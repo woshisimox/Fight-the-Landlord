@@ -46,12 +46,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           else { const { cards } = baselineMove(hand, s.lastCombo); moveCards = cards; reason = `fallback: ${data?.error||'unknown'}`; }
         }
 
+        const handBefore = hand.slice();
+        const lastBefore = s.lastCombo;
         const { ok, reason: why, combo, next } = applyMove(s, who, moveCards);
         if (!ok){
           const { next: forceNext } = applyMove(s, who, []);
-          s = forceNext; log.events.push({ who, pv, tried: moveCards, reason: reason||why||'illegal', forced:'PASS' });
+          s = forceNext; log.events.push({ who, pv, hand: handBefore, last: lastBefore, tried: moveCards, reason: reason||why||'illegal', forced:'PASS' });
         } else {
-          s = next; log.events.push({ who, pv, play: combo, reason });
+          s = next; log.events.push({ who, pv, hand: handBefore, last: lastBefore, play: combo, reason });
         }
       }
       const w = winner as number; const wp = seats[w];
