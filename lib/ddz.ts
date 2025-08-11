@@ -223,8 +223,6 @@ export function beats(a: Combo, b: Combo | null): boolean {
     case 'TRIPLE_WITH_SINGLE':
     case 'TRIPLE_WITH_PAIR':
     case 'BOMB':
-    case 'ROCKET':
-      return rankOrder(a.mainRank!) > rankOrder(b.mainRank!);
     case 'STRAIGHT':
       if (a.length!==b.length) return false;
       return rankOrder(a.mainRank!) > rankOrder(b.mainRank!);
