@@ -1,4 +1,5 @@
 import { AiResult, Provider, ProviderConfig, Snapshot, fromCode } from './ddz-types';
+import type { Combo } from './ddz-types';
 import { detectCombo } from './ddz-engine';
 
 const SYS_JSON = 'Only respond with strict JSON: {"tiles":["<codes>"], "reason":"short"}';
@@ -22,8 +23,8 @@ export function fallbackAI(snapshot: Snapshot): AiResult {
   const hand = snapshot.hand.map(fromCode);
   const last = null; // simplified for now
   const { allLegalResponses } = require('./ddz-engine');
-  const options = allLegalResponses(hand, last);
+  const options: Combo[] = allLegalResponses(hand, last) as Combo[];
   if (options.length===0) return { tileCodes: [], reason: 'no legal beat → pass', meta:{ usedApi:false, provider:'fallback' } };
-  options.sort((a,b)=> a.cards.length===b.cards.length ? a.main-b.main : a.cards.length-b.cards.length);
+  options.sort((a: Combo, b: Combo)=> a.cards.length===b.cards.length ? a.main-b.main : a.cards.length-b.cards.length);
   return { tileCodes: options[0].cards.map(c=>c.id), reason: 'min-cards greedy', meta:{ usedApi:false, provider:'fallback' } };
 }
