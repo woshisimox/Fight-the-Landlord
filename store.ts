@@ -1,7 +1,8 @@
 'use client';
 import { create } from 'zustand';
 import type { Card, Combo, Provider, ProviderChoice, Seat } from './lib/ddz-types';
-import { makeDeck, shuffle, deal, detectCombo, removeCards, canBeat, sortByRank } from './lib/ddz-engine';
+import { makeDeck, shuffle, deal, detectCombo, removeCards, canBeat } from './lib/ddz-engine';
+import { sortByRank } from './lib/ddz-types';
 import { callProviderViaProxy, fallbackAI } from './lib/ddz-ai';
 
 export type PlayRecord = { seat: Seat; combo: Combo; text: string; reason?: string; provider?: Provider };
