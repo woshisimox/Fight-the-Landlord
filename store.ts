@@ -123,7 +123,6 @@ export const useGame = create<GameState>((set,get)=>({
       await new Promise(r=>setTimeout(r,500));
       await get().stepPlay(true);
     }
-  }
  else {
     aiRes = await callProviderViaProxy(provider, st.providerKeys, snapshot);
   }
