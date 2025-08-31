@@ -39,3 +39,10 @@ export interface PlayerView {
   lead: boolean;
   require?: Combo;
 }
+
+export type GameEvent =
+  | { kind: 'deal', hands: string[][], bottom: string[] }
+  | { kind: 'bid', seat: Seat, action: number | 'pass' | 'rob' | 'norob' }
+  | { kind: 'landlord', landlord: Seat, baseScore: number, bottom: string[] }
+  | { kind: 'play', seat: Seat, type?: ComboType, cards?: string[] | null, move?: 'pass' }
+  | { kind: 'finish', winner: 'landlord' | 'farmers' };

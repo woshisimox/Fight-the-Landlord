@@ -212,6 +212,127 @@ export default function Home() {
           </pre>
         </div>
       )}
+    
+
+      <details style={{marginTop:16}}>
+        <summary>实时运行（流式）</summary>
+        <LivePanel rounds={rounds} seed={seed} rob={rob} four2={four2} delayMs={delayMs} players={players} />
+      </details>
+
+    </div>
+  );
+}
+
+
+
+function LivePanel(props:any){
+  const [lines, setLines] = useState<string[]>([]);
+  const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[]}>({hands:[[],[],[]], last:[], landlord:null, bottom:[]});
+  const [running, setRunning] = useState(false);
+
+  async function start(){
+    setLines([]);
+    setBoard({hands:[[],[],[]], last:[], landlord:null, bottom:[]});
+    setRunning(true);
+    try {
+      const body:any = {
+        rounds: props.rounds, seed: props.seed, rob: props.rob, four2: props.four2, delayMs: props.delayMs,
+        players: props.players.map((p:any)=> {
+          if (p.kind==='builtin') return { kind:'builtin', name: p.builtin };
+          if (p.kind==='http') return { kind:'http', url: p.url, apiKey: p.apiKey };
+          if (p.kind==='openai') return { kind:'openai', apiKey: p.apiKey, model: p.model || 'gpt-4o-mini', baseURL: p.baseURL };
+          if (p.kind==='gemini') return { kind:'gemini', apiKey: p.apiKey, model: p.model || 'gemini-1.5-flash' };
+          if (p.kind==='kimi') return { kind:'kimi', apiKey: p.apiKey, model: p.model || 'moonshot-v1-8k', baseURL: p.baseURL };
+          if (p.kind==='grok') return { kind:'grok', apiKey: p.apiKey, model: p.model || 'grok-beta', baseURL: p.baseURL };
+          return { kind:'builtin', name:'RandomLegal' };
+        }),
+      };
+      const r = await fetch('/api/stream_ndjson', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
+      const reader = r.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true){
+        const {value, done} = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, {stream:true});
+        let idx;
+        while ((idx = buf.indexOf("\n")) >= 0){
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx+1);
+          if (!line) continue;
+          const obj = JSON.parse(line);
+          handle(obj);
+        }
+      }
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  function handle(obj:any){
+    if (obj.type==='event'){
+      if (obj.kind==='deal'){
+        setBoard(b=> ({...b, hands: obj.hands, bottom: obj.bottom}));
+        push(`发牌：底牌 ${obj.bottom.join('')}`);
+      } else if (obj.kind==='bid'){
+        const seat = ['甲','乙','丙'][obj.seat];
+        push(`叫分/抢：${seat} -> ${String(obj.action)}`);
+      } else if (obj.kind==='landlord'){
+        push(`确定地主：${['甲','乙','丙'][obj.landlord]}，底牌 ${obj.bottom.join('')} 基础分 ${obj.baseScore}`);
+        setBoard(b=> ({...b, landlord: obj.landlord}));
+      } else if (obj.kind==='play'){
+        const seat = ['甲','乙','丙'][obj.seat];
+        if (obj.move==='pass'){
+          push(`${seat}：过`);
+          setBoard(b=> ({...b, last:[seat + ': 过']}));
+        } else {
+          const cards = (obj.cards||[]).join('');
+          push(`${seat}：${obj.type} ${cards}`);
+          setBoard(b=> ({...b, last:[seat + ': ' + cards]}));
+          // 从手牌中移除这些牌（仅基于标签，简单处理）
+          setBoard(b=> {
+            const hands = b.hands.map(arr=>arr.slice());
+            const si = ['甲','乙','丙'].indexOf(seat);
+            const labels = (obj.cards||[]) as string[];
+            for (const lab of labels){
+              const k = hands[si].indexOf(lab);
+              if (k>=0) hands[si].splice(k,1);
+            }
+            return {...b, hands};
+          });
+        }
+      } else if (obj.kind==='finish'){
+        push(`结束：赢家 ${obj.winner==='landlord' ? '地主' : '农民'}`);
+      }
+    } else if (obj.type==='round-start'){
+      push(`—— 第 ${obj.index+1} 局开始 ——`);
+    } else if (obj.type==='round-end'){
+      push(`—— 第 ${obj.index+1} 局结束 ——`);
+    } else if (obj.type==='done'){
+      push('全部对局完成。');
+    }
+  }
+
+  function push(t:string){ setLines(l=> [...l, t]); }
+
+  return (
+    <div style={{marginTop:12}}>
+      <button onClick={start} disabled={running} style={{padding:'6px 12px'}}>{running?'运行中…':'开始实时运行'}</button>
+      <div style={{display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12, marginTop:12}}>
+        {[0,1,2].map(i=> (
+          <div key={i} style={{border:'1px solid #eee', borderRadius:8, padding:10}}>
+            <div style={{fontWeight:700}}>{['甲','乙','丙'][i]}{board.landlord===i?'（地主）':''}</div>
+            <div>手牌：<code>{board.hands[i]?.join(' ')}</code></div>
+            <div>最近出牌：<code>{board.last[i]||''}</code></div>
+          </div>
+        ))}
+      </div>
+      <div style={{marginTop:12}}>
+        <div style={{fontWeight:700}}>事件日志</div>
+        <div style={{whiteSpace:'pre-wrap', background:'#f9f9f9', padding:10, border:'1px solid #eee', height:240, overflow:'auto'}}>
+          {lines.join('\n')}
+        </div>
+      </div>
     </div>
   );
 }

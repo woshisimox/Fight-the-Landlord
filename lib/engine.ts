@@ -25,6 +25,7 @@ export interface EngineOptions {
   rules: RuleConfig;
   moveDelayMs?: number;
   events?: any[];
+  onEvent?: (ev:any)=>void;
 }
 
 function seatName(s: Seat): string { return ['甲(A)','乙(B)','丙(C)'][s]; }
@@ -34,12 +35,16 @@ export class Engine {
   private rules: RuleConfig;
   private moveDelayMs: number;
   private events: any[];
+  private onEvent?: (ev:any)=>void;
+
+  private emit(ev:any){ this.events.push(ev); if (this.onEvent) try { this.onEvent(ev); } catch {} }
 
   constructor(opts: EngineOptions) {
     this.rng = new RNG(opts.seed);
     this.rules = opts.rules;
     this.moveDelayMs = opts.moveDelayMs ?? 0;
     this.events = opts.events ?? [];
+    this.onEvent = opts.onEvent;
   }
 
   deal(): { hands: [Card[],Card[],Card[]]; bottom: Card[] } {
@@ -52,6 +57,7 @@ export class Engine {
       hands[2].push(deck[i*3+2]);
     }
     const bottom = deck.slice(51);
+    this.emit({ kind:'deal', hands: hands.map(h=>h.map(c=>c.label)), bottom: bottom.map(c=>c.label) });
     for (const h of hands) h.sort((a,b)=>a.rank-b.rank || a.id-b.id);
     return { hands, bottom };
   }
@@ -65,7 +71,8 @@ export class Engine {
         const view: PlayerView = {
           seat: s, landlord: 0, hand: hands[s], bottom, history: [], lead: false
         };
-        const res = await bots[s].bid(view);
+        \1
+        this.emit({ kind:'bid', seat: s, action: res });
         if (res==='pass') {
           // nothing
         } else if (typeof res==='number') {
@@ -83,7 +90,8 @@ export class Engine {
       // first caller
       for (let s=0 as Seat; s<=2; s=(s+1) as Seat) {
         const view: PlayerView = { seat: s, landlord: 0, hand: hands[s], bottom, history: [], lead: false };
-        const res = await bots[s].bid(view);
+        \1
+        this.emit({ kind:'bid', seat: s, action: res });
         const wantRob = (res==='rob') || (typeof res==='number' && res>0);
         if (wantRob) { landlord = s; robCount = 1; break; }
       }
@@ -92,7 +100,8 @@ export class Engine {
       for (let step=1; step<3; step++) {
         const s = ((landlord + step) % 3) as Seat;
         const view: PlayerView = { seat: s, landlord, hand: hands[s], bottom, history: [], lead: false };
-        const res = await bots[s].bid(view);
+        \1
+        this.emit({ kind:'bid', seat: s, action: res });
         const wantRob = (res==='rob') || (typeof res==='number' && res>0);
         if (wantRob) { landlord = s; robCount++; }
       }
@@ -116,7 +125,7 @@ export class Engine {
 
     const landName = seatName(landlord);
     humanPlays.push({ seat: landlord, text: `地主确定: ${landName}, 底牌=${bottom.map(c=>c.label).join('')}, 基础分=${baseScore}` });
-    this.events.push({ kind:'landlord', landlord, baseScore, bottom: bottom.map(c=>c.label) });
+    this.emit({ kind:'landlord', landlord, baseScore, bottom: bottom.map(c=>c.label) });
 
     let current: Combo | null = null;
     let leadSeat: Seat = landlord;
@@ -173,7 +182,7 @@ export class Engine {
       plays.push({ seat: turn, combo });
       if (combo.type==='pass') {
         humanPlays.push({ seat: turn, text: `${seatName(turn)}: 过` });
-        this.events.push({ kind:'play', seat: turn, move:'pass' });
+        this.emit({ kind:'play', seat: turn, move:'pass' });
         passCount++;
       } else {
         // remove cards
@@ -189,7 +198,7 @@ export class Engine {
         if (combo.type==='bomb') bombs++;
         if (combo.type==='rocket') rocket++;
         humanPlays.push({ seat: turn, text: `${seatName(turn)}: ${tag} ${combo.cards.map(c=>c.label).join('')}` });
-        this.events.push({ kind:'play', seat: turn, type: combo.type, cards: combo.cards.map(c=>c.label) });
+        this.emit({ kind:'play', seat: turn, type: combo.type, cards: combo.cards.map(c=>c.label) });
       }
 
       // win check
@@ -223,7 +232,7 @@ export class Engine {
           for (const s of nonLandlordSeats) scores[s] = +multiplier;
         }
 
-        this.events.push({ kind:'finish', winner });
+        this.emit({ kind:'finish', winner });
         const roundLog: RoundLog = {
           deal: {
             0: hands[0].map(c=>c.label),
