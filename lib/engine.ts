@@ -71,7 +71,7 @@ export class Engine {
         const view: PlayerView = {
           seat: s, landlord: 0, hand: hands[s], bottom, history: [], lead: false
         };
-        \1
+        const res = await bots[s].bid(view);
         this.emit({ kind:'bid', seat: s, action: res });
         if (res==='pass') {
           // nothing
@@ -90,7 +90,7 @@ export class Engine {
       // first caller
       for (let s=0 as Seat; s<=2; s=(s+1) as Seat) {
         const view: PlayerView = { seat: s, landlord: 0, hand: hands[s], bottom, history: [], lead: false };
-        \1
+        const res = await bots[s].bid(view);
         this.emit({ kind:'bid', seat: s, action: res });
         const wantRob = (res==='rob') || (typeof res==='number' && res>0);
         if (wantRob) { landlord = s; robCount = 1; break; }
@@ -100,7 +100,7 @@ export class Engine {
       for (let step=1; step<3; step++) {
         const s = ((landlord + step) % 3) as Seat;
         const view: PlayerView = { seat: s, landlord, hand: hands[s], bottom, history: [], lead: false };
-        \1
+        const res = await bots[s].bid(view);
         this.emit({ kind:'bid', seat: s, action: res });
         const wantRob = (res==='rob') || (typeof res==='number' && res>0);
         if (wantRob) { landlord = s; robCount++; }
