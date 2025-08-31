@@ -30,7 +30,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<any>(null);
 
-  // sessionStorage persist
   useEffect(()=>{
     try {
       const s = sessionStorage.getItem('ddz_players');
@@ -59,7 +58,7 @@ export default function Home() {
           if (p.kind==='gemini') return { kind:'gemini', apiKey: p.apiKey, model: p.model || 'gemini-1.5-flash' };
           if (p.kind==='kimi') return { kind:'kimi', apiKey: p.apiKey, model: p.model || 'moonshot-v1-8k', baseURL: p.baseURL };
           if (p.kind==='grok') return { kind:'grok', apiKey: p.apiKey, model: p.model || 'grok-beta', baseURL: p.baseURL };
-          return { kind:'openai', apiKey: p.apiKey, model: p.model || 'gpt-4o-mini', baseURL: p.baseURL };
+          return { kind:'builtin', name:'RandomLegal' };
         }),
       };
       const r = await fetch('/api/arena', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
@@ -73,7 +72,7 @@ export default function Home() {
   return (
     <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Roboto', padding: 20, maxWidth: 1100, margin:'0 auto'}}>
       <h1>斗地主 AI 比赛 · 甲 / 乙 / 丙</h1>
-      <p>可为每位选手选择内置或外部 AI（HTTP / OpenAI），并可设置每步出牌的延迟（毫秒）。</p>
+      <p>为每位选手选择内置或外部 AI（HTTP / OpenAI / Gemini / Kimi / Grok），并可设置每步出牌延迟（ms）。</p>
 
       <fieldset style={{border:'1px solid #ddd', padding:12, borderRadius:8}}>
         <legend>对局参数</legend>
@@ -106,12 +105,15 @@ export default function Home() {
           <div key={i} style={{display:'grid', gridTemplateColumns:'120px 1fr', gap:12, padding:'10px 0', borderBottom: i<2?'1px solid #eee':'none'}}>
             <div style={{fontWeight:600}}>{seatName(i)}</div>
             <div>
-              <div style={{display:'grid', gridTemplateColumns:'140px 1fr 1fr', gap:8, alignItems:'center'}}>
+              <div style={{display:'grid', gridTemplateColumns:'160px 1fr 1fr', gap:8, alignItems:'center'}}>
                 <label>类型<br/>
                   <select value={players[i].kind} onChange={e=>updatePlayer(i,{ kind:e.target.value as ProviderKind })}>
                     <option value="builtin">内置</option>
                     <option value="http">HTTP JSON</option>
-                    <option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="kimi">Kimi</option><option value="grok">Grok</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="kimi">Kimi</option>
+                    <option value="grok">Grok</option>
                   </select>
                 </label>
 
@@ -139,7 +141,17 @@ export default function Home() {
                 {players[i].kind==='openai' && (
                   <>
                     <label>API Key<br/>
-                      <input type="password" placeholder="sk-..." value={players[i].apiKey||''} onChange={e=>updatePlayer(i,{ apiKey:e.target.value })}
+                      <input type="password" placeholder="sk-..." value={players[i].apiKey||''} onChange={e=>updatePlayer(i,{ apiKey:e.target.value })} />
+                    </label>
+                    <label>模型<br/>
+                      <input type="text" placeholder="gpt-4o-mini" value={players[i].model||''} onChange={e=>updatePlayer(i,{ model:e.target.value })} />
+                    </label>
+                    <label>Base URL（可选）<br/>
+                      <input type="text" placeholder="https://api.openai.com/v1" value={players[i].baseURL||''} onChange={e=>updatePlayer(i,{ baseURL:e.target.value })} />
+                    </label>
+                  </>
+                )}
+
                 {players[i].kind==='gemini' && (
                   <>
                     <label>API Key<br/>
@@ -150,6 +162,7 @@ export default function Home() {
                     </label>
                   </>
                 )}
+
                 {players[i].kind==='kimi' && (
                   <>
                     <label>API Key<br/>
@@ -163,6 +176,7 @@ export default function Home() {
                     </label>
                   </>
                 )}
+
                 {players[i].kind==='grok' && (
                   <>
                     <label>API Key<br/>
@@ -176,16 +190,7 @@ export default function Home() {
                     </label>
                   </>
                 )}
- />
-                    </label>
-                    <label>模型<br/>
-                      <input type="text" placeholder="gpt-4o-mini" value={players[i].model||''} onChange={e=>updatePlayer(i,{ model:e.target.value })} />
-                    </label>
-                    <label>Base URL（可选）<br/>
-                      <input type="text" placeholder="https://api.openai.com/v1" value={players[i].baseURL||''} onChange={e=>updatePlayer(i,{ baseURL:e.target.value })} />
-                    </label>
-                  </>
-                )}
+
               </div>
             </div>
           </div>
@@ -205,14 +210,6 @@ export default function Home() {
           <pre style={{whiteSpace:'pre-wrap', background:'#f7f7f7', padding:12, border:'1px solid #eee', maxHeight:400, overflow:'auto'}}>
 {JSON.stringify(resp.logs[0], null, 2)}
           </pre>
-
-          <details>
-            <summary>所有局汇总（CSV字段说明）</summary>
-            <ul>
-              <li>每局对象包含：地主、底牌、各步出牌（plays）、计分倍数、炸弹/王炸/春天、每家得分。</li>
-              <li>events 字段给出 step-by-step 事件（含 play/landlord/finish）。</li>
-            </ul>
-          </details>
         </div>
       )}
     </div>
