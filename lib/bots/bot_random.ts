@@ -7,7 +7,7 @@ export class BotRandom implements IBot {
   constructor(name='RandomLegal') { this._name = name; }
   name(): string { return this._name; }
 
-  bid(view: PlayerView): number | 'pass' | 'rob' | 'norob' {
+  async bid(view: PlayerView): Promise<number | 'pass' | 'rob' | 'norob'> {
     const r = Math.random();
     if (r<0.25) return 'pass';
     if (r<0.5) return 1;
@@ -15,7 +15,7 @@ export class BotRandom implements IBot {
     return 3;
   }
 
-  play(view: PlayerView): Combo {
+  async play(view: PlayerView): Promise<Combo> {
     const { require } = view;
     if (!require) {
       const combos = enumerateAllCombos(view.hand);

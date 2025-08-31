@@ -1,19 +1,68 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+
+type Builtin = 'GreedyMin'|'GreedyMax'|'RandomLegal';
+type ProviderKind = 'builtin'|'http'|'openai'|'gemini'|'kimi'|'grok';
+
+interface PlayerConfig {
+  kind: ProviderKind;
+  builtin?: Builtin;
+  url?: string;
+  apiKey?: string;
+  model?: string;
+  baseURL?: string;
+}
+
+function seatName(i:number){ return ['甲(A)','乙(B)','丙(C)'][i]; }
 
 export default function Home() {
   const [rounds, setRounds] = useState(10);
   const [seed, setSeed] = useState(42);
   const [rob, setRob] = useState(false);
   const [four2, setFour2] = useState<'both'|'2singles'|'2pairs'>('both');
+  const [delayMs, setDelayMs] = useState(0);
+
+  const [players, setPlayers] = useState<PlayerConfig[]>([
+    { kind:'builtin', builtin:'GreedyMin' },
+    { kind:'builtin', builtin:'GreedyMax' },
+    { kind:'builtin', builtin:'RandomLegal' },
+  ]);
+
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<any>(null);
 
-  async function run() {
-    setLoading(true);
-    setResp(null);
+  // sessionStorage persist
+  useEffect(()=>{
     try {
-      const q = new URLSearchParams({ rounds: String(rounds), seed: String(seed), rob: String(rob), four2 });
-      const r = await fetch('/api/arena?' + q.toString());
+      const s = sessionStorage.getItem('ddz_players');
+      if (s) setPlayers(JSON.parse(s));
+    } catch {}
+  }, []);
+  useEffect(()=>{
+    try {
+      sessionStorage.setItem('ddz_players', JSON.stringify(players));
+    } catch {}
+  }, [players]);
+
+  function updatePlayer(i:number, patch: Partial<PlayerConfig>){
+    setPlayers(prev => prev.map((p,idx)=> idx===i ? {...p, ...patch} : p));
+  }
+
+  async function run() {
+    setLoading(true); setResp(null);
+    try {
+      const body:any = {
+        rounds, seed, rob, four2, delayMs,
+        players: players.map(p=> {
+          if (p.kind==='builtin') return { kind:'builtin', name: p.builtin };
+          if (p.kind==='http') return { kind:'http', url: p.url, apiKey: p.apiKey };
+          if (p.kind==='openai') return { kind:'openai', apiKey: p.apiKey, model: p.model || 'gpt-4o-mini', baseURL: p.baseURL };
+          if (p.kind==='gemini') return { kind:'gemini', apiKey: p.apiKey, model: p.model || 'gemini-1.5-flash' };
+          if (p.kind==='kimi') return { kind:'kimi', apiKey: p.apiKey, model: p.model || 'moonshot-v1-8k', baseURL: p.baseURL };
+          if (p.kind==='grok') return { kind:'grok', apiKey: p.apiKey, model: p.model || 'grok-beta', baseURL: p.baseURL };
+          return { kind:'openai', apiKey: p.apiKey, model: p.model || 'gpt-4o-mini', baseURL: p.baseURL };
+        }),
+      };
+      const r = await fetch('/api/arena', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
       const j = await r.json();
       setResp(j);
     } finally {
@@ -22,28 +71,126 @@ export default function Home() {
   }
 
   return (
-    <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Roboto', padding: 20, maxWidth: 960, margin:'0 auto'}}>
-      <h1>斗地主 AI 比赛 · 甲/乙/丙</h1>
-      <p>基于你提供的规则实现（叫分制/抢地主制、四带二两种等）。选择参数后点击“运行”。</p>
+    <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Roboto', padding: 20, maxWidth: 1100, margin:'0 auto'}}>
+      <h1>斗地主 AI 比赛 · 甲 / 乙 / 丙</h1>
+      <p>可为每位选手选择内置或外部 AI（HTTP / OpenAI），并可设置每步出牌的延迟（毫秒）。</p>
 
-      <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap: 12, alignItems:'end', marginTop: 12}}>
-        <label>局数<br/>
-          <input type="number" value={rounds} min={1} onChange={e=>setRounds(Number(e.target.value))} />
-        </label>
-        <label>随机种子<br/>
-          <input type="number" value={seed} onChange={e=>setSeed(Number(e.target.value))} />
-        </label>
-        <label>抢地主制<br/>
-          <input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} />
-        </label>
-        <label>四带二<br/>
-          <select value={four2} onChange={e=>setFour2(e.target.value as any)}>
-            <option value="both">两种都允许</option>
-            <option value="2singles">只允许两单</option>
-            <option value="2pairs">只允许两对</option>
-          </select>
-        </label>
-      </div>
+      <fieldset style={{border:'1px solid #ddd', padding:12, borderRadius:8}}>
+        <legend>对局参数</legend>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap: 12, alignItems:'end'}}>
+          <label>局数<br/>
+            <input type="number" value={rounds} min={1} onChange={e=>setRounds(Number(e.target.value))} />
+          </label>
+          <label>随机种子<br/>
+            <input type="number" value={seed} onChange={e=>setSeed(Number(e.target.value))} />
+          </label>
+          <label>抢地主制<br/>
+            <input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} />
+          </label>
+          <label>四带二<br/>
+            <select value={four2} onChange={e=>setFour2(e.target.value as any)}>
+              <option value="both">两种都允许</option>
+              <option value="2singles">只允许两单</option>
+              <option value="2pairs">只允许两对</option>
+            </select>
+          </label>
+          <label>每步延迟 (ms)<br/>
+            <input type="number" value={delayMs} min={0} onChange={e=>setDelayMs(Number(e.target.value))} />
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset style={{border:'1px solid #ddd', padding:12, borderRadius:8, marginTop:12}}>
+        <legend>参赛者设置</legend>
+        {[0,1,2].map(i=> (
+          <div key={i} style={{display:'grid', gridTemplateColumns:'120px 1fr', gap:12, padding:'10px 0', borderBottom: i<2?'1px solid #eee':'none'}}>
+            <div style={{fontWeight:600}}>{seatName(i)}</div>
+            <div>
+              <div style={{display:'grid', gridTemplateColumns:'140px 1fr 1fr', gap:8, alignItems:'center'}}>
+                <label>类型<br/>
+                  <select value={players[i].kind} onChange={e=>updatePlayer(i,{ kind:e.target.value as ProviderKind })}>
+                    <option value="builtin">内置</option>
+                    <option value="http">HTTP JSON</option>
+                    <option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="kimi">Kimi</option><option value="grok">Grok</option>
+                  </select>
+                </label>
+
+                {players[i].kind==='builtin' && (
+                  <label>内置策略<br/>
+                    <select value={players[i].builtin} onChange={e=>updatePlayer(i,{ builtin:e.target.value as Builtin })}>
+                      <option value="GreedyMin">GreedyMin</option>
+                      <option value="GreedyMax">GreedyMax</option>
+                      <option value="RandomLegal">RandomLegal</option>
+                    </select>
+                  </label>
+                )}
+
+                {players[i].kind==='http' && (
+                  <>
+                    <label>URL<br/>
+                      <input type="text" placeholder="https://your-bot.example/api" value={players[i].url||''} onChange={e=>updatePlayer(i,{ url:e.target.value })} />
+                    </label>
+                    <label>API Key（可选）<br/>
+                      <input type="password" placeholder="将作为 Bearer 发送" value={players[i].apiKey||''} onChange={e=>updatePlayer(i,{ apiKey:e.target.value })} />
+                    </label>
+                  </>
+                )}
+
+                {players[i].kind==='openai' && (
+                  <>
+                    <label>API Key<br/>
+                      <input type="password" placeholder="sk-..." value={players[i].apiKey||''} onChange={e=>updatePlayer(i,{ apiKey:e.target.value })}
+                {players[i].kind==='gemini' && (
+                  <>
+                    <label>API Key<br/>
+                      <input type="password" placeholder="AIza..." value={players[i].apiKey||''} onChange={e=>updatePlayer(i,{ apiKey:e.target.value })} />
+                    </label>
+                    <label>模型<br/>
+                      <input type="text" placeholder="gemini-1.5-flash" value={players[i].model||''} onChange={e=>updatePlayer(i,{ model:e.target.value })} />
+                    </label>
+                  </>
+                )}
+                {players[i].kind==='kimi' && (
+                  <>
+                    <label>API Key<br/>
+                      <input type="password" placeholder="KIMI_API_KEY" value={players[i].apiKey||''} onChange={e=>updatePlayer(i,{ apiKey:e.target.value })} />
+                    </label>
+                    <label>模型<br/>
+                      <input type="text" placeholder="moonshot-v1-8k" value={players[i].model||''} onChange={e=>updatePlayer(i,{ model:e.target.value })} />
+                    </label>
+                    <label>Base URL（可选）<br/>
+                      <input type="text" placeholder="https://api.moonshot.cn/v1" value={players[i].baseURL||''} onChange={e=>updatePlayer(i,{ baseURL:e.target.value })} />
+                    </label>
+                  </>
+                )}
+                {players[i].kind==='grok' && (
+                  <>
+                    <label>API Key<br/>
+                      <input type="password" placeholder="GROK_API_KEY" value={players[i].apiKey||''} onChange={e=>updatePlayer(i,{ apiKey:e.target.value })} />
+                    </label>
+                    <label>模型<br/>
+                      <input type="text" placeholder="grok-beta" value={players[i].model||''} onChange={e=>updatePlayer(i,{ model:e.target.value })} />
+                    </label>
+                    <label>Base URL（可选）<br/>
+                      <input type="text" placeholder="https://api.x.ai/v1" value={players[i].baseURL||''} onChange={e=>updatePlayer(i,{ baseURL:e.target.value })} />
+                    </label>
+                  </>
+                )}
+ />
+                    </label>
+                    <label>模型<br/>
+                      <input type="text" placeholder="gpt-4o-mini" value={players[i].model||''} onChange={e=>updatePlayer(i,{ model:e.target.value })} />
+                    </label>
+                    <label>Base URL（可选）<br/>
+                      <input type="text" placeholder="https://api.openai.com/v1" value={players[i].baseURL||''} onChange={e=>updatePlayer(i,{ baseURL:e.target.value })} />
+                    </label>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </fieldset>
 
       <button onClick={run} disabled={loading} style={{marginTop:16,padding:'8px 16px'}}>
         {loading ? '运行中…' : '运行'}
@@ -53,41 +200,18 @@ export default function Home() {
         <div style={{marginTop:24}}>
           <h2>结果</h2>
           <p>总局数：{resp.rounds}；总分：甲 {resp.totals[0]} / 乙 {resp.totals[1]} / 丙 {resp.totals[2]}</p>
-          <table style={{width:'100%', borderCollapse:'collapse'}}>
-            <thead>
-              <tr>
-                <th style={{borderBottom:'1px solid #ccc'}}>#</th>
-                <th style={{borderBottom:'1px solid #ccc'}}>地主</th>
-                <th style={{borderBottom:'1px solid #ccc'}}>赢家</th>
-                <th style={{borderBottom:'1px solid #ccc'}}>倍数</th>
-                <th style={{borderBottom:'1px solid #ccc'}}>炸弹</th>
-                <th style={{borderBottom:'1px solid #ccc'}}>王炸</th>
-                <th style={{borderBottom:'1px solid #ccc'}}>春天</th>
-                <th style={{borderBottom:'1px solid #ccc'}}>甲分</th>
-                <th style={{borderBottom:'1px solid #ccc'}}>乙分</th>
-                <th style={{borderBottom:'1px solid #ccc'}}>丙分</th>
-              </tr>
-            </thead>
-            <tbody>
-              {resp.logs.map((l:any, i:number)=> (
-                <tr key={i}>
-                  <td style={{borderBottom:'1px solid #eee'}}>{i+1}</td>
-                  <td style={{borderBottom:'1px solid #eee'}}>{['甲','乙','丙'][l.landlord]}</td>
-                  <td style={{borderBottom:'1px solid #eee'}}>{l.winner==='landlord'?'地主':'农民'}</td>
-                  <td style={{borderBottom:'1px solid #eee'}}>{l.finalMultiplier}</td>
-                  <td style={{borderBottom:'1px solid #eee'}}>{l.bombs}</td>
-                  <td style={{borderBottom:'1px solid #eee'}}>{l.rocket}</td>
-                  <td style={{borderBottom:'1px solid #eee'}}>{l.spring}</td>
-                  <td style={{borderBottom:'1px solid #eee'}}>{l.scores[0]}</td>
-                  <td style={{borderBottom:'1px solid #eee'}}>{l.scores[1]}</td>
-                  <td style={{borderBottom:'1px solid #eee'}}>{l.scores[2]}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <details style={{marginTop:16}}>
-            <summary>展开查看首局日志示例</summary>
-            <pre style={{whiteSpace:'pre-wrap', background:'#f7f7f7', padding:12, border:'1px solid #eee'}}>{JSON.stringify(resp.logs[0], null, 2)}</pre>
+
+          <h3>首局详情</h3>
+          <pre style={{whiteSpace:'pre-wrap', background:'#f7f7f7', padding:12, border:'1px solid #eee', maxHeight:400, overflow:'auto'}}>
+{JSON.stringify(resp.logs[0], null, 2)}
+          </pre>
+
+          <details>
+            <summary>所有局汇总（CSV字段说明）</summary>
+            <ul>
+              <li>每局对象包含：地主、底牌、各步出牌（plays）、计分倍数、炸弹/王炸/春天、每家得分。</li>
+              <li>events 字段给出 step-by-step 事件（含 play/landlord/finish）。</li>
+            </ul>
           </details>
         </div>
       )}

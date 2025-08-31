@@ -27,4 +27,15 @@ export interface RoundLog {
   rocket: number;
   finalMultiplier: number;
   scores: { [seat in Seat]: number };
+  events?: any[]; // stepwise events for UI
+}
+
+export interface PlayerView {
+  seat: Seat;
+  landlord: Seat;
+  hand: Card[];
+  bottom: Card[];
+  history: Play[];
+  lead: boolean;
+  require?: Combo;
 }

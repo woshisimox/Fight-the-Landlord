@@ -16,13 +16,15 @@ export interface PlayerView {
 
 export interface IBot {
   name(): string;
-  bid(view: PlayerView): number | 'pass' | 'rob' | 'norob';
-  play(view: PlayerView): Combo; // must return a legal combo (or pass)
+  bid(view: PlayerView): Promise<number | 'pass' | 'rob' | 'norob'>;
+  play(view: PlayerView): Promise<Combo>; // must return a legal combo (or pass)
 }
 
 export interface EngineOptions {
   seed: number;
   rules: RuleConfig;
+  moveDelayMs?: number;
+  events?: any[];
 }
 
 function seatName(s: Seat): string { return ['甲(A)','乙(B)','丙(C)'][s]; }
@@ -30,10 +32,14 @@ function seatName(s: Seat): string { return ['甲(A)','乙(B)','丙(C)'][s]; }
 export class Engine {
   private rng: RNG;
   private rules: RuleConfig;
+  private moveDelayMs: number;
+  private events: any[];
 
   constructor(opts: EngineOptions) {
     this.rng = new RNG(opts.seed);
     this.rules = opts.rules;
+    this.moveDelayMs = opts.moveDelayMs ?? 0;
+    this.events = opts.events ?? [];
   }
 
   deal(): { hands: [Card[],Card[],Card[]]; bottom: Card[] } {
@@ -61,7 +67,7 @@ export class Engine {
         const view: PlayerView = {
           seat: s, landlord: 0, hand: hands[s], bottom, history: [], lead: false
         };
-        const res = bots[s].bid(view);
+        const res = await bots[s].bid(view);
         if (res==='pass') {
           // nothing
         } else if (typeof res==='number') {
@@ -79,7 +85,7 @@ export class Engine {
       // first caller
       for (let s=0 as Seat; s<=2; s=(s+1) as Seat) {
         const view: PlayerView = { seat: s, landlord: 0, hand: hands[s], bottom, history: [], lead: false };
-        const res = bots[s].bid(view);
+        const res = await bots[s].bid(view);
         const wantRob = (res==='rob') || (typeof res==='number' && res>0);
         if (wantRob) { landlord = s; robCount = 1; break; }
       }
@@ -88,7 +94,7 @@ export class Engine {
       for (let step=1; step<3; step++) {
         const s = ((landlord + step) % 3) as Seat;
         const view: PlayerView = { seat: s, landlord, hand: hands[s], bottom, history: [], lead: false };
-        const res = bots[s].bid(view);
+        const res = await bots[s].bid(view);
         const wantRob = (res==='rob') || (typeof res==='number' && res>0);
         if (wantRob) { landlord = s; robCount++; }
       }
@@ -97,7 +103,7 @@ export class Engine {
   }
 
   // Run one round; return RoundLog and seat scores
-  playRound(bots: IBot[], roundIndex: number): RoundLog | null {
+  async playRound(bots: IBot[], roundIndex: number): Promise<RoundLog | null> {
     const { hands, bottom } = this.deal();
     const bidRes = this.bidding(hands, bottom, bots);
     if (!bidRes) return null;
@@ -112,6 +118,7 @@ export class Engine {
 
     const landName = seatName(landlord);
     humanPlays.push({ seat: landlord, text: `地主确定: ${landName}, 底牌=${bottom.map(c=>c.label).join('')}, 基础分=${baseScore}` });
+    this.events.push({ kind:'landlord', landlord, baseScore, bottom: bottom.map(c=>c.label) });
 
     let current: Combo | null = null;
     let leadSeat: Seat = landlord;
@@ -136,7 +143,7 @@ export class Engine {
     while (true) {
       const view = getView(turn);
       const bot = bots[turn];
-      let combo = bot.play(view);
+      let combo = await bot.play(view);
       // validate combo
       if (!combo) combo = { type:'pass', cards: [] } as Combo;
       if (combo.type!=='pass') {
@@ -162,10 +169,13 @@ export class Engine {
         if (!legal) combo = { type:'pass', cards: [] } as Combo;
       }
 
+      // optional delay before applying play
+      if ((this as any).moveDelayMs && (this as any).moveDelayMs>0) { await new Promise(r=>setTimeout(r, (this as any).moveDelayMs)); }
       // apply play
       plays.push({ seat: turn, combo });
       if (combo.type==='pass') {
         humanPlays.push({ seat: turn, text: `${seatName(turn)}: 过` });
+        this.events.push({ kind:'play', seat: turn, move:'pass' });
         passCount++;
       } else {
         // remove cards
@@ -181,6 +191,7 @@ export class Engine {
         if (combo.type==='bomb') bombs++;
         if (combo.type==='rocket') rocket++;
         humanPlays.push({ seat: turn, text: `${seatName(turn)}: ${tag} ${combo.cards.map(c=>c.label).join('')}` });
+        this.events.push({ kind:'play', seat: turn, type: combo.type, cards: combo.cards.map(c=>c.label) });
       }
 
       // win check
@@ -214,6 +225,7 @@ export class Engine {
           for (const s of nonLandlordSeats) scores[s] = +multiplier;
         }
 
+        this.events.push({ kind:'finish', winner });
         const roundLog: RoundLog = {
           deal: {
             0: hands[0].map(c=>c.label),
@@ -227,6 +239,7 @@ export class Engine {
           bombs, rocket,
           finalMultiplier: multiplier,
           scores,
+          events: this.events,
         };
         return roundLog;
       }

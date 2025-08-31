@@ -1,13 +1,13 @@
-import { IBot, PlayerView } from '../engine';
-import { Combo, ComboType } from '../types';
-import { enumerateAllCombos, enumerateResponses } from '../combos';
+import { IBot, PlayerView } from '../game/engine';
+import { Combo, ComboType } from '../game/types';
+import { enumerateAllCombos, enumerateResponses } from '../game/combos';
 
 export class BotGreedyMin implements IBot {
   private _name: string;
   constructor(name='GreedyMin') { this._name = name; }
   name(): string { return this._name; }
 
-  bid(view: PlayerView): number | 'pass' | 'rob' | 'norob' {
+  async bid(view: PlayerView): Promise<number | 'pass' | 'rob' | 'norob'> {
     // Simple strength: count high ranks and jokers
     const high = view.hand.filter(c=>c.rank>=14).length;
     const bombs = new Set(view.hand.map(c=>c.rank)).size !== view.hand.length ? 1 : 0;
@@ -15,7 +15,7 @@ export class BotGreedyMin implements IBot {
     return score===0 ? 'pass' : score;
   }
 
-  play(view: PlayerView): Combo {
+  async play(view: PlayerView): Promise<Combo> {
     const { require } = view;
     if (!require) {
       // lead: enumerate all combos and pick the "lightest" (min size then min mainRank)
