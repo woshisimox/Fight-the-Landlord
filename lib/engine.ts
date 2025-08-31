@@ -57,7 +57,7 @@ export class Engine {
   }
 
   // Bidding phase
-  private bidding(hands: [Card[],Card[],Card[]], bottom: Card[], bots: IBot[]):
+  private async bidding(hands: [Card[],Card[],Card[]], bottom: Card[], bots: IBot[]):
     { landlord: Seat, baseScore: number, robCount: number } | null
   {
     if (this.rules.bidding==='call-score') {
@@ -105,7 +105,7 @@ export class Engine {
   // Run one round; return RoundLog and seat scores
   async playRound(bots: IBot[], roundIndex: number): Promise<RoundLog | null> {
     const { hands, bottom } = this.deal();
-    const bidRes = this.bidding(hands, bottom, bots);
+    const bidRes = await this.bidding(hands, bottom, bots);
     if (!bidRes) return null;
     const { landlord, baseScore, robCount } = bidRes;
 
@@ -170,7 +170,7 @@ export class Engine {
       }
 
       // optional delay before applying play
-      if ((this as any).moveDelayMs && (this as any).moveDelayMs>0) { await new Promise(r=>setTimeout(r, (this as any).moveDelayMs)); }
+      if (this.moveDelayMs && this.moveDelayMs > 0) { await new Promise(r => setTimeout(r, this.moveDelayMs)); }
       // apply play
       plays.push({ seat: turn, combo });
       if (combo.type==='pass') {
