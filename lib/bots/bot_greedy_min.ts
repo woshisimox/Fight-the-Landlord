@@ -1,6 +1,6 @@
 import { IBot, PlayerView } from '../engine';
-import { Combo, ComboType } from '../game/types';
-import { enumerateAllCombos, enumerateResponses } from '../game/combos';
+import { Combo, ComboType } from '../types';
+import { enumerateAllCombos, enumerateResponses } from '../combos';
 
 export class BotGreedyMin implements IBot {
   private _name: string;
