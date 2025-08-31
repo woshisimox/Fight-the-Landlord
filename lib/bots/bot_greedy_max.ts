@@ -7,7 +7,7 @@ export class BotGreedyMax implements IBot {
   constructor(name='GreedyMax') { this._name = name; }
   name(): string { return this._name; }
 
-  async bid(view: PlayerView): Promise<number | 'pass' | 'rob' | 'norob'> {
+  async async bid(view: PlayerView): Promise[Promise<number | 'pass' | 'rob' | 'norob'> ];{
     const jokers = view.hand.filter(c=>c.rank>=16).length;
     const twos = view.hand.filter(c=>c.rank===15).length;
     const triples = new Map<number,number>();
@@ -23,7 +23,7 @@ export class BotGreedyMax implements IBot {
     return score===0 ? 'pass' : score;
   }
 
-  async play(view: PlayerView): Promise<Combo> {
+  async async play(view: PlayerView): Promise[Promise<Combo> ];{
     const { require } = view;
     if (!require) {
       // lead: prefer control — use bigger combos if available
