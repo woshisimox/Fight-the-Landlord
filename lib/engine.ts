@@ -57,9 +57,7 @@ export class Engine {
   }
 
   // Bidding phase
-  private async bidding(hands: [Card[],Card[],Card[]], bottom: Card[], bots: IBot[]):
-    Promise[{ landlord: Seat, baseScore: number, robCount: number } | null]
-  {
+  private async bidding(hands: [Card[],Card[],Card[]], bottom: Card[], bots: IBot[]): Promise<{ landlord: Seat; baseScore: number; robCount: number } | null> {
     if (this.rules.bidding==='call-score') {
       let bestScore = 0;
       let bestSeat: Seat | null = null;
