@@ -1,24 +1,17 @@
 {
-  "name": "fight-the-landlord-seatkeys",
+  "name": "doudizhu-ai-arena",
+  "version": "1.0.0",
   "private": true,
-  "version": "0.4.0",
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "vercel-build": "next build"
+    "start": "ts-node src/cli.ts",
+    "build": "tsc -p .",
+    "play": "ts-node src/cli.ts --rounds 10 --seed 42",
+    "lint": "echo \"(Add your linter of choice)\""
   },
-  "dependencies": {
-    "lodash": "^4.17.21",
-    "next": "^14.2.5",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "zustand": "^4.5.2"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "typescript": "^5.4.5",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "@types/node": "^20.14.10"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
   }
 }
