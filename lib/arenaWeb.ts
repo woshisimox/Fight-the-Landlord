@@ -16,29 +16,27 @@ export interface ArenaResp { rounds:number; logs:RoundLog[]; totals:[number,numb
 
 function makeBot(spec: ProviderSpec, seatIdx: number): IBot {
   const label = '甲乙丙'[seatIdx];
-  if (spec.kind==='builtin') {
-    if (spec.name==='GreedyMin') return new BotGreedyMin(label + '(内置:GreedyMin)');
-    if (spec.name==='GreedyMax') return new BotGreedyMax(label + '(内置:GreedyMax)');
+  if (spec.kind === 'builtin') {
+    if (spec.name === 'GreedyMin') return new BotGreedyMin(label + '(内置:GreedyMin)');
+    if (spec.name === 'GreedyMax') return new BotGreedyMax(label + '(内置:GreedyMax)');
     return new BotRandom(label + '(内置:Random)');
-  } else if (spec.kind==='http') {
+  }
+  if (spec.kind === 'http') {
     return new BotHTTP(spec, label + '(HTTP)');
-  } else if (spec.kind==='gemini') {
+  }
+  if (spec.kind === 'gemini') {
     return new BotGemini(spec, label + '(Gemini)');
-  } else if (spec.kind==='kimi') {
+  }
+  if (spec.kind === 'kimi') {
     const base = spec.baseURL || 'https://api.moonshot.cn/v1';
     return new BotOpenAI({ apiKey: spec.apiKey, model: spec.model, baseURL: base }, label + '(Kimi)');
-  } else if (spec.kind==='grok') {
+  }
+  if (spec.kind === 'grok') {
     const base = spec.baseURL || 'https://api.x.ai/v1';
     return new BotOpenAI({ apiKey: spec.apiKey, model: spec.model, baseURL: base }, label + '(Grok)');
-  } else {
-    // openai
-    return new BotOpenAI(spec, label + '(OpenAI)');
   }
-} else if (spec.kind==='http') {
-    return new BotHTTP(spec, '甲乙丙'[seatIdx] + '(HTTP)');
-  } else {
-    return new BotOpenAI(spec, '甲乙丙'[seatIdx] + '(OpenAI)');
-  }
+  // default: openai
+  return new BotOpenAI(spec as any, label + '(OpenAI)');
 }
 
 export async function runArenaInMemory(req: ArenaReq): Promise<ArenaResp> {
