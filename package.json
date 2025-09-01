@@ -1,6 +1,6 @@
 {
   "name": "doudizhu-ai-web",
-  "version": "1.6.3",
+  "version": "1.6.3-hotfix1",
   "private": true,
   "scripts": {
     "dev": "next dev",
