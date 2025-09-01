@@ -1,3 +1,11 @@
+function getDefaultTimeoutMs(): number {
+  try {
+    // Prefer env var if available
+    // @ts-ignore
+    const v = (typeof process!=='undefined' && (process as any)?.env?.AI_TIMEOUT_MS) ? Number((process as any).env.AI_TIMEOUT_MS) : 10000;
+    return Number.isFinite(v) && v>=1000 ? v : 10000;
+  } catch { return 10000; }
+}
 import type { Combo } from './types';
 import { detectCombo, enumerateAllCombos, enumerateResponses } from './combos';
 import type { IBot } from './engine';
@@ -18,7 +26,7 @@ const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 10000);
 
 async function fetchJson(url: string, init: RequestInit, timeoutMs?: number): Promise<{data:any, error?:string}> {
   const ac = new AbortController();
-  const to = Math.max(1000, Number(timeoutMs || DEFAULT_TIMEOUT_MS));
+  const to = Math.max(1000, Number(timeoutMs ?? getDefaultTimeoutMs()));
   const id = setTimeout(()=> ac.abort(), to);
   try {
     const resp = await fetch(url, { ...init, signal: ac.signal });
