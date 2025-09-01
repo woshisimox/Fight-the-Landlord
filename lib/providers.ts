@@ -16,11 +16,25 @@ export type ProviderSpec =
 
 const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 10000);
 
-async function fetchJson(url: string, init: RequestInit): Promise<any> {
+async function fetchJson(url: string, init: RequestInit, timeoutMs?: number): Promise<{data:any, error?:string}> {
   const ac = new AbortController();
-  const id = setTimeout(()=> ac.abort(), REQUEST_TIMEOUT_MS);
+  const to = Math.max(1000, Number(timeoutMs || DEFAULT_TIMEOUT_MS));
+  const id = setTimeout(()=> ac.abort(), to);
   try {
     const resp = await fetch(url, { ...init, signal: ac.signal });
+    const txt = await resp.text();
+    try { return { data: JSON.parse(txt) }; } catch { return { data: {}, error: '非JSON响应' }; }
+  } catch (e:any) {
+    let msg = String(e?.message || e || 'unknown');
+    // sanitize tokens
+    msg = msg.replace(/(sk-[A-Za-z0-9_\-]{8,})/g, '***');  // generic key pattern
+    msg = msg.replace(/Bearer\s+[A-Za-z0-9_\-\.]+/gi, 'Bearer ***');
+    return { data: {}, error: msg };
+  } finally {
+    clearTimeout(id);
+  }
+}
+);
     const txt = await resp.text();
     try { return JSON.parse(txt); } catch { return {}; }
   } catch (e) {

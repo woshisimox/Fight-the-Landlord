@@ -38,4 +38,5 @@ export type GameEvent =
   | { kind: 'trick-reset', leader: Seat }
   | { kind: 'finish', winner: 'landlord' | 'farmers' }
   | { kind: 'score', totals: [number,number,number] }
-  | { kind: 'terminated', reason: string, totals: [number,number,number], loser: Seat };
+  | { kind: 'terminated', reason: string, totals: [number,number,number], loser: Seat }
+  | { kind: 'setup', players: any[], aiTimeoutMs?: number };
