@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { RuleConfig } from '../../../lib/rules';
-import { ProviderSpec } from '../../../lib/providers';
-import { runArenaInMemory } from '../../../lib/arenaWeb';
+import { RuleConfig } from '../../lib/rules';
+import { ProviderSpec } from '../../lib/providers';
+import { runArenaInMemory } from '../../lib/arenaWeb';
 
 export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
 

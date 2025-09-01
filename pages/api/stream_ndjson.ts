@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { RuleConfig } from '../../../lib/rules';
-import { ProviderSpec } from '../../../lib/providers';
-import { runArenaStream } from '../../../lib/arenaStream';
+import { RuleConfig } from '../../lib/rules';
+import { ProviderSpec } from '../../lib/providers';
+import { runArenaStream } from '../../lib/arenaStream';
 
 export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
 
