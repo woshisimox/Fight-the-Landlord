@@ -13,7 +13,7 @@ export interface EngineOptions {
 export interface IBot {
   name(): string;
   bid(view: PlayerView): Promise<number | 'pass' | 'rob' | 'norob'>;
-  play(view: PlayerView): Promise<Combo>;
+  play(view: PlayerView): Promise<Combo | { combo: Combo, reason?: string }>;
 }
 
 export class Engine {
@@ -71,6 +71,11 @@ export class Engine {
     return hit ?? ({ type:'pass', cards: [] } as any);
   }
 
+  private unpackDecision(dec: any): { combo: Combo, reason?: string } {
+    if (dec && typeof dec==='object' && 'combo' in dec) return dec as {combo:Combo, reason?:string};
+    return { combo: dec as Combo };
+  }
+
   async playRound(bots: IBot[], roundIdx: number): Promise<RoundLog> {
     // Deal
     const deck = makeDeck();
@@ -101,14 +106,18 @@ export class Engine {
 
       const bot = bots[turn];
       const view: PlayerView = { seat: turn, landlord, hand: hands[turn], bottom, history, lead: require===null, require };
-      const proposed = await bot.play(view);
-      const combo = this.normalizeToLegal(view, proposed);
+      const decision = this.unpackDecision(await bot.play(view));
+      let combo = this.normalizeToLegal(view, decision.combo);
+      let reason = decision.reason as (string|undefined);
+      if (!view.require && (decision.combo as any)?.type==='pass') {
+        reason = reason || '首家必须领出，系统改为最小领出';
+      }
 
       if (this.moveDelayMs && this.moveDelayMs>0) await new Promise(r=>setTimeout(r, this.moveDelayMs));
 
       if (combo.type==='pass') {
         // only when require!=null; normalizeToLegal blocks pass on lead
-        this.emit({ kind:'play', seat: turn, move:'pass' });
+        this.emit({ kind:'play', seat: turn, move:'pass', reason });
         passesSinceLastPlay += 1;
         if (passesSinceLastPlay >= 2) {
           if (lastPlaySeat===null) lastPlaySeat = turn; // safety
@@ -123,13 +132,13 @@ export class Engine {
       }
 
       // a real play
-      this.emit({ kind:'play', seat: turn, comboType: combo.type, cards: combo.cards.map(c=>c.label) });
+      this.emit({ kind:'play', seat: turn, comboType: combo.type, cards: combo.cards.map(c=>c.label), reason });
       // remove cards
       for (const c of combo.cards) {
         const idx = hands[turn].findIndex(x=>x.id===c.id);
         if (idx>=0) hands[turn].splice(idx,1);
       }
-      history.push({ seat: turn, combo });
+      history.push({ seat: turn, combo, reason });
       require = combo;
       lastPlaySeat = turn;
       passesSinceLastPlay = 0;

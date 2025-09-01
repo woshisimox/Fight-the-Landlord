@@ -26,17 +26,17 @@ export class BotGreedyMax implements IBot {
     return s===0 ? 'pass' : s;
   }
 
-  async play(view: PlayerView): Promise<Combo> {
+  async play(view: PlayerView): Promise<Combo | {combo: Combo, reason?: string}> {
     const { require } = view;
     if (!require) {
       const combos = enumerateAllCombos(view.hand);
       combos.sort((a,b)=> (b.length??1)-(a.length??1) || (b.mainRank??0)-(a.mainRank??0));
-      return combos[0];
+      return { combo: combos[0], reason: '首家最大领出' };
     } else {
       const resps = enumerateResponses(view.hand, require);
-      if (resps.length===0) return { type:'pass', cards: [] } as any;
+      if (resps.length===0) return { combo: ({ type:'pass', cards: [] } as any), reason: '无法跟上，选择过' };
       resps.sort((a,b)=> (b.mainRank??0)-(a.mainRank??0) || (b.length??1)-(a.length??1));
-      return resps[0];
+      return { combo: resps[0], reason: '能压就打最大' };
     }
   }
 }

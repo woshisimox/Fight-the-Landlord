@@ -11,7 +11,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
   try {
-    // best-effort flush for streaming on Node runtimes (e.g., Vercel)
+    // streaming flush hints
     // @ts-ignore
     res.flushHeaders?.();
     // @ts-ignore
@@ -38,13 +38,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await runArenaStream({ rounds, seed, rules, delayMs, players }, writer);
     res.end();
   } catch (e:any) {
-    try {
-    // best-effort flush for streaming on Node runtimes (e.g., Vercel)
-    // @ts-ignore
-    res.flushHeaders?.();
-    // @ts-ignore
-    res.socket?.setNoDelay(true);
- res.write(JSON.stringify({ type:'error', error: String(e?.message || e) }) + '\n'); } catch {}
+    try { res.write(JSON.stringify({ type:'error', error: String(e?.message || e) }) + '\n'); } catch {}
     res.end();
   }
 }

@@ -308,12 +308,16 @@ function LivePanel(props:any){
       } else if (obj.kind==='play'){
         const seat = ['甲','乙','丙'][obj.seat];
         if (obj.move==='pass'){
-          push(`${seat}：过`);
+          push(`${seat}：过${obj.reason?(' — 理由：'+obj.reason):''}`);
           setBoard(b=> { const last=b.last.slice(); last[obj.seat]='过'; return {...b, last}; });
         } else {
           const cards = (obj.cards||[]).join('');
-          push(`${seat}：${obj.comboType || obj.type} ${cards}`);
-          setBoard(b=> { const last=b.last.slice(); last[obj.seat]=cards; const hands=b.hands.map(arr=>arr.slice()); const labels=(obj.cards||[]) as string[]; for (const lab of labels){ const k=hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1);} return {...b, last, hands}; });
+          push(`${seat}：${obj.comboType || obj.type} ${cards}${obj.reason?(' — 理由：'+obj.reason):''}`);
+          setBoard(b=> { const last=b.last.slice(); last[obj.seat]=cards;
+            const hands=b.hands.map(arr=>arr.slice());
+            const labels=(obj.cards||[]) as string[];
+            for (const lab of labels){ const k=hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1);}
+            return {...b, last, hands}; });
         }
       } else if (obj.kind==='finish'){
         push(`结束：赢家 ${obj.winner==='landlord' ? '地主' : '农民'}`);

@@ -47,7 +47,7 @@ export class BotHTTP implements IBot {
     return (j?.bid ?? 'pass');
   }
 
-  async play(view: PlayerView): Promise<Combo> {
+  async play(view: PlayerView): Promise<Combo | {combo: Combo, reason?: string}> {
     const legal = view.require ? enumerateResponses(view.hand, view.require) : enumerateAllCombos(view.hand);
     const payload = { ...this.viewPayload(view, 'play'), legal: legal.map(c=>({ type:c.type, length:c.length, mainRank:c.mainRank, cards:c.cards.map(x=>x.label) })) };
     const j = await fetchJson(this.cfg.url, {
@@ -56,8 +56,8 @@ export class BotHTTP implements IBot {
       body: JSON.stringify(payload),
     });
     const res = comboFromLabels(j);
-    if (!res) return { type:'pass', cards: [] } as any;
-    return res;
+    if (!res) return { combo: ({ type:'pass', cards: [] } as any), reason: (j?.reason||'') };
+    return { combo: res, reason: (j?.reason || '') };
   }
 
   private viewPayload(view: PlayerView, phase: 'bid'|'play') {
@@ -82,14 +82,14 @@ export class BotOpenAI implements IBot {
     const j = await this.chat(sys, user);
     return (j?.bid ?? 'pass');
   }
-  async play(view: PlayerView): Promise<Combo> {
-    const sys = 'You play Dou Dizhu. Reply with pure JSON like {"type":"pass"} or {"type":"single","cards":["A"]}.';
+  async play(view: PlayerView): Promise<Combo | {combo: Combo, reason?: string}> {
+    const sys = 'You play Dou Dizhu. Reply with pure JSON like {"type":"pass"} or {"type":"single","cards":["A"]}. You may include an optional "reason" field.';
     const payload = viewPayload(view, 'play');
     const user = JSON.stringify(payload);
     const j = await this.chat(sys, user);
     const res = comboFromLabels(j);
-    if (!res) return { type:'pass', cards: [] } as any;
-    return res;
+    if (!res) return { combo: ({ type:'pass', cards: [] } as any), reason: (j?.reason||'') };
+    return { combo: res, reason: (j?.reason || '') };
   }
 
   private async chat(system: string, user: string): Promise<any> {
@@ -125,12 +125,12 @@ export class BotGemini implements IBot {
     return (j?.bid ?? 'pass');
   }
 
-  async play(view: PlayerView): Promise<Combo> {
+  async play(view: PlayerView): Promise<Combo | {combo: Combo, reason?: string}> {
     const payload = JSON.stringify(viewPayload(view, 'play'));
-    const j = await this.gen(payload, 'Return ONLY JSON like {"type":"pass"} or {"type":"single","cards":["A"]}.');
+    const j = await this.gen(payload, 'Return ONLY JSON like {"type":"pass"} or {"type":"single","cards":["A"]}. You may include an optional "reason".');
     const res = comboFromLabels(j);
-    if (!res) return { type:'pass', cards: [] } as any;
-    return res;
+    if (!res) return { combo: ({ type:'pass', cards: [] } as any), reason: (j?.reason||'') };
+    return { combo: res, reason: (j?.reason || '') };
   }
 
   private async gen(userJSON: string, instruction: string): Promise<any> {
@@ -149,7 +149,16 @@ export class BotGemini implements IBot {
 }
 
 // ---------------------------- helpers -------------------------------
+function lastBySeat(history: any[], seat: number){
+  for (let i=history.length-1;i>=0;i--){ if (history[i].seat===seat) return history[i]; }
+  return null;
+}
+
 function viewPayload(view: PlayerView, phase:'bid'|'play') {
+  const role = (view.seat===view.landlord) ? 'landlord' : 'farmer';
+  const left = (view.seat+1)%3; const right = (view.seat+2)%3;
+  const lastLeft = lastBySeat(view.history, left);
+  const lastRight = lastBySeat(view.history, right);
   return {
     phase,
     seat: view.seat,
@@ -157,8 +166,13 @@ function viewPayload(view: PlayerView, phase:'bid'|'play') {
     lead: view.lead,
     hand: view.hand.map(c=>c.label),
     bottom: view.bottom.map(c=>c.label),
-    history: view.history.map(h=>({ seat: h.seat, type: h.combo.type, cards: h.combo.cards.map(c=>c.label) })),
+    history: view.history.map(h=>({ seat: h.seat, type: h.combo.type, cards: h.combo.cards.map(c=>c.label), reason: h.reason })),
     require: view.require ? { type: view.require.type, length: view.require.length, mainRank: view.require.mainRank } : null,
+    role,
+    neighbors: {
+      left: { seat: left, role: (left===view.landlord?'landlord':'farmer'), last: lastLeft? { seat: lastLeft.seat, type: lastLeft.combo.type, cards: lastLeft.combo.cards.map((c:any)=>c.label) } : null },
+      right: { seat: right, role: (right===view.landlord?'landlord':'farmer'), last: lastRight? { seat: lastRight.seat, type: lastRight.combo.type, cards: lastRight.combo.cards.map((c:any)=>c.label) } : null }
+    },
   };
 }
 

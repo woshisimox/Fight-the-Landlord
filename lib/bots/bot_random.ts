@@ -16,15 +16,17 @@ export class BotRandom implements IBot {
     return 3;
   }
 
-  async play(view: PlayerView): Promise<Combo> {
+  async play(view: PlayerView): Promise<Combo | {combo: Combo, reason?: string}> {
     const { require } = view;
     if (!require) {
       const combos = enumerateAllCombos(view.hand);
-      return combos[Math.floor(Math.random()*combos.length)];
+      const c = combos[Math.floor(Math.random()*combos.length)];
+      return { combo: c, reason: '随机领出' };
     } else {
       const resps = enumerateResponses(view.hand, require);
-      if (resps.length===0) return { type:'pass', cards: [] } as any;
-      return resps[Math.floor(Math.random()*resps.length)];
+      if (resps.length===0) return { combo: ({ type:'pass', cards: [] } as any), reason: '无法跟上，选择过' };
+      const c = resps[Math.floor(Math.random()*resps.length)];
+      return { combo: c, reason: '随机跟牌' };
     }
   }
 }

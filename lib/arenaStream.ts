@@ -42,6 +42,7 @@ export async function runArenaStream(req: ArenaReq, write:(obj:any)=>void): Prom
   const bots: IBot[] = req.players ? [ makeBot(req.players[0],0), makeBot(req.players[1],1), makeBot(req.players[2],2) ] : defaultBots;
 
   for (let i=0; i<rounds; i++) {
+    write({ type:'event', stage:'ready' });
     write({ type:'event', stage:'round', action:'start', index: i });
     const events:any[] = [];
     const eng = new Engine({ seed: seed + i, rules, moveDelayMs: delayMs, events, onEvent: (ev)=> write({ type:'event', round:i, ...ev }) });
