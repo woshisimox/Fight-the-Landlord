@@ -1,22 +1,22 @@
 {
-  "name": "doudizhu-ai-web",
-  "version": "1.6.3-hotfix3",
+  "name": "ddz-llm-proxy-demo",
+  "version": "1.0.1",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "start": "next start -p 3000",
+    "lint": "echo \"(lint disabled)\""
   },
   "dependencies": {
-    "next": "14.1.0",
+    "next": "14.2.5",
     "react": "18.2.0",
     "react-dom": "18.2.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
-    "@types/react": "^18.2.46",
-    "@types/react-dom": "^18.2.18",
-    "typescript": "^5.3.3"
+    "typescript": "5.4.5",
+    "@types/node": "20.12.12",
+    "@types/react": "18.2.66",
+    "@types/react-dom": "18.2.22"
   }
 }

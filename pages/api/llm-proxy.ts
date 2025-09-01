@@ -1,92 +1,143 @@
-// pages/api/llm-proxy.ts
-// 统一的服务端代理：把浏览器端的 LLM 请求转发到第三方，以规避 CORS，
-// 并在错误时返回可写入日志的（已脱敏）文本。
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-const MASK = (s: string) => (s || '').replace(/(sk|pk|Bearer)\s+[A-Za-z0-9._-]+/gi, '$1 ***');
+type Provider = 'openai' | 'kimi' | 'grok' | 'gemini';
+
+interface Cfg {
+  provider: Provider;
+  apiKey?: string;
+  model?: string;
+  baseUrl?: string;
+  headers?: Record<string,string>;
+  timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 16000;
+
+// -------- helpers --------
+function sanitizeError(err: unknown): string {
+  const msg = (err instanceof Error ? err.message : String(err || 'unknown'));
+  // 脱敏：隐藏 token 之类敏感信息
+  return msg
+    .replace(/Bearer\s+[A-Za-z0-9_\-]{10,}/g, 'Bearer ***')
+    .replace(/\b(sk|xai|gk|gm|moonshot|ms)-[A-Za-z0-9_\-]{8,}\b/gi, '***')
+    .replace(/authorization"?\s*:\s*"[^"]+"/gi, 'authorization:"***"');
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const ac = new AbortController();
+  const id = setTimeout(() => ac.abort(), Math.max(1000, timeoutMs || DEFAULT_TIMEOUT_MS));
+  try {
+    const r = await fetch(url, { ...init, signal: ac.signal });
+    clearTimeout(id);
+    return r;
+  } catch (e) {
+    clearTimeout(id);
+    throw e;
+  }
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ data: null, error: 'Method Not Allowed' });
+    res.status(405).json({ error: 'method_not_allowed' });
+    return;
   }
 
+  const { cfg, payload } = req.body as { cfg: Cfg; payload: any };
+  if (!cfg || !cfg.provider) {
+    res.status(400).json({ error: 'bad_request: missing cfg.provider' });
+    return;
+  }
+
+  const provider = cfg.provider;
+  const model = cfg.model || (
+    provider === 'openai' ? 'gpt-4o-mini' :
+    provider === 'kimi'   ? 'moonshot-v1-8k' :
+    provider === 'grok'   ? 'grok-beta' :
+    'gemini-1.5-flash'
+  );
+  const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  // 统一的 messages 输入
+  const messages = (payload && payload.messages) ? payload.messages : [
+    { role: 'system', content: payload?.system ?? 'You are a helpful AI.' },
+    { role: 'user',   content: payload?.prompt ?? JSON.stringify(payload ?? {}) }
+  ];
+
   try {
-    const { provider, baseURL, model, apiKey, body, timeoutMs } = (req.body || {});
+    if (provider === 'openai' || provider === 'grok' || provider === 'kimi') {
+      // OpenAI 兼容型 /chat/completions
+      const defaultBase = provider === 'openai'
+        ? 'https://api.openai.com/v1'
+        : provider === 'grok'
+          ? 'https://api.x.ai/v1'
+          : 'https://api.moonshot.cn/v1';
 
-    // 允许调用方传完整 URL；否则按 provider 推断一个默认前缀
-    const buildUrl = () => {
-      if (baseURL && /^https?:\/\//i.test(baseURL)) {
-        // 兼容使用者直接给出 /chat/completions 等路径（排除多余 /）
-        return String(baseURL).replace(/\/$/, '');
-      }
-      const p = String(provider || '').toLowerCase();
-      if (p === 'gemini') {
-        // 这里仅给出公共前缀；最终路径由前端 body 决定（例如 :generateContent）
-        return 'https://generativelanguage.googleapis.com';
-      }
-      // openai / kimi(moonshot) / grok(xai) 都是 openai 风格
-      return 'https://api.openai.com/v1';
-    };
+      const base = (cfg.baseUrl || defaultBase).replace(/\/$/, '');
+      const url = base + '/chat/completions';
 
-    // 如果是 OpenAI 风格接口，默认拼 /chat/completions；
-    // 如果调用方给的是完整 URL（以 /v1/... 结尾），就按原样发。
-    const isFullPath = (u: string) => /\/v1\/[^/]+/.test(u);
-    let url = buildUrl();
-    if (!isFullPath(url)) {
-      const p = String(provider || '').toLowerCase();
-      if (p === 'gemini') {
-        // 由 body 自行携带正确的 :generateContent 路径，这里不追加
-        // 例如 bodyPath: '/v1beta/models/gemini-1.5-pro:generateContent'
-        if (body && typeof body.bodyPath === 'string') {
-          url = url.replace(/\/$/, '') + String(body.bodyPath);
-        } else {
-          return res.status(200).json({ data: null, error: 'Gemini 需要在 body.bodyPath 指定完整路径，例如 /v1beta/models/gemini-1.5-pro:generateContent' });
-        }
-      } else {
-        // OpenAI 兼容风格
-        url = url.replace(/\/$/, '') + '/chat/completions';
-      }
-    }
+      const headers: Record<string,string> = {
+        'content-type': 'application/json',
+        ...(cfg.apiKey ? { 'authorization': `Bearer ${cfg.apiKey}` } : {}),
+        ...(cfg.headers || {})
+      };
 
-    const headers: Record<string, string> = {
-      'content-type': 'application/json',
-    };
-    if (apiKey) headers['authorization'] = `Bearer ${apiKey}`;
-
-    const ac = new AbortController();
-    const to = Math.max(1000, Number(timeoutMs || 15000));
-    const id = setTimeout(() => ac.abort(), to);
-
-    let respText = '';
-    try {
-      const r = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: ac.signal,
+      const body = JSON.stringify({
+        model,
+        messages,
+        temperature: payload?.temperature ?? 0.2,
+        stream: false
       });
-      clearTimeout(id);
 
-      respText = await r.text();
+      const resp = await fetchWithTimeout(url, { method: 'POST', headers, body }, timeoutMs);
+      const txt = await resp.text();
+      let j: any = {};
+      try { j = JSON.parse(txt); } catch { /* keep as text */ }
 
-      if (!r.ok) {
-        // 把第三方的错误正文一并返回（已脱敏），方便写入事件日志
-        return res.status(200).json({ data: null, error: `HTTP ${r.status} ${r.statusText} ${MASK(respText)}` });
+      if (!resp.ok) {
+        res.status(resp.status).json({ error: sanitizeError(j?.error?.message || txt || 'upstream_error'), raw: j });
+        return;
       }
-
-      try {
-        const data = JSON.parse(respText);
-        return res.status(200).json({ data });
-      } catch {
-        return res.status(200).json({ data: null, error: `JSON 解析失败：${MASK(respText.slice(0, 800))}` });
-      }
-    } catch (e: any) {
-      clearTimeout(id);
-      const msg = (e?.name ? (e.name + ': ') : '') + (e?.message || String(e));
-      return res.status(200).json({ data: null, error: `网络或超时错误：${MASK(msg)}` });
+      const text = j?.choices?.[0]?.message?.content ?? '';
+      res.status(200).json({ text, raw: j });
+      return;
     }
-  } catch (e: any) {
-    return res.status(200).json({ data: null, error: `处理失败：${e?.message || e}` });
+
+    if (provider === 'gemini') {
+      // Gemini generateContent
+      const key = cfg.apiKey || '';
+      const base = (cfg.baseUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
+      const url = `${base}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+
+      // 转换 messages -> parts
+      const parts: any[] = [];
+      for (const m of messages) {
+        if (m?.content) {
+          parts.push({ text: String(m.content) });
+        }
+      }
+      const body = JSON.stringify({ contents: [{ parts }] });
+
+      const resp = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(cfg.headers || {}) },
+        body
+      }, timeoutMs);
+
+      const txt = await resp.text();
+      let j: any = {};
+      try { j = JSON.parse(txt); } catch { /* noop */ }
+
+      if (!resp.ok) {
+        res.status(resp.status).json({ error: sanitizeError(j?.error?.message || txt || 'upstream_error'), raw: j });
+        return;
+      }
+      const text = j?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? '').join('') ?? '';
+      res.status(200).json({ text, raw: j });
+      return;
+    }
+
+    res.status(400).json({ error: 'unsupported_provider' });
+  } catch (e) {
+    res.status(500).json({ error: sanitizeError(e) });
   }
 }
