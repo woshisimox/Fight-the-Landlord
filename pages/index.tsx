@@ -227,6 +227,23 @@ function LivePanel(props:any){
   const [objs, setObjs] = useState<any[]>([]);
   const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[]}>({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
   const [running, setRunning] = useState(false);
+  const downloadNdjson = (lines:string[])=>{
+    const blob = new Blob([lines.join('\n')], {type:'application/x-ndjson'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'ddz-log-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
+    a.click();
+    setTimeout(()=> URL.revokeObjectURL(a.href), 2000);
+  };
+  const downloadJson = (objs:any[])=>{
+    const blob = new Blob([JSON.stringify(objs, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'ddz-events-' + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
+    a.click();
+    setTimeout(()=> URL.revokeObjectURL(a.href), 2000);
+  };
+
 
   async function start(){
     setLines([]);
