@@ -208,31 +208,27 @@ export default function Home() {
 
           <h3>首局详情</h3>
           <pre style={{whiteSpace:'pre-wrap', background:'#f7f7f7', padding:12, border:'1px solid #eee', maxHeight:400, overflow:'auto'}}>
-{JSON.stringify(resp.logs[0], null, 2)}
+{JSON.stringify(resp.logs?.[0], null, 2)}
           </pre>
         </div>
       )}
-    
 
       <details style={{marginTop:16}}>
         <summary>实时运行（流式）</summary>
         <LivePanel rounds={rounds} seed={seed} rob={rob} four2={four2} delayMs={delayMs} players={players} />
       </details>
-
     </div>
   );
 }
 
-
-
 function LivePanel(props:any){
   const [lines, setLines] = useState<string[]>([]);
-  const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[]}>({hands:[[],[],[]], last:[], landlord:null, bottom:[]});
+  const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[]}>({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
   const [running, setRunning] = useState(false);
 
   async function start(){
     setLines([]);
-    setBoard({hands:[[],[],[]], last:[], landlord:null, bottom:[]});
+    setBoard({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
     setRunning(true);
     try {
       const body:any = {
@@ -284,22 +280,11 @@ function LivePanel(props:any){
         const seat = ['甲','乙','丙'][obj.seat];
         if (obj.move==='pass'){
           push(`${seat}：过`);
-          setBoard(b=> ({...b, last:[seat + ': 过']}));
+          setBoard(b=> { const last=b.last.slice(); last[obj.seat]='过'; return {...b, last}; });
         } else {
           const cards = (obj.cards||[]).join('');
           push(`${seat}：${obj.type} ${cards}`);
-          setBoard(b=> ({...b, last:[seat + ': ' + cards]}));
-          // 从手牌中移除这些牌（仅基于标签，简单处理）
-          setBoard(b=> {
-            const hands = b.hands.map(arr=>arr.slice());
-            const si = ['甲','乙','丙'].indexOf(seat);
-            const labels = (obj.cards||[]) as string[];
-            for (const lab of labels){
-              const k = hands[si].indexOf(lab);
-              if (k>=0) hands[si].splice(k,1);
-            }
-            return {...b, hands};
-          });
+          setBoard(b=> { const last=b.last.slice(); last[obj.seat]=cards; const hands=b.hands.map(arr=>arr.slice()); const labels=(obj.cards||[]) as string[]; for (const lab of labels){ const k=hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1);} return {...b, last, hands}; });
         }
       } else if (obj.kind==='finish'){
         push(`结束：赢家 ${obj.winner==='landlord' ? '地主' : '农民'}`);

@@ -1,9 +1,10 @@
-import { IBot, PlayerView } from '../engine';
-import { Combo } from '../types';
+import type { Combo } from '../types';
+import type { IBot } from '../engine';
+import type { PlayerView } from '../types';
 import { enumerateAllCombos, enumerateResponses } from '../combos';
 
 function scoreBid(view: PlayerView): number {
-  const highs = view.hand.filter(c=>c.rank>=14).length; // A,2,SJ,BJ
+  const highs = view.hand.filter(c=>c.rank>=14).length;
   if (highs >= 6) return 3;
   if (highs >= 4) return 2;
   if (highs >= 2) return 1;
@@ -24,22 +25,12 @@ export class BotGreedyMin implements IBot {
     const { require } = view;
     if (!require) {
       const combos = enumerateAllCombos(view.hand);
-      combos.sort((a,b)=>{
-        const la = a.length ?? 1, lb = b.length ?? 1;
-        if (la!==lb) return la - lb;
-        const ma = a.mainRank ?? 0, mb = b.mainRank ?? 0;
-        return (ma - mb);
-      });
+      combos.sort((a,b)=> (a.length??1)-(b.length??1) || (a.mainRank??0)-(b.mainRank??0));
       return combos[0];
     } else {
       const resps = enumerateResponses(view.hand, require);
       if (resps.length===0) return { type:'pass', cards: [] } as any;
-      resps.sort((a,b)=>{
-        const ma = a.mainRank ?? 0, mb = b.mainRank ?? 0;
-        if (ma!==mb) return ma - mb;
-        const la = a.length ?? 1, lb = b.length ?? 1;
-        return la - lb;
-      });
+      resps.sort((a,b)=> (a.mainRank??0)-(b.mainRank??0) || (a.length??1)-(b.length??1));
       return resps[0];
     }
   }

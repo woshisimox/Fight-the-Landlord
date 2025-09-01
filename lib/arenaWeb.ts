@@ -1,7 +1,6 @@
-import { Engine } from './engine';
+import { Engine, IBot } from './engine';
 import { DefaultRules, RuleConfig } from './rules';
 import type { RoundLog } from './types';
-import type { IBot } from './engine';
 import { BotGreedyMin } from './bots/bot_greedy_min';
 import { BotGreedyMax } from './bots/bot_greedy_max';
 import { BotRandom } from './bots/bot_random';
@@ -10,33 +9,29 @@ import { ProviderSpec, BotHTTP, BotOpenAI, BotGemini } from './providers';
 export interface ArenaReq {
   rounds:number; seed:number; rules?:Partial<RuleConfig>;
   delayMs?: number;
-  players?: [ProviderSpec, ProviderSpec, ProviderSpec]; // 甲/乙/丙
+  players?: [ProviderSpec, ProviderSpec, ProviderSpec];
 }
 export interface ArenaResp { rounds:number; logs:RoundLog[]; totals:[number,number,number]; }
 
 function makeBot(spec: ProviderSpec, seatIdx: number): IBot {
   const label = '甲乙丙'[seatIdx];
-  if (spec.kind === 'builtin') {
-    if (spec.name === 'GreedyMin') return new BotGreedyMin(label + '(内置:GreedyMin)');
-    if (spec.name === 'GreedyMax') return new BotGreedyMax(label + '(内置:GreedyMax)');
+  if (spec.kind==='builtin') {
+    if (spec.name==='GreedyMin') return new BotGreedyMin(label + '(内置:GreedyMin)');
+    if (spec.name==='GreedyMax') return new BotGreedyMax(label + '(内置:GreedyMax)');
     return new BotRandom(label + '(内置:Random)');
-  }
-  if (spec.kind === 'http') {
+  } else if (spec.kind==='http') {
     return new BotHTTP(spec, label + '(HTTP)');
-  }
-  if (spec.kind === 'gemini') {
+  } else if (spec.kind==='gemini') {
     return new BotGemini(spec, label + '(Gemini)');
-  }
-  if (spec.kind === 'kimi') {
+  } else if (spec.kind==='kimi') {
     const base = spec.baseURL || 'https://api.moonshot.cn/v1';
     return new BotOpenAI({ apiKey: spec.apiKey, model: spec.model, baseURL: base }, label + '(Kimi)');
-  }
-  if (spec.kind === 'grok') {
+  } else if (spec.kind==='grok') {
     const base = spec.baseURL || 'https://api.x.ai/v1';
     return new BotOpenAI({ apiKey: spec.apiKey, model: spec.model, baseURL: base }, label + '(Grok)');
+  } else {
+    return new BotOpenAI(spec, label + '(OpenAI)');
   }
-  // default: openai
-  return new BotOpenAI(spec as any, label + '(OpenAI)');
 }
 
 export async function runArenaInMemory(req: ArenaReq): Promise<ArenaResp> {

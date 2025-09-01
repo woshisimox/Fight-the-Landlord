@@ -1,6 +1,7 @@
-import { IBot, PlayerView } from './engine';
-import { Combo } from './types';
-import { detectCombo, enumerateResponses, enumerateAllCombos } from './combos';
+import type { Combo } from './types';
+import { detectCombo, enumerateAllCombos, enumerateResponses } from './combos';
+import type { IBot } from './engine';
+import type { PlayerView } from './types';
 
 export type BuiltinName = 'GreedyMin'|'GreedyMax'|'RandomLegal';
 
@@ -49,8 +50,7 @@ export class BotHTTP implements IBot {
   }
 }
 
-// ---------- OpenAI-like (OpenAI / Kimi / Grok via baseURL) ----------
-
+// OpenAI-like (OpenAI / Kimi / Grok)
 export class BotOpenAI implements IBot {
   private apiKey: string;
   private model: string;
@@ -68,7 +68,7 @@ export class BotOpenAI implements IBot {
     return (j?.bid ?? 'pass');
   }
   async play(view: PlayerView): Promise<Combo> {
-    const sys = 'You play Dou Dizhu. Reply with pure JSON like {"type": "...", "cards": ["A","A","A"]} or {"type":"pass"}.';
+    const sys = 'You play Dou Dizhu. Reply with pure JSON like {"type":"pass"} or {"type":"single","cards":["A"]}.';
     const payload = viewPayload(view, 'play');
     const user = JSON.stringify(payload);
     const j = await this.chat(sys, user);
@@ -95,8 +95,7 @@ export class BotOpenAI implements IBot {
   }
 }
 
-// ---------- Gemini ----------
-
+// Gemini
 export class BotGemini implements IBot {
   private apiKey: string;
   private model: string;
@@ -114,7 +113,7 @@ export class BotGemini implements IBot {
 
   async play(view: PlayerView): Promise<Combo> {
     const payload = JSON.stringify(viewPayload(view, 'play'));
-    const j = await this.gen(payload, 'Return ONLY JSON like {"type":"pass"} or {"type":"pair","cards":["A","A"]}.');
+    const j = await this.gen(payload, 'Return ONLY JSON like {"type":"pass"} or {"type":"single","cards":["A"]}.');
     const res = comboFromLabels(j);
     if (!res) return { type:'pass', cards: [] } as any;
     return res;
@@ -126,9 +125,7 @@ export class BotGemini implements IBot {
       method:'POST',
       headers: { 'content-type':'application/json' },
       body: JSON.stringify({
-        contents: [
-          { role:'user', parts:[ { text: instruction + "\n" + userJSON } ] }
-        ],
+        contents: [ { role:'user', parts:[ { text: instruction + "\n" + userJSON } ] } ],
         generationConfig: { temperature: 0 }
       })
     });
@@ -138,8 +135,7 @@ export class BotGemini implements IBot {
   }
 }
 
-// ---------- Shared helpers ----------
-
+// helpers
 function viewPayload(view: PlayerView, phase:'bid'|'play') {
   return {
     phase,
@@ -157,9 +153,9 @@ function comboFromLabels(j: any): Combo | null {
   if (!j || !j.type) return null;
   if (j.type==='pass') return { type:'pass', cards: [] } as any;
   const labels: string[] = j.cards ?? [];
-  const fake = labels.map((lab, idx)=> ({ id: idx, label: lab, rank: 3 as any })); // ranks ignored in detectCombo
+  const fake = labels.map((lab, idx)=> ({ id: idx, label: lab, rank: 3 as any }));
   const combo = detectCombo(fake as any);
   if (!combo) return null;
-  combo.cards = labels.map((lab, idx)=> ({ id: 1000+idx, label: lab, rank: 3 as any })) as any;
+  combo.cards = fake as any;
   return combo;
 }

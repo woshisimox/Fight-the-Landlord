@@ -1,5 +1,6 @@
-import { IBot, PlayerView } from '../engine';
-import { Combo } from '../types';
+import type { Combo } from '../types';
+import type { IBot } from '../engine';
+import type { PlayerView } from '../types';
 import { enumerateAllCombos, enumerateResponses } from '../combos';
 
 export class BotRandom implements IBot {

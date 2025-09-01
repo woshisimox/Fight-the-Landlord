@@ -1,24 +1,6 @@
-import { Card, Combo, Play, Rank, RoundLog, Seat } from './types';
-import { makeDeck, rankLabel } from './deck';
-import { RNG } from './random';
-import { detectCombo, enumerateAllCombos, enumerateResponses, sortByRankAsc, beats } from './combos';
-import { RuleConfig, DefaultRules } from './rules';
-
-export interface PlayerView {
-  seat: Seat;
-  landlord: Seat;
-  hand: Card[];
-  bottom: Card[];
-  history: Play[];
-  lead: boolean;
-  require?: Combo; // current trick to follow
-}
-
-export interface IBot {
-  name(): string;
-  bid(view: PlayerView): Promise<number | 'pass' | 'rob' | 'norob'>;
-  play(view: PlayerView): Promise<Combo>; // must return a legal combo (or pass)
-}
+import { DefaultRules, RuleConfig } from './rules';
+import type { Card, Combo, Play, PlayerView, RoundLog, Seat } from './types';
+import { enumerateAllCombos, enumerateResponses } from './combos';
 
 export interface EngineOptions {
   seed: number;
@@ -28,240 +10,170 @@ export interface EngineOptions {
   onEvent?: (ev:any)=>void;
 }
 
-function seatName(s: Seat): string { return ['甲(A)','乙(B)','丙(C)'][s]; }
+export interface IBot {
+  name(): string;
+  bid(view: PlayerView): Promise<number | 'pass' | 'rob' | 'norob'>;
+  play(view: PlayerView): Promise<Combo>;
+}
 
 export class Engine {
-  private rng: RNG;
+  private rng: () => number;
   private rules: RuleConfig;
   private moveDelayMs: number;
   private events: any[];
   private onEvent?: (ev:any)=>void;
 
-  private emit(ev:any){ this.events.push(ev); if (this.onEvent) try { this.onEvent(ev); } catch {} }
-
   constructor(opts: EngineOptions) {
-    this.rng = new RNG(opts.seed);
+    this.rng = mulberry32(opts.seed);
     this.rules = opts.rules;
     this.moveDelayMs = opts.moveDelayMs ?? 0;
     this.events = opts.events ?? [];
     this.onEvent = opts.onEvent;
   }
 
-  deal(): { hands: [Card[],Card[],Card[]]; bottom: Card[] } {
-    const deck = makeDeck();
-    this.rng.shuffle(deck);
-    const hands: [Card[],Card[],Card[]] = [[],[],[]];
-    for (let i=0;i<17;i++) {
-      hands[0].push(deck[i*3+0]);
-      hands[1].push(deck[i*3+1]);
-      hands[2].push(deck[i*3+2]);
+  private emit(ev:any){ this.events.push(ev); if (this.onEvent) try{ this.onEvent(ev);}catch{} }
+
+  private comboKey(c: Combo): string {
+    const cards = (c && (c as any).cards) ? (c as any).cards : [];
+    return cards.map((x:any) => (x.label ?? '')).sort().join(',');
+  }
+
+  private pickSmallestLead(hand: Card[]): Combo {
+    const all = enumerateAllCombos(hand);
+    if (all.length === 0) return { type: 'pass', cards: [] } as any;
+    const singles = all.filter(c => c.type === 'single');
+    if (singles.length) {
+      singles.sort((a,b) => (a.mainRank! - b.mainRank!));
+      return singles[0];
     }
+    all.sort((a,b) => (a.mainRank! - b.mainRank!) || ((a.length ?? 1) - (b.length ?? 1)));
+    return all[0];
+  }
+
+  private normalizeToLegal(view: PlayerView, proposed: Combo): Combo {
+    const legal = view.require
+      ? enumerateResponses(view.hand, view.require)
+      : enumerateAllCombos(view.hand);
+    const byKey = new Map(legal.map(c => [this.comboKey(c), c]));
+
+    if (!view.require) {
+      if (!proposed || (proposed as any).type === 'pass') {
+        return this.pickSmallestLead(view.hand);
+      }
+      const hit = byKey.get(this.comboKey(proposed));
+      return hit ?? this.pickSmallestLead(view.hand);
+    }
+
+    if (!proposed || (proposed as any).type === 'pass') {
+      return { type:'pass', cards: [] } as any;
+    }
+    const hit = byKey.get(this.comboKey(proposed));
+    return hit ?? ({ type:'pass', cards: [] } as any);
+  }
+
+  async playRound(bots: IBot[], roundIdx: number): Promise<RoundLog> {
+    const deck = makeDeck();
+    shuffleInPlace(deck, this.rng);
+    const hands: [Card[],Card[],Card[]] = [[],[],[]];
+    for (let i=0;i<51;i++) hands[i%3].push(deck[i]);
     const bottom = deck.slice(51);
     this.emit({ kind:'deal', hands: hands.map(h=>h.map(c=>c.label)), bottom: bottom.map(c=>c.label) });
-    for (const h of hands) h.sort((a,b)=>a.rank-b.rank || a.id-b.id);
-    return { hands, bottom };
-  }
 
-  // Bidding phase
-  private async bidding(hands: [Card[],Card[],Card[]], bottom: Card[], bots: IBot[]): Promise<{ landlord: Seat; baseScore: number; robCount: number } | null> {
-    if (this.rules.bidding==='call-score') {
-      let bestScore = 0;
-      let bestSeat: Seat | null = null;
-      for (let s=0 as Seat; s<=2; s=(s+1) as Seat) {
-        const view: PlayerView = {
-          seat: s, landlord: 0, hand: hands[s], bottom, history: [], lead: false
-        };
-        const res = await bots[s].bid(view);
-        this.emit({ kind:'bid', seat: s, action: res });
-        if (res==='pass') {
-          // nothing
-        } else if (typeof res==='number') {
-          const sc = Math.max(1, Math.min(3, Math.floor(res)));
-          if (sc>bestScore) { bestScore = sc; bestSeat = s; }
-          if (sc===3) break;
-        }
-      }
-      if (bestSeat===null) return null; // all pass => redeal
-      return { landlord: bestSeat, baseScore: bestScore, robCount: 0 };
-    } else {
-      // rob mode
-      let landlord: Seat | null = null;
-      let robCount = 0;
-      // first caller
-      for (let s=0 as Seat; s<=2; s=(s+1) as Seat) {
-        const view: PlayerView = { seat: s, landlord: 0, hand: hands[s], bottom, history: [], lead: false };
-        const res = await bots[s].bid(view);
-        this.emit({ kind:'bid', seat: s, action: res });
-        const wantRob = (res==='rob') || (typeof res==='number' && res>0);
-        if (wantRob) { landlord = s; robCount = 1; break; }
-      }
-      if (landlord===null) return null;
-      // others may rob
-      for (let step=1; step<3; step++) {
-        const s = ((landlord + step) % 3) as Seat;
-        const view: PlayerView = { seat: s, landlord, hand: hands[s], bottom, history: [], lead: false };
-        const res = await bots[s].bid(view);
-        this.emit({ kind:'bid', seat: s, action: res });
-        const wantRob = (res==='rob') || (typeof res==='number' && res>0);
-        if (wantRob) { landlord = s; robCount++; }
-      }
-      return { landlord, baseScore: 1, robCount };
-    }
-  }
-
-  // Run one round; return RoundLog and seat scores
-  async playRound(bots: IBot[], roundIndex: number): Promise<RoundLog | null> {
-    const { hands, bottom } = this.deal();
+    // bidding
     const bidRes = await this.bidding(hands, bottom, bots);
-    if (!bidRes) return null;
-    const { landlord, baseScore, robCount } = bidRes;
-
-    // give bottom to landlord
+    const landlord = bidRes?.landlord ?? 1 as Seat;
+    const baseScore = bidRes?.baseScore ?? 1;
     hands[landlord].push(...bottom);
-    hands[landlord].sort((a,b)=>a.rank-b.rank || a.id-b.id);
-
-    const plays: Play[] = [];
-    const humanPlays: { seat: Seat; text: string; }[] = [];
-
-    const landName = seatName(landlord);
-    humanPlays.push({ seat: landlord, text: `地主确定: ${landName}, 底牌=${bottom.map(c=>c.label).join('')}, 基础分=${baseScore}` });
     this.emit({ kind:'landlord', landlord, baseScore, bottom: bottom.map(c=>c.label) });
 
-    let current: Combo | null = null;
-    let leadSeat: Seat = landlord;
+    const history: Play[] = [];
     let turn: Seat = landlord;
-    let passCount = 0;
-    let bombs = 0;
-    let rocket = 0;
-    const firstPlayCount = [0,0,0] as number[];
-    const nonLandlordSeats: Seat[] = [0,1,2].filter(s=>s!==landlord) as Seat[];
+    let require: Combo | null = null;
+    let winner: 'landlord'|'farmers'|null = null;
 
-    const getView = (s: Seat): PlayerView => ({
-      seat: s,
-      landlord,
-      hand: hands[s],
-      bottom,
-      history: plays.slice(),
-      lead: s===leadSeat,
-      require: current ?? undefined,
-    });
-
-    // main loop
-    while (true) {
-      const view = getView(turn);
+    while (true){
       const bot = bots[turn];
-      let combo = await bot.play(view);
-      // validate combo
-      if (!combo) combo = { type:'pass', cards: [] } as Combo;
-      if (combo.type!=='pass') {
-        const det = detectCombo(combo.cards);
-        if (!det || det.type!==combo.type || (det.length!==undefined && combo.length!==undefined && det.length!==combo.length)) {
-          // auto-fix to pass if invalid
-          combo = { type:'pass', cards: [] } as Combo;
-        } else {
-          combo = det;
-        }
-      }
+      const view: PlayerView = {
+        seat: turn, landlord, hand: hands[turn], bottom, history, lead: require===null, require
+      };
+      let proposed = await bot.play(view);
+      let combo = this.normalizeToLegal(view, proposed);
 
-      // check against requirement
-      if (current) {
-        // must beat or pass
-        let legal = false;
-        if (combo.type==='pass') legal = true;
-        else {
-          // same type/shape or bombs/rocket
-          // direct import of beats at top
-          legal = beats(current, combo);
-        }
-        if (!legal) combo = { type:'pass', cards: [] } as Combo;
-      }
+      // optional delay
+      if (this.moveDelayMs && this.moveDelayMs>0) await new Promise(r=>setTimeout(r, this.moveDelayMs));
 
-      // optional delay before applying play
-      if (this.moveDelayMs && this.moveDelayMs > 0) { await new Promise(r => setTimeout(r, this.moveDelayMs)); }
-      // apply play
-      plays.push({ seat: turn, combo });
-      if (combo.type==='pass') {
-        humanPlays.push({ seat: turn, text: `${seatName(turn)}: 过` });
+      if (combo.type==='pass'){
         this.emit({ kind:'play', seat: turn, move:'pass' });
-        passCount++;
       } else {
+        this.emit({ kind:'play', seat: turn, type: combo.type, cards: combo.cards.map(c=>c.label) });
         // remove cards
-        for (const c of combo.cards) {
+        for (const c of combo.cards){
           const idx = hands[turn].findIndex(x=>x.id===c.id);
           if (idx>=0) hands[turn].splice(idx,1);
         }
-        firstPlayCount[turn]++;
-        passCount = 0;
-        current = combo;
-        leadSeat = turn;
-        const tag = combo.type.toUpperCase();
-        if (combo.type==='bomb') bombs++;
-        if (combo.type==='rocket') rocket++;
-        humanPlays.push({ seat: turn, text: `${seatName(turn)}: ${tag} ${combo.cards.map(c=>c.label).join('')}` });
-        this.emit({ kind:'play', seat: turn, type: combo.type, cards: combo.cards.map(c=>c.label) });
+        history.push({ seat: turn, combo });
+        require = combo;
+        if (hands[turn].length===0){
+          winner = (turn===landlord) ? 'landlord' : 'farmers';
+          break;
+        }
+      }
+      // if everyone passed (i.e., two passes after a lead), clear requirement
+      if (combo.type==='pass'){
+        const last3 = history.slice(-1);
+        const passCount = (last3.length===0 ? 0 : 0); // we only store plays, so count passes separately by checking events; for simplicity, reset require after two consecutive passes events
+        // simple rule: if two consecutive passes seen in events, reset
+        const evlen = this.events.length;
+        const lastTwo = this.events.slice(Math.max(0, evlen-2));
+        if (lastTwo.length===2 && lastTwo.every(e=>e.kind==='play' && e.move==='pass')){
+          require = null;
+        }
       }
 
-      // win check
-      if (hands[turn].length===0) {
-        const winner = (turn===landlord) ? 'landlord' : 'farmers';
-        // spring
-        let spring: 'none'|'spring'|'antispring' = 'none';
-        if (winner==='landlord') {
-          const totalFarmerPlays = firstPlayCount[nonLandlordSeats[0]] + firstPlayCount[nonLandlordSeats[1]];
-          if (totalFarmerPlays===0) spring='spring';
-        } else {
-          if (firstPlayCount[landlord]===1) spring='antispring';
-        }
-        // final multiplier
-        let multiplier = baseScore;
-        // rob multiplier
-        if (this.rules.bidding==='rob' && this.rules.robMultiplier) {
-          multiplier *= (2 ** robCount);
-        }
-        // bombs & rocket doubling
-        const bombTimes = bombs + rocket; // rocket also ×2
-        multiplier *= (2 ** bombTimes);
-        if (spring!=='none') multiplier *= 2;
-
-        const scores: {[seat in Seat]: number} = { 0:0,1:0,2:0 };
-        if (winner==='landlord') {
-          scores[landlord] = +multiplier*2;
-          for (const s of nonLandlordSeats) scores[s] = -multiplier;
-        } else {
-          scores[landlord] = -multiplier*2;
-          for (const s of nonLandlordSeats) scores[s] = +multiplier;
-        }
-
-        this.emit({ kind:'finish', winner });
-        const roundLog: RoundLog = {
-          deal: {
-            0: hands[0].map(c=>c.label),
-            1: hands[1].map(c=>c.label),
-            2: hands[2].map(c=>c.label),
-          },
-          landlord, baseScore, robCount,
-          bottom: bottom.map(c=>c.label),
-          plays: humanPlays,
-          winner, spring,
-          bombs, rocket,
-          finalMultiplier: multiplier,
-          scores,
-          events: this.events,
-        };
-        return roundLog;
-      }
-
-      // trick end if two passes
-      if (passCount===2 && current) {
-        // reset requirement
-        current = null;
-        passCount = 0;
-        // next turn is the last non-pass (leadSeat), but it will advance by +1 below
-        turn = leadSeat;
-      }
-
-      // next turn
       turn = ((turn + 1) % 3) as Seat;
     }
+
+    const scores: [number,number,number] = [0,0,0];
+    if (winner==='landlord') { scores[landlord]+=baseScore*2; scores[(landlord+1)%3]-=baseScore; scores[(landlord+2)%3]-=baseScore; }
+    else { scores[landlord]-=baseScore*2; scores[(landlord+1)%3]+=baseScore; scores[(landlord+2)%3]+=baseScore; }
+    this.emit({ kind:'finish', winner });
+
+    return { round: roundIdx, landlord, scores, events: this.events };
+  }
+
+  // Bidding phase (very simple heuristic and async-safe)
+  private async bidding(hands: [Card[],Card[],Card[]], bottom: Card[], bots: IBot[]):
+    Promise<{ landlord: Seat, baseScore: number, robCount: number } | null>
+  {
+    let bestScore = -1;
+    let who: Seat = 0;
+    for (let s=0 as Seat; s<3; s=(s+1)%3 as Seat){
+      const view = { seat:s, landlord:0 as Seat, hand:hands[s], bottom, history:[], lead:false } as any;
+      const res = await bots[s].bid(view);
+      this.emit({ kind:'bid', seat: s, action: res });
+      const val = (typeof res==='number' ? res : res==='rob' ? 3 : 0);
+      if (val>bestScore) { bestScore = val; who = s; }
+      if (s===2) break;
+    }
+    return { landlord: who, baseScore: Math.max(1, bestScore), robCount: 0 };
   }
 }
+
+// utils
+function makeDeck(): Card[] {
+  const labels = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','SJ','BJ'];
+  const ranks: Record<string,number> = { '3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'T':10,'J':11,'Q':12,'K':13,'A':14,'2':15,'SJ':16,'BJ':17 };
+  let id=1;
+  const cards: Card[] = [];
+  for (const l of labels){
+    if (l==='SJ' || l==='BJ') { cards.push({ id:id++, label:l, rank:ranks[l] }); continue; }
+    for (let s=0; s<4; s++) cards.push({ id:id++, label:l, rank:ranks[l] });
+  }
+  return cards;
+}
+
+function shuffleInPlace<T>(arr:T[], rng:()=>number){
+  for (let i=arr.length-1;i>0;i--){ const j = Math.floor(rng()*(i+1)); [arr[i],arr[j]] = [arr[j],arr[i]]; }
+}
+
+function mulberry32(a:number){ return function(){ let t = a += 0x6D2B79F5; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; } }

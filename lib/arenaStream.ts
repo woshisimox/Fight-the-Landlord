@@ -1,6 +1,5 @@
 import { Engine, IBot } from './engine';
 import { DefaultRules, RuleConfig } from './rules';
-import type { RoundLog } from './types';
 import { BotGreedyMin } from './bots/bot_greedy_min';
 import { BotGreedyMax } from './bots/bot_greedy_max';
 import { BotRandom } from './bots/bot_random';
@@ -9,7 +8,7 @@ import { ProviderSpec, BotHTTP, BotOpenAI, BotGemini } from './providers';
 export interface ArenaReq {
   rounds:number; seed:number; rules?:Partial<RuleConfig>;
   delayMs?: number;
-  players?: [ProviderSpec, ProviderSpec, ProviderSpec]; // 甲/乙/丙
+  players?: [ProviderSpec, ProviderSpec, ProviderSpec];
 }
 
 function makeBot(spec: ProviderSpec, seatIdx: number): IBot {

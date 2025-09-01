@@ -1,14 +1,12 @@
-export type FourWithTwoMode = '2singles'|'2pairs'|'both';
+export type BiddingMode = 'call-score'|'rob';
+export type FourWithTwo = 'both'|'2singles'|'2pairs';
+
 export interface RuleConfig {
-  bidding: 'call-score'|'rob';
-  enableMingPai: 'none'|'see-bottom-x2'|'after-call-x3';
-  fourWithTwo: FourWithTwoMode;
-  allowWingsContain2OrJoker: boolean;
-  springRule: 'std';
-  robMultiplier: boolean;
+  bidding: BiddingMode;
+  fourWithTwo: FourWithTwo;
 }
+
 export const DefaultRules: RuleConfig = {
-  bidding: 'call-score', enableMingPai: 'none',
-  fourWithTwo: 'both', allowWingsContain2OrJoker: false,
-  springRule: 'std', robMultiplier: true,
+  bidding: 'call-score',
+  fourWithTwo: 'both',
 };
