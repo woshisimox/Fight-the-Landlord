@@ -93,6 +93,7 @@ export class Engine {
 
     while (true){
       const bot = bots[turn];
+      this.emit({ kind:'turn', seat: turn, lead: (require===null), require: require? { type: require.type, mainRank: require.mainRank, length: require.length } : null });
       const view: PlayerView = {
         seat: turn, landlord, hand: hands[turn], bottom, history, lead: require===null, require
       };

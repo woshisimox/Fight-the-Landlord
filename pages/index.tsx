@@ -223,11 +223,15 @@ export default function Home() {
 
 function LivePanel(props:any){
   const [lines, setLines] = useState<string[]>([]);
+  const [raw, setRaw] = useState<string[]>([]);
+  const [objs, setObjs] = useState<any[]>([]);
   const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[]}>({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
   const [running, setRunning] = useState(false);
 
   async function start(){
     setLines([]);
+    setRaw([]);
+    setObjs([]);
     setBoard({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
     setRunning(true);
     try {
@@ -257,6 +261,8 @@ function LivePanel(props:any){
           buf = buf.slice(idx+1);
           if (!line) continue;
           const obj = JSON.parse(line);
+          setRaw(r=>[...r, line]);
+          setObjs(o=>[...o, obj]);
           handle(obj);
         }
       }
@@ -267,7 +273,10 @@ function LivePanel(props:any){
 
   function handle(obj:any){
     if (obj.type==='event'){
-      if (obj.kind==='deal'){
+      if (obj.kind==='turn'){
+        const seat = ['甲','乙','丙'][obj.seat];
+        push(`【回合】${seat} ${obj.lead?'(领出)':''} ${obj.require?('需跟: '+obj.require.type+'>'+obj.require.mainRank):''}`);
+      } else if (obj.kind==='deal'){
         setBoard(b=> ({...b, hands: obj.hands, bottom: obj.bottom}));
         push(`发牌：底牌 ${obj.bottom.join('')}`);
       } else if (obj.kind==='bid'){
@@ -302,6 +311,11 @@ function LivePanel(props:any){
 
   return (
     <div style={{marginTop:12}}>
+      <div style={{marginTop:8, display:'flex', gap:8}}>
+        <button onClick={()=>downloadNdjson(raw)} disabled={!raw.length}>下载 NDJSON</button>
+        <button onClick={()=>downloadJson(objs)} disabled={!objs.length}>下载事件 JSON</button>
+      </div>
+
       <button onClick={start} disabled={running} style={{padding:'6px 12px'}}>{running?'运行中…':'开始实时运行'}</button>
       <div style={{display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12, marginTop:12}}>
         {[0,1,2].map(i=> (
@@ -313,6 +327,11 @@ function LivePanel(props:any){
         ))}
       </div>
       <div style={{marginTop:12}}>
+      <div style={{marginTop:8, display:'flex', gap:8}}>
+        <button onClick={()=>downloadNdjson(raw)} disabled={!raw.length}>下载 NDJSON</button>
+        <button onClick={()=>downloadJson(objs)} disabled={!objs.length}>下载事件 JSON</button>
+      </div>
+
         <div style={{fontWeight:700}}>事件日志</div>
         <div style={{whiteSpace:'pre-wrap', background:'#f9f9f9', padding:10, border:'1px solid #eee', height:240, overflow:'auto'}}>
           {lines.join('\n')}
