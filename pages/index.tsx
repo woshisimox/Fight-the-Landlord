@@ -302,14 +302,14 @@ function LivePanel(props:any){
       } else if (obj.kind==='landlord'){
         push(`确定地主：${['甲','乙','丙'][obj.landlord]}，底牌 ${obj.bottom.join('')} 基础分 ${obj.baseScore}`);
         setBoard(b=> ({...b, landlord: obj.landlord}));
-      } else if (obj.kind==='play'){
+      } else if (obj.kind==='trick-reset'){ push(`（新一轮）由 ${['甲','乙','丙'][obj.leader]} 继续领出`); } else if (obj.kind==='play'){
         const seat = ['甲','乙','丙'][obj.seat];
         if (obj.move==='pass'){
           push(`${seat}：过`);
           setBoard(b=> { const last=b.last.slice(); last[obj.seat]='过'; return {...b, last}; });
         } else {
           const cards = (obj.cards||[]).join('');
-          push(`${seat}：${obj.type} ${cards}`);
+          push(`${seat}：${obj.comboType||obj.type} ${cards}`);
           setBoard(b=> { const last=b.last.slice(); last[obj.seat]=cards; const hands=b.hands.map(arr=>arr.slice()); const labels=(obj.cards||[]) as string[]; for (const lab of labels){ const k=hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1);} return {...b, last, hands}; });
         }
       } else if (obj.kind==='finish'){
