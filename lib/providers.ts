@@ -11,7 +11,15 @@ async function fetchJson(url: string, init: RequestInit): Promise<any> {
   const ac = new AbortController();
   const id = setTimeout(()=> ac.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const j = await fetchJson(url, { ...init, signal: ac.signal });
+    const resp = await fetch(url, { ...init, signal: ac.signal });
+    const txt = await resp.text();
+    try { return JSON.parse(txt); } catch { return {}; }
+  } catch (e) {
+    return {};
+  } finally {
+    clearTimeout(id);
+  }
+});
     const txt = await r.text();
     try { return JSON.parse(txt); } catch { return {}; }
   } catch (e) {
