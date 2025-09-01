@@ -3,7 +3,16 @@ import { detectCombo, enumerateAllCombos, enumerateResponses } from './combos';
 import type { IBot } from './engine';
 import type { PlayerView } from './types';
 
+export type BuiltinName = 'GreedyMin'|'GreedyMax'|'RandomLegal';
 
+export type ProviderSpec =
+  | { kind:'builtin', name:BuiltinName }
+  | { kind:'http', url:string, apiKey?:string, headers?:Record<string,string> }
+  | { kind:'openai', apiKey:string, model:string, baseURL?:string }
+  | { kind:'gemini', apiKey:string, model:string }
+  | { kind:'kimi', apiKey:string, model:string, baseURL?:string }
+  | { kind:'grok', apiKey:string, model:string, baseURL?:string }
+  ;
 
 const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 10000);
 
@@ -19,27 +28,9 @@ async function fetchJson(url: string, init: RequestInit): Promise<any> {
   } finally {
     clearTimeout(id);
   }
-});
-    const txt = await r.text();
-    try { return JSON.parse(txt); } catch { return {}; }
-  } catch (e) {
-    return {};
-  } finally {
-    clearTimeout(id);
-  }
 }
 
-export type BuiltinName = 'GreedyMin'|'GreedyMax'|'RandomLegal';
-
-export type ProviderSpec =
-  | { kind:'builtin', name:BuiltinName }
-  | { kind:'http', url:string, apiKey?:string, headers?:Record<string,string> }
-  | { kind:'openai', apiKey:string, model:string, baseURL?:string }
-  | { kind:'gemini', apiKey:string, model:string }
-  | { kind:'kimi', apiKey:string, model:string, baseURL?:string }
-  | { kind:'grok', apiKey:string, model:string, baseURL?:string }
-  ;
-
+// -------------------------- HTTP JSON Bot --------------------------
 export class BotHTTP implements IBot {
   private cfg: Extract<ProviderSpec, {kind:'http'}>;
   private _name: string;
@@ -53,7 +44,6 @@ export class BotHTTP implements IBot {
       headers: { 'content-type':'application/json', ...(this.cfg.apiKey? {'authorization':`Bearer ${this.cfg.apiKey}`} : {}), ...(this.cfg.headers||{}) },
       body: JSON.stringify(payload),
     });
-    
     return (j?.bid ?? 'pass');
   }
 
@@ -65,7 +55,6 @@ export class BotHTTP implements IBot {
       headers: { 'content-type':'application/json', ...(this.cfg.apiKey? {'authorization':`Bearer ${this.cfg.apiKey}`} : {}), ...(this.cfg.headers||{}) },
       body: JSON.stringify(payload),
     });
-    
     const res = comboFromLabels(j);
     if (!res) return { type:'pass', cards: [] } as any;
     return res;
@@ -76,7 +65,7 @@ export class BotHTTP implements IBot {
   }
 }
 
-// OpenAI-like (OpenAI / Kimi / Grok)
+// --------------- OpenAI-like (OpenAI / Kimi / Grok) ----------------
 export class BotOpenAI implements IBot {
   private apiKey: string;
   private model: string;
@@ -115,13 +104,12 @@ export class BotOpenAI implements IBot {
         response_format: { type:'json_object' }
       }),
     });
-    
     const text = j?.choices?.[0]?.message?.content || '{}';
     try { return JSON.parse(text); } catch { return {}; }
   }
 }
 
-// Gemini
+// ------------------------------ Gemini ------------------------------
 export class BotGemini implements IBot {
   private apiKey: string;
   private model: string;
@@ -155,13 +143,12 @@ export class BotGemini implements IBot {
         generationConfig: { temperature: 0 }
       })
     });
-    
     const text = j?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
     try { return JSON.parse(text); } catch { return {}; }
   }
 }
 
-// helpers
+// ---------------------------- helpers -------------------------------
 function viewPayload(view: PlayerView, phase:'bid'|'play') {
   return {
     phase,
