@@ -77,7 +77,7 @@ export default function Home() {
 
       <fieldset style={{border:'1px solid #ddd', padding:12, borderRadius:8}}>
         <legend>对局参数</legend>
-        <div style={{display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap: 12, alignItems:'end'}}>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(6, 1fr)', gap: 12, alignItems:'end'}}>
           <label>局数<br/>
             <input type="number" value={rounds} min={1} onChange={e=>setRounds(Number(e.target.value))} />
           </label>
@@ -230,16 +230,21 @@ function LivePanel(props:any){
   const [raw, setRaw] = useState<string[]>([]);
   const [objs, setObjs] = useState<any[]>([]);
   const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[]}>({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
+  const [totals, setTotals] = useState<[number,number,number]>([props.startScore||0, props.startScore||0, props.startScore||0]);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState('idle');
-  const [totals, setTotals] = useState<[number,number,number]>([props.startScore||0, props.startScore||0, props.startScore||0]);
-  function labelFor(i:number){ const p = props.players[i]; const seat=['甲','乙','丙'][i]; if(!p) return seat; if(p.kind==='builtin') return `${seat}（内置:${p.builtin||'Random'}）`; if(p.kind==='http') return `${seat}（HTTP）`; if(p.kind==='openai') return `${seat}（OpenAI）`; if(p.kind==='gemini') return `${seat}（Gemini）`; if(p.kind==='kimi') return `${seat}（Kimi）`; if(p.kind==='grok') return `${seat}（Grok）`; return seat; }
 
-  function toB64(obj:any){ 
-    const s = JSON.stringify(obj); 
-    return (typeof btoa!=='undefined') ? btoa(unescape(encodeURIComponent(s))) : Buffer.from(s,'utf8').toString('base64'); 
+  function labelFor(i:number){
+    const p = props.players[i]; const seat=['甲','乙','丙'][i];
+    if(!p) return seat;
+    if(p.kind==='builtin') return `${seat}（内置:${p.builtin||'Random'}）`;
+    if(p.kind==='http') return `${seat}（HTTP）`;
+    if(p.kind==='openai') return `${seat}（OpenAI）`;
+    if(p.kind==='gemini') return `${seat}（Gemini）`;
+    if(p.kind==='kimi') return `${seat}（Kimi）`;
+    if(p.kind==='grok') return `${seat}（Grok）`;
+    return seat;
   }
-
 
   const downloadNdjson = (lines:string[])=>{
     const blob = new Blob([lines.join('\\n')], {type:'application/x-ndjson'});
@@ -257,12 +262,18 @@ function LivePanel(props:any){
     a.click();
     setTimeout(()=> URL.revokeObjectURL(a.href), 2000);
   };
+  function toB64(obj:any){ 
+    const s = JSON.stringify(obj); 
+    // @ts-ignore
+    return (typeof btoa!=='undefined') ? btoa(unescape(encodeURIComponent(s))) : Buffer.from(s,'utf8').toString('base64'); 
+  }
 
   async function start(){
     setLines([]);
     setRaw([]);
     setObjs([]);
-    setBoard({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]}); setTotals([props.startScore||0, props.startScore||0, props.startScore||0]);
+    setBoard({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
+    setTotals([props.startScore||0, props.startScore||0, props.startScore||0]);
     setRunning(true);
     setStatus('connecting');
     const body:any = {
@@ -278,7 +289,6 @@ function LivePanel(props:any){
       }),
     };
 
-    // Try SSE first
     try {
       const es = new EventSource(`/api/stream_sse?q=${toB64(body)}`);
       es.onopen = () => setStatus('open');
@@ -300,10 +310,6 @@ function LivePanel(props:any){
         setStatus('sse-error');
         fallbackNdjson(body);
       });
-      // Also safety fallback after 1500ms if no ready
-      setTimeout(()=>{
-        if (status==='connecting' || status==='open') return;
-      }, 1500);
     } catch (e) {
       setStatus('sse-unsupported');
       fallbackNdjson(body);
@@ -322,7 +328,7 @@ function LivePanel(props:any){
         if (done) break;
         buf += decoder.decode(value, {stream:true});
         let idx;
-        while ((idx = buf.indexOf("\n")) >= 0){
+        while ((idx = buf.indexOf("\\n")) >= 0){
           const line = buf.slice(0, idx).trim();
           buf = buf.slice(idx+1);
           if (!line) continue;
@@ -341,14 +347,14 @@ function LivePanel(props:any){
   function handle(obj:any){
     if (obj.type==='event'){
       if (obj.kind==='turn'){
-        const seat = ['甲','乙','丙'][obj.seat]; const label = labelFor(obj.seat);
+        const seat = ['甲','乙','丙'][obj.seat];
         const req = obj.require?(`需跟:${obj.require.type}>${obj.require.mainRank}`):'';
         push(`【回合】${seat} ${obj.lead?'(领出)':''} ${req}`);
       } else if (obj.kind==='deal'){
         setBoard(b=> ({...b, hands: obj.hands, bottom: obj.bottom}));
         push(`发牌：底牌 ${obj.bottom.join('')}`);
       } else if (obj.kind==='bid'){
-        const seat = ['甲','乙','丙'][obj.seat]; const label = labelFor(obj.seat);
+        const seat = ['甲','乙','丙'][obj.seat];
         push(`叫分/抢：${seat} -> ${String(obj.action)}`);
       } else if (obj.kind==='landlord'){
         push(`确定地主：${['甲','乙','丙'][obj.landlord]}，底牌 ${obj.bottom.join('')} 基础分 ${obj.baseScore}`);
@@ -356,7 +362,8 @@ function LivePanel(props:any){
       } else if (obj.kind==='trick-reset'){
         push(`（新一轮）由 ${['甲','乙','丙'][obj.leader]} 继续领出`);
       } else if (obj.kind==='play'){
-        const seat = ['甲','乙','丙'][obj.seat]; const label = labelFor(obj.seat);
+        const seat = ['甲','乙','丙'][obj.seat];
+        const label = labelFor(obj.seat);
         if (obj.move==='pass'){
           push(`${label}：过${obj.reason?(' — 理由：'+obj.reason):''}`);
           setBoard(b=> { const last=b.last.slice(); last[obj.seat]='过'; return {...b, last}; });

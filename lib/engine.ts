@@ -57,18 +57,18 @@ export class Engine {
     const byKey = new Map(legal.map(c => [this.comboKey(c), c]));
 
     if (!view.require) {
+      // Leading: must play something (pick smallest if invalid/pass)
       if (!proposed || (proposed as any).type === 'pass') {
         return this.pickSmallestLead(view.hand);
       }
-      const hit = byKey.get(this.comboKey(proposed));
-      return hit ?? this.pickSmallestLead(view.hand);
+      return byKey.get(this.comboKey(proposed)) ?? this.pickSmallestLead(view.hand);
     }
 
+    // Following: if invalid or pass, auto pick minimal legal if any; else pass
     if (!proposed || (proposed as any).type === 'pass') {
-      return { type:'pass', cards: [] } as any;
+      return legal.length ? legal[0] : ({ type:'pass', cards: [] } as any);
     }
-    const hit = byKey.get(this.comboKey(proposed));
-    return hit ?? ({ type:'pass', cards: [] } as any);
+    return byKey.get(this.comboKey(proposed)) ?? (legal.length ? legal[0] : ({ type:'pass', cards: [] } as any));
   }
 
   private unpackDecision(dec: any): { combo: Combo, reason?: string } {
@@ -92,7 +92,7 @@ export class Engine {
     hands[landlord].push(...bottom);
     this.emit({ kind:'landlord', landlord, baseScore, bottom: bottom.map(c=>c.label) });
 
-    // Play loop (strict trick state)
+    // Play loop
     const history: Play[] = [];
     let turn: Seat = landlord;
     let require: Combo | null = null;
@@ -101,7 +101,6 @@ export class Engine {
     let passesSinceLastPlay = 0;
 
     while (true) {
-      // turn event
       this.emit({ kind:'turn', seat: turn, lead: (require===null), require: require? { type: require.type, mainRank: require.mainRank, length: require.length } : null });
 
       const bot = bots[turn];
@@ -112,11 +111,18 @@ export class Engine {
       if (!view.require && (decision.combo as any)?.type==='pass') {
         reason = reason || '首家必须领出，系统改为最小领出';
       }
+      // If following and normalized differs from proposed, annotate fallback reason
+      if (view.require) {
+        const k1 = this.comboKey(decision.combo as any);
+        const k2 = this.comboKey(combo as any);
+        if (k1 !== k2 && combo.type !== 'pass') {
+          reason = reason || 'AI无效/非法，系统改为最小可跟';
+        }
+      }
 
       if (this.moveDelayMs && this.moveDelayMs>0) await new Promise(r=>setTimeout(r, this.moveDelayMs));
 
       if (combo.type==='pass') {
-        // only when require!=null; normalizeToLegal blocks pass on lead
         this.emit({ kind:'play', seat: turn, move:'pass', reason });
         passesSinceLastPlay += 1;
         if (passesSinceLastPlay >= 2) {
@@ -131,7 +137,6 @@ export class Engine {
         continue;
       }
 
-      // a real play
       this.emit({ kind:'play', seat: turn, comboType: combo.type, cards: combo.cards.map(c=>c.label), reason });
       // remove cards
       for (const c of combo.cards) {
@@ -159,7 +164,6 @@ export class Engine {
     return { round: roundIdx, landlord, scores, events: this.events };
   }
 
-  // Bidding phase (simplified)
   private async bidding(hands: [Card[],Card[],Card[]], bottom: Card[], bots: IBot[]):
     Promise<{ landlord: Seat, baseScore: number, robCount: number } | null>
   {

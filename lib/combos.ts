@@ -14,6 +14,8 @@ export function enumerateAllCombos(hand: Card[]): Combo[] {
   for (const c of hand) bucket.set(c.rank, [...(bucket.get(c.rank)||[]), c]);
   for (const [rank, arr] of bucket) if (arr.length>=2)
     res.push({ type:'pair', cards: arr.slice(0,2), length:1, mainRank:rank });
+  // 简化版：只实现单张/对子，便于演示与调试
+  res.sort((a,b)=> (a.type===b.type?0: a.type==='single'? -1 : 1) || (a.mainRank! - b.mainRank!));
   return res;
 }
 

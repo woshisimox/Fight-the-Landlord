@@ -7,7 +7,6 @@ export const config = { api: { bodyParser: false, responseLimit: false } };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
-    // Parse config from base64 query ?q=
     const q = (req.query.q || '') as string | string[];
     const b64 = Array.isArray(q) ? q[0] : q;
     const txt = b64 ? Buffer.from(b64, 'base64').toString('utf8') : '{}';

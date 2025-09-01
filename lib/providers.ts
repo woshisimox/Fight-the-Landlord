@@ -56,7 +56,7 @@ export class BotHTTP implements IBot {
       body: JSON.stringify(payload),
     });
     const res = comboFromLabels(j);
-    if (!res) return { combo: ({ type:'pass', cards: [] } as any), reason: (j?.reason||'') };
+    if (!res) return { combo: ({ type:'pass', cards: [] } as any), reason: (j?.reason||'HTTP无效/超时，默认过') };
     return { combo: res, reason: (j?.reason || '') };
   }
 
@@ -83,12 +83,14 @@ export class BotOpenAI implements IBot {
     return (j?.bid ?? 'pass');
   }
   async play(view: PlayerView): Promise<Combo | {combo: Combo, reason?: string}> {
-    const sys = 'You play Dou Dizhu. Reply with pure JSON like {"type":"pass"} or {"type":"single","cards":["A"]}. You may include an optional "reason" field.';
-    const payload = viewPayload(view, 'play');
-    const user = JSON.stringify(payload);
+    const legal = view.require ? enumerateResponses(view.hand, view.require) : enumerateAllCombos(view.hand);
+    const legalPayload = legal.map(c=>({ type:c.type, length:c.length, mainRank:c.mainRank, cards:c.cards.map(x=>x.label) }));
+    const sys = 'You play Dou Dizhu. If "legal" is non-empty, you MUST select exactly one option from "legal". Reply ONLY pure JSON: {"type":"pass"} OR {"type":"single|pair","cards":["..."],"reason":"..."}';
+    const payloadObj = { ...viewPayload(view, 'play'), legal: legalPayload };
+    const user = JSON.stringify(payloadObj);
     const j = await this.chat(sys, user);
     const res = comboFromLabels(j);
-    if (!res) return { combo: ({ type:'pass', cards: [] } as any), reason: (j?.reason||'') };
+    if (!res) return { combo: ({ type:'pass', cards: [] } as any), reason: (j?.reason || 'LLM无效/超时，默认过') };
     return { combo: res, reason: (j?.reason || '') };
   }
 
@@ -115,8 +117,7 @@ export class BotGemini implements IBot {
   private model: string;
   private _name: string;
   constructor(cfg: Extract<ProviderSpec,{kind:'gemini'}>, name='Gemini') {
-    this.apiKey = cfg.apiKey; this.model = cfg.model; this._name=name;
-  }
+    this.apiKey = cfg.apiKey; this.model = cfg.model; this._name=name; }
   name(): string { return this._name; }
 
   async bid(view: PlayerView): Promise<number | 'pass' | 'rob' | 'norob'> {
@@ -126,10 +127,12 @@ export class BotGemini implements IBot {
   }
 
   async play(view: PlayerView): Promise<Combo | {combo: Combo, reason?: string}> {
-    const payload = JSON.stringify(viewPayload(view, 'play'));
-    const j = await this.gen(payload, 'Return ONLY JSON like {"type":"pass"} or {"type":"single","cards":["A"]}. You may include an optional "reason".');
+    const legal = view.require ? enumerateResponses(view.hand, view.require) : enumerateAllCombos(view.hand);
+    const legalPayload = legal.map(c=>({ type:c.type, length:c.length, mainRank:c.mainRank, cards:c.cards.map(x=>x.label) }));
+    const payloadObj = { ...viewPayload(view, 'play'), legal: legalPayload };
+    const j = await this.gen(JSON.stringify(payloadObj), 'Return ONLY pure JSON. If "legal" is non-empty, you MUST choose exactly one from it.');
     const res = comboFromLabels(j);
-    if (!res) return { combo: ({ type:'pass', cards: [] } as any), reason: (j?.reason||'') };
+    if (!res) return { combo: ({ type:'pass', cards: [] } as any), reason: (j?.reason || 'LLM无效/超时，默认过') };
     return { combo: res, reason: (j?.reason || '') };
   }
 
@@ -154,7 +157,7 @@ function lastBySeat(history: any[], seat: number){
   return null;
 }
 
-function viewPayload(view: PlayerView, phase:'bid'|'play') {
+export function viewPayload(view: PlayerView, phase:'bid'|'play') {
   const role = (view.seat===view.landlord) ? 'landlord' : 'farmer';
   const left = (view.seat+1)%3; const right = (view.seat+2)%3;
   const lastLeft = lastBySeat(view.history, left);
