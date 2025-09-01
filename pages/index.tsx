@@ -227,6 +227,13 @@ function LivePanel(props:any){
   const [objs, setObjs] = useState<any[]>([]);
   const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[]}>({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
   const [running, setRunning] = useState(false);
+  const [status, setStatus] = useState('idle');
+
+  function toB64(obj:any){ 
+    const s = JSON.stringify(obj); 
+    return (typeof btoa!=='undefined') ? btoa(unescape(encodeURIComponent(s))) : Buffer.from(s,'utf8').toString('base64'); 
+  }
+
 
   const downloadNdjson = (lines:string[])=>{
     const blob = new Blob([lines.join('\\n')], {type:'application/x-ndjson'});
@@ -251,19 +258,55 @@ function LivePanel(props:any){
     setObjs([]);
     setBoard({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
     setRunning(true);
+    setStatus('connecting');
+    const body:any = {
+      rounds: props.rounds, seed: props.seed, rob: props.rob, four2: props.four2, delayMs: props.delayMs,
+      players: props.players.map((p:any)=> {
+        if (p.kind==='builtin') return { kind:'builtin', name: p.builtin };
+        if (p.kind==='http') return { kind:'http', url: p.url, apiKey: p.apiKey };
+        if (p.kind==='openai') return { kind:'openai', apiKey: p.apiKey, model: p.model || 'gpt-4o-mini', baseURL: p.baseURL };
+        if (p.kind==='gemini') return { kind:'gemini', apiKey: p.apiKey, model: p.model || 'gemini-1.5-flash' };
+        if (p.kind==='kimi') return { kind:'kimi', apiKey: p.apiKey, model: p.model || 'moonshot-v1-8k', baseURL: p.baseURL };
+        if (p.kind==='grok') return { kind:'grok', apiKey: p.apiKey, model: p.model || 'grok-beta', baseURL: p.baseURL };
+        return { kind:'builtin', name:'RandomLegal' };
+      }),
+    };
+
+    // Try SSE first
     try {
-      const body:any = {
-        rounds: props.rounds, seed: props.seed, rob: props.rob, four2: props.four2, delayMs: props.delayMs,
-        players: props.players.map((p:any)=> {
-          if (p.kind==='builtin') return { kind:'builtin', name: p.builtin };
-          if (p.kind==='http') return { kind:'http', url: p.url, apiKey: p.apiKey };
-          if (p.kind==='openai') return { kind:'openai', apiKey: p.apiKey, model: p.model || 'gpt-4o-mini', baseURL: p.baseURL };
-          if (p.kind==='gemini') return { kind:'gemini', apiKey: p.apiKey, model: p.model || 'gemini-1.5-flash' };
-          if (p.kind==='kimi') return { kind:'kimi', apiKey: p.apiKey, model: p.model || 'moonshot-v1-8k', baseURL: p.baseURL };
-          if (p.kind==='grok') return { kind:'grok', apiKey: p.apiKey, model: p.model || 'grok-beta', baseURL: p.baseURL };
-          return { kind:'builtin', name:'RandomLegal' };
-        }),
+      const es = new EventSource(`/api/stream_sse?q=${toB64(body)}`);
+      es.onopen = () => setStatus('open');
+      es.onmessage = (e) => {
+        try {
+          const obj = JSON.parse(e.data);
+          setRaw(r=>[...r, e.data]);
+          setObjs(o=>[...o, obj]);
+          handle(obj);
+        } catch {}
       };
+      es.addEventListener('done', () => {
+        es.close();
+        setStatus('done');
+        setRunning(false);
+      });
+      es.addEventListener('error', () => {
+        es.close();
+        setStatus('sse-error');
+        fallbackNdjson(body);
+      });
+      // Also safety fallback after 1500ms if no ready
+      setTimeout(()=>{
+        if (status==='connecting' || status==='open') return;
+      }, 1500);
+    } catch (e) {
+      setStatus('sse-unsupported');
+      fallbackNdjson(body);
+    }
+  }
+
+  async function fallbackNdjson(body:any){
+    try{
+      setStatus('ndjson');
       const r = await fetch('/api/stream_ndjson', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
       const reader = r.body!.getReader();
       const decoder = new TextDecoder();
@@ -273,7 +316,7 @@ function LivePanel(props:any){
         if (done) break;
         buf += decoder.decode(value, {stream:true});
         let idx;
-        while ((idx = buf.indexOf("\\n")) >= 0){
+        while ((idx = buf.indexOf("\n")) >= 0){
           const line = buf.slice(0, idx).trim();
           buf = buf.slice(idx+1);
           if (!line) continue;
@@ -285,6 +328,7 @@ function LivePanel(props:any){
       }
     } finally {
       setRunning(false);
+      setStatus('done');
     }
   }
 
@@ -331,7 +375,7 @@ function LivePanel(props:any){
 
   return (
     <div style={{marginTop:12}}>
-      <button onClick={start} disabled={running} style={{padding:'6px 12px'}}>{running?'运行中…':'开始实时运行'}</button>
+      <button onClick={start} disabled={running} style={{padding:'6px 12px'}}>{running?('运行中…('+status+')'):'开始实时运行'}</button>
       <div style={{marginTop:8, display:'flex', gap:8}}>
         <button onClick={()=>downloadNdjson(raw)} disabled={!raw.length}>下载 NDJSON</button>
         <button onClick={()=>downloadJson(objs)} disabled={!objs.length}>下载事件 JSON</button>

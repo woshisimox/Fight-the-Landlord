@@ -3,7 +3,7 @@ import { RuleConfig } from '../../lib/rules';
 import { ProviderSpec } from '../../lib/providers';
 import { runArenaStream } from '../../lib/arenaStream';
 
-export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
+export const config = { api: { bodyParser: { sizeLimit: '2mb' }, responseLimit: false } };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
