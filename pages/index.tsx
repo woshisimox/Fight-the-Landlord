@@ -20,6 +20,7 @@ export default function Home() {
   const [rob, setRob] = useState(false);
   const [four2, setFour2] = useState<'both'|'2singles'|'2pairs'>('both');
   const [delayMs, setDelayMs] = useState(0);
+  const [startScore, setStartScore] = useState(0);
 
   const [players, setPlayers] = useState<PlayerConfig[]>([
     { kind:'builtin', builtin:'GreedyMin' },
@@ -50,7 +51,7 @@ export default function Home() {
     setLoading(true); setResp(null);
     try {
       const body:any = {
-        rounds, seed, rob, four2, delayMs,
+        rounds, seed, rob, four2, delayMs, startScore,
         players: players.map(p=> {
           if (p.kind==='builtin') return { kind:'builtin', name: p.builtin };
           if (p.kind==='http') return { kind:'http', url: p.url, apiKey: p.apiKey };
@@ -92,6 +93,9 @@ export default function Home() {
               <option value="2singles">只允许两单</option>
               <option value="2pairs">只允许两对</option>
             </select>
+          </label>
+          <label>起始分<br/>
+            <input type="number" value={startScore} onChange={e=>setStartScore(Number(e.target.value))} />
           </label>
           <label>每步延迟 (ms)<br/>
             <input type="number" value={delayMs} min={0} onChange={e=>setDelayMs(Number(e.target.value))} />
@@ -204,7 +208,7 @@ export default function Home() {
       {resp && (
         <div style={{marginTop:24}}>
           <h2>结果</h2>
-          <p>总局数：{resp.rounds}；总分：甲 {resp.totals[0]} / 乙 {resp.totals[1]} / 丙 {resp.totals[2]}</p>
+          <p>总局数：{resp.rounds}；起始分：{resp.startScore}；总分：甲 {resp.totals[0]} / 乙 {resp.totals[1]} / 丙 {resp.totals[2]}{resp.endedEarly?'（已提前终止）':''}</p>
 
           <h3>首局详情</h3>
           <pre style={{whiteSpace:'pre-wrap', background:'#f7f7f7', padding:12, border:'1px solid #eee', maxHeight:400, overflow:'auto'}}>
@@ -215,7 +219,7 @@ export default function Home() {
 
       <details style={{marginTop:16}}>
         <summary>实时运行（流式）</summary>
-        <LivePanel rounds={rounds} seed={seed} rob={rob} four2={four2} delayMs={delayMs} players={players} />
+        <LivePanel rounds={rounds} seed={seed} rob={rob} four2={four2} delayMs={delayMs} startScore={startScore} players={players} />
       </details>
     </div>
   );
@@ -228,6 +232,8 @@ function LivePanel(props:any){
   const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[]}>({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState('idle');
+  const [totals, setTotals] = useState<[number,number,number]>([props.startScore||0, props.startScore||0, props.startScore||0]);
+  function labelFor(i:number){ const p = props.players[i]; const seat=['甲','乙','丙'][i]; if(!p) return seat; if(p.kind==='builtin') return `${seat}（内置:${p.builtin||'Random'}）`; if(p.kind==='http') return `${seat}（HTTP）`; if(p.kind==='openai') return `${seat}（OpenAI）`; if(p.kind==='gemini') return `${seat}（Gemini）`; if(p.kind==='kimi') return `${seat}（Kimi）`; if(p.kind==='grok') return `${seat}（Grok）`; return seat; }
 
   function toB64(obj:any){ 
     const s = JSON.stringify(obj); 
@@ -256,11 +262,11 @@ function LivePanel(props:any){
     setLines([]);
     setRaw([]);
     setObjs([]);
-    setBoard({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
+    setBoard({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]}); setTotals([props.startScore||0, props.startScore||0, props.startScore||0]);
     setRunning(true);
     setStatus('connecting');
     const body:any = {
-      rounds: props.rounds, seed: props.seed, rob: props.rob, four2: props.four2, delayMs: props.delayMs,
+      rounds: props.rounds, seed: props.seed, rob: props.rob, four2: props.four2, delayMs: props.delayMs, startScore: props.startScore,
       players: props.players.map((p:any)=> {
         if (p.kind==='builtin') return { kind:'builtin', name: p.builtin };
         if (p.kind==='http') return { kind:'http', url: p.url, apiKey: p.apiKey };
@@ -335,14 +341,14 @@ function LivePanel(props:any){
   function handle(obj:any){
     if (obj.type==='event'){
       if (obj.kind==='turn'){
-        const seat = ['甲','乙','丙'][obj.seat];
+        const seat = ['甲','乙','丙'][obj.seat]; const label = labelFor(obj.seat);
         const req = obj.require?(`需跟:${obj.require.type}>${obj.require.mainRank}`):'';
         push(`【回合】${seat} ${obj.lead?'(领出)':''} ${req}`);
       } else if (obj.kind==='deal'){
         setBoard(b=> ({...b, hands: obj.hands, bottom: obj.bottom}));
         push(`发牌：底牌 ${obj.bottom.join('')}`);
       } else if (obj.kind==='bid'){
-        const seat = ['甲','乙','丙'][obj.seat];
+        const seat = ['甲','乙','丙'][obj.seat]; const label = labelFor(obj.seat);
         push(`叫分/抢：${seat} -> ${String(obj.action)}`);
       } else if (obj.kind==='landlord'){
         push(`确定地主：${['甲','乙','丙'][obj.landlord]}，底牌 ${obj.bottom.join('')} 基础分 ${obj.baseScore}`);
@@ -350,19 +356,25 @@ function LivePanel(props:any){
       } else if (obj.kind==='trick-reset'){
         push(`（新一轮）由 ${['甲','乙','丙'][obj.leader]} 继续领出`);
       } else if (obj.kind==='play'){
-        const seat = ['甲','乙','丙'][obj.seat];
+        const seat = ['甲','乙','丙'][obj.seat]; const label = labelFor(obj.seat);
         if (obj.move==='pass'){
-          push(`${seat}：过${obj.reason?(' — 理由：'+obj.reason):''}`);
+          push(`${label}：过${obj.reason?(' — 理由：'+obj.reason):''}`);
           setBoard(b=> { const last=b.last.slice(); last[obj.seat]='过'; return {...b, last}; });
         } else {
           const cards = (obj.cards||[]).join('');
-          push(`${seat}：${obj.comboType || obj.type} ${cards}${obj.reason?(' — 理由：'+obj.reason):''}`);
+          push(`${label}：${obj.comboType || obj.type} ${cards}${obj.reason?(' — 理由：'+obj.reason):''}`);
           setBoard(b=> { const last=b.last.slice(); last[obj.seat]=cards;
             const hands=b.hands.map(arr=>arr.slice());
             const labels=(obj.cards||[]) as string[];
             for (const lab of labels){ const k=hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1);}
             return {...b, last, hands}; });
         }
+      } else if (obj.kind==='score'){
+        setTotals([obj.totals[0], obj.totals[1], obj.totals[2]]);
+        push(`积分：甲 ${obj.totals[0]} / 乙 ${obj.totals[1]} / 丙 ${obj.totals[2]}`);
+      } else if (obj.kind==='terminated'){
+        setTotals([obj.totals[0], obj.totals[1], obj.totals[2]]);
+        push(`比赛提前终止（原因：${obj.reason}），当前积分：甲 ${obj.totals[0]} / 乙 ${obj.totals[1]} / 丙 ${obj.totals[2]}`);
       } else if (obj.kind==='finish'){
         push(`结束：赢家 ${obj.winner==='landlord' ? '地主' : '农民'}`);
       }
@@ -383,7 +395,7 @@ function LivePanel(props:any){
       <div style={{display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12, marginTop:12}}>
         {[0,1,2].map(i=> (
           <div key={i} style={{border:'1px solid #eee', borderRadius:8, padding:10}}>
-            <div style={{fontWeight:700}}>{['甲','乙','丙'][i]}{board.landlord===i?'（地主）':''}</div>
+            <div style={{fontWeight:700}}>{labelFor(i)}{board.landlord===i?'（地主）':''} — 分数：{totals[i]}</div>
             <div>手牌：<code>{board.hands[i]?.join(' ')}</code></div>
             <div>最近出牌：<code>{board.last[i]||''}</code></div>
           </div>

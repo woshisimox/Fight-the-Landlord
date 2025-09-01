@@ -18,6 +18,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rob = String(body.rob ?? 'false');
     const four2 = String(body.four2 ?? 'both');
     const delayMs = Number(body.delayMs ?? 0);
+    const startScore = Number(body.startScore ?? 0);
     let players = body.players as [ProviderSpec,ProviderSpec,ProviderSpec] | undefined;
 
     const rules: Partial<RuleConfig> = {};
@@ -39,7 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const send = (obj:any) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
     send({ type:'event', stage:'ready' });
 
-    await runArenaStream({ rounds, seed, rules, delayMs, players }, send);
+    await runArenaStream({ rounds, seed, rules, delayMs, players, startScore }, send);
     res.write("event: done\ndata: {}\n\n");
     res.end();
   } catch (e:any) {
