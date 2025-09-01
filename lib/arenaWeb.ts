@@ -59,9 +59,6 @@ export async function runArenaInMemory(req: ArenaReq): Promise<ArenaResp> {
     logs.push(log);
     totals[0]+=log.scores[0]; totals[1]+=log.scores[1]; totals[2]+=log.scores[2];
     if (totals[0] < 0 || totals[1] < 0 || totals[2] < 0) { endedEarly = true; break; }
-    if (totals[0]<0 or totals[1]<0 or totals[2]<0):
-        pass
-
   }
   return { rounds, logs, totals, startScore, endedEarly };
 }
