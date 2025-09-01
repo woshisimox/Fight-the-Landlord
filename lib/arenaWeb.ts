@@ -30,7 +30,7 @@ function makeBot(spec: ProviderSpec, seatIdx: number): IBot {
     const base = spec.baseURL || 'https://api.x.ai/v1';
     return new BotOpenAI({ apiKey: spec.apiKey, model: spec.model, baseURL: base }, label + '(Grok)');
   } else {
-    return new BotOpenAI(spec, label + '(OpenAI)');
+    return new BotOpenAI(spec as any, label + '(OpenAI)');
   }
 }
 

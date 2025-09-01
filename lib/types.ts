@@ -33,5 +33,7 @@ export type GameEvent =
   | { kind: 'deal', hands: string[][], bottom: string[] }
   | { kind: 'bid', seat: Seat, action: number | 'pass' | 'rob' | 'norob' }
   | { kind: 'landlord', landlord: Seat, baseScore: number, bottom: string[] }
-  | { kind: 'play', seat: Seat, type?: ComboType, cards?: string[] | null, move?: 'pass' }
+  | { kind: 'turn', seat: Seat, lead: boolean, require: { type: string, mainRank?: number, length?: number } | null }
+  | { kind: 'play', seat: Seat, comboType?: string, cards?: string[], move?: 'pass' }
+  | { kind: 'trick-reset', leader: Seat }
   | { kind: 'finish', winner: 'landlord' | 'farmers' };

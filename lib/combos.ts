@@ -1,7 +1,7 @@
 import type { Card, Combo } from './types';
 
 export function detectCombo(cards: Card[]): Combo | null {
-  if (!cards || cards.length===0) return { type:'pass', cards: [] };
+  if (!cards || cards.length===0) return { type:'pass', cards: [] } as any;
   if (cards.length===1) return { type:'single', cards, length:1, mainRank: cards[0].rank };
   if (cards.length===2 && cards[0].rank===cards[1].rank) return { type:'pair', cards, length:1, mainRank: cards[0].rank };
   return null;
@@ -10,10 +10,10 @@ export function detectCombo(cards: Card[]): Combo | null {
 export function enumerateAllCombos(hand: Card[]): Combo[] {
   const res: Combo[] = [];
   for (const c of hand) res.push({ type:'single', cards:[c], length:1, mainRank:c.rank });
-  // pairs
-  const map = new Map<number,Card[]>();
-  for (const c of hand){ map.set(c.rank, [...(map.get(c.rank)||[]), c]); }
-  for (const [rank, arr] of map) if (arr.length>=2) res.push({ type:'pair', cards: arr.slice(0,2), length:1, mainRank:rank });
+  const bucket = new Map<number,Card[]>();
+  for (const c of hand) bucket.set(c.rank, [...(bucket.get(c.rank)||[]), c]);
+  for (const [rank, arr] of bucket) if (arr.length>=2)
+    res.push({ type:'pair', cards: arr.slice(0,2), length:1, mainRank:rank });
   return res;
 }
 

@@ -28,7 +28,7 @@ function makeBot(spec: ProviderSpec, seatIdx: number): IBot {
     const base = spec.baseURL || 'https://api.x.ai/v1';
     return new BotOpenAI({ apiKey: spec.apiKey, model: spec.model, baseURL: base }, label + '(Grok)');
   } else {
-    return new BotOpenAI(spec, label + '(OpenAI)');
+    return new BotOpenAI(spec as any, label + '(OpenAI)');
   }
 }
 
@@ -42,11 +42,11 @@ export async function runArenaStream(req: ArenaReq, write:(obj:any)=>void): Prom
   const bots: IBot[] = req.players ? [ makeBot(req.players[0],0), makeBot(req.players[1],1), makeBot(req.players[2],2) ] : defaultBots;
 
   for (let i=0; i<rounds; i++) {
-    write({ type:'round-start', index: i });
+    write({ type:'event', stage:'round', action:'start', index: i });
     const events:any[] = [];
     const eng = new Engine({ seed: seed + i, rules, moveDelayMs: delayMs, events, onEvent: (ev)=> write({ type:'event', round:i, ...ev }) });
     const log = await eng.playRound([bots[(i+0)%3], bots[(i+1)%3], bots[(i+2)%3]], i);
-    write({ type:'round-end', index: i, log });
+    write({ type:'event', stage:'round', action:'end', index: i, log });
   }
   write({ type:'done' });
 }

@@ -71,69 +71,78 @@ export class Engine {
     return hit ?? ({ type:'pass', cards: [] } as any);
   }
 
-  async playRound(bots: IBot[], roundIdx: number): Promise<RoundLog> {const history: Play[] = [];
-    let turn: Seat = landlord;
-    let require: Combo | null = null;
-    let winner: 'landlord'|'farmers'|null = null;
+  async playRound(bots: IBot[], roundIdx: number): Promise<RoundLog> {
+    // Deal
+    const deck = makeDeck();
+    shuffleInPlace(deck, this.rng);
+    const hands: [Card[],Card[],Card[]] = [[],[],[]];
+    for (let i=0;i<51;i++) hands[i%3].push(deck[i]);
+    const bottom = deck.slice(51);
+    this.emit({ kind:'deal', hands: hands.map(h=>h.map(c=>c.label)), bottom: bottom.map(c=>c.label) });
 
-    
+    // Bidding
+    const bidRes = await this.bidding(hands, bottom, bots);
+    const landlord = (bidRes?.landlord ?? 1) as Seat;
+    const baseScore = bidRes?.baseScore ?? 1;
+    hands[landlord].push(...bottom);
+    this.emit({ kind:'landlord', landlord, baseScore, bottom: bottom.map(c=>c.label) });
+
+    // Play loop (strict trick state)
+    const history: Play[] = [];
     let turn: Seat = landlord;
     let require: Combo | null = null;
     let winner: 'landlord'|'farmers'|null = null;
     let lastPlaySeat: Seat | null = null;
     let passesSinceLastPlay = 0;
 
-    while (true){
-      // announce turn for debugging (handled earlier by emitter injection in v1.3.3)
+    while (true) {
+      // turn event
+      this.emit({ kind:'turn', seat: turn, lead: (require===null), require: require? { type: require.type, mainRank: require.mainRank, length: require.length } : null });
+
       const bot = bots[turn];
-      const view: PlayerView = {
-        seat: turn, landlord, hand: hands[turn], bottom, history, lead: require===null, require
-      };
+      const view: PlayerView = { seat: turn, landlord, hand: hands[turn], bottom, history, lead: require===null, require };
+      const proposed = await bot.play(view);
+      const combo = this.normalizeToLegal(view, proposed);
 
-      let proposed = await bot.play(view);
-      let combo = this.normalizeToLegal(view, proposed);
-
-      // optional delay
       if (this.moveDelayMs && this.moveDelayMs>0) await new Promise(r=>setTimeout(r, this.moveDelayMs));
 
-      if (combo.type==='pass'){
-        // Only allowed when require!=null; normalizeToLegal already ensures lead can't pass.
+      if (combo.type==='pass') {
+        // only when require!=null; normalizeToLegal blocks pass on lead
         this.emit({ kind:'play', seat: turn, move:'pass' });
         passesSinceLastPlay += 1;
-
         if (passesSinceLastPlay >= 2) {
-          // Both opponents passed -> last player who actually played leads again
-          if (lastPlaySeat===null) { lastPlaySeat = turn; } // safety
+          if (lastPlaySeat===null) lastPlaySeat = turn; // safety
           require = null;
           passesSinceLastPlay = 0;
           this.emit({ kind:'trick-reset', leader: lastPlaySeat });
-          turn = lastPlaySeat;
-          continue;
+          turn = lastPlaySeat; // leader continues to lead a new trick
         } else {
           turn = ((turn + 1) % 3) as Seat;
-          continue;
         }
-      } else {
-        this.emit({ kind:'play', seat: turn, type: combo.type, cards: combo.cards.map(c=>c.label) });
-        for (const c of combo.cards){
-          const idx = hands[turn].findIndex(x=>x.id===c.id);
-          if (idx>=0) hands[turn].splice(idx,1);
-        }
-        history.push({ seat: turn, combo });
-        require = combo;
-        lastPlaySeat = turn;
-        passesSinceLastPlay = 0;
-
-        if (hands[turn].length===0){
-          winner = (turn===landlord) ? 'landlord' : 'farmers';
-          break;
-        }
-
-        turn = ((turn + 1) % 3) as Seat;
         continue;
       }
+
+      // a real play
+      this.emit({ kind:'play', seat: turn, comboType: combo.type, cards: combo.cards.map(c=>c.label) });
+      // remove cards
+      for (const c of combo.cards) {
+        const idx = hands[turn].findIndex(x=>x.id===c.id);
+        if (idx>=0) hands[turn].splice(idx,1);
+      }
+      history.push({ seat: turn, combo });
+      require = combo;
+      lastPlaySeat = turn;
+      passesSinceLastPlay = 0;
+
+      if (hands[turn].length===0) {
+        winner = (turn===landlord) ? 'landlord' : 'farmers';
+        break;
+      }
+
+      turn = ((turn + 1) % 3) as Seat;
     }
-: [number,number,number] = [0,0,0];
+
+    const scores: [number,number,number] = [0,0,0];
     if (winner==='landlord') { scores[landlord]+=baseScore*2; scores[(landlord+1)%3]-=baseScore; scores[(landlord+2)%3]-=baseScore; }
     else { scores[landlord]-=baseScore*2; scores[(landlord+1)%3]+=baseScore; scores[(landlord+2)%3]+=baseScore; }
     this.emit({ kind:'finish', winner });
@@ -141,7 +150,7 @@ export class Engine {
     return { round: roundIdx, landlord, scores, events: this.events };
   }
 
-  // Bidding phase (very simple heuristic and async-safe)
+  // Bidding phase (simplified)
   private async bidding(hands: [Card[],Card[],Card[]], bottom: Card[], bots: IBot[]):
     Promise<{ landlord: Seat, baseScore: number, robCount: number } | null>
   {

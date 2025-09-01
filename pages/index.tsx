@@ -227,8 +227,9 @@ function LivePanel(props:any){
   const [objs, setObjs] = useState<any[]>([]);
   const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[]}>({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
   const [running, setRunning] = useState(false);
+
   const downloadNdjson = (lines:string[])=>{
-    const blob = new Blob([lines.join('\n')], {type:'application/x-ndjson'});
+    const blob = new Blob([lines.join('\\n')], {type:'application/x-ndjson'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'ddz-log-' + new Date().toISOString().replace(/[:.]/g,'-') + '.ndjson';
@@ -243,7 +244,6 @@ function LivePanel(props:any){
     a.click();
     setTimeout(()=> URL.revokeObjectURL(a.href), 2000);
   };
-
 
   async function start(){
     setLines([]);
@@ -273,12 +273,12 @@ function LivePanel(props:any){
         if (done) break;
         buf += decoder.decode(value, {stream:true});
         let idx;
-        while ((idx = buf.indexOf("\n")) >= 0){
+        while ((idx = buf.indexOf("\\n")) >= 0){
           const line = buf.slice(0, idx).trim();
           buf = buf.slice(idx+1);
           if (!line) continue;
-          const obj = JSON.parse(line);
           setRaw(r=>[...r, line]);
+          const obj = JSON.parse(line);
           setObjs(o=>[...o, obj]);
           handle(obj);
         }
@@ -292,7 +292,8 @@ function LivePanel(props:any){
     if (obj.type==='event'){
       if (obj.kind==='turn'){
         const seat = ['甲','乙','丙'][obj.seat];
-        push(`【回合】${seat} ${obj.lead?'(领出)':''} ${obj.require?('需跟: '+obj.require.type+'>'+obj.require.mainRank):''}`);
+        const req = obj.require?(`需跟:${obj.require.type}>${obj.require.mainRank}`):'';
+        push(`【回合】${seat} ${obj.lead?'(领出)':''} ${req}`);
       } else if (obj.kind==='deal'){
         setBoard(b=> ({...b, hands: obj.hands, bottom: obj.bottom}));
         push(`发牌：底牌 ${obj.bottom.join('')}`);
@@ -302,23 +303,21 @@ function LivePanel(props:any){
       } else if (obj.kind==='landlord'){
         push(`确定地主：${['甲','乙','丙'][obj.landlord]}，底牌 ${obj.bottom.join('')} 基础分 ${obj.baseScore}`);
         setBoard(b=> ({...b, landlord: obj.landlord}));
-      } else if (obj.kind==='trick-reset'){ push(`（新一轮）由 ${['甲','乙','丙'][obj.leader]} 继续领出`); } else if (obj.kind==='play'){
+      } else if (obj.kind==='trick-reset'){
+        push(`（新一轮）由 ${['甲','乙','丙'][obj.leader]} 继续领出`);
+      } else if (obj.kind==='play'){
         const seat = ['甲','乙','丙'][obj.seat];
         if (obj.move==='pass'){
           push(`${seat}：过`);
           setBoard(b=> { const last=b.last.slice(); last[obj.seat]='过'; return {...b, last}; });
         } else {
           const cards = (obj.cards||[]).join('');
-          push(`${seat}：${obj.comboType||obj.type} ${cards}`);
+          push(`${seat}：${obj.comboType || obj.type} ${cards}`);
           setBoard(b=> { const last=b.last.slice(); last[obj.seat]=cards; const hands=b.hands.map(arr=>arr.slice()); const labels=(obj.cards||[]) as string[]; for (const lab of labels){ const k=hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1);} return {...b, last, hands}; });
         }
       } else if (obj.kind==='finish'){
         push(`结束：赢家 ${obj.winner==='landlord' ? '地主' : '农民'}`);
       }
-    } else if (obj.type==='round-start'){
-      push(`—— 第 ${obj.index+1} 局开始 ——`);
-    } else if (obj.type==='round-end'){
-      push(`—— 第 ${obj.index+1} 局结束 ——`);
     } else if (obj.type==='done'){
       push('全部对局完成。');
     }
@@ -328,12 +327,11 @@ function LivePanel(props:any){
 
   return (
     <div style={{marginTop:12}}>
+      <button onClick={start} disabled={running} style={{padding:'6px 12px'}}>{running?'运行中…':'开始实时运行'}</button>
       <div style={{marginTop:8, display:'flex', gap:8}}>
         <button onClick={()=>downloadNdjson(raw)} disabled={!raw.length}>下载 NDJSON</button>
         <button onClick={()=>downloadJson(objs)} disabled={!objs.length}>下载事件 JSON</button>
       </div>
-
-      <button onClick={start} disabled={running} style={{padding:'6px 12px'}}>{running?'运行中…':'开始实时运行'}</button>
       <div style={{display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12, marginTop:12}}>
         {[0,1,2].map(i=> (
           <div key={i} style={{border:'1px solid #eee', borderRadius:8, padding:10}}>
@@ -344,11 +342,6 @@ function LivePanel(props:any){
         ))}
       </div>
       <div style={{marginTop:12}}>
-      <div style={{marginTop:8, display:'flex', gap:8}}>
-        <button onClick={()=>downloadNdjson(raw)} disabled={!raw.length}>下载 NDJSON</button>
-        <button onClick={()=>downloadJson(objs)} disabled={!objs.length}>下载事件 JSON</button>
-      </div>
-
         <div style={{fontWeight:700}}>事件日志</div>
         <div style={{whiteSpace:'pre-wrap', background:'#f9f9f9', padding:10, border:'1px solid #eee', height:240, overflow:'auto'}}>
           {lines.join('\n')}

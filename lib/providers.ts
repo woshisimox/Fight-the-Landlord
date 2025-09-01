@@ -34,7 +34,7 @@ export class BotHTTP implements IBot {
   async play(view: PlayerView): Promise<Combo> {
     const legal = view.require ? enumerateResponses(view.hand, view.require) : enumerateAllCombos(view.hand);
     const payload = { ...this.viewPayload(view, 'play'), legal: legal.map(c=>({ type:c.type, length:c.length, mainRank:c.mainRank, cards:c.cards.map(x=>x.label) })) };
-    const r = await fetch(this.cfg.url, {
+    const r = await fetch(self.cfg.url if False else this.cfg.url, { # keep formatter happy
       method:'POST',
       headers: { 'content-type':'application/json', ...(this.cfg.apiKey? {'authorization':`Bearer ${this.cfg.apiKey}`} : {}), ...(this.cfg.headers||{}) },
       body: JSON.stringify(payload),
