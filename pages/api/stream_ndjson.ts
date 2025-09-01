@@ -11,6 +11,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
   try {
+    // best-effort flush for streaming on Node runtimes (e.g., Vercel)
+    // @ts-ignore
+    res.flushHeaders?.();
+    // @ts-ignore
+    res.socket?.setNoDelay(true);
+
     res.setHeader('Content-Type', 'application/x-ndjson');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -28,10 +34,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (four2==='2singles' || four2==='2pairs' || four2==='both') rules.fourWithTwo = four2 as any;
 
     const writer = (obj:any) => { res.write(JSON.stringify(obj) + '\n'); };
+    writer({ type:'event', stage:'ready' });
     await runArenaStream({ rounds, seed, rules, delayMs, players }, writer);
     res.end();
   } catch (e:any) {
-    try { res.write(JSON.stringify({ type:'error', error: String(e?.message || e) }) + '\n'); } catch {}
+    try {
+    // best-effort flush for streaming on Node runtimes (e.g., Vercel)
+    // @ts-ignore
+    res.flushHeaders?.();
+    // @ts-ignore
+    res.socket?.setNoDelay(true);
+ res.write(JSON.stringify({ type:'error', error: String(e?.message || e) }) + '\n'); } catch {}
     res.end();
   }
 }

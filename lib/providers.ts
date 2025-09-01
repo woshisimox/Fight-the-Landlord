@@ -3,6 +3,24 @@ import { detectCombo, enumerateAllCombos, enumerateResponses } from './combos';
 import type { IBot } from './engine';
 import type { PlayerView } from './types';
 
+
+
+const REQUEST_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 10000);
+
+async function fetchJson(url: string, init: RequestInit): Promise<any> {
+  const ac = new AbortController();
+  const id = setTimeout(()=> ac.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const j = await fetchJson(url, { ...init, signal: ac.signal });
+    const txt = await r.text();
+    try { return JSON.parse(txt); } catch { return {}; }
+  } catch (e) {
+    return {};
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 export type BuiltinName = 'GreedyMin'|'GreedyMax'|'RandomLegal';
 
 export type ProviderSpec =
@@ -22,24 +40,24 @@ export class BotHTTP implements IBot {
 
   async bid(view: PlayerView): Promise<number | 'pass' | 'rob' | 'norob'> {
     const payload = this.viewPayload(view, 'bid');
-    const r = await fetch(this.cfg.url, {
+    const j = await fetchJson(this.cfg.url, {
       method:'POST',
       headers: { 'content-type':'application/json', ...(this.cfg.apiKey? {'authorization':`Bearer ${this.cfg.apiKey}`} : {}), ...(this.cfg.headers||{}) },
       body: JSON.stringify(payload),
     });
-    const j = await r.json();
+    
     return (j?.bid ?? 'pass');
   }
 
   async play(view: PlayerView): Promise<Combo> {
     const legal = view.require ? enumerateResponses(view.hand, view.require) : enumerateAllCombos(view.hand);
     const payload = { ...this.viewPayload(view, 'play'), legal: legal.map(c=>({ type:c.type, length:c.length, mainRank:c.mainRank, cards:c.cards.map(x=>x.label) })) };
-    const r = await fetch(this.cfg.url, {
+    const j = await fetchJson(this.cfg.url, {
       method:'POST',
       headers: { 'content-type':'application/json', ...(this.cfg.apiKey? {'authorization':`Bearer ${this.cfg.apiKey}`} : {}), ...(this.cfg.headers||{}) },
       body: JSON.stringify(payload),
     });
-    const j = await r.json();
+    
     const res = comboFromLabels(j);
     if (!res) return { type:'pass', cards: [] } as any;
     return res;
@@ -79,7 +97,7 @@ export class BotOpenAI implements IBot {
 
   private async chat(system: string, user: string): Promise<any> {
     const url = (this.baseURL || 'https://api.openai.com/v1') + '/chat/completions';
-    const r = await fetch(url, {
+    const j = await fetchJson(url, {
       method:'POST',
       headers: { 'content-type':'application/json', 'authorization': `Bearer ${this.apiKey}` },
       body: JSON.stringify({
@@ -89,7 +107,7 @@ export class BotOpenAI implements IBot {
         response_format: { type:'json_object' }
       }),
     });
-    const j = await r.json();
+    
     const text = j?.choices?.[0]?.message?.content || '{}';
     try { return JSON.parse(text); } catch { return {}; }
   }
@@ -121,7 +139,7 @@ export class BotGemini implements IBot {
 
   private async gen(userJSON: string, instruction: string): Promise<any> {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
-    const r = await fetch(endpoint, {
+    const j = await fetchJson(endpoint, {
       method:'POST',
       headers: { 'content-type':'application/json' },
       body: JSON.stringify({
@@ -129,7 +147,7 @@ export class BotGemini implements IBot {
         generationConfig: { temperature: 0 }
       })
     });
-    const j = await r.json();
+    
     const text = j?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
     try { return JSON.parse(text); } catch { return {}; }
   }
