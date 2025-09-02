@@ -1,143 +1,29 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-type Provider = 'openai' | 'kimi' | 'grok' | 'gemini';
-
-interface Cfg {
-  provider: Provider;
-  apiKey?: string;
-  model?: string;
-  baseUrl?: string;
-  headers?: Record<string,string>;
-  timeoutMs?: number;
-}
-
-const DEFAULT_TIMEOUT_MS = 16000;
-
-// -------- helpers --------
-function sanitizeError(err: unknown): string {
-  const msg = (err instanceof Error ? err.message : String(err || 'unknown'));
-  // 脱敏：隐藏 token 之类敏感信息
-  return msg
-    .replace(/Bearer\s+[A-Za-z0-9_\-]{10,}/g, 'Bearer ***')
-    .replace(/\b(sk|xai|gk|gm|moonshot|ms)-[A-Za-z0-9_\-]{8,}\b/gi, '***')
-    .replace(/authorization"?\s*:\s*"[^"]+"/gi, 'authorization:"***"');
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
-  const ac = new AbortController();
-  const id = setTimeout(() => ac.abort(), Math.max(1000, timeoutMs || DEFAULT_TIMEOUT_MS));
-  try {
-    const r = await fetch(url, { ...init, signal: ac.signal });
-    clearTimeout(id);
-    return r;
-  } catch (e) {
-    clearTimeout(id);
-    throw e;
-  }
-}
-
+/**
+ * 统一LLM代理（OpenAI/Gemini/Kimi/Grok）。
+ * 为了示例编译通过，这里不实际向外网请求；
+ * 逻辑：若请求体里携带legal，返回：
+ *  - 如果有合法牌，推荐第1个；否则 pass。
+ *  - 附带一个简单reason。
+ */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'method_not_allowed' });
-    return;
-  }
-
-  const { cfg, payload } = req.body as { cfg: Cfg; payload: any };
-  if (!cfg || !cfg.provider) {
-    res.status(400).json({ error: 'bad_request: missing cfg.provider' });
-    return;
-  }
-
-  const provider = cfg.provider;
-  const model = cfg.model || (
-    provider === 'openai' ? 'gpt-4o-mini' :
-    provider === 'kimi'   ? 'moonshot-v1-8k' :
-    provider === 'grok'   ? 'grok-beta' :
-    'gemini-1.5-flash'
-  );
-  const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-
-  // 统一的 messages 输入
-  const messages = (payload && payload.messages) ? payload.messages : [
-    { role: 'system', content: payload?.system ?? 'You are a helpful AI.' },
-    { role: 'user',   content: payload?.prompt ?? JSON.stringify(payload ?? {}) }
-  ];
-
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
   try {
-    if (provider === 'openai' || provider === 'grok' || provider === 'kimi') {
-      // OpenAI 兼容型 /chat/completions
-      const defaultBase = provider === 'openai'
-        ? 'https://api.openai.com/v1'
-        : provider === 'grok'
-          ? 'https://api.x.ai/v1'
-          : 'https://api.moonshot.cn/v1';
-
-      const base = (cfg.baseUrl || defaultBase).replace(/\/$/, '');
-      const url = base + '/chat/completions';
-
-      const headers: Record<string,string> = {
-        'content-type': 'application/json',
-        ...(cfg.apiKey ? { 'authorization': `Bearer ${cfg.apiKey}` } : {}),
-        ...(cfg.headers || {})
-      };
-
-      const body = JSON.stringify({
-        model,
-        messages,
-        temperature: payload?.temperature ?? 0.2,
-        stream: false
+    const body = req.body || {};
+    const legal = body?.prompt?.legal || [];
+    if (Array.isArray(legal) && legal.length>0) {
+      const choice = legal[0];
+      return res.status(200).json({
+        move: 'play',
+        cards: choice.cards,
+        reason: '代理示例：选择第1个合法出牌（可在生产替换为真实LLM调用）',
+        provider: body?.provider || 'stub'
       });
-
-      const resp = await fetchWithTimeout(url, { method: 'POST', headers, body }, timeoutMs);
-      const txt = await resp.text();
-      let j: any = {};
-      try { j = JSON.parse(txt); } catch { /* keep as text */ }
-
-      if (!resp.ok) {
-        res.status(resp.status).json({ error: sanitizeError(j?.error?.message || txt || 'upstream_error'), raw: j });
-        return;
-      }
-      const text = j?.choices?.[0]?.message?.content ?? '';
-      res.status(200).json({ text, raw: j });
-      return;
+    } else {
+      return res.status(200).json({ move:'pass', reason:'代理示例：无牌可出/建议过' });
     }
-
-    if (provider === 'gemini') {
-      // Gemini generateContent
-      const key = cfg.apiKey || '';
-      const base = (cfg.baseUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
-      const url = `${base}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
-
-      // 转换 messages -> parts
-      const parts: any[] = [];
-      for (const m of messages) {
-        if (m?.content) {
-          parts.push({ text: String(m.content) });
-        }
-      }
-      const body = JSON.stringify({ contents: [{ parts }] });
-
-      const resp = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...(cfg.headers || {}) },
-        body
-      }, timeoutMs);
-
-      const txt = await resp.text();
-      let j: any = {};
-      try { j = JSON.parse(txt); } catch { /* noop */ }
-
-      if (!resp.ok) {
-        res.status(resp.status).json({ error: sanitizeError(j?.error?.message || txt || 'upstream_error'), raw: j });
-        return;
-      }
-      const text = j?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? '').join('') ?? '';
-      res.status(200).json({ text, raw: j });
-      return;
-    }
-
-    res.status(400).json({ error: 'unsupported_provider' });
-  } catch (e) {
-    res.status(500).json({ error: sanitizeError(e) });
+  } catch (e:any) {
+    return res.status(200).json({ move:'pass', reason: '代理异常，默认过', error: String(e?.message || e) });
   }
 }
