@@ -1,154 +1,133 @@
-import { Card, Combo, Play, ProviderSpec, RoundLog, RuleConfig, Seat } from './types';
-import { deal, rankLabel } from './cards';
-import { enumerateAllCombos, enumerateResponses, canBeat } from './combos';
-import { BotRandom, IBot } from './bots/bot_random';
-import { BotGreedyMax } from './bots/bot_greedy_max';
-import { BotGreedyMin } from './bots/bot_greedy_min';
-import { BotOpenAI } from './providers';
-
-type Event = any;
+import { Card, Combo, Event, IBot, PlayerView, Play, RoundLog, RuleConfig, Seat } from './types';
+import { makeDeck, handLabels } from './cards';
+import { shuffleInPlace, removeCards } from './utils';
 
 export class Engine {
-  rules: RuleConfig;
-  onEvent: (e: Event)=>void;
+  rules: RuleConfig = { bidding: 'call-score' };
 
-  constructor(rules: RuleConfig, onEvent: (e:Event)=>void) {
-    this.rules = rules;
-    this.onEvent = onEvent;
+  private viewFor(seat: Seat, landlord: Seat, hand: Card[], bottom: Card[], history: Play[], lead: boolean, require: Combo|null): PlayerView {
+    return { seat, landlord, hand, bottom, history, lead, require };
   }
-  private emit(e: Event) { this.onEvent({ type:'event', ...e }); }
 
   private async bidding(hands: [Card[],Card[],Card[]], bottom: Card[], bots: IBot[]):
     Promise<{ landlord: Seat, baseScore: number } | null>
   {
-    // 叫分 1..3，最高者当地主；无人叫分则重发（此处简单：若都pass则默认手2最多者为地主 baseScore=1）
-    let bestScore = 0, bestSeat: Seat | null = null;
-    for (let s=0 as Seat; s<3; s=(s+1)%3 as Seat) {
-      const view = { seat: s, landlord: 0 as Seat, hand: hands[s], bottom, history: [] as any[], lead: false };
+    let best: { seat: Seat, score: 1|2|3 } | null = null;
+    const events: Event[] = [];
+
+    for (let s:Seat = 0 as Seat; s<3; s=(s+1)%3 as Seat) {
+      const view = this.viewFor(s, 0, hands[s], bottom, [], false, null);
       const res = await bots[s].bid(view);
-      this.emit({ round:0, kind:'bid', seat: s, action: res });
-      if (res!=='pass' && res>bestScore) { bestScore = res; bestSeat = s; }
-      if (s===2) break; // 只叫一轮即可
+      events.push({ kind:'bid', seat: s, action: res });
+      if (res === 'pass') { /* nothing */ }
+      else {
+        if (!best || res > best.score) best = { seat: s, score: res };
+      }
+      if (s===2) break; // one round of bidding (simple)
     }
-    const landlord = (bestSeat ?? 0) as Seat;
-    const baseScore = bestScore || 1;
-    return { landlord, baseScore };
+
+    if (!best) return null;
+
+    // Give bottom to landlord
+    const landlord = best.seat;
+    hands[landlord].push(...bottom);
+
+    return { landlord, baseScore: best.score };
   }
 
-  async playRound(bots: IBot[], roundIdx: number): Promise<RoundLog> {
-    const { hands, bottom } = deal();
-    this.emit({ round: roundIdx, kind:'deal', hands: hands.map(h=>h.map(c=>rankLabel(c.rank))) , bottom: bottom.map(c=>rankLabel(c.rank)) });
-    const bid = await this.bidding(hands, bottom, bots);
-    if (!bid) throw new Error('bidding failed');
-    const landlord = bid.landlord;
-    hands[landlord].push(...bottom);
-    this.emit({ round: roundIdx, kind:'landlord', landlord, baseScore: bid.baseScore, bottom: bottom.map(c=>rankLabel(c.rank)) });
+  async runRound(bots: IBot[], roundIdx: number): Promise<RoundLog> {
+    // Prepare deck and deal
+    const deck = shuffleInPlace(makeDeck().slice());
+    const hands: [Card[],Card[],Card[]] = [deck.slice(0,17), deck.slice(17,34), deck.slice(34,51)];
+    const bottom: Card[] = deck.slice(51);
+    const events: Event[] = [];
+    events.push({ kind:'deal', hands: [handLabels(hands[0]), handLabels(hands[1]), handLabels(hands[2])], bottom: handLabels(bottom) });
 
+    const bidRes = await this.bidding(hands, bottom, bots);
+    if (!bidRes) {
+      // redeal: simple fallback, landlord seat 0, base 1
+      const landlord: Seat = 0;
+      hands[landlord].push(...bottom);
+      events.push({ kind:'landlord', landlord, baseScore: 1, bottom: handLabels(bottom) });
+      return { round: roundIdx, landlord, scores: [0,0,0], events };
+    }
+    const { landlord, baseScore } = bidRes;
+    events.push({ kind:'landlord', landlord, baseScore, bottom: handLabels(bottom) });
+
+    // Play loop
     let turn: Seat = landlord;
-    let require: Combo|null = null;
+    let require: Combo | null = null;
+    let lead = true;
     let passes = 0;
     let lastWinner: Seat = landlord;
-    let winner: 'landlord'|'farmers'|null = null;
+    const history: Play[] = [];
 
     while (true) {
-      const view = {
-        seat: turn, landlord, hand: hands[turn], bottom,
-        history: [], lead: require===null, require
-      };
-      this.emit({ round: roundIdx, kind:'turn', seat: turn, lead: view.lead, require: require? { type:require.type, mainRank: require.mainRank, length:require.length } : null });
+      events.push({ kind:'turn', round: roundIdx, seat: turn, lead, require });
 
-      // 询问 bot 出牌
-      const play = await bots[turn].play(view);
-      let reason = (view as any).__reason || '';
-      if (play==='pass') {
-        // 只有非首家可过
-        if (require===null) {
-          // 首家不能过：出一张最小
-          const legal = enumerateAllCombos(hands[turn]);
-          if (legal.length===0) break;
-          legal.sort((a,b)=>a.mainRank-b.mainRank);
-          const chosen = legal[0];
-          hands[turn] = removeCards(hands[turn], chosen.cards);
-          require = chosen;
-          passes = 0;
+      const view = this.viewFor(turn, landlord, hands[turn], bottom, history, lead, require);
+      const action = await bots[turn].play(view);
+
+      if (action === 'pass') {
+        history.push({ seat: turn, move:'pass', reason: lead ? '首家不能过（规则简化：改为随机小牌）' : '无法跟上，选择过' });
+        events.push({ kind:'play', round: roundIdx, seat: turn, move:'pass', reason: lead ? '首家不能过（已被引擎拦截）' : '无法跟上，选择过' });
+        if (lead) {
+          // In standard rules, leader cannot pass. Force smallest single.
+          const fallback = hands[turn].slice().sort((a,b)=>a.rank-b.rank)[0];
+          const combo = { type:'single' as const, length:1, mainRank:fallback.rank, cards:[fallback] };
+          removeCards(hands[turn], combo.cards);
+          history.push({ seat: turn, comboType: combo.type, cards: combo.cards, reason:'首家不能过，自动出最小单' });
+          events.push({ kind:'play', round: roundIdx, seat: turn, comboType: combo.type, cards: combo.cards.map(c=>c.label), reason:'首家不能过，自动出最小单' });
+          require = combo;
           lastWinner = turn;
-          reason = reason || '首家不得过，改为最小领出';
-          this.emit({ round: roundIdx, kind:'play', seat: turn, comboType: chosen.type, cards: chosen.cards.map(c=>rankLabel(c.rank)), reason });
-        } else {
-          passes++;
-          this.emit({ round: roundIdx, kind:'play', seat: turn, move: 'pass', reason: reason || '无法跟上，选择过' });
-        }
-      } else {
-        // 校验合法
-        const legal = require ? enumerateResponses(hands[turn], require) : enumerateAllCombos(hands[turn]);
-        const ok = legal.some(c => sameCombo(c, play));
-        if (!ok) {
-          passes++;
-          this.emit({ round: roundIdx, kind:'play', seat: turn, move: 'pass', reason: '非法出牌，按过处理' });
-        } else {
-          // 出牌
-          hands[turn] = removeCards(hands[turn], play.cards);
-          require = require ? (canBeat(play, require) ? play : require) : play;
-          if (!require || canBeat(play, require)) { require = play; lastWinner = turn; }
           passes = 0;
-          this.emit({ round: roundIdx, kind:'play', seat: turn, comboType: play.type, cards: play.cards.map(c=>rankLabel(c.rank)), reason: reason || (view.lead ? '随机领出' : '随机跟牌') });
-          // 胜负
-          if (hands[turn].length===0) {
-            winner = turn===landlord ? 'landlord' : 'farmers';
-            break;
+          lead = false;
+        } else {
+          passes += 1;
+          if (passes >= 2) {
+            // Trick ends, lastWinner leads
+            events.push({ kind:'trick-reset', round: roundIdx, leader: lastWinner });
+            turn = lastWinner;
+            require = null;
+            lead = true;
+            passes = 0;
+            // loop continues from new leader
+          } else {
+            turn = ((turn+1)%3) as Seat;
           }
         }
-      }
-
-      // 两家过，重启新圈由 lastWinner 领出
-      if (passes>=2) {
-        require = null;
-        turn = lastWinner;
-        this.emit({ round: roundIdx, kind:'trick-reset', leader: lastWinner });
       } else {
+        // play a combo
+        removeCards(hands[turn], action.cards);
+        history.push({ seat: turn, comboType: action.type, cards: action.cards, reason: lead ? '首家领出' : '跟牌' });
+        events.push({ kind:'play', round: roundIdx, seat: turn, comboType: action.type, cards: action.cards.map(c=>c.label), reason: lead ? '首家领出' : '跟牌' });
+        require = action;
+        lastWinner = turn;
+        passes = 0;
+        lead = false;
+        // win check
+        if (hands[turn].length === 0) {
+          const winner = (turn === landlord) ? 'landlord' : 'farmers';
+          events.push({ kind:'finish', round: roundIdx, winner });
+          const scores: [number,number,number] =
+            winner==='landlord' ? (():[number,number,number]=>{
+              const arr:[number,number,number] = [0,0,0];
+              arr[landlord] = baseScore*2;
+              arr[(landlord+1)%3] = -baseScore;
+              arr[(landlord+2)%3] = -baseScore;
+              return arr;
+            })() : (():[number,number,number]=>{
+              const arr:[number,number,number] = [0,0,0];
+              arr[landlord] = -baseScore*2;
+              arr[(landlord+1)%3] = baseScore;
+              arr[(landlord+2)%3] = baseScore;
+              return arr;
+            })();
+          return { round: roundIdx, landlord, scores, events };
+        }
+        // next seat
         turn = ((turn+1)%3) as Seat;
       }
     }
-
-    const base = bid.baseScore;
-    let scores: [number,number,number];
-    if (winner==='landlord') {
-      const sL = 2*base, sF = -base;
-      scores = [0,0,0]; scores[landlord] = sL; scores[(landlord+1)%3 as Seat] = sF; scores[(landlord+2)%3 as Seat] = sF;
-    } else {
-      const sL = -2*base, sF = base;
-      scores = [0,0,0]; scores[landlord] = sL; scores[(landlord+1)%3 as Seat] = sF; scores[(landlord+2)%3 as Seat] = sF;
-    }
-    this.emit({ round: roundIdx, kind:'finish', winner });
-    return { round: roundIdx, landlord, baseScore: base, scores, events: [] };
   }
-}
-
-function removeCards(hand: Card[], cards: Card[]): Card[] {
-  const a = hand.slice();
-  for (const c of cards) {
-    const i = a.findIndex(x=>x===c);
-    if (i>=0) a.splice(i,1);
-  }
-  return a;
-}
-
-function sameCombo(a: Combo, b: Combo): boolean {
-  if (a.type!==b.type || a.length!==b.length || a.mainRank!==b.mainRank) return false;
-  if (a.cards.length!==b.cards.length) return false;
-  // 比较引用集合
-  const setA = new Set(a.cards);
-  for (const c of b.cards) if (!setA.has(c)) return false;
-  return true;
-}
-
-// 工具：根据配置创建bot
-export function makeBot(spec: ProviderSpec, seatIdx: number): IBot {
-  const label = '甲乙丙'[seatIdx] + '';
-  if (spec.kind==='builtin') {
-    if (spec.name==='GreedyMin') return new BotGreedyMin(label + '(内置:GreedyMin)');
-    if (spec.name==='GreedyMax') return new BotGreedyMax(label + '(内置:GreedyMax)');
-    return new BotRandom(label + '(内置:Random)');
-  }
-  return new BotOpenAI(spec, label + '(' + spec.kind + ')');
 }

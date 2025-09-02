@@ -1,65 +1,63 @@
-import { Card, Combo } from './types';
+import { Card, Combo, ComboType } from './types';
 
-/** 将手牌按点数分组（忽略花色，用于形成对子/炸弹，但保留原卡对象） */
 function groupByRank(cards: Card[]): Map<number, Card[]> {
   const m = new Map<number, Card[]>();
   for (const c of cards) {
-    if (!m.has(c.rank)) m.set(c.rank, []);
-    m.get(c.rank)!.push(c);
+    const a = m.get(c.rank) || [];
+    a.push(c);
+    m.set(c.rank, a);
   }
   return m;
 }
 
-export function enumerateAllCombos(cards: Card[]): Combo[] {
+export function enumerateAllCombos(hand: Card[]): Combo[] {
   const res: Combo[] = [];
-  const m = groupByRank(cards);
-  for (const [rank, cs] of m.entries()) {
-    if (rank===16 || rank===17) {
-      // 单王
-      res.push({ type:'single', length:1, mainRank:rank, cards:[cs[0]] });
-      continue;
+  const byRank = groupByRank(hand);
+
+  // singles
+  for (const [rank, arr] of byRank) {
+    for (const c of arr) res.push({ type:'single', length:1, mainRank:rank, cards:[c] });
+  }
+  // pairs
+  for (const [rank, arr] of byRank) {
+    if (arr.length >= 2) {
+      for (let i=0;i<arr.length;i++) for (let j=i+1;j<arr.length;j++) {
+        res.push({ type:'pair', length:1, mainRank:rank, cards:[arr[i],arr[j]] });
+      }
     }
-    // 单张
-    for (const c of cs) res.push({ type:'single', length:1, mainRank:rank, cards:[c] });
-    // 对子
-    if (cs.length>=2) res.push({ type:'pair', length:1, mainRank:rank, cards:[cs[0], cs[1]] });
-    // 三张
-    if (cs.length>=3) res.push({ type:'trio', length:1, mainRank:rank, cards:[cs[0], cs[1], cs[2]] });
-    // 炸弹（四张）
-    if (cs.length===4) res.push({ type:'bomb', length:1, mainRank:rank, cards:[cs[0], cs[1], cs[2], cs[3]] });
   }
-  // 王炸
-  const hasSJ = m.get(16)?.length ? true : false;
-  const hasBJ = m.get(17)?.length ? true : false;
-  if (hasSJ && hasBJ) {
-    const SJ = m.get(16)![0], BJ = m.get(17)![0];
-    res.push({ type:'rocket', length:1, mainRank:99, cards:[SJ,BJ] });
+  // triples
+  for (const [rank, arr] of byRank) {
+    if (arr.length >= 3) {
+      for (let i=0;i<arr.length;i++) for (let j=i+1;j<arr.length;j++) for (let k=j+1;k<arr.length;k++) {
+        res.push({ type:'triple', length:1, mainRank:rank, cards:[arr[i],arr[j],arr[k]] });
+      }
+    }
   }
-  return dedup(res);
+  // bombs (four of a kind)
+  for (const [rank, arr] of byRank) {
+    if (arr.length === 4) {
+      res.push({ type:'bomb', length:1, mainRank:rank, cards:[...arr] });
+    }
+  }
+  // king-bomb
+  const sj = hand.find(c=>c.label==='SJ');
+  const bj = hand.find(c=>c.label==='BJ');
+  if (sj && bj) {
+    res.push({ type:'king-bomb', length:1, mainRank:Infinity, cards:[sj,bj] });
+  }
+  return res;
 }
 
-export function enumerateResponses(cards: Card[], require: Combo): Combo[] {
-  const all = enumerateAllCombos(cards);
-  return all.filter(c => canBeat(c, require));
-}
-
-export function canBeat(a: Combo, b: Combo): boolean {
-  if (a.type==='rocket') return true;
-  if (b.type==='rocket') return false;
-  if (a.type==='bomb' && b.type!=='bomb') return true;
-  if (a.type!==b.type) return false;
-  if (a.length!==b.length) return false;
-  // 基础版：只比较主点
+function beats(a: Combo, b: Combo): boolean {
+  if (a.type === 'king-bomb') return true;
+  if (b.type === 'king-bomb') return false;
+  if (a.type === 'bomb' && b.type !== 'bomb') return true;
+  if (a.type !== b.type || a.length !== b.length) return false;
   return a.mainRank > b.mainRank;
 }
 
-function dedup(arr: Combo[]): Combo[] {
-  // 基于cards引用集合做去重
-  const seen = new Set<string>();
-  const out: Combo[] = [];
-  for (const c of arr) {
-    const key = c.type + ':' + c.cards.map(x=>x.label).sort().join(',');
-    if (!seen.has(key)) { seen.add(key); out.push(c); }
-  }
-  return out;
+export function enumerateResponses(hand: Card[], require: Combo): Combo[] {
+  const all = enumerateAllCombos(hand);
+  return all.filter(c => beats(c, require));
 }
