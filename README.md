@@ -1,25 +1,15 @@
-# Suits Add-on for v1.6.3-hotfix3
-
-This add-on introduces *physical cards with suits* while keeping the on-screen rules unchanged.
-- Cards now have: `{ id, suit, label, rank }`
-- `label` is per-suit (e.g. `♠A`), jokers are `SJ`/`BJ`
-- Pair/bomb enumeration uses *rank grouping*, so `♦K + ♣K` forms a valid **pair**, `xxxx` forms **bomb**.
-
-## Files
-Copy these three files into your project (overwrite):
+# 斗地主 AI Arena（带花色 / 单对炸火）
+- Next.js + TypeScript，可本地运行
+- 规则：花色仅用于显示；大小只按点数比较
+- 牌型：单张、对子、炸弹、火箭
+- 三个内置 Bot（Random/GreedyMin/GreedyMax），以及 HTTP/OpenAI/Gemini/Kimi/Grok 的占位配置（通过 `/api/llm-proxy` 模拟）
+## 启动
+```bash
+npm i
+npm run dev
+# 打开 http://localhost:3000
 ```
-lib/types.ts
-lib/cards.ts
-lib/combos.ts
-```
-
-## Engine hook
-Where you deal cards, switch to:
-```ts
-import { deal3 } from '@/lib/cards';
-const { hands, bottom } = deal3();
-```
-
-## Notes
-- UI and logs can continue to render `card.label`.
-- No suit-based power; comparison is by `rank` only.
+## 功能
+- 可设置回合数、起始分、超时与出牌间隔
+- 实时显示三家手牌、底牌、最近出牌、累计分
+- 事件流（NDJSON/JSON）下载

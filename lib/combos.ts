@@ -1,98 +1,27 @@
-// lib/combos.ts
-import type { Card, Combo, Rank } from './types';
-
-// Group by rank helper
-function groupByRank(cards: Card[]): Map<Rank, Card[]> {
-  const m = new Map<Rank, Card[]>();
-  for (const c of cards) {
-    const arr = m.get(c.rank);
-    if (arr) arr.push(c);
-    else m.set(c.rank, [c]);
-  }
-  return m;
+import { Card, Combo } from './types';
+export function isRocket(cards: Card[]): boolean {
+  const ranks = cards.map(c=>c.rank).sort((a,b)=>a-b); return ranks.length===2 && ranks[0]===16 && ranks[1]===17;
 }
-
-function allSingles(hand: Card[]): Combo[] {
-  return hand.map(c => ({ type:'single' as const, cards:[c], mainRank:c.rank, length:1 }));
+export function isBomb(cards: Card[]): boolean { if (cards.length!==4) return false; const r = cards[0].rank; return cards.every(c=>c.rank===r); }
+export function isPair(cards: Card[]): boolean { return cards.length===2 && cards[0].rank===cards[1].rank && cards[0].rank<=15; }
+export function toCombo(cards: Card[]): Combo|null {
+  if (isRocket(cards)) return { type:'rocket', length:1, mainRank:17, cards };
+  if (isBomb(cards)) return { type:'bomb', length:1, mainRank:cards[0].rank, cards };
+  if (isPair(cards)) return { type:'pair', length:1, mainRank:cards[0].rank, cards };
+  if (cards.length===1) return { type:'single', length:1, mainRank:cards[0].rank, cards }; return null;
 }
-
-function allPairs(hand: Card[]): Combo[] {
-  const res: Combo[] = [];
-  const g = groupByRank(hand);
-  for (const [rank, arr] of g.entries()) {
-    if (arr.length >= 2) {
-      // list all combinations of 2 (distinct suits/ids)
-      for (let i=0;i<arr.length;i++) for (let j=i+1;j<arr.length;j++) {
-        res.push({ type:'pair', cards:[arr[i], arr[j]], mainRank:rank, length:1 });
-      }
-    }
-  }
-  return res;
-}
-
-function allTriples(hand: Card[]): Combo[] {
-  const res: Combo[] = [];
-  const g = groupByRank(hand);
-  for (const [rank, arr] of g.entries()) {
-    if (arr.length >= 3) {
-      // choose any 3 (we only need one canonical triple for now)
-      for (let i=0;i<arr.length;i++) for (let j=i+1;j<arr.length;j++) for (let k=j+1;k<arr.length;k++) {
-        res.push({ type:'triple', cards:[arr[i],arr[j],arr[k]], mainRank:rank, length:1 });
-      }
-    }
-  }
-  return res;
-}
-
-function allBombs(hand: Card[]): Combo[] {
-  const res: Combo[] = [];
-  const g = groupByRank(hand);
-  for (const [rank, arr] of g.entries()) {
-    if (arr.length === 4) {
-      res.push({ type:'bomb', cards:[...arr], mainRank:rank, length:1 });
-    }
-  }
-  // Joker bomb (SJ + BJ)
-  const hasSJ = hand.some(c => c.rank===16);
-  const hasBJ = hand.some(c => c.rank===17);
-  if (hasSJ && hasBJ) {
-    const sj = hand.find(c=>c.rank===16)!;
-    const bj = hand.find(c=>c.rank===17)!;
-    res.push({ type:'joker-bomb', cards:[sj,bj], mainRank:17 as Rank, length:1 });
-  }
-  return res;
-}
-
 export function enumerateAllCombos(hand: Card[]): Combo[] {
-  return [
-    ...allSingles(hand),
-    ...allPairs(hand),
-    ...allTriples(hand),
-    ...allBombs(hand),
-  ];
+  const out: Combo[] = [];
+  for (const c of hand) out.push({ type:'single', length:1, mainRank:c.rank, cards:[c] });
+  const byRank = new Map<number, Card[]>(); for (const c of hand){ if (c.rank>15) continue; if (!byRank.has(c.rank)) byRank.set(c.rank, []); byRank.get(c.rank)!.push(c); }
+  for (const [r, arr] of byRank){ if (arr.length>=2){ for (let i=0;i<arr.length;i++) for (let j=i+1;j<arr.length;j++) out.push({ type:'pair', length:1, mainRank:r, cards:[arr[i],arr[j]] }); }
+    if (arr.length===4) out.push({ type:'bomb', length:1, mainRank:r, cards:arr.slice() }); }
+  const sj = hand.find(c=>c.rank===16); const bj = hand.find(c=>c.rank===17); if (sj && bj) out.push({ type:'rocket', length:1, mainRank:17, cards:[sj,bj] });
+  return out;
 }
-
-// Enumerate responses that can beat the required combo.
-// Basic DouDiZhu rule: any bomb can beat any non-bomb; joker-bomb beats everything.
 export function enumerateResponses(hand: Card[], require: Combo): Combo[] {
-  const bombs = allBombs(hand);
-  if (!require) return enumerateAllCombos(hand);
-
-  const res: Combo[] = [];
-  if (require.type === 'single') {
-    const singles = allSingles(hand).filter(c => c.mainRank > require.mainRank);
-    res.push(...singles, ...bombs);
-  } else if (require.type === 'pair') {
-    const pairs = allPairs(hand).filter(c => c.mainRank > require.mainRank);
-    res.push(...pairs, ...bombs);
-  } else if (require.type === 'triple') {
-    const triples = allTriples(hand).filter(c => c.mainRank > require.mainRank);
-    res.push(...triples, ...bombs);
-  } else if (require.type === 'bomb') {
-    const onlyStrongerBombs = bombs.filter(c => (c.type === 'joker-bomb') || (c.type==='bomb' && c.mainRank > require.mainRank));
-    res.push(...onlyStrongerBombs);
-  } else if (require.type === 'joker-bomb') {
-    // nothing can beat joker-bomb
-  }
-  return res;
+  const all = enumerateAllCombos(hand); return all.filter(c=>winsOver(c, require));
+}
+export function winsOver(a: Combo, b: Combo): boolean {
+  if (a.type==='rocket') return true; if (b.type==='rocket') return false; if (a.type==='bomb' && b.type!=='bomb') return true; if (a.type!==b.type) return false; return a.mainRank>b.mainRank;
 }
