@@ -1,12 +1,25 @@
-# DouDiZhu (Suits-enabled, rules & UI unchanged)
+# Suits Add-on for v1.6.3-hotfix3
 
-- Adds **suit-aware physical cards** (♠ ♥ ♦ ♣) while **keeping rules & UI unchanged** (compare ranks only).
-- Supports singles, pairs, triples, bombs (four of a kind), and king-bomb (SJ+BJ). Sequences/attachments are intentionally omitted.
-- Minimal Next.js + TypeScript app with one API endpoint to simulate rounds.
+This add-on introduces *physical cards with suits* while keeping the on-screen rules unchanged.
+- Cards now have: `{ id, suit, label, rank }`
+- `label` is per-suit (e.g. `♠A`), jokers are `SJ`/`BJ`
+- Pair/bomb enumeration uses *rank grouping*, so `♦K + ♣K` forms a valid **pair**, `xxxx` forms **bomb**.
 
-## Quick start
-```bash
-npm i
-npm run dev
-# open http://localhost:3000
+## Files
+Copy these three files into your project (overwrite):
 ```
+lib/types.ts
+lib/cards.ts
+lib/combos.ts
+```
+
+## Engine hook
+Where you deal cards, switch to:
+```ts
+import { deal3 } from '@/lib/cards';
+const { hands, bottom } = deal3();
+```
+
+## Notes
+- UI and logs can continue to render `card.label`.
+- No suit-based power; comparison is by `rank` only.
