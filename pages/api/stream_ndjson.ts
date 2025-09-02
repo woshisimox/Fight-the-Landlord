@@ -1,9 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { RuleConfig } from '../../lib/rules';
 import { ProviderSpec } from '../../lib/providers';
-import { runArenaInMemory } from '../../lib/arenaWeb';
+import { runArenaStream } from '../../lib/arenaStream';
 
-export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };
+export const config = { api: { bodyParser: { sizeLimit: '2mb' }, responseLimit: false } };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -11,8 +11,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
   try {
+    // streaming flush hints
+    // @ts-ignore
+    res.flushHeaders?.();
+    // @ts-ignore
+    res.socket?.setNoDelay(true);
+
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+
     const body = req.body || {};
-    const rounds = Number(body.rounds ?? 10);
+    const rounds = Number(body.rounds ?? 1);
     const seed = Number(body.seed ?? 42);
     const rob = String(body.rob ?? 'false');
     const four2 = String(body.four2 ?? 'both');
@@ -24,9 +34,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     rules.bidding = (rob === 'true') ? 'rob' : 'call-score';
     if (four2==='2singles' || four2==='2pairs' || four2==='both') rules.fourWithTwo = four2 as any;
 
-    const resp = await runArenaInMemory({ rounds, seed, rules, delayMs, players, startScore });
-    res.status(200).json(resp);
+    const writer = (obj:any) => { res.write(JSON.stringify(obj) + '\n'); };
+    writer({ type:'event', stage:'ready' });
+    await runArenaStream({ rounds, seed, rules, delayMs, players, startScore }, writer);
+    res.end();
   } catch (e:any) {
-    res.status(500).json({ error: String(e?.message || e) });
+    try { res.write(JSON.stringify({ type:'error', error: String(e?.message || e) }) + '\n'); } catch {}
+    res.end();
   }
 }
