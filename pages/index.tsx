@@ -241,7 +241,7 @@ export default function Home() {
   );
 }
 
-function LivePanel(props:any){
+function LivePanel(props:any): JSX.Element {
   const [lines, setLines] = useState<string[]>([]);
   const [raw, setRaw] = useState<string[]>([]);
   const [objs, setObjs] = useState<any[]>([]);
