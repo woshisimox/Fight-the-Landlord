@@ -30,11 +30,11 @@ export interface RoundLog {
 }
 
 export type GameEvent =
-  | { kind: 'deal', hands: string[][], bottom: string[] }
+  | { kind: 'deal', hands: string[][], bottom: string[], handsRich?: {label:string, suit?: 'H'|'D'|'S'|'C', code?:string}[][], bottomRich?: {label:string, suit?: 'H'|'D'|'S'|'C', code?:string}[] }
   | { kind: 'bid', seat: Seat, action: number | 'pass' | 'rob' | 'norob' }
-  | { kind: 'landlord', landlord: Seat, baseScore: number, bottom: string[] }
+  | { kind: 'landlord', landlord: Seat, baseScore: number, bottom: string[], bottomRich?: {label:string, suit?: 'H'|'D'|'S'|'C', code?:string}[] }
   | { kind: 'turn', seat: Seat, lead: boolean, require: { type: string, mainRank?: number, length?: number } | null }
-  | { kind: 'play', seat: Seat, comboType?: string, cards?: string[], move?: 'pass', reason?: string }
+  | { kind: 'play', seat: Seat, comboType?: string, cards?: string[], cardsRich?: {label:string, suit?: 'H'|'D'|'S'|'C', code?:string}[], move?: 'pass', reason?: string }
   | { kind: 'trick-reset', leader: Seat }
   | { kind: 'finish', winner: 'landlord' | 'farmers' }
   | { kind: 'score', totals: [number,number,number] }

@@ -83,14 +83,14 @@ export class Engine {
     const hands: [Card[],Card[],Card[]] = [[],[],[]];
     for (let i=0;i<51;i++) hands[i%3].push(deck[i]);
     const bottom = deck.slice(51);
-    this.emit({ kind:'deal', hands: hands.map(h=>h.map(c=>c.label)), bottom: bottom.map(c=>c.label) });
+    this.emit({ kind:'deal', hands: hands.map(h=>h.map(c=>c.label)), bottom: bottom.map(c=>c.label), handsRich: hands.map(h=>h.map(c=>({label:c.label, suit:c.suit, code:c.code}))), bottomRich: bottom.map(c=>({label:c.label, suit:c.suit, code:c.code})) });
 
     // Bidding
     const bidRes = await this.bidding(hands, bottom, bots);
     const landlord = (bidRes?.landlord ?? 1) as Seat;
     const baseScore = bidRes?.baseScore ?? 1;
     hands[landlord].push(...bottom);
-    this.emit({ kind:'landlord', landlord, baseScore, bottom: bottom.map(c=>c.label) });
+    this.emit({ kind:'landlord', landlord, baseScore, bottom: bottom.map(c=>c.label), bottomRich: bottom.map(c=>({label:c.label, suit:c.suit, code:c.code})) });
 
     // Play loop
     const history: Play[] = [];
@@ -185,19 +185,12 @@ export class Engine {
 function makeDeck(): Card[] {
   const labels = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','SJ','BJ'];
   const ranks: Record<string,number> = { '3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'T':10,'J':11,'Q':12,'K':13,'A':14,'2':15,'SJ':16,'BJ':17 };
-  const suits: Array<'H'|'D'|'S'|'C'> = ['H','D','S','C']; // ♥♦♠♣
-  let id=1;
+  const suits: Array<'H'|'D'|'S'|'C'> = ['H','D','S','C'];
+  let id = 1;
   const cards: Card[] = [];
   for (const l of labels){
-    if (l==='SJ' || l==='BJ') {
-      cards.push({ id:id++, label:l, rank:ranks[l], code:l });
-      continue;
-    }
-    for (let i=0; i<4; i++) {
-      const suit = suits[i];
-      const code = l + suit; // like '7H', 'QC' etc.
-      cards.push({ id:id++, label:l, rank:ranks[l], suit, code });
-    }
+    if (l==='SJ' || l==='BJ') { cards.push({ id:id++, label:l, rank:ranks[l], code:l }); continue; }
+    for (let i=0;i<4;i++){ const suit = suits[i]; const code = l + suit; cards.push({ id:id++, label:l, rank:ranks[l], suit, code }); }
   }
   return cards;
 }
