@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type React from 'react';
 
 function CardLine(props:{items:any[]|string[]}){
   const items = props.items||[];
@@ -13,7 +14,7 @@ function CardLine(props:{items:any[]|string[]}){
       })}
     </code>
   );
-}
+};
 
 
 type Builtin = 'GreedyMin'|'GreedyMax'|'RandomLegal';
@@ -239,9 +240,9 @@ export default function Home() {
       </details>
     </div>
   );
-}
+};
 
-function LivePanel(props:any){
+const LivePanel: React.FC<any> = (props) => {
   const [lines, setLines] = useState<string[]>([]);
   const [raw, setRaw] = useState<string[]>([]);
   const [objs, setObjs] = useState<any[]>([]);
@@ -452,4 +453,4 @@ function LivePanel(props:any){
       </div>
     </div>
   );
-}
+};
