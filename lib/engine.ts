@@ -185,8 +185,8 @@ export class Engine {
 function makeDeck(): Card[] {
   const labels = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','SJ','BJ'];
   const ranks: Record<string,number> = { '3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'T':10,'J':11,'Q':12,'K':13,'A':14,'2':15,'SJ':16,'BJ':17 };
-  const suits: Array<'H'|'D'|'S'|'C'> = ['H','D','S','C'];
-  let id = 1;
+  const suits: Array<'H'|'D'|'S'|'C'> = ['H','D','S','C']; // ♥♦♠♣
+  let id=1;
   const cards: Card[] = [];
   for (const l of labels){
     if (l==='SJ' || l==='BJ') { cards.push({ id:id++, label:l, rank:ranks[l], code:l }); continue; }

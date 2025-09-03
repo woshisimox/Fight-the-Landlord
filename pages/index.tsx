@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import type React from 'react';
 
 function CardLine(props:{items:any[]|string[]}){
   const items = props.items||[];
@@ -14,7 +13,7 @@ function CardLine(props:{items:any[]|string[]}){
       })}
     </code>
   );
-};
+}
 
 
 type Builtin = 'GreedyMin'|'GreedyMax'|'RandomLegal';
@@ -240,9 +239,9 @@ export default function Home() {
       </details>
     </div>
   );
-};
+}
 
-const LivePanel: React.FC<any> = (props) => {
+function LivePanel(props:any){
   const [lines, setLines] = useState<string[]>([]);
   const [raw, setRaw] = useState<string[]>([]);
   const [objs, setObjs] = useState<any[]>([]);
@@ -378,40 +377,20 @@ const LivePanel: React.FC<any> = (props) => {
         setBoard(b=> ({...b, landlord: obj.landlord}));
       } else if (obj.kind==='trick-reset'){
         push(`（新一轮）由 ${['甲','乙','丙'][obj.leader]} 继续领出`);
-      }       } else if (obj.kind==='play'){
+      } else if (obj.kind==='play'){
         const seat = ['甲','乙','丙'][obj.seat];
         const label = labelFor(obj.seat);
         if (obj.move==='pass'){
           push(`${label}：过${obj.reason?(' — 理由：'+obj.reason):''}`);
-          setBoard(b=> { const last=b.last.slice(); last[obj.seat]='过'; const lastRich = (b as any).lastRich ? (b as any).lastRich.slice() : [[],[],[]]; lastRich[obj.seat] = []; return {...b, last, lastRich}; });
+          setBoard(b=> { const last=b.last.slice(); last[obj.seat]='过'; return {...b, last}; });
         } else {
           const cards = (obj.cards||[]).join('');
           push(`${label}：${obj.comboType || obj.type} ${cards}${obj.reason?(' — 理由：'+obj.reason):''}`);
-          setBoard(b=> { 
-            const last=b.last.slice(); 
-            last[obj.seat]=cards;
+          setBoard(b=> { const last=b.last.slice(); last[obj.seat]=cards;
             const hands=b.hands.map(arr=>arr.slice());
             const labels=(obj.cards||[]) as string[];
-            const cardsRich=(obj.cardsRich||[]) as any[];
-            // Remove from string hands
-            for (const lab of labels){ const k=hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1); }
-            // Remove from handsRich using exact suit/code when available
-            const handsRichArr = (b as any).handsRich ? (b as any).handsRich.map((arr:any)=> arr.slice()) : [[],[],[]];
-            if (cardsRich && cardsRich.length && handsRichArr[obj.seat]) {
-              for (const c of cardsRich){
-                const k = handsRichArr[obj.seat].findIndex((x:any)=> (x.code && c.code && x.code===c.code) || (x.label===c.label && x.suit===c.suit));
-                if (k>=0) handsRichArr[obj.seat].splice(k,1);
-              }
-            } else if (handsRichArr[obj.seat]) {
-              for (const lab of labels){
-                const k = handsRichArr[obj.seat].findIndex((x:any)=> x.label===lab);
-                if (k>=0) handsRichArr[obj.seat].splice(k,1);
-              }
-            }
-            const lastRich = (b as any).lastRich ? (b as any).lastRich.slice() : [[],[],[]];
-            lastRich[obj.seat] = cardsRich && cardsRich.length ? cardsRich : (labels.map(l=>({label:l})) as any[]);
-            return {...b, last, lastRich, hands, handsRich: handsRichArr}; 
-          });
+            for (const lab of labels){ const k=hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1);}
+            return {...b, last, hands}; });
         }
       } else if (obj.kind==='score'){
         setTotals([obj.totals[0], obj.totals[1], obj.totals[2]]);
@@ -453,4 +432,4 @@ const LivePanel: React.FC<any> = (props) => {
       </div>
     </div>
   );
-};
+}
