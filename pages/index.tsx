@@ -1,13 +1,12 @@
 // pages/index.tsx
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 
-// ---- suit helpers ----
+/** ---------- 花色渲染辅助 ---------- **/
 const SUIT_CHAR: Record<string, string> = { S: '♠', H: '♥', D: '♦', C: '♣', RJ: '🃏', BJ: '🃏' };
 const SUIT_COLOR: Record<string, string> = { S: '#222', C: '#222', H: '#c00', D: '#c00', RJ: '#c00', BJ: '#222' };
 
 function labelDisplay(l: string) {
-  if (l === 'T') return '10';
-  return l;
+  return l === 'T' ? '10' : l;
 }
 
 function CardLine({ cards }: { cards: any[] }) {
@@ -15,12 +14,11 @@ function CardLine({ cards }: { cards: any[] }) {
   return (
     <span>
       {cards.map((c: any, idx: number) => {
-        const lab = c.label || '';
-        const text = labelDisplay(lab);
         const icon = SUIT_CHAR[c.suit] || '';
         const color = SUIT_COLOR[c.suit] || '#222';
+        const text = labelDisplay(c.label || '');
         return (
-          <span key={c.code || `${lab}-${idx}`} style={{ marginRight: 6, color }}>
+          <span key={c.code || `${c.label}-${idx}`} style={{ marginRight: 6, color }}>
             <span>{icon}</span>
             <span style={{ marginLeft: 2 }}>{text}</span>
           </span>
@@ -30,6 +28,7 @@ function CardLine({ cards }: { cards: any[] }) {
   );
 }
 
+/** ---------- 类型 ---------- **/
 type Board = {
   hands: string[][];
   last: string[];
@@ -38,7 +37,7 @@ type Board = {
   handsRich: any[][];
   lastRich: any[][];
   bottomRich: any[];
-  trick: any[]; // {seat:number, pass?:boolean, cardsRich?:any[]}
+  trick: Array<{ seat: number; pass?: boolean; cardsRich?: any[] }>;
 };
 
 type LiveProps = {
@@ -51,6 +50,7 @@ type LiveProps = {
   players: string;
 };
 
+/** ---------- 实时面板 ---------- **/
 const LivePanel: React.FC<LiveProps> = (props) => {
   const [lines, setLines] = useState<string[]>([]);
   const push = (t: string) => setLines((l) => [...l, t]);
@@ -73,6 +73,7 @@ const LivePanel: React.FC<LiveProps> = (props) => {
   ]);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'streaming' | 'terminated'>('idle');
+
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -83,7 +84,7 @@ const LivePanel: React.FC<LiveProps> = (props) => {
         const req = obj.require ? `需跟:${obj.require.type}>${obj.require.mainRank}` : '';
         push(`【回合】${seat} ${obj.lead ? '(领出)' : ''} ${req}`);
       } else if (obj.kind === 'deal') {
-        // 依据 label 给每张牌确定一个花色，保持后续渲染一致
+        // 给每张牌分配花色，保证后续渲染一致
         const SUITS = ['S', 'H', 'D', 'C'];
         const nextIdx: Record<string, number> = {};
         function take(label: string) {
@@ -108,7 +109,9 @@ const LivePanel: React.FC<LiveProps> = (props) => {
         push(`发牌：底牌 ${obj.bottom.join('')}`);
       } else if (obj.kind === 'landlord') {
         setBoard((b) => ({ ...b, landlord: obj.landlord }));
-        push(`确定地主：${['甲', '乙', '丙'][obj.landlord]}，底牌 ${obj.bottom?.join('') ?? ''} 基础分 ${obj.baseScore ?? ''}`);
+        push(
+          `确定地主：${['甲', '乙', '丙'][obj.landlord]}，底牌 ${obj.bottom?.join('') ?? ''} 基础分 ${obj.baseScore ?? ''}`
+        );
       } else if (obj.kind === 'trick-reset') {
         setBoard((b) => ({ ...b, trick: [] }));
         push('新一轮开始。');
@@ -132,21 +135,26 @@ const LivePanel: React.FC<LiveProps> = (props) => {
           setBoard((b) => {
             const last = b.last.slice();
             last[obj.seat] = text;
+
             const hands = b.hands.map((a) => a.slice());
             for (const lab of labels) {
               const k = hands[obj.seat].indexOf(lab);
               if (k >= 0) hands[obj.seat].splice(k, 1);
             }
+
             const handsRich = b.handsRich.map((arr) => arr.slice());
             const taken: any[] = [];
             for (const lab of labels) {
               const k = handsRich[obj.seat].findIndex((c: any) => c.label === lab);
               if (k >= 0) taken.push(handsRich[obj.seat].splice(k, 1)[0]);
             }
+
             const lastRich = b.lastRich.map((x) => x.slice());
             lastRich[obj.seat] = taken;
+
             const trick = b.trick.slice();
             trick.push({ seat: obj.seat, cardsRich: taken });
+
             return { ...b, last, hands, handsRich, lastRich, trick };
           });
         }
@@ -187,6 +195,7 @@ const LivePanel: React.FC<LiveProps> = (props) => {
       if (!r.body) {
         push('后台无响应流。');
         setStatus('idle');
+        setRunning(false);
         return;
       }
       setStatus('streaming');
@@ -300,6 +309,7 @@ const LivePanel: React.FC<LiveProps> = (props) => {
   );
 };
 
+/** ---------- 页面 ---------- **/
 export default function Home() {
   const [rounds, setRounds] = useState<number>(1);
   const [seed, setSeed] = useState<number>(0);
