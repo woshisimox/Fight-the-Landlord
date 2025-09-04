@@ -221,7 +221,7 @@ export default function Home() {
 
       <details style={{marginTop:16}}>
         <summary>实时运行（流式）</summary>
-        {React.createElement(LivePanelAny as any, { rounds: rounds seed: seed rob: rob four2: four2 delayMs: delayMs startScore: startScore, players: players })}
+        {React.createElement(LivePanel as any, { rounds, seed, rob, four2, delayMs, startScore, players })}
       </details>
     </div>
   );
