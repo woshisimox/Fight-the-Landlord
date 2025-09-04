@@ -98,7 +98,6 @@ export default function Home() {
   }
 
   return (
-  <>
     <div style={{fontFamily:'system-ui, -apple-system, Segoe UI, Roboto', padding: 20, maxWidth: 1100, margin:'0 auto'}}>
       <h1>斗地主 AI 比赛 · 甲 / 乙 / 丙</h1>
       <p>为每位选手选择内置或外部 AI（HTTP / OpenAI / Gemini / Kimi / Grok），并可设置每步出牌延迟（ms）。</p>
