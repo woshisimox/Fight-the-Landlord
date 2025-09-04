@@ -1,15 +1,24 @@
+
 import { useEffect, useState } from 'react';
 
 function CardLine(props:{items:any[]|string[]}){
   const items = props.items||[];
   const isRich = typeof items[0]==='object';
+  const SUIT_CHAR: Record<'H'|'D'|'S'|'C', string> = { H:'♥', D:'♦', S:'♠', C:'♣' };
   return (
     <code>
       {items.map((it:any, idx:number)=> {
-        if (!isRich) return <span key={idx} style={{marginRight:4}}>{String(it)}</span>;
+        if (!isRich) return <span key={idx} style={{marginRight:6}}>{String(it)}</span>;
         const suit = it.suit as ('H'|'D'|'S'|'C'|undefined);
-        const color = (suit==='H' || suit==='D') ? 'red' : (suit==='S' || suit==='C') ? 'black' : undefined;
-        return <span key={idx} style={{color, marginRight:4}}>{it.label}</span>;
+        const isRed = suit==='H' || suit==='D';
+        const color = isRed ? 'red' : (suit==='S' || suit==='C') ? 'black' : undefined;
+        const icon = suit ? SUIT_CHAR[suit] : (it.label==='SJ' || it.label==='BJ' ? '🃏' : '');
+        return (
+          <span key={idx} style={{marginRight:8, display:'inline-flex', alignItems:'center', gap:4}}>
+            {icon ? <span style={{color, fontWeight:700}}>{icon}</span> : null}
+            <span style={{color}}>{it.label}</span>
+          </span>
+        );
       })}
     </code>
   );
@@ -245,7 +254,7 @@ function LivePanel(props:any){
   const [lines, setLines] = useState<string[]>([]);
   const [raw, setRaw] = useState<string[]>([]);
   const [objs, setObjs] = useState<any[]>([]);
-  const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[], handsRich?: any[][], lastRich?: any[][], bottomRich?: any[]}>({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
+  const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[], handsRich?:any[][], lastRich?:any[][], bottomRich?:any[], trick?:any[]}>({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[], trick:[]});
   const [totals, setTotals] = useState<[number,number,number]>([props.startScore||0, props.startScore||0, props.startScore||0]);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState('idle');
@@ -288,7 +297,7 @@ function LivePanel(props:any){
     setLines([]);
     setRaw([]);
     setObjs([]);
-    setBoard({hands:[[],[],[]], handsRich:[[],[],[]], last:['','',''], lastRich:[[],[],[]], landlord:null, bottom:[], bottomRich:[]});
+    setBoard({hands:[[],[],[]], handsRich:[[],[],[]], last:['','',''], lastRich:[[],[],[]], landlord:null, bottom:[], bottomRich:[], trick:[]});
     setTotals([props.startScore||0, props.startScore||0, props.startScore||0]);
     setRunning(true);
     setStatus('connecting');
@@ -367,7 +376,7 @@ function LivePanel(props:any){
         const req = obj.require?(`需跟:${obj.require.type}>${obj.require.mainRank}`):'';
         push(`【回合】${seat} ${obj.lead?'(领出)':''} ${req}`);
       } else if (obj.kind==='deal'){
-        setBoard(b=> ({...b, hands: obj.hands, bottom: obj.bottom, handsRich: obj.handsRich||[[],[],[]], bottomRich: obj.bottomRich||[]}));
+        setBoard(b=> ({...b, hands: obj.hands, bottom: obj.bottom, handsRich: obj.handsRich||[[],[],[]], bottomRich: obj.bottomRich||[], trick:[]}));
         push(`发牌：底牌 ${obj.bottom.join('')}`);
       } else if (obj.kind==='bid'){
         const seat = ['甲','乙','丙'][obj.seat];
@@ -378,21 +387,45 @@ function LivePanel(props:any){
       } else if (obj.kind==='trick-reset'){
         push(`（新一轮）由 ${['甲','乙','丙'][obj.leader]} 继续领出`);
       } else if (obj.kind==='play'){
-        const seat = ['甲','乙','丙'][obj.seat];
-        const label = labelFor(obj.seat);
-        if (obj.move==='pass'){
-          push(`${label}：过${obj.reason?(' — 理由：'+obj.reason):''}`);
-          setBoard(b=> { const last=b.last.slice(); last[obj.seat]='过'; return {...b, last}; });
-        } else {
-          const cards = (obj.cards||[]).join('');
-          push(`${label}：${obj.comboType || obj.type} ${cards}${obj.reason?(' — 理由：'+obj.reason):''}`);
-          setBoard(b=> { const last=b.last.slice(); last[obj.seat]=cards;
-            const hands=b.hands.map(arr=>arr.slice());
-            const labels=(obj.cards||[]) as string[];
-            for (const lab of labels){ const k=hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1);}
-            return {...b, last, hands}; });
+  const label = labelFor(obj.seat);
+  if (obj.move==='pass'){
+    push(`${label}：过${obj.reason?(' — 理由：'+obj.reason):''}`);
+    setBoard(b=>{
+      const last = b.last.slice();
+      last[obj.seat] = '过';
+      const lastRich = (b as any).lastRich ? (b as any).lastRich.slice() : [[],[],[]];
+      lastRich[obj.seat] = [];
+      const trick = (b as any).trick ? (b as any).trick.slice() : [];
+      trick.push({seat: obj.seat, pass: true, labels: [], cardsRich: []});
+      return {...b, last, lastRich, trick};
+    });
+  } else {
+    const labels = (obj.cards||[]) as string[];
+    const cardsRich = (obj.cardsRich||[]) as any[];
+    const cardsTxt = labels.join('');
+    push(`${label}：${obj.comboType || obj.type} ${cardsTxt}${obj.reason?(' — 理由：'+obj.reason):''}`);
+    setBoard(b=>{
+      const last = b.last.slice();
+      last[obj.seat] = cardsTxt;
+      const hands = b.hands.map(a=>a.slice());
+      for (const lab of labels){ const k = hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1); }
+      const handsRichArr = (b as any).handsRich ? (b as any).handsRich.map((arr:any)=> arr.slice()) : [[],[],[]];
+      if (cardsRich.length && handsRichArr[obj.seat]){
+        for (const c of cardsRich){
+          const k = handsRichArr[obj.seat].findIndex((x:any)=> (x.code && c.code && x.code===c.code) || (x.label===c.label && x.suit===c.suit));
+          if (k>=0) handsRichArr[obj.seat].splice(k,1);
         }
-      } else if (obj.kind==='score'){
+      } else if (handsRichArr[obj.seat]){
+        for (const lab of labels){ const k = handsRichArr[obj.seat].findIndex((x:any)=> x.label===lab); if (k>=0) handsRichArr[obj.seat].splice(k,1); }
+      }
+      const lastRich = (b as any).lastRich ? (b as any).lastRich.slice() : [[],[],[]];
+      lastRich[obj.seat] = cardsRich.length ? cardsRich : labels.map(l=>({label:l}));
+      const trick = (b as any).trick ? (b as any).trick.slice() : [];
+      trick.push({seat: obj.seat, labels, cardsRich});
+      return {...b, hands, handsRich: handsRichArr, last, lastRich, trick};
+    });
+  }
+} else if } else if (obj.kind==='score'){
         setTotals([obj.totals[0], obj.totals[1], obj.totals[2]]);
         push(`积分：甲 ${obj.totals[0]} / 乙 ${obj.totals[1]} / 丙 ${obj.totals[2]}`);
       } else if (obj.kind==='terminated'){
@@ -419,10 +452,23 @@ function LivePanel(props:any){
         {[0,1,2].map(i=> (
           <div key={i} style={{border:'1px solid #eee', borderRadius:8, padding:10}}>
             <div style={{fontWeight:700}}>{labelFor(i)}{board.landlord===i?'（地主）':''} — 分数：{totals[i]}</div>
-            <div>手牌：{(board as any).handsRich && (board as any).handsRich[i]?.length ? <CardLine items={(board as any).handsRich[i]} /> : <code>{board.hands[i]?.join(' ')}</code>}</div>
+            <div>手牌：<code>{board.hands[i]?.join(' ')}</code></div>
             <div>最近出牌：{(board as any).lastRich && (board as any).lastRich[i]?.length ? <CardLine items={(board as any).lastRich[i]} /> : <code>{board.last[i]||''}</code>}</div>
           </div>
         ))}
+
+      <div style={{marginTop:12}}>
+        <div style={{fontWeight:700}}>本轮出牌顺序</div>
+        <div style={{whiteSpace:'normal', background:'#f9f9f9', padding:10, border:'1px solid #eee'}}>
+          {((board as any).trick||[]).map((step:any, idx:number)=> (
+            <div key={idx} style={{marginBottom:4}}>
+              <span style={{marginRight:8}}>{['甲','乙','丙'][step.seat]}{board.landlord===step.seat?'（地主）':''}：</span>
+              {step.pass ? <code>过</code> : (step.cardsRich && step.cardsRich.length ? <CardLine items={step.cardsRich} /> : <code>{(step.labels||[]).join(' ')}</code>)}
+            </div>
+          ))}
+          {((board as any).trick||[]).length===0 ? <div style={{opacity:0.6}}>（暂无出牌）</div> : null}
+        </div>
+      </div>
       </div>
       <div style={{marginTop:12}}>
         <div style={{fontWeight:700}}>事件日志</div>
