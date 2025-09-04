@@ -1,4 +1,4 @@
-// build-tag: full-bundle-stable 2025-09-04T11:47:38.897464Z
+// build-tag: full-bundle-stable-createElement2 2025-09-04T11:54:38.691471Z
 import { useEffect, useState } from 'react';
 import React from 'react';
 
@@ -221,7 +221,7 @@ export default function Home() {
 
       <details style={{marginTop:16}}>
         <summary>实时运行（流式）</summary>
-        <LivePanelAny rounds={rounds} seed={seed} rob={rob} four2={four2} delayMs={delayMs} startScore={startScore} players={players} />
+        {React.createElement(LivePanelAny as any, { rounds: rounds seed: seed rob: rob four2: four2 delayMs: delayMs startScore: startScore, players: players })}
       </details>
     </div>
   );
