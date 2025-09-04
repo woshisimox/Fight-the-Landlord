@@ -430,9 +430,8 @@ const LivePanelAny: any = LivePanel;
             const trick = (b as any).trick ? (b as any).trick.slice() : [];
             trick.push({ seat: obj.seat, cardsRich: taken });
             return {...b, last, hands, handsRich, lastRich, trick};
-          });
-        }
-      }：过${obj.reason?(' — 理由：'+obj.reason):''}`);
+        if (obj.move==='pass'){
+          push(`${label}：过${obj.reason?(' — 理由：'+obj.reason):''}`);
           setBoard(b=> { const last=b.last.slice(); last[obj.seat]='过'; return {...b, last}; });
         } else {
           const cards = (obj.cards||[]).join('');
@@ -443,7 +442,6 @@ const LivePanelAny: any = LivePanel;
             for (const lab of labels){ const k=hands[obj.seat].indexOf(lab); if (k>=0) hands[obj.seat].splice(k,1);}
             return {...b, last, hands}; });
         }
-      } else if (obj.kind==='score'){
         setTotals([obj.totals[0], obj.totals[1], obj.totals[2]]);
         push(`积分：甲 ${obj.totals[0]} / 乙 ${obj.totals[1]} / 丙 ${obj.totals[2]}`);
       } else if (obj.kind==='terminated'){
