@@ -48,6 +48,14 @@ type LiveProps = {
   delayMs: number;
   startScore: number;
   players: string;
+  apiKeys?: {
+    openai?: string;
+    gemini?: string;
+    kimi?: string;
+    grok?: string;
+    httpBase?: string;
+    httpToken?: string;
+  };
 };
 
 type Provider = 'builtin' | 'openai' | 'gemini' | 'kimi' | 'grok' | 'http';
@@ -176,8 +184,18 @@ const LivePanel: React.FC<LiveProps> = (props) => {
       setStatus('connecting');
       setRunning(true);
 
-      // 请求体由父组件注入（保持后端兼容）
-      const body: any = (window as any).__ddz_req_body__ || {};
+      // 直接使用 props 组装请求体（不再依赖 window.__ddz_req_body__）
+      const body: any = {
+        rounds: props.rounds,
+        seed: props.seed,
+        rob: props.rob,
+        four2: props.four2,
+        delayMs: props.delayMs,
+        startScore: props.startScore,
+        players: props.players,
+        apiKeys: props.apiKeys || {},
+      };
+
       const ac = new AbortController();
       abortRef.current = ac;
 
@@ -319,7 +337,7 @@ export default function Home() {
 
   // 仍保留原有 players 字符串（兼容后端），新增可视化选择并双向同步
   const [players, setPlayers] = useState<string>('builtin,builtin,builtin');
-  const [seatProviders, setSeatProviders] = useState<Provider[]>(['builtin', 'builtin', 'builtin']);
+  const [seatProviders, setSeatProviders] = useState<('builtin'|'openai'|'gemini'|'kimi'|'grok'|'http')[]>(['builtin', 'builtin', 'builtin']);
 
   // 可选：API Keys / HTTP 配置（随请求发送）
   const [apiKeys, setApiKeys] = useState({
@@ -333,26 +351,12 @@ export default function Home() {
 
   // 当手动编辑 players 字符串时，同步回三个下拉
   function syncFromPlayersString(s: string) {
-    const arr = (s || '').split(',').map((x) => x.trim()) as Provider[];
-    const pad: Provider[] = ['builtin', 'builtin', 'builtin'];
+    const arr = (s || '').split(',').map((x) => x.trim()) as any[];
+    const pad: any[] = ['builtin', 'builtin', 'builtin'];
     for (let i = 0; i < Math.min(3, arr.length); i++) {
-      if (arr[i]) pad[i] = arr[i] as Provider;
+      if (arr[i]) pad[i] = arr[i] as any;
     }
-    setSeatProviders(pad);
-  }
-
-  // 组合请求体（通过 window 临时挂载供 LivePanel.start 使用）
-  function mountRequestBody() {
-    (window as any).__ddz_req_body__ = {
-      rounds,
-      seed,
-      rob,
-      four2,
-      delayMs,
-      startScore,
-      players,
-      apiKeys,
-    };
+    setSeatProviders(pad as any);
   }
 
   return (
@@ -403,11 +407,11 @@ export default function Home() {
                 <select
                   value={seatProviders[i]}
                   onChange={(e) => {
-                    const v = e.target.value as Provider;
-                    const arr = seatProviders.slice();
+                    const v = e.target.value as any;
+                    const arr = seatProviders.slice() as any[];
                     arr[i] = v;
-                    setSeatProviders(arr);
-                    setPlayers(arr.join(','));
+                    setSeatProviders(arr as any);
+                    setPlayers((arr as any).join(','));
                   }}
                 >
                   <option value="builtin">内建</option>
@@ -484,9 +488,9 @@ export default function Home() {
         </div>
       </fieldset>
 
-      <details style={{ marginTop: 16 }} onToggle={mountRequestBody}>
+      <details style={{ marginTop: 16 }}>
         <summary>实时运行（流式）</summary>
-        {React.createElement(LivePanel as any, { rounds, seed, rob, four2, delayMs, startScore, players })}
+        {React.createElement(LivePanel as any, { rounds, seed, rob, four2, delayMs, startScore, players, apiKeys })}
       </details>
     </div>
   );
