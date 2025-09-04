@@ -437,7 +437,6 @@ function LivePanel(props:any){
     } else if (obj.type==='done'){
       push('全部对局完成。');
     }
-  }
 
   function push(t:string){ setLines(l=> [...l, t]); }
 
