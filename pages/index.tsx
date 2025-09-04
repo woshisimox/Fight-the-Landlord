@@ -425,7 +425,7 @@ function LivePanel(props:any){
       return {...b, hands, handsRich: handsRichArr, last, lastRich, trick};
     });
   }
-} else if } else if (obj.kind==='score'){
+} else if (obj.kind==='score'){
         setTotals([obj.totals[0], obj.totals[1], obj.totals[2]]);
         push(`积分：甲 ${obj.totals[0]} / 乙 ${obj.totals[1]} / 丙 ${obj.totals[2]}`);
       } else if (obj.kind==='terminated'){
