@@ -167,7 +167,6 @@ export default function Home() {
                     <label>API Key（可选）<br/>
                       <input type="password" placeholder="将作为 Bearer 发送" value={players[i].apiKey||''} onChange={e=>updatePlayer(i,{ apiKey:e.target.value })} />
                     </label>
-                  </>
                 )}
 
                 {players[i].kind==='openai' && (
@@ -181,7 +180,6 @@ export default function Home() {
                     <label>Base URL（可选）<br/>
                       <input type="text" placeholder="https://api.openai.com/v1" value={players[i].baseURL||''} onChange={e=>updatePlayer(i,{ baseURL:e.target.value })} />
                     </label>
-                  </>
                 )}
 
                 {players[i].kind==='gemini' && (
@@ -192,7 +190,6 @@ export default function Home() {
                     <label>模型<br/>
                       <input type="text" placeholder="gemini-1.5-flash" value={players[i].model||''} onChange={e=>updatePlayer(i,{ model:e.target.value })} />
                     </label>
-                  </>
                 )}
 
                 {players[i].kind==='kimi' && (
@@ -206,7 +203,6 @@ export default function Home() {
                     <label>Base URL（可选）<br/>
                       <input type="text" placeholder="https://api.moonshot.cn/v1" value={players[i].baseURL||''} onChange={e=>updatePlayer(i,{ baseURL:e.target.value })} />
                     </label>
-                  </>
                 )}
 
                 {players[i].kind==='grok' && (
@@ -220,7 +216,6 @@ export default function Home() {
                     <label>Base URL（可选）<br/>
                       <input type="text" placeholder="https://api.x.ai/v1" value={players[i].baseURL||''} onChange={e=>updatePlayer(i,{ baseURL:e.target.value })} />
                     </label>
-                  </>
                 )}
 
               </div>
@@ -249,9 +244,9 @@ export default function Home() {
         <summary>实时运行（流式）</summary>
         {React.createElement(LivePanel as any, { rounds, seed, rob, four2, delayMs, startScore, players })}
       </details>
-  </>
     </div>
   );
+  </>
 }
 
 function LivePanel(props:any){
