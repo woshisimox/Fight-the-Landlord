@@ -245,13 +245,13 @@ export default function Home() {
 
       <details style={{marginTop:16}}>
         <summary>实时运行（流式）</summary>
-        <LivePanel rounds={rounds} seed={seed} rob={rob} four2={four2} delayMs={delayMs} startScore={startScore} players={players} />
+        <LivePanel2 rounds={rounds} seed={seed} rob={rob} four2={four2} delayMs={delayMs} startScore={startScore} players={players} />
       </details>
     </div>
   );
 }
 
-function LivePanel(props:any){
+function LivePanel2(props:any){
   const [lines, setLines] = useState<string[]>([]);
   const [raw, setRaw] = useState<string[]>([]);
   const [objs, setObjs] = useState<any[]>([]);
