@@ -255,6 +255,7 @@ export default function Home() {
 function LivePanel(props:any){
 const LivePanelAny: any = LivePanel;
   const [lines, setLines] = useState<string[]>([]);
+  const push = (t:string) => setLines(l => [...l, t]);
   const [raw, setRaw] = useState<string[]>([]);
   const [objs, setObjs] = useState<any[]>([]);
   const [board, setBoard] = useState<{hands:string[][], last:string[], landlord:number|null, bottom:string[]}>({hands:[[],[],[]], last:['','',''], landlord:null, bottom:[]});
@@ -456,7 +457,6 @@ const LivePanelAny: any = LivePanel;
     }
   }
 
-  function push(t:string){ setLines(l=> [...l, t]); }
 
   return (
     
