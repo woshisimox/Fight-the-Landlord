@@ -176,7 +176,7 @@ const LivePanel: React.FC<LiveProps> = (props) => {
       setStatus('connecting');
       setRunning(true);
 
-      // body 由父组件传入的 players + 可选 apiKeys（保持后端兼容）
+      // 请求体由父组件注入（保持后端兼容）
       const body: any = (window as any).__ddz_req_body__ || {};
       const ac = new AbortController();
       abortRef.current = ac;
@@ -251,7 +251,7 @@ const LivePanel: React.FC<LiveProps> = (props) => {
               {['甲', '乙', '丙'][i]} {board.landlord === i ? '（地主）' : ''}
             </div>
             <div>手牌数：{board.hands[i]?.length ?? 0}</div>
-            {/* 新增：显示手牌 */}
+            {/* 手牌显示 */}
             <div style={{ marginTop: 6, lineHeight: 1.6 }}>
               手牌：<code><CardLine cards={board.handsRich ? board.handsRich[i] : []} /></code>
             </div>
@@ -321,7 +321,7 @@ export default function Home() {
   const [players, setPlayers] = useState<string>('builtin,builtin,builtin');
   const [seatProviders, setSeatProviders] = useState<Provider[]>(['builtin', 'builtin', 'builtin']);
 
-  // 可选：API Keys / HTTP 配置（随请求发送，后端不识别也不会影响）
+  // 可选：API Keys / HTTP 配置（随请求发送）
   const [apiKeys, setApiKeys] = useState({
     openai: '',
     gemini: '',
@@ -341,7 +341,7 @@ export default function Home() {
     setSeatProviders(pad);
   }
 
-  // 组合请求体（避免改 LivePanel 内 start() 逻辑：通过 window 临时挂载）
+  // 组合请求体（通过 window 临时挂载供 LivePanel.start 使用）
   function mountRequestBody() {
     (window as any).__ddz_req_body__ = {
       rounds,
@@ -351,7 +351,7 @@ export default function Home() {
       delayMs,
       startScore,
       players,
-      apiKeys, // 新增：可选密钥/HTTP配置
+      apiKeys,
     };
   }
 
@@ -393,7 +393,7 @@ export default function Home() {
           </label>
         </div>
 
-        {/* 新增：每家算法选择 */}
+        {/* 每家算法选择 */}
         <div style={{ marginTop: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>每家算法选择</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
@@ -422,7 +422,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 新增：API Keys / HTTP 配置（可选） */}
+        {/* API Keys / HTTP 配置（可选） */}
         <div style={{ marginTop: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>API Keys / HTTP</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
@@ -466,7 +466,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 原有 players 文本框保留：可手动覆盖并同步回下拉 */}
+        {/* 原有 players 文本框保留：手动覆盖并同步到下拉 */}
         <div style={{ marginTop: 12 }}>
           <label>
             选手（逗号分隔）<br />
