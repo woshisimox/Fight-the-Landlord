@@ -391,7 +391,7 @@ const LivePanelAny: any = LivePanel;
       } else if (obj.kind==='trick-reset'){
         setBoard(b=> ({...b, trick: []}));
         push('新一轮开始。');
-      } 继续领出`);
+      }
       
       } else if (obj.kind==='play'){
         const seatName = ['甲','乙','丙'][obj.seat];
