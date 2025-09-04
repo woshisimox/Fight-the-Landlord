@@ -50,6 +50,8 @@ type LiveProps = {
   players: string;
 };
 
+type Provider = 'builtin' | 'openai' | 'gemini' | 'kimi' | 'grok' | 'http';
+
 /** ---------- 实时面板 ---------- **/
 const LivePanel: React.FC<LiveProps> = (props) => {
   const [lines, setLines] = useState<string[]>([]);
@@ -174,15 +176,8 @@ const LivePanel: React.FC<LiveProps> = (props) => {
       setStatus('connecting');
       setRunning(true);
 
-      const body = {
-        rounds: props.rounds,
-        seed: props.seed,
-        rob: props.rob,
-        four2: props.four2,
-        delayMs: props.delayMs,
-        startScore: props.startScore,
-        players: props.players,
-      };
+      // body 由父组件传入的 players + 可选 apiKeys（保持后端兼容）
+      const body: any = (window as any).__ddz_req_body__ || {};
       const ac = new AbortController();
       abortRef.current = ac;
 
@@ -256,6 +251,10 @@ const LivePanel: React.FC<LiveProps> = (props) => {
               {['甲', '乙', '丙'][i]} {board.landlord === i ? '（地主）' : ''}
             </div>
             <div>手牌数：{board.hands[i]?.length ?? 0}</div>
+            {/* 新增：显示手牌 */}
+            <div style={{ marginTop: 6, lineHeight: 1.6 }}>
+              手牌：<code><CardLine cards={board.handsRich ? board.handsRich[i] : []} /></code>
+            </div>
             <div style={{ marginTop: 6 }}>
               最近出牌：<code><CardLine cards={board.lastRich ? board.lastRich[i] : []} /></code>
             </div>
@@ -317,12 +316,49 @@ export default function Home() {
   const [four2, setFour2] = useState<'both' | '2singles' | '2pairs'>('both');
   const [delayMs, setDelayMs] = useState<number>(200);
   const [startScore, setStartScore] = useState<number>(0);
+
+  // 仍保留原有 players 字符串（兼容后端），新增可视化选择并双向同步
   const [players, setPlayers] = useState<string>('builtin,builtin,builtin');
+  const [seatProviders, setSeatProviders] = useState<Provider[]>(['builtin', 'builtin', 'builtin']);
+
+  // 可选：API Keys / HTTP 配置（随请求发送，后端不识别也不会影响）
+  const [apiKeys, setApiKeys] = useState({
+    openai: '',
+    gemini: '',
+    kimi: '',
+    grok: '',
+    httpBase: '',
+    httpToken: '',
+  });
+
+  // 当手动编辑 players 字符串时，同步回三个下拉
+  function syncFromPlayersString(s: string) {
+    const arr = (s || '').split(',').map((x) => x.trim()) as Provider[];
+    const pad: Provider[] = ['builtin', 'builtin', 'builtin'];
+    for (let i = 0; i < Math.min(3, arr.length); i++) {
+      if (arr[i]) pad[i] = arr[i] as Provider;
+    }
+    setSeatProviders(pad);
+  }
+
+  // 组合请求体（避免改 LivePanel 内 start() 逻辑：通过 window 临时挂载）
+  function mountRequestBody() {
+    (window as any).__ddz_req_body__ = {
+      rounds,
+      seed,
+      rob,
+      four2,
+      delayMs,
+      startScore,
+      players,
+      apiKeys, // 新增：可选密钥/HTTP配置
+    };
+  }
 
   return (
     <div style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto', padding: 20, maxWidth: 1100, margin: '0 auto' }}>
       <h1>斗地主 AI 比赛 · 甲 / 乙 / 丙</h1>
-      <p>为每位选手选择内置或外部 AI，并可设置每步出牌延迟（ms）。</p>
+      <p>为每位选手选择内建或外部 AI，并可设置每步出牌延迟（ms）。</p>
 
       <fieldset style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8 }}>
         <legend>对局参数</legend>
@@ -356,20 +392,99 @@ export default function Home() {
             <input type="number" value={startScore} onChange={(e) => setStartScore(Number(e.target.value))} />
           </label>
         </div>
+
+        {/* 新增：每家算法选择 */}
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>每家算法选择</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+            {['甲', '乙', '丙'].map((label, i) => (
+              <label key={i}>
+                {label}：
+                <select
+                  value={seatProviders[i]}
+                  onChange={(e) => {
+                    const v = e.target.value as Provider;
+                    const arr = seatProviders.slice();
+                    arr[i] = v;
+                    setSeatProviders(arr);
+                    setPlayers(arr.join(','));
+                  }}
+                >
+                  <option value="builtin">内建</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="kimi">Kimi</option>
+                  <option value="grok">Grok</option>
+                  <option value="http">HTTP</option>
+                </select>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* 新增：API Keys / HTTP 配置（可选） */}
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>API Keys / HTTP</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+            <label>
+              OpenAI Key<br />
+              <input
+                type="password"
+                value={apiKeys.openai}
+                onChange={(e) => setApiKeys({ ...apiKeys, openai: e.target.value })}
+                placeholder="sk-..."
+              />
+            </label>
+            <label>
+              Gemini Key<br />
+              <input type="password" value={apiKeys.gemini} onChange={(e) => setApiKeys({ ...apiKeys, gemini: e.target.value })} />
+            </label>
+            <label>
+              Kimi Key<br />
+              <input type="password" value={apiKeys.kimi} onChange={(e) => setApiKeys({ ...apiKeys, kimi: e.target.value })} />
+            </label>
+            <label>
+              Grok Key<br />
+              <input type="password" value={apiKeys.grok} onChange={(e) => setApiKeys({ ...apiKeys, grok: e.target.value })} />
+            </label>
+            <label>
+              HTTP Base URL<br />
+              <input
+                value={apiKeys.httpBase}
+                onChange={(e) => setApiKeys({ ...apiKeys, httpBase: e.target.value })}
+                placeholder="https://example.com/api"
+              />
+            </label>
+            <label>
+              HTTP Token<br />
+              <input
+                type="password"
+                value={apiKeys.httpToken}
+                onChange={(e) => setApiKeys({ ...apiKeys, httpToken: e.target.value })}
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* 原有 players 文本框保留：可手动覆盖并同步回下拉 */}
         <div style={{ marginTop: 12 }}>
           <label>
             选手（逗号分隔）<br />
             <input
               style={{ width: '100%' }}
               value={players}
-              onChange={(e) => setPlayers(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setPlayers(v);
+                syncFromPlayersString(v);
+              }}
               placeholder="builtin,builtin,builtin"
             />
           </label>
         </div>
       </fieldset>
 
-      <details style={{ marginTop: 16 }}>
+      <details style={{ marginTop: 16 }} onToggle={mountRequestBody}>
         <summary>实时运行（流式）</summary>
         {React.createElement(LivePanel as any, { rounds, seed, rob, four2, delayMs, startScore, players })}
       </details>
