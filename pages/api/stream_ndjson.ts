@@ -5,7 +5,6 @@ import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
 import { HttpBot } from '../../lib/bots/http_bot';
 import { KimiBot } from '../../lib/bots/kimi_bot';
-import { KimiBot } from '../../lib/bots/kimi_bot';
 
 export const config = { api: { bodyParser: false, responseLimit: false } };
 
