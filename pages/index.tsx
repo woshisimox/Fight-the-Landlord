@@ -379,7 +379,7 @@ function LivePanel(props: LiveProps): JSX.Element {
             whiteSpace: 'pre-wrap',
             background: '#fcfcfc',
             padding: '6px 8px',
-            border: '1px solid '#eee',
+            border: '1px solid #eee',  // ✅ 修正这里的引号
             borderRadius: 4,
           }}
         >
