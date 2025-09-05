@@ -171,11 +171,16 @@ function LivePanel(props: LiveProps): JSX.Element {
         }
       }
     } else if (obj?.type === 'score') {
-      setTotals([obj.totals?.[0], obj.totals?.[1], obj.totals?.[2]]);
+      // —— 仅此处修改：把起始分叠加到 totals 上 —— //
+      const base = props.startScore || 0;
+      const tt: [number, number, number] = [
+        (obj.totals?.[0] ?? 0) + base,
+        (obj.totals?.[1] ?? 0) + base,
+        (obj.totals?.[2] ?? 0) + base,
+      ];
+      setTotals(tt);
       const spring = obj.spring ? (obj.spring === 'spring' ? ' · 春天×2' : ' · 反春天×2') : '';
-      push(
-        `积分：甲 ${obj.totals?.[0]} / 乙 ${obj.totals?.[1]} / 丙 ${obj.totals?.[2]}  · 底分=${obj.base} 倍数=${obj.multiplier}${spring}`
-      );
+      push(`积分：甲 ${tt[0]} / 乙 ${tt[1]} / 丙 ${tt[2]}  · 底分=${obj.base} 倍数=${obj.multiplier}${spring}`);
     } else if (obj?.type === 'terminated') {
       setStatus('terminated');
       push('对局已终止。');
@@ -372,7 +377,7 @@ function LivePanel(props: LiveProps): JSX.Element {
             <div style={{ fontWeight: 700, marginBottom: 6 }}>
               {['甲', '乙', '丙'][i]} {board.landlord === i ? '（地主）' : ''}
             </div>
-            {/* 新增：显示当前分数 */}
+            {/* 显示当前分数（含起始分） */}
             <div>当前分数：{totals[i]}</div>
             <div>手牌数：{board.hands[i]?.length ?? 0}</div>
             <div style={{ marginTop: 6, lineHeight: 1.6 }}>
