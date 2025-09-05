@@ -1,5 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
+import { OpenAIBot } from '../../lib/bots/openai_bot';
+import { GeminiBot } from '../../lib/bots/gemini_bot';
+import { GrokBot } from '../../lib/bots/grok_bot';
+import { HttpBot } from '../../lib/bots/http_bot';
+import { KimiBot } from '../../lib/bots/kimi_bot';
+import { KimiBot } from '../../lib/bots/kimi_bot';
 
 export const config = { api: { bodyParser: false, responseLimit: false } };
 
@@ -32,11 +38,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const seatProviders: string[] = Array.isArray(body.seatProviders) ? body.seatProviders : String(playersStr).split(',').map((s:string)=>s.trim());
   const seatKeys: any[] = Array.isArray(body.seatKeys) ? body.seatKeys : [];
 
-  const toBot = (name: string) => {
+  const toBot = (name: string, idx: number) => {
     const n = (name || '').trim().toLowerCase();
     if (n==='greedymax' || n==='max') return GreedyMax;
+    if (n==='openai') return OpenAIBot({ apiKey: (seatKeys[idx]?.openai)||'' });
     if (n==='greedymin' || n==='min') return GreedyMin;
+    if (n==='gemini') return GeminiBot({ apiKey: (seatKeys[idx]?.gemini)||'' });
     if (n==='random'   || n==='randomlegal') return RandomLegal;
+    if (n==='http') return HttpBot({ base: (seatKeys[idx]?.httpBase)||'', token: (seatKeys[idx]?.httpToken)||'' });
+    if (n==='kimi') return KimiBot({ apiKey: (seatKeys[idx]?.kimi)||'' });
+    if (n==='grok') return GrokBot({ apiKey: (seatKeys[idx]?.grok)||'' });
+    if (n==='kimi') return KimiBot({ apiKey: (seatKeys[idx]?.kimi)||'' });
     if (n==='builtin') return GreedyMax;
     // 未接入外部AI时，全部回退到 GreedyMax
     return GreedyMax;
@@ -51,7 +63,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const botNames = playersStr.split(',').map((s:string)=>s.trim());
-  const bots = [ toBot(botNames[0]||'builtin'), toBot(botNames[1]||'builtin'), toBot(botNames[2]||'builtin') ] as any;
+  const bots = [ toBot(botNames[0]||'builtin',0), toBot(botNames[1]||'builtin',1), toBot(botNames[2]||'builtin',2) ] as any;
   const botLabels = [ labelOf(botNames[0]||'builtin'), labelOf(botNames[1]||'builtin'), labelOf(botNames[2]||'builtin') ];
 
   res.writeHead(200, {
