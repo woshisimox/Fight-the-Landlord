@@ -24,9 +24,9 @@ export type TrickReq =
         | 'planeSingle' | 'planePair'
         | 'fourTwoSingles' | 'fourTwoPairs'
         | 'bomb' | 'rocket';
-      mainRank: number;    // 比较用主序（顺子/连对/飞机为最大那档；炸弹为四张牌的档）
-      length?: number;     // 顺子/连对/飞机长度（张数/对数/三张组数）
-      wings?: number;      // 飞机带翅膀时=三顺的组数
+      mainRank: number;    // 主序（比较大小）
+      length?: number;     // 顺子/连对/三顺的长度
+      wings?: number;      // 飞机带翅膀时=三顺组数
     };
 
 export type EventObj =
@@ -40,8 +40,8 @@ export type EventObj =
 
 export type EngineOptions = {
   seed?: number;
-  four2?: Four2Policy;       // 四带二规则
-  delayMs?: number;          // 逐步输出时的延迟（给流式 API 用）
+  four2?: Four2Policy;
+  delayMs?: number;
 };
 
 export type BotMove =
@@ -59,11 +59,11 @@ export type BotCtx = {
 
 export type BotFunc = (ctx: BotCtx) => BotMove;
 
-// 牌序：3..A(14), 2(16), 小王x(18), 大王X(19)
+// 牌序：3..A(??), 2, 小王x, 大王X
 export const RANKS: Label[] = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
 export const RANK_IDX = Object.fromEntries(RANKS.map((l, i) => [l, i])) as Record<Label, number>;
 
-// - - - - - 工具 - - - - -
+// ---------- 工具 ----------
 function lcg(seed: number) {
   let s = (seed >>> 0) || 1;
   return () => (s = (s * 1664525 + 1013904223) >>> 0);
@@ -74,7 +74,6 @@ function shuffle<T>(arr: T[], rnd: () => number) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
 }
-function copy<T>(a: T[]): T[] { return a.slice(); }
 function sortDesc(labels: Label[]): Label[] {
   return labels.slice().sort((a, b) => RANK_IDX[b] - RANK_IDX[a]);
 }
@@ -85,16 +84,15 @@ function counts(labels: Label[]): Map<Label, number> {
 }
 function uniq<T>(a: T[]): T[] { return Array.from(new Set(a)); }
 
+// 完整一副牌（含大小王）
 export function fullDeck(): Card[] {
   const out: Card[] = [];
   const suits: Suit[] = ['S','H','D','C'];
   for (const l of RANKS) {
     if (l === 'x') { out.push({ label: 'x', suit: 'BJ', code: 'J-B' }); continue; }
     if (l === 'X') { out.push({ label: 'X', suit: 'RJ', code: 'J-R' }); continue; }
-    // 3..2 每档四张
-    if (l !== 'x' && l !== 'X') {
-      suits.forEach((s, i) => out.push({ label: l, suit: s, code: `${l}-${s}-${i+1}` }));
-    }
+    // 到这里时 l 一定不是 'x' 或 'X'（TS 已收窄）
+    suits.forEach((s, i) => out.push({ label: l, suit: s, code: `${l}-${s}-${i+1}` }));
   }
   return out;
 }
@@ -115,10 +113,11 @@ export function deal(seed = 0): DealResult {
   return { hands, bottom, handsRich, bottomRich };
 }
 
-// - - - - - 组合判定 - - - - -
+// ---------- 组合判定 ----------
 export function classify(labels: Label[], policy: Four2Policy): TrickReq {
   const n = labels.length;
   const cnt = counts(labels);
+
   // 火箭
   if (n === 2 && cnt.get('x') === 1 && cnt.get('X') === 1) {
     return { type: 'rocket', mainRank: RANK_IDX['X'] };
@@ -128,7 +127,7 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
     const lab = [...cnt.entries()].find(([, v]) => v === 4)![0];
     return { type: 'bomb', mainRank: RANK_IDX[lab] };
   }
-  // 单张/对子/三张
+  // 单/对/三
   if (n === 1) return { type: 'single', mainRank: RANK_IDX[labels[0]] };
   if (n === 2 && [...cnt.values()][0] === 2) {
     const lab = [...cnt.keys()][0]; return { type: 'pair', mainRank: RANK_IDX[lab] };
@@ -136,7 +135,7 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
   if (n === 3 && [...cnt.values()][0] === 3) {
     const lab = [...cnt.keys()][0]; return { type: 'triple', mainRank: RANK_IDX[lab] };
   }
-  // 三带一/三带二
+  // 三带一/二
   if (n === 4 && [...cnt.values()].includes(3)) {
     const lab = [...cnt.entries()].find(([, v]) => v === 3)![0];
     return { type: 'tripleSingle', mainRank: RANK_IDX[lab] };
@@ -145,6 +144,7 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
     const lab = [...cnt.entries()].find(([, v]) => v === 3)![0];
     return { type: 'triplePair', mainRank: RANK_IDX[lab] };
   }
+
   // 顺子（>=5，不含2与王）
   const okStraight = (arr: Label[]): {len:number, max:number}|null => {
     if (arr.some(l => l === '2' || l === 'x' || l === 'X')) return null;
@@ -171,7 +171,7 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
   const ds = okDoubleStraight(labels);
   if (ds) return { type: 'doubleStraight', length: ds.pairs, mainRank: ds.max };
 
-  // 飞机（纯三顺/带翅膀）
+  // 三顺（不带）
   const okTripleStraight = (arr: Label[]): {groups:number, max:number}|null => {
     const m = counts(arr);
     if ([...m.values()].every(v => v===3)) {
@@ -185,8 +185,7 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
   const ts = okTripleStraight(labels);
   if (ts) return { type: 'tripleStraight', length: ts.groups, mainRank: ts.max };
 
-  // 飞机带翅膀
-  // 形如：三顺N组 + N个单牌  或  三顺N组 + N个对子
+  // 飞机带翅膀（N组三顺 + N 单 / N 对）
   const m = counts(labels);
   const triples = [...m.entries()].filter(([,v])=>v===3).map(([k])=>k as Label);
   triples.sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
@@ -225,14 +224,12 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
   return null;
 }
 
-// 比较（b 是否能大过 a）
-// 注意：只判断“可比且更大”，不处理不可比/过牌（在生成走法时控制）
+// b 是否能大过 a（仅类型/结构/主序比较）
 export function canBeat(a: TrickReq, b: TrickReq): boolean {
   if (!a || !b) return false;
   if (b.type === 'rocket') return true;
   if (a.type !== 'bomb' && b.type === 'bomb') return true;
   if (a.type !== b.type) return false;
-  // 同类型还需结构匹配
   if (a.type === 'straight' || a.type === 'doubleStraight' || a.type === 'tripleStraight') {
     if (a.length !== b.length) return false;
   }
@@ -242,26 +239,28 @@ export function canBeat(a: TrickReq, b: TrickReq): boolean {
   return b.mainRank > a.mainRank;
 }
 
-// - - - - - 走法生成（必要子集，覆盖常见跟牌/领出） - - - - -
+// ---------- 走法生成（覆盖常见情况） ----------
 export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Policy): Label[][] {
   const out: Label[][] = [];
   const m = counts(hand);
   const labs = sortDesc(uniq(hand));
   const pushIf = (arr: Label[]) => { if (classify(arr, policy)) out.push(arr); };
 
-  // 帮助：找所有炸弹/火箭
+  // 炸弹/火箭
   const bombs: Label[][] = [];
   for (const [k,v] of m) if (v===4) bombs.push([k,k,k,k]);
   const hasRocket = m.get('x')===1 && m.get('X')===1;
 
   if (!require) {
-    // 领出：给出常见类型（单、对、三、顺、连对、三顺、三带、四带、炸弹/火箭）
+    // 领出：常见类型
     for (const l of labs) pushIf([l]);
     for (const [k,v] of m) if (v>=2) pushIf([k,k]);
     for (const [k,v] of m) if (v>=3) pushIf([k,k,k]);
 
-    // 枚举顺子
-    const seqBase = labs.filter(l=>l!=='2'&&l!=='x'&&l!=='X').sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
+    // 顺子
+    const seqBase = labs
+      .filter(l=>l!=='2'&&l!=='x'&&l!=='X')
+      .sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
     for (let i=0;i<seqBase.length;i++){
       for (let j=i+4;j<seqBase.length;j++){
         let ok=true; for (let t=i+1;t<=j;t++) if (RANK_IDX[seqBase[t]]!==RANK_IDX[seqBase[t-1]]+1){ok=false;break;}
@@ -269,7 +268,9 @@ export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Pol
       }
     }
     // 连对
-    const pairKeys = labs.filter(l=> (m.get(l)||0)>=2 && l!=='2'&&l!=='x'&&l!=='X').sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
+    const pairKeys = labs
+      .filter(l=> (m.get(l)||0)>=2 && l!=='2'&&l!=='x'&&l!=='X')
+      .sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
     for (let i=0;i<pairKeys.length;i++){
       for (let j=i+2;j<pairKeys.length;j++){
         let ok=true; for (let t=i+1;t<=j;t++) if (RANK_IDX[pairKeys[t]]!==RANK_IDX[pairKeys[t-1]]+1){ok=false;break;}
@@ -277,19 +278,19 @@ export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Pol
       }
     }
     // 三顺（不带）
-    const triKeys = labs.filter(l=> (m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X').sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
-    for (let i=0;i+1<triKeys.length;i++){
-      for (let j=i+1;j<triKeys.length;j++){
-        let ok=true; for (let t=i+1;t<=j;t++) if (RANK_IDX[triKeys[t]]!==RANK_IDX[triKeys[t-1]]+1){ok=false;break;}
-        if (ok){ pushIf(triKeys.slice(i,j+1).flatMap(k=>[k,k,k])); }
+    const triKeys0 = labs
+      .filter(l=> (m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X')
+      .sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
+    for (let i=0;i+1<triKeys0.length;i++){
+      for (let j=i+1;j<triKeys0.length;j++){
+        let ok=true; for (let t=i+1;t<=j;t++) if (RANK_IDX[triKeys0[t]]!==RANK_IDX[triKeys0[t-1]]+1){ok=false;break;}
+        if (ok){ pushIf(triKeys0.slice(i,j+1).flatMap(k=>[k,k,k])); }
       }
     }
     // 三带一 / 三带二
     for (const [k,v] of m){
       if (v>=3){
-        // 带一
         for (const s of labs) if (s!==k) pushIf([k,k,k,s]);
-        // 带二（一个对子）
         for (const [p,vp] of m) if (p!==k && vp>=2) pushIf([k,k,k,p,p]);
       }
     }
@@ -311,10 +312,11 @@ export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Pol
     // 炸弹/火箭
     out.push(...bombs);
     if (hasRocket) out.push(['x','X']);
+
     return uniqBy(out.map(sortDesc), a=>a.join(',')).sort(byComboStrength);
   }
 
-  // 跟牌：先找同类型可大过的，再考虑炸弹/火箭
+  // 跟牌：先同型可接，再炸弹/火箭
   const req = require;
   const addIfBeats = (arr: Label[]) => {
     const cl = classify(arr, policy); if (cl && canBeat(req, cl)) out.push(arr);
@@ -366,13 +368,14 @@ export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Pol
     }
   } else if (req.type==='planeSingle'){
     const L = req.length!;
-    const triKeys = labs.filter(l=>(m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X').sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
-    for (let i=0;i+L-1<tr iKeys.length;i++){
-      let ok=true; for (let t=1;t<L;t++) if (RANK_IDX[triKeys[i+t]]!==RANK_IDX[triKeys[i+t-1]]+1){ok=false;break;}
+    const triKeys = labs
+      .filter(l => (m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X')
+      .sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
+    for (let i=0;i+L-1<triKeys.length;i++){
+      let ok=true; for (let t=1;t<L;t++) if (RANK_IDX[triKeys[i+t]]!==RANK_IDX[triKeys[i+t-1]]+1){ ok=false; break; }
       if (!ok) continue;
       const maxRank = RANK_IDX[triKeys[i+L-1]];
       if (maxRank<=req.mainRank) continue;
-      // 选择 L 个单牌
       const singles = labs.filter(s => {
         const c = (m.get(s)||0) - (triKeys.slice(i,i+L).includes(s) ? 3 : 0);
         return c>=1;
@@ -384,13 +387,14 @@ export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Pol
     }
   } else if (req.type==='planePair'){
     const L = req.length!;
-    const triKeys = labs.filter(l=>(m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X').sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
-    for (let i=0;i+L-1<tr iKeys.length;i++){
-      let ok=true; for (let t=1;t<L;t++) if (RANK_IDX[triKeys[i+t]]!==RANK_IDX[triKeys[i+t-1]]+1){ok=false;break;}
+    const triKeys = labs
+      .filter(l => (m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X')
+      .sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
+    for (let i=0;i+L-1<triKeys.length;i++){
+      let ok=true; for (let t=1;t<L;t++) if (RANK_IDX[triKeys[i+t]]!==RANK_IDX[triKeys[i+t-1]]+1){ ok=false; break; }
       if (!ok) continue;
       const maxRank = RANK_IDX[triKeys[i+L-1]];
       if (maxRank<=req.mainRank) continue;
-      // 选择 L 个对子
       const pairs = labs.filter(p => {
         const c = (m.get(p)||0) - (triKeys.slice(i,i+L).includes(p) ? 3 : 0);
         return c>=2;
@@ -426,7 +430,7 @@ function uniqBy<T>(arr: T[], key: (x:T)=>string): T[] {
   for (const x of arr){ const k = key(x); if (!s.has(k)){ s.add(k); out.push(x); } }
   return out;
 }
-// 大致排序：按分类强度 + 主序
+// 简单权重排序：先看类型强度，再看长度/主序
 function byComboStrength(a: Label[], b: Label[]): number {
   const A = classify(a as Label[], 'both')!; const B = classify(b as Label[], 'both')!;
   const w = (t: TrickReq) => t.type==='rocket'?1000: t.type==='bomb'?900:
@@ -441,7 +445,7 @@ function byComboStrength(a: Label[], b: Label[]): number {
   return A.mainRank - B.mainRank;
 }
 
-// - - - - - 简单 AI - - - - -
+// ---------- 简单 AI ----------
 export const RandomLegal: BotFunc = ({hands, require, canPass, policy}) => {
   const moves = generateMoves(hands, require, policy);
   if (moves.length===0) return canPass?{move:'pass'}:{move:'play', cards:[hands[0]]};
@@ -459,7 +463,7 @@ export const GreedyMax: BotFunc = ({hands, require, canPass, policy}) => {
   return { move:'play', cards: moves[moves.length-1] }; // 最强
 };
 
-// - - - - - 地主选择（简化：估分最高者当地主） - - - - -
+// ---------- 地主选择（简化） ----------
 function scoreHandForLandlord(labels: Label[]): number {
   const m = counts(labels);
   let s = 0;
@@ -470,7 +474,7 @@ function scoreHandForLandlord(labels: Label[]): number {
   return s;
 }
 
-// - - - - - 回合驱动 - - - - -
+// ---------- 回合驱动 ----------
 export type GameSetup = {
   hands: Label[][];
   bottom: Label[];
@@ -478,7 +482,7 @@ export type GameSetup = {
 };
 export function makeGame(seed=0): GameSetup {
   const {hands, bottom} = deal(seed);
-  // 选地主
+  // 选地主：估分最高
   const scores = hands.map(h=>scoreHandForLandlord(h));
   let landlord = 0; let best = -1;
   for (let i=0;i<3;i++) if (scores[i]>best){best=scores[i]; landlord=i;}
@@ -488,7 +492,7 @@ export function makeGame(seed=0): GameSetup {
 }
 
 export type MatchOptions = EngineOptions & {
-  players: [BotFunc, BotFunc, BotFunc];   // 三家 AI
+  players: [BotFunc, BotFunc, BotFunc];
   rounds?: number;
 };
 
@@ -517,18 +521,20 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
 
     if (mv.move==='pass') {
       if (!canPass) {
-        // 领出不能过，强制出最小单
-        const force = generateMoves(hands[turn], null, opts.four2||'both')[0] || [hands[turn][hands[turn].length-1]];
-        yield { type:'event', kind:'play', seat: turn, move:'play', cards: force, comboType: classify(force, opts.four2||'both')?.type||'play' };
+        // 领出不能过：强制出最小合法组合
+        const legalLead = generateMoves(hands[turn], null, opts.four2||'both');
+        const force = legalLead[0] || [hands[turn][hands[turn].length-1]];
+        const cc = classify(force, opts.four2||'both')!;
+        yield { type:'event', kind:'play', seat: turn, move:'play', cards: force, comboType: cc.type };
         removeLabels(hands[turn], force);
-        req = classify(force, opts.four2||'both')!;
+        req = cc;
         lastNonPassSeat = turn;
         passCount = 0;
       } else {
         yield { type:'event', kind:'play', seat: turn, move:'pass', reason:'过' };
         passCount++;
         if (passCount===2 && lastNonPassSeat!=null) {
-          // 一轮结束
+          // 一轮结束，上一位获领出权
           yield { type:'event', kind:'trick-reset' };
           turn = lastNonPassSeat;
           canPass = false;
@@ -538,10 +544,9 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
         }
       }
     } else {
-      // 出牌合法性校验
+      // 合法性校验
       const c = classify(mv.cards, opts.four2||'both');
       if (!c || (req && !canBeat(req, c))) {
-        // 非法，降级为最小合法组合
         const legal = generateMoves(hands[turn], req, opts.four2||'both');
         const pick = legal[0] || (canPass? null : [hands[turn][hands[turn].length-1]]);
         if (!pick) {
@@ -568,9 +573,8 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
 
     // 胜负判定
     if (hands[turn].length===0) {
-      // 简单计分：胜者+10
       const totals: [number,number,number] = [0,0,0];
-      totals[turn] = 10;
+      totals[turn] = 10; // 演示计分
       yield { type:'score', totals };
       yield { type:'terminated' };
       return;
@@ -578,8 +582,7 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
 
     // 下一家
     turn = (turn + 1) % 3;
-    if (!lastNonPassSeat) canPass = false;
-    else canPass = true;
+    canPass = lastNonPassSeat != null;
   }
 }
 
