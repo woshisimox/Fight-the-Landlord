@@ -21,12 +21,12 @@ export const HttpBot = (opts: HTTPOpts): BotFunc => {
       const j = await r.json();
       const move = j.move === 'pass' ? 'pass' : 'play';
       const cards = Array.isArray(j.cards) ? j.cards : [];
-      return move === 'pass' ? { move: 'pass' } : { move: 'play', cards, reason: j.reason || j.aiReason || j.explain || '' };
+      return move === 'pass' ? { move: 'pass' } : { move: 'play', cards };
     } catch (e) {
       if (ctx.canPass) return { move: 'pass' };
       const legal = generateMoves(ctx.hands, ctx.require, ctx.policy);
       const force = (legal && legal[0]) || [ctx.hands[0]];
-      return { move: 'play', cards: force, reason: providerName + ' 调用失败，回退' };
+      return { move: 'play', cards: force };
     }
   };
 };

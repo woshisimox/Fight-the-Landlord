@@ -44,8 +44,8 @@ export type EngineOptions = {
 };
 
 export type BotMove =
-  | { move: 'pass' }
-  | { move: 'play', cards: Label[] };
+  | { move: 'pass', reason?: string }
+  | { move: 'play', cards: Label[], reason?: string };
 
 export type BotCtx = {
   seat: number;
@@ -487,7 +487,7 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
           req = cc; lastNonPassSeat = turn; passCount = 0;
         }
       } else {
-        yield { type:'event', kind:'play', seat: turn, move:'play', cards: mv.cards, comboType: c.type };
+        yield { type:'event', kind:'play', seat: turn, move:'play', cards: mv.cards, comboType: c.type, reason: (mv as any).reason };
         removeLabels(hands[turn], mv.cards);
         playedCount[turn]++;
         if (c.type==='bomb' || c.type==='rocket') multiplier *= 2;
