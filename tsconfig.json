@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "es2017",
     "lib": [
       "dom",
       "dom.iterable",
@@ -21,7 +21,8 @@
     "types": [
       "node",
       "react"
-    ]
+    ],
+    "downlevelIteration": true
   },
   "include": [
     "next-env.d.ts",
