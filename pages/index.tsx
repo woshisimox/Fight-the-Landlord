@@ -196,10 +196,10 @@ function LivePanel(props: LiveProps): JSX.Element {
       const chunk = dec.decode(value, { stream: true });
       if (!gotFirstChunkRef.current) { gotFirstChunkRef.current = true; push('✅ 已收到数据流(POST)。'); clearWatchdog(); }
       buf += chunk;
-      let idx: number;
-      while ((idx = buf.indexOf('\\n')) >= 0) {
-        const line = buf.slice(0, idx).trim();
-        buf = buf.slice(idx + 1);
+      let idxLine: number;
+      while ((idxLine = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idxLine).trim();
+        buf = buf.slice(idxLine + 1);
         if (!line) continue;
         try {
           const payload = line.startsWith('data:') ? line.slice(5).trim() : line;
@@ -207,6 +207,15 @@ function LivePanel(props: LiveProps): JSX.Element {
           handle(obj);
         } catch {}
       }
+    }
+    // flush tail without trailing newline
+    const rest = buf.trim();
+    if (rest) {
+      try {
+        const payload = rest.startsWith('data:') ? rest.slice(5).trim() : rest;
+        const obj = JSON.parse(payload);
+        handle(obj);
+      } catch {}
     }
   }
 
