@@ -70,14 +70,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const game = runOneGame({ seed: seed + r, players: bots, four2, delayMs });
     for await (const ev of game) {
       // NEW: 在 play 事件上补充 provider / reason（内建给出简要理由提示）
-      if (ev && ev.type==='event' && ev.kind==='play' && typeof ev.seat === 'number') {
-        const seat = ev.seat as number;
+      if (ev && ev.type==='event' && ev.kind==='play' && typeof (ev as any).seat === 'number') {
+        const seat = (ev as any).seat as number;
         const provider = seatProviders?.[seat] || botLabels[seat] || 'builtin';
         const fallbackReason = provider==='builtin' || provider==='GreedyMax' || provider==='GreedyMin' || provider==='Random'
           ? `内建算法（${botLabels[seat]}）`
           : `外部AI(${provider})未接入后端，已回退内建（${botLabels[seat]}）`;
-        ev.provider = ev.provider || provider;
-        ev.reason = ev.reason || ev.aiReason || ev.explain || fallbackReason;
+        const enhanced = {
+          ...(ev as any),
+          provider: (ev as any).provider ?? provider,
+          reason: (ev as any).reason ?? (ev as any).aiReason ?? (ev as any).explain ?? fallbackReason,
+        };
+        write(enhanced);
+        continue;
       }
       write(ev);
     }
