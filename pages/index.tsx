@@ -274,7 +274,7 @@ function LivePanel(props: LiveProps): JSX.Element {
         delayMs: String(props.delayMs),
         startScore: String(props.startScore),
         players: props.players,
-        // 出于安全考虑，这里不把 key 放到 query 里
+        // 出于安全考虑，不把 key 放到 query
       });
       const full = url.includes('?') ? url + '&' + qs.toString() : url + '?' + qs.toString();
       push(`连接(GET SSE)：${full}`);
