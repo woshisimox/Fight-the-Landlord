@@ -132,9 +132,16 @@ function LivePanel(props: LiveProps): JSX.Element {
         setBoard((b) => ({ ...b, trick: [] }));
         push('新一轮开始。');
       } else if (obj.kind === 'play') {
+        // —— 这里做“AI 理由 + 提供方”显示的兼容 —— //
         const seatName = ['甲', '乙', '丙'][obj.seat];
+        const by = obj.provider || obj.model || obj.bot || obj.agent || obj.ai || '';
+        const pickedReason =
+          obj.aiReason ?? obj.reason ?? obj.explain ?? (obj.meta ? obj.meta.reason : undefined) ?? '';
+        const reasonSuffix = pickedReason ? ` — 理由：${pickedReason}` : '';
+        const byPrefix = by ? `【AI:${by}】` : '';
+
         if (obj.move === 'pass') {
-          push(`${seatName}：过${obj.reason ? ' — 理由：' + obj.reason : ''}`);
+          push(`${byPrefix}${seatName}：过${reasonSuffix}`);
           setBoard((b) => {
             const last = b.last.slice();
             last[obj.seat] = '过';
@@ -147,7 +154,7 @@ function LivePanel(props: LiveProps): JSX.Element {
         } else {
           const labels: string[] = obj.cards || [];
           const text = labels.join('');
-          push(`${seatName}：${obj.comboType || obj.type || '出牌'} ${text}${obj.reason ? ' — 理由：' + obj.reason : ''}`);
+          push(`${byPrefix}${seatName}：${obj.comboType || obj.type || '出牌'} ${text}${reasonSuffix}`);
           setBoard((b) => {
             const last = b.last.slice();
             last[obj.seat] = text;
