@@ -372,6 +372,8 @@ function LivePanel(props: LiveProps): JSX.Element {
             <div style={{ fontWeight: 700, marginBottom: 6 }}>
               {['甲', '乙', '丙'][i]} {board.landlord === i ? '（地主）' : ''}
             </div>
+            {/* 新增：显示当前分数 */}
+            <div>当前分数：{totals[i]}</div>
             <div>手牌数：{board.hands[i]?.length ?? 0}</div>
             <div style={{ marginTop: 6, lineHeight: 1.6 }}>
               手牌：<code><CardLine cards={board.handsRich ? board.handsRich[i] : []} /></code>
@@ -449,7 +451,7 @@ export default function Home(): JSX.Element {
   // 旧的全局 apiKeys（保持不变，以免影响其它逻辑；不再渲染 UI）
   const [apiKeys] = useState({ openai: '', gemini: '', kimi: '', grok: '', httpBase: '', httpToken: '' });
 
-  // —— 新增：每位玩家独立的 Key（仅 UI，不改变现有请求/引擎） —— //
+  // —— 每位玩家独立的 Key（仅 UI，不改变现有请求/引擎） —— //
   type SeatKey = {
     openai: string;
     gemini: string;
@@ -567,7 +569,7 @@ export default function Home(): JSX.Element {
           </div>
         </div>
 
-        {/* —— 新增：每家独立的 API Key / HTTP 设置（仅 UI；不更改现有请求/引擎） —— */}
+        {/* 每家 API 设置（独立，仅 UI） */}
         <div style={{ marginTop: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>每家 API 设置（独立）</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
