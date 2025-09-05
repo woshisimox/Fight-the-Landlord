@@ -1,3 +1,4 @@
+// pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 
@@ -24,18 +25,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const body = await readBody(req).catch(()=>({}));
-  const rounds = Number(body.rounds ?? 1);
-  const seed   = Number(body.seed ?? 0);
-  const delayMs= Number(body.delayMs ?? 200);
-  const four2  = (body.four2 ?? 'both') as 'both'|'2singles'|'2pairs';
+  const rounds  = Number(body.rounds ?? 1);
+  const seed    = Number(body.seed ?? 0);
+  const delayMs = Number(body.delayMs ?? 200);
+  const four2   = (body.four2 ?? 'both') as 'both'|'2singles'|'2pairs';
   const playersStr = String(body.players ?? 'builtin,builtin,builtin');
 
-  // 仅实现“内建”算法（示例），三家都使用内建
   const toBot = (name: string) => {
     const n = name.trim().toLowerCase();
     if (n==='greedymax' || n==='max') return GreedyMax;
     if (n==='greedymin' || n==='min') return GreedyMin;
-    if (n==='random' || n==='randomlegal') return RandomLegal;
+    if (n==='random'   || n==='randomlegal') return RandomLegal;
     if (n==='builtin') return GreedyMax;
     return GreedyMax;
   };
