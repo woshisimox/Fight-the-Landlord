@@ -1,4 +1,4 @@
-// pages/index.tsx
+
 import React, { useEffect, useRef, useState } from 'react';
 
 /** ---------- 花色渲染 ---------- **/
@@ -67,11 +67,7 @@ function LivePanel(props: LiveProps): JSX.Element {
     trick: [],
   });
 
-  const [totals, setTotals] = useState<[number, number, number]>([
-    props.startScore || 0,
-    props.startScore || 0,
-    props.startScore || 0,
-  ]);
+  const [totals, setTotals] = useState<[number, number, number]>([props.startScore||0, props.startScore||0, props.startScore||0]);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'streaming' | 'terminated'>('idle');
 
@@ -81,23 +77,13 @@ function LivePanel(props: LiveProps): JSX.Element {
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gotFirstChunkRef = useRef(false);
 
-  /** 连接设置（诊断用） */
-  const [endpointOverride, setEndpointOverride] = useState<string>(''); // 例如 /api/stream_ndjson
-  const [mode, setMode] = useState<Mode>('auto'); // auto / post / sse
+  const [endpointOverride, setEndpointOverride] = useState<string>('');
+  const [mode, setMode] = useState<Mode>('auto');
 
-  function clearWatchdog() {
-    if (watchdogRef.current) {
-      clearTimeout(watchdogRef.current as any);
-      watchdogRef.current = null;
-    }
-  }
+  function clearWatchdog() { if (watchdogRef.current) { clearTimeout(watchdogRef.current as any); watchdogRef.current = null; } }
   function armWatchdog() {
     clearWatchdog();
-    watchdogRef.current = setTimeout(() => {
-      if (!gotFirstChunkRef.current) {
-        push('⚠️ 长时间未收到数据，请检查后端是否返回 NDJSON 或 SSE。');
-      }
-    }, 5000);
+    watchdogRef.current = setTimeout(() => { if (!gotFirstChunkRef.current) push('⚠️ 长时间未收到数据，请检查后端是否返回 NDJSON 或 SSE。'); }, 5000);
   }
 
   function handle(obj: any) {
@@ -107,7 +93,6 @@ function LivePanel(props: LiveProps): JSX.Element {
         const req = obj.require ? `需跟:${obj.require.type}>${obj.require.mainRank}` : '';
         push(`【回合】${seat} ${obj.lead ? '(领出)' : ''} ${req}`);
       } else if (obj.kind === 'deal') {
-        // 为每张牌分配花色，后续渲染稳定
         const SUITS = ['S', 'H', 'D', 'C'];
         const nextIdx: Record<string, number> = {};
         const take = (label: string) => {
@@ -152,37 +137,33 @@ function LivePanel(props: LiveProps): JSX.Element {
           push(`${seatName}：${obj.comboType || obj.type || '出牌'} ${text}${obj.reason ? ' — 理由：' + obj.reason : ''}`);
           setBoard((b) => {
             const last = b.last.slice(); last[obj.seat] = text;
-
             const hands = b.hands.map((a) => a.slice());
             for (const lab of labels) {
               const k = hands[obj.seat].indexOf(lab);
               if (k >= 0) hands[obj.seat].splice(k, 1);
             }
-
             const handsRich = b.handsRich.map((arr) => arr.slice());
             const taken: any[] = [];
             for (const lab of labels) {
               const k = handsRich[obj.seat].findIndex((c: any) => c.label === lab);
               if (k >= 0) taken.push(handsRich[obj.seat].splice(k, 1)[0]);
             }
-
             const lastRich = b.lastRich.map((x) => x.slice()); lastRich[obj.seat] = taken;
             const trick = b.trick.slice(); trick.push({ seat: obj.seat, cardsRich: taken });
-
             return { ...b, last, hands, handsRich, lastRich, trick };
           });
         }
       }
     } else if (obj?.type === 'score') {
       setTotals([obj.totals?.[0], obj.totals?.[1], obj.totals?.[2]]);
-      push(`积分：甲 ${obj.totals?.[0]} / 乙 ${obj.totals?.[1]} / 丙 ${obj.totals?.[2]}`);
+      const spring = obj.spring ? (obj.spring==='spring'?' · 春天×2':' · 反春天×2') : '';
+      push(`积分：甲 ${obj.totals?.[0]} / 乙 ${obj.totals?.[1]} / 丙 ${obj.totals?.[2]}  · 底分=${obj.base} 倍数=${obj.multiplier}${spring}`);
     } else if (obj?.type === 'terminated') {
       setStatus('terminated');
       push('对局已终止。');
     }
   }
 
-  /** POST + NDJSON */
   async function runPOST(url: string) {
     const body: any = {
       rounds: props.rounds,
@@ -190,7 +171,6 @@ function LivePanel(props: LiveProps): JSX.Element {
       rob: props.rob,
       four2: props.four2,
       delayMs: props.delayMs,
-      delay: props.delayMs,
       startScore: props.startScore,
       start_score: props.startScore,
       players: props.players,
@@ -199,37 +179,25 @@ function LivePanel(props: LiveProps): JSX.Element {
     };
     const ac = new AbortController();
     abortRef.current = ac;
-
     push(`连接(POST NDJSON)：${url}`);
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: ac.signal,
-    });
-    push(`HTTP ${r.status} ${r.statusText} · content-type=${r.headers.get('content-type')}`);
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: ac.signal });
+    push(`HTTP ${r.status}  · content-type=${r.headers.get('content-type')}`);
     if (!r.ok || !r.body) throw new Error('响应不可读');
     setStatus('streaming');
     gotFirstChunkRef.current = false;
     armWatchdog();
-
     const reader = r.body.getReader();
     readerRef.current = reader;
     const dec = new TextDecoder('utf-8');
     let buf = '';
-
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       const chunk = dec.decode(value, { stream: true });
-      if (!gotFirstChunkRef.current) {
-        gotFirstChunkRef.current = true;
-        push('✅ 已收到数据流(POST)。');
-        clearWatchdog();
-      }
+      if (!gotFirstChunkRef.current) { gotFirstChunkRef.current = true; push('✅ 已收到数据流(POST)。'); clearWatchdog(); }
       buf += chunk;
       let idx: number;
-      while ((idx = buf.indexOf('\n')) >= 0) {
+      while ((idx = buf.indexOf('\\n')) >= 0) {
         const line = buf.slice(0, idx).trim();
         buf = buf.slice(idx + 1);
         if (!line) continue;
@@ -242,7 +210,6 @@ function LivePanel(props: LiveProps): JSX.Element {
     }
   }
 
-  /** GET + SSE */
   function runSSE(url: string) {
     return new Promise<void>((resolve, reject) => {
       const qs = new URLSearchParams({
@@ -264,32 +231,20 @@ function LivePanel(props: LiveProps): JSX.Element {
       es.onopen = () => { opened = true; push('SSE 打开'); };
       es.onerror = () => { if (!opened) reject(new Error('SSE 打开失败')); else push('SSE 错误'); };
       es.onmessage = (ev) => {
-        if (!gotFirstChunkRef.current) {
-          gotFirstChunkRef.current = true;
-          push('✅ 已收到数据流(SSE)。');
-          clearWatchdog();
-        }
-        try {
-          const obj = JSON.parse(ev.data);
-          handle(obj);
-        } catch {}
+        if (!gotFirstChunkRef.current) { gotFirstChunkRef.current = true; push('✅ 已收到数据流(SSE)。'); clearWatchdog(); }
+        try { const obj = JSON.parse(ev.data); handle(obj); } catch {}
       };
     });
   }
 
-  /** 启动/停止 */
   async function start() {
     try {
       setLines([]);
       setStatus('connecting');
       setRunning(true);
       gotFirstChunkRef.current = false;
-
-      const candidates = endpointOverride
-        ? [endpointOverride]
-        : ['/api/stream_ndjson', '/api/stream', '/api/live_ndjson', '/api/live'];
+      const candidates = endpointOverride ? [endpointOverride] : ['/api/stream_ndjson', '/api/stream', '/api/live_ndjson', '/api/live'];
       const tryModes: Mode[] = mode === 'auto' ? ['post', 'sse'] : [mode];
-
       let connected = false;
       for (const u of candidates) {
         for (const m of tryModes) {
@@ -304,7 +259,6 @@ function LivePanel(props: LiveProps): JSX.Element {
         }
         if (connected) break;
       }
-
       if (!connected) {
         push('❌ 所有尝试均失败，请确认后端端点与返回格式（NDJSON 或 SSE）。');
         setStatus('idle');
@@ -320,18 +274,14 @@ function LivePanel(props: LiveProps): JSX.Element {
   function stop() {
     try { abortRef.current?.abort(); } catch {}
     try { esRef.current?.close(); } catch {}
-    clearWatchdog();
+    if (watchdogRef.current) clearTimeout(watchdogRef.current);
+    watchdogRef.current = null;
     setStatus('idle');
     setRunning(false);
     push('已停止。');
   }
 
-  useEffect(() => {
-    return () => {
-      stop();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { return () => { stop(); }; }, []);
 
   return (
     <div style={{ border: '1px solid #eee', padding: 12, borderRadius: 8, marginTop: 12 }}>
@@ -374,15 +324,7 @@ function LivePanel(props: LiveProps): JSX.Element {
 
       <div style={{ marginTop: 12 }}>
         <div style={{ fontWeight: 700 }}>本轮出牌顺序</div>
-        <div
-          style={{
-            whiteSpace: 'pre-wrap',
-            background: '#fcfcfc',
-            padding: '6px 8px',
-            border: '1px solid #eee',  // ✅ 修正这里的引号
-            borderRadius: 4,
-          }}
-        >
+        <div style={{ whiteSpace: 'pre-wrap', background: '#fcfcfc', padding: '6px 8px', border: '1px solid #eee', borderRadius: 4 }}>
           {board.trick && board.trick.length ? (
             board.trick.map((t: any, idx: number) => (
               <div key={idx} style={{ marginBottom: 4 }}>
@@ -398,21 +340,8 @@ function LivePanel(props: LiveProps): JSX.Element {
 
       <div style={{ marginTop: 12 }}>
         <div style={{ fontWeight: 700 }}>事件日志（诊断信息）</div>
-        <div
-          style={{
-            whiteSpace: 'pre-wrap',
-            background: '#fcfcfc',
-            padding: '6px 8px',
-            border: '1px solid #eee',
-            borderRadius: 4,
-            maxHeight: 260,
-            overflow: 'auto',
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
-          }}
-        >
-          {lines.map((l, i) => (
-            <div key={i}>• {l}</div>
-          ))}
+        <div style={{ whiteSpace: 'pre-wrap', background: '#fcfcfc', padding: '6px 8px', border: '1px solid #eee', borderRadius: 4, maxHeight: 260, overflow: 'auto', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>
+          {lines.map((l, i) => (<div key={i}>• {l}</div>))}
         </div>
       </div>
     </div>
@@ -428,28 +357,14 @@ export default function Home(): JSX.Element {
   const [delayMs, setDelayMs] = useState<number>(200);
   const [startScore, setStartScore] = useState<number>(0);
 
-  // 仍保留原有 players 字符串（兼容后端），新增可视化选择并双向同步
   const [players, setPlayers] = useState<string>('builtin,builtin,builtin');
-  const [seatProviders, setSeatProviders] = useState<('builtin' | 'openai' | 'gemini' | 'kimi' | 'grok' | 'http')[]>([
-    'builtin', 'builtin', 'builtin'
-  ]);
-
-  // 可选：API Keys / HTTP 配置
-  const [apiKeys, setApiKeys] = useState({
-    openai: '',
-    gemini: '',
-    kimi: '',
-    grok: '',
-    httpBase: '',
-    httpToken: '',
-  });
+  const [seatProviders, setSeatProviders] = useState<('builtin' | 'openai' | 'gemini' | 'kimi' | 'grok' | 'http')[]>(['builtin', 'builtin', 'builtin']);
+  const [apiKeys, setApiKeys] = useState({ openai: '', gemini: '', kimi: '', grok: '', httpBase: '', httpToken: '' });
 
   function syncFromPlayersString(s: string) {
     const arr = (s || '').split(',').map((x) => x.trim());
     const pad: any[] = ['builtin', 'builtin', 'builtin'];
-    for (let i = 0; i < Math.min(3, arr.length); i++) {
-      if (arr[i]) pad[i] = arr[i];
-    }
+    for (let i = 0; i < Math.min(3, arr.length); i++) { if (arr[i]) pad[i] = arr[i]; }
     setSeatProviders(pad as any);
   }
 
@@ -461,37 +376,20 @@ export default function Home(): JSX.Element {
       <fieldset style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8 }}>
         <legend>对局参数</legend>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, alignItems: 'end' }}>
-          <label>
-            局数<br />
-            <input type="number" value={rounds} min={1} onChange={(e) => setRounds(Number(e.target.value))} />
-          </label>
-          <label>
-            随机种子<br />
-            <input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))} />
-          </label>
-          <label>
-            抢地主制<br />
-            <input type="checkbox" checked={rob} onChange={(e) => setRob(e.target.checked)} />
-          </label>
-          <label>
-            四带二<br />
+          <label>局数<br /><input type="number" value={rounds} min={1} onChange={(e) => setRounds(Number(e.target.value))} /></label>
+          <label>随机种子<br /><input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))} /></label>
+          <label>抢地主制<br /><input type="checkbox" checked={rob} onChange={(e) => setRob(e.target.checked)} /></label>
+          <label>四带二<br />
             <select value={four2} onChange={(e) => setFour2(e.target.value as any)}>
               <option value="both">两种都允许</option>
               <option value="2singles">只允许两单</option>
               <option value="2pairs">只允许两对</option>
             </select>
           </label>
-          <label>
-            延迟（ms）<br />
-            <input type="number" value={delayMs} min={0} onChange={(e) => setDelayMs(Number(e.target.value))} />
-          </label>
-          <label>
-            起始分<br />
-            <input type="number" value={startScore} onChange={(e) => setStartScore(Number(e.target.value))} />
-          </label>
+          <label>延迟（ms）<br /><input type="number" value={delayMs} min={0} onChange={(e) => setDelayMs(Number(e.target.value))} /></label>
+          <label>起始分<br /><input type="number" value={startScore} onChange={(e) => setStartScore(Number(e.target.value))} /></label>
         </div>
 
-        {/* 每家算法选择 */}
         <div style={{ marginTop: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>每家算法选择</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
@@ -520,64 +418,21 @@ export default function Home(): JSX.Element {
           </div>
         </div>
 
-        {/* API Keys / HTTP 配置（可选） */}
         <div style={{ marginTop: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>API Keys / HTTP</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
-            <label>
-              OpenAI Key<br />
-              <input
-                type="password"
-                value={apiKeys.openai}
-                onChange={(e) => setApiKeys({ ...apiKeys, openai: e.target.value })}
-                placeholder="sk-..."
-              />
-            </label>
-            <label>
-              Gemini Key<br />
-              <input type="password" value={apiKeys.gemini} onChange={(e) => setApiKeys({ ...apiKeys, gemini: e.target.value })} />
-            </label>
-            <label>
-              Kimi Key<br />
-              <input type="password" value={apiKeys.kimi} onChange={(e) => setApiKeys({ ...apiKeys, kimi: e.target.value })} />
-            </label>
-            <label>
-              Grok Key<br />
-              <input type="password" value={apiKeys.grok} onChange={(e) => setApiKeys({ ...apiKeys, grok: e.target.value })} />
-            </label>
-            <label>
-              HTTP Base URL<br />
-              <input
-                value={apiKeys.httpBase}
-                onChange={(e) => setApiKeys({ ...apiKeys, httpBase: e.target.value })}
-                placeholder="https://example.com/api"
-              />
-            </label>
-            <label>
-              HTTP Token<br />
-              <input
-                type="password"
-                value={apiKeys.httpToken}
-                onChange={(e) => setApiKeys({ ...apiKeys, httpToken: e.target.value })}
-              />
-            </label>
+            <label>OpenAI Key<br /><input type="password" value={apiKeys.openai} onChange={(e) => setApiKeys({ ...apiKeys, openai: e.target.value })} placeholder="sk-..." /></label>
+            <label>Gemini Key<br /><input type="password" value={apiKeys.gemini} onChange={(e) => setApiKeys({ ...apiKeys, gemini: e.target.value })} /></label>
+            <label>Kimi Key<br /><input type="password" value={apiKeys.kimi} onChange={(e) => setApiKeys({ ...apiKeys, kimi: e.target.value })} /></label>
+            <label>Grok Key<br /><input type="password" value={apiKeys.grok} onChange={(e) => setApiKeys({ ...apiKeys, grok: e.target.value })} /></label>
+            <label>HTTP Base URL<br /><input value={apiKeys.httpBase} onChange={(e) => setApiKeys({ ...apiKeys, httpBase: e.target.value })} placeholder="https://example.com/api" /></label>
+            <label>HTTP Token<br /><input type="password" value={apiKeys.httpToken} onChange={(e) => setApiKeys({ ...apiKeys, httpToken: e.target.value })} /></label>
           </div>
         </div>
 
-        {/* 原有 players 文本框保留：手动覆盖并同步到下拉 */}
         <div style={{ marginTop: 12 }}>
-          <label>
-            选手（逗号分隔）<br />
-            <input
-              style={{ width: '100%' }}
-              value={players}
-              onChange={(e) => {
-                const v = e.target.value;
-                setPlayers(v);
-                syncFromPlayersString(v);
-              }}
-              placeholder="builtin,builtin,builtin"
-            />
+          <label>选手（逗号分隔）<br />
+            <input style={{ width: '100%' }} value={players} onChange={(e) => { const v = e.target.value; setPlayers(v); syncFromPlayersString(v); }} placeholder="builtin,builtin,builtin" />
           </label>
         </div>
       </fieldset>

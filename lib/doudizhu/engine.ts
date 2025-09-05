@@ -1,6 +1,5 @@
-// lib/doudizhu/engine.ts
-/* eslint-disable @typescript-eslint/no-use-before-define */
 
+/* eslint-disable @typescript-eslint/no-use-before-define */
 export type Label = '3'|'4'|'5'|'6'|'7'|'8'|'9'|'T'|'J'|'Q'|'K'|'A'|'2'|'x'|'X';
 export type Suit  = 'S'|'H'|'D'|'C'|'BJ'|'RJ';
 export type Four2Policy = 'both'|'2singles'|'2pairs';
@@ -24,9 +23,9 @@ export type TrickReq =
         | 'planeSingle' | 'planePair'
         | 'fourTwoSingles' | 'fourTwoPairs'
         | 'bomb' | 'rocket';
-      mainRank: number;    // 主序（比较大小）
-      length?: number;     // 顺子/连对/三顺的长度
-      wings?: number;      // 飞机带翅膀时=三顺组数
+      mainRank: number;
+      length?: number;
+      wings?: number;
     };
 
 export type EventObj =
@@ -35,7 +34,7 @@ export type EventObj =
   | { type: 'event', kind: 'turn', seat: number, lead?: boolean, require?: TrickReq }
   | { type: 'event', kind: 'play', seat: number, move: 'play'|'pass', cards?: Label[], comboType?: string, reason?: string }
   | { type: 'event', kind: 'trick-reset' }
-  | { type: 'score', totals: [number, number, number] }
+  | { type: 'score', totals: [number, number, number], base: number, multiplier: number, spring?: 'spring'|'anti-spring' }
   | { type: 'terminated' };
 
 export type EngineOptions = {
@@ -59,39 +58,22 @@ export type BotCtx = {
 
 export type BotFunc = (ctx: BotCtx) => BotMove;
 
-// 牌序：3..A(??), 2, 小王x, 大王X
 export const RANKS: Label[] = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
 export const RANK_IDX = Object.fromEntries(RANKS.map((l, i) => [l, i])) as Record<Label, number>;
 
-// ---------- 工具 ----------
-function lcg(seed: number) {
-  let s = (seed >>> 0) || 1;
-  return () => (s = (s * 1664525 + 1013904223) >>> 0);
-}
-function shuffle<T>(arr: T[], rnd: () => number) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = rnd() % (i + 1);
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-}
-function sortDesc(labels: Label[]): Label[] {
-  return labels.slice().sort((a, b) => RANK_IDX[b] - RANK_IDX[a]);
-}
-function counts(labels: Label[]): Map<Label, number> {
-  const m = new Map<Label, number>();
-  for (const l of labels) m.set(l, (m.get(l) || 0) + 1);
-  return m;
-}
+function lcg(seed: number) { let s = (seed >>> 0) || 1; return () => (s = (s * 1664525 + 1013904223) >>> 0); }
+function rndPick(n: number, r: () => number) { return r() % n; }
+function shuffle<T>(arr: T[], rnd: () => number) { for (let i = arr.length - 1; i > 0; i--) { const j = rndPick(i + 1, rnd); [arr[i], arr[j]] = [arr[j], arr[i]]; } }
+function sortDesc(labels: Label[]): Label[] { return labels.slice().sort((a, b) => RANK_IDX[b] - RANK_IDX[a]); }
+function counts(labels: Label[]): Map<Label, number> { const m = new Map<Label, number>(); for (const l of labels) m.set(l, (m.get(l) || 0) + 1); return m; }
 function uniq<T>(a: T[]): T[] { return Array.from(new Set(a)); }
 
-// 完整一副牌（含大小王）
 export function fullDeck(): Card[] {
   const out: Card[] = [];
   const suits: Suit[] = ['S','H','D','C'];
   for (const l of RANKS) {
     if (l === 'x') { out.push({ label: 'x', suit: 'BJ', code: 'J-B' }); continue; }
     if (l === 'X') { out.push({ label: 'X', suit: 'RJ', code: 'J-R' }); continue; }
-    // 到这里时 l 一定不是 'x' 或 'X'（TS 已收窄）
     suits.forEach((s, i) => out.push({ label: l, suit: s, code: `${l}-${s}-${i+1}` }));
   }
   return out;
@@ -113,39 +95,22 @@ export function deal(seed = 0): DealResult {
   return { hands, bottom, handsRich, bottomRich };
 }
 
-// ---------- 组合判定 ----------
 export function classify(labels: Label[], policy: Four2Policy): TrickReq {
   const n = labels.length;
   const cnt = counts(labels);
-
-  // 火箭
   if (n === 2 && cnt.get('x') === 1 && cnt.get('X') === 1) {
     return { type: 'rocket', mainRank: RANK_IDX['X'] };
   }
-  // 炸弹
   if (n === 4 && [...cnt.values()].includes(4)) {
     const lab = [...cnt.entries()].find(([, v]) => v === 4)![0];
     return { type: 'bomb', mainRank: RANK_IDX[lab] };
   }
-  // 单/对/三
   if (n === 1) return { type: 'single', mainRank: RANK_IDX[labels[0]] };
-  if (n === 2 && [...cnt.values()][0] === 2) {
-    const lab = [...cnt.keys()][0]; return { type: 'pair', mainRank: RANK_IDX[lab] };
-  }
-  if (n === 3 && [...cnt.values()][0] === 3) {
-    const lab = [...cnt.keys()][0]; return { type: 'triple', mainRank: RANK_IDX[lab] };
-  }
-  // 三带一/二
-  if (n === 4 && [...cnt.values()].includes(3)) {
-    const lab = [...cnt.entries()].find(([, v]) => v === 3)![0];
-    return { type: 'tripleSingle', mainRank: RANK_IDX[lab] };
-  }
-  if (n === 5 && [...cnt.values()].includes(3) && [...cnt.values()].includes(2)) {
-    const lab = [...cnt.entries()].find(([, v]) => v === 3)![0];
-    return { type: 'triplePair', mainRank: RANK_IDX[lab] };
-  }
+  if (n === 2 && [...cnt.values()][0] === 2) { const lab = [...cnt.keys()][0]; return { type: 'pair', mainRank: RANK_IDX[lab] }; }
+  if (n === 3 && [...cnt.values()][0] === 3) { const lab = [...cnt.keys()][0]; return { type: 'triple', mainRank: RANK_IDX[lab] }; }
+  if (n === 4 && [...cnt.values()].includes(3)) { const lab = [...cnt.entries()].find(([, v]) => v === 3)![0]; return { type: 'tripleSingle', mainRank: RANK_IDX[lab] }; }
+  if (n === 5 && [...cnt.values()].includes(3) && [...cnt.values()].includes(2)) { const lab = [...cnt.entries()].find(([, v]) => v === 3)![0]; return { type: 'triplePair', mainRank: RANK_IDX[lab] }; }
 
-  // 顺子（>=5，不含2与王）
   const okStraight = (arr: Label[]): {len:number, max:number}|null => {
     if (arr.some(l => l === '2' || l === 'x' || l === 'X')) return null;
     const u = uniq(arr).sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
@@ -157,7 +122,6 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
   const st = okStraight(labels);
   if (st) return { type: 'straight', length: st.len, mainRank: st.max };
 
-  // 连对（>=3对，不含2与王）
   const okDoubleStraight = (arr: Label[]): {pairs:number, max:number}|null => {
     const m = counts(arr);
     if ([...m.values()].some(v => v !== 2)) return null;
@@ -171,7 +135,6 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
   const ds = okDoubleStraight(labels);
   if (ds) return { type: 'doubleStraight', length: ds.pairs, mainRank: ds.max };
 
-  // 三顺（不带）
   const okTripleStraight = (arr: Label[]): {groups:number, max:number}|null => {
     const m = counts(arr);
     if ([...m.values()].every(v => v===3)) {
@@ -185,7 +148,6 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
   const ts = okTripleStraight(labels);
   if (ts) return { type: 'tripleStraight', length: ts.groups, mainRank: ts.max };
 
-  // 飞机带翅膀（N组三顺 + N 单 / N 对）
   const m = counts(labels);
   const triples = [...m.entries()].filter(([,v])=>v===3).map(([k])=>k as Label);
   triples.sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
@@ -200,15 +162,12 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
       const remain = v - (inTriples?3:0);
       for (let i=0;i<remain;i++) rest.push(k);
     }
-    // N 单
     const singleOk = rest.length===groups && counts(rest).size===rest.length;
     if (singleOk) return { type:'planeSingle', wings: groups, length: groups, mainRank: RANK_IDX[triples[triples.length-1]] };
-    // N 对
     const pairOk = rest.length===groups*2 && [...counts(rest).values()].every(v=>v===2);
     if (pairOk) return { type:'planePair', wings: groups, length: groups, mainRank: RANK_IDX[triples[triples.length-1]] };
   }
 
-  // 四带二（两单或两对）
   if (n === 6 && policy!=='2pairs') {
     const has4 = [...cnt.values()].includes(4);
     if (has4) return { type:'fourTwoSingles', mainRank: RANK_IDX[[...cnt.entries()].find(([,v])=>v===4)![0]] };
@@ -220,11 +179,9 @@ export function classify(labels: Label[], policy: Four2Policy): TrickReq {
       return { type:'fourTwoPairs', mainRank: RANK_IDX[[...cnt.entries()].find(([,v])=>v===4)![0]] };
     }
   }
-
   return null;
 }
 
-// b 是否能大过 a（仅类型/结构/主序比较）
 export function canBeat(a: TrickReq, b: TrickReq): boolean {
   if (!a || !b) return false;
   if (b.type === 'rocket') return true;
@@ -239,62 +196,48 @@ export function canBeat(a: TrickReq, b: TrickReq): boolean {
   return b.mainRank > a.mainRank;
 }
 
-// ---------- 走法生成（覆盖常见情况） ----------
 export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Policy): Label[][] {
   const out: Label[][] = [];
   const m = counts(hand);
   const labs = sortDesc(uniq(hand));
   const pushIf = (arr: Label[]) => { if (classify(arr, policy)) out.push(arr); };
 
-  // 炸弹/火箭
   const bombs: Label[][] = [];
   for (const [k,v] of m) if (v===4) bombs.push([k,k,k,k]);
   const hasRocket = m.get('x')===1 && m.get('X')===1;
 
   if (!require) {
-    // 领出：常见类型
     for (const l of labs) pushIf([l]);
     for (const [k,v] of m) if (v>=2) pushIf([k,k]);
     for (const [k,v] of m) if (v>=3) pushIf([k,k,k]);
 
-    // 顺子
-    const seqBase = labs
-      .filter(l=>l!=='2'&&l!=='x'&&l!=='X')
-      .sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
+    const seqBase = labs.filter(l=>l!=='2'&&l!=='x'&&l!=='X').sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
     for (let i=0;i<seqBase.length;i++){
       for (let j=i+4;j<seqBase.length;j++){
         let ok=true; for (let t=i+1;t<=j;t++) if (RANK_IDX[seqBase[t]]!==RANK_IDX[seqBase[t-1]]+1){ok=false;break;}
         if (ok){ pushIf(seqBase.slice(i,j+1)); }
       }
     }
-    // 连对
-    const pairKeys = labs
-      .filter(l=> (m.get(l)||0)>=2 && l!=='2'&&l!=='x'&&l!=='X')
-      .sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
+    const pairKeys = labs.filter(l=> (m.get(l)||0)>=2 && l!=='2'&&l!=='x'&&l!=='X').sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
     for (let i=0;i<pairKeys.length;i++){
       for (let j=i+2;j<pairKeys.length;j++){
         let ok=true; for (let t=i+1;t<=j;t++) if (RANK_IDX[pairKeys[t]]!==RANK_IDX[pairKeys[t-1]]+1){ok=false;break;}
         if (ok){ pushIf(pairKeys.slice(i,j+1).flatMap(k=>[k,k])); }
       }
     }
-    // 三顺（不带）
-    const triKeys0 = labs
-      .filter(l=> (m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X')
-      .sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
+    const triKeys0 = labs.filter(l=> (m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X').sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
     for (let i=0;i+1<triKeys0.length;i++){
       for (let j=i+1;j<triKeys0.length;j++){
         let ok=true; for (let t=i+1;t<=j;t++) if (RANK_IDX[triKeys0[t]]!==RANK_IDX[triKeys0[t-1]]+1){ok=false;break;}
         if (ok){ pushIf(triKeys0.slice(i,j+1).flatMap(k=>[k,k,k])); }
       }
     }
-    // 三带一 / 三带二
     for (const [k,v] of m){
       if (v>=3){
         for (const s of labs) if (s!==k) pushIf([k,k,k,s]);
         for (const [p,vp] of m) if (p!==k && vp>=2) pushIf([k,k,k,p,p]);
       }
     }
-    // 四带二
     if (policy!=='2pairs'){
       for (const [k,v] of m) if (v===4){
         const singles = labs.filter(s=>s!==k);
@@ -309,18 +252,13 @@ export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Pol
           pushIf([k,k,k,k,pairs[i],pairs[i],pairs[j],pairs[j]]);
       }
     }
-    // 炸弹/火箭
     out.push(...bombs);
     if (hasRocket) out.push(['x','X']);
-
     return uniqBy(out.map(sortDesc), a=>a.join(',')).sort(byComboStrength);
   }
 
-  // 跟牌：先同型可接，再炸弹/火箭
   const req = require;
-  const addIfBeats = (arr: Label[]) => {
-    const cl = classify(arr, policy); if (cl && canBeat(req, cl)) out.push(arr);
-  };
+  const addIfBeats = (arr: Label[]) => { const cl = classify(arr, policy); if (cl && canBeat(req, cl)) out.push(arr); };
 
   if (req.type==='single'){
     for (const l of labs) if (RANK_IDX[l]>req.mainRank) addIfBeats([l]);
@@ -368,9 +306,7 @@ export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Pol
     }
   } else if (req.type==='planeSingle'){
     const L = req.length!;
-    const triKeys = labs
-      .filter(l => (m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X')
-      .sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
+    const triKeys = labs.filter(l => (m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X').sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
     for (let i=0;i+L-1<triKeys.length;i++){
       let ok=true; for (let t=1;t<L;t++) if (RANK_IDX[triKeys[i+t]]!==RANK_IDX[triKeys[i+t-1]]+1){ ok=false; break; }
       if (!ok) continue;
@@ -387,9 +323,7 @@ export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Pol
     }
   } else if (req.type==='planePair'){
     const L = req.length!;
-    const triKeys = labs
-      .filter(l => (m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X')
-      .sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
+    const triKeys = labs.filter(l => (m.get(l)||0)>=3 && l!=='2'&&l!=='x'&&l!=='X').sort((a,b)=>RANK_IDX[a]-RANK_IDX[b]);
     for (let i=0;i+L-1<triKeys.length;i++){
       let ok=true; for (let t=1;t<L;t++) if (RANK_IDX[triKeys[i+t]]!==RANK_IDX[triKeys[i+t-1]]+1){ ok=false; break; }
       if (!ok) continue;
@@ -418,7 +352,6 @@ export function generateMoves(hand: Label[], require: TrickReq, policy: Four2Pol
     }
   }
 
-  // 炸弹/火箭兜底
   bombs.forEach(addIfBeats);
   if (hasRocket) addIfBeats(['x','X']);
 
@@ -430,10 +363,9 @@ function uniqBy<T>(arr: T[], key: (x:T)=>string): T[] {
   for (const x of arr){ const k = key(x); if (!s.has(k)){ s.add(k); out.push(x); } }
   return out;
 }
-// 简单权重排序：先看类型强度，再看长度/主序
 function byComboStrength(a: Label[], b: Label[]): number {
   const A = classify(a as Label[], 'both')!; const B = classify(b as Label[], 'both')!;
-  const w = (t: TrickReq) => t.type==='rocket'?1000: t.type==='bomb'?900:
+  const w = (t: any) => t.type==='rocket'?1000: t.type==='bomb'?900:
     t.type==='fourTwoPairs'||t.type==='fourTwoSingles'?500:
     t.type==='planePair'||t.type==='planeSingle'?420:
     t.type==='tripleStraight'?400:
@@ -445,7 +377,6 @@ function byComboStrength(a: Label[], b: Label[]): number {
   return A.mainRank - B.mainRank;
 }
 
-// ---------- 简单 AI ----------
 export const RandomLegal: BotFunc = ({hands, require, canPass, policy}) => {
   const moves = generateMoves(hands, require, policy);
   if (moves.length===0) return canPass?{move:'pass'}:{move:'play', cards:[hands[0]]};
@@ -455,26 +386,24 @@ export const RandomLegal: BotFunc = ({hands, require, canPass, policy}) => {
 export const GreedyMin: BotFunc = ({hands, require, canPass, policy}) => {
   const moves = generateMoves(hands, require, policy);
   if (moves.length===0) return canPass?{move:'pass'}:{move:'play', cards:[hands[hands.length-1]]};
-  return { move:'play', cards: moves[0] }; // 最弱
+  return { move:'play', cards: moves[0] };
 };
 export const GreedyMax: BotFunc = ({hands, require, canPass, policy}) => {
   const moves = generateMoves(hands, require, policy);
   if (moves.length===0) return canPass?{move:'pass'}:{move:'play', cards:[hands[0]]};
-  return { move:'play', cards: moves[moves.length-1] }; // 最强
+  return { move:'play', cards: moves[moves.length-1] };
 };
 
-// ---------- 地主选择（简化） ----------
 function scoreHandForLandlord(labels: Label[]): number {
   const m = counts(labels);
   let s = 0;
   for (const l of labels) s += RANK_IDX[l];
   if (m.get('2')) s += 20*(m.get('2')||0);
   if ((m.get('x')||0)+(m.get('X')||0)===2) s += 80;
-  for (const [k,v] of m) if (v===4) s += 60; // 炸弹
+  for (const [k,v] of m) if (v===4) s += 60;
   return s;
 }
 
-// ---------- 回合驱动 ----------
 export type GameSetup = {
   hands: Label[][];
   bottom: Label[];
@@ -482,11 +411,9 @@ export type GameSetup = {
 };
 export function makeGame(seed=0): GameSetup {
   const {hands, bottom} = deal(seed);
-  // 选地主：估分最高
   const scores = hands.map(h=>scoreHandForLandlord(h));
   let landlord = 0; let best = -1;
   for (let i=0;i<3;i++) if (scores[i]>best){best=scores[i]; landlord=i;}
-  // 地主拿底牌
   hands[landlord] = sortDesc(hands[landlord].concat(bottom));
   return { hands: hands.map(sortDesc), bottom, landlord };
 }
@@ -499,42 +426,42 @@ export type MatchOptions = EngineOptions & {
 export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> {
   const delay = async () => { if (opts.delayMs) await new Promise(r=>setTimeout(r, opts.delayMs)); };
 
+  const baseScore = 3; // 无叫分，固定底分=3
   const g = makeGame(opts.seed||0);
   yield { type:'event', kind:'deal', hands: g.hands.map(h=>h.slice()), bottom: g.bottom };
-  yield { type:'event', kind:'landlord', landlord: g.landlord, bottom: g.bottom.slice(), baseScore: 3 };
+  yield { type:'event', kind:'landlord', landlord: g.landlord, bottom: g.bottom.slice(), baseScore };
 
   const hands: Label[][] = g.hands.map(h=>h.slice());
   const bots = opts.players;
 
-  let turn = g.landlord; // 当前行动位
+  let turn = g.landlord;
   let req: TrickReq = null;
   let canPass = false;
   let lastNonPassSeat: number | null = null;
   let passCount = 0;
 
+  // 倍数：炸弹/火箭×2，春天/反春天×2
+  let multiplier = 1;
+  const playedCount: number[] = [0,0,0]; // 每家成功出牌次数
+
   while (true) {
     yield { type:'event', kind:'turn', seat: turn, lead: !canPass, require: req || undefined };
-    const mv = bots[turn]({
-      seat: turn, hands: hands[turn].slice(), require: req, canPass, policy: opts.four2||'both',
-      lastNonPassSeat
-    });
+    const mv = bots[turn]({ seat: turn, hands: hands[turn].slice(), require: req, canPass, policy: opts.four2||'both', lastNonPassSeat });
 
     if (mv.move==='pass') {
       if (!canPass) {
-        // 领出不能过：强制出最小合法组合
         const legalLead = generateMoves(hands[turn], null, opts.four2||'both');
         const force = legalLead[0] || [hands[turn][hands[turn].length-1]];
         const cc = classify(force, opts.four2||'both')!;
         yield { type:'event', kind:'play', seat: turn, move:'play', cards: force, comboType: cc.type };
         removeLabels(hands[turn], force);
-        req = cc;
-        lastNonPassSeat = turn;
-        passCount = 0;
+        playedCount[turn]++;
+        if (cc.type==='bomb' || cc.type==='rocket') multiplier *= 2;
+        req = cc; lastNonPassSeat = turn; passCount = 0;
       } else {
         yield { type:'event', kind:'play', seat: turn, move:'pass', reason:'过' };
         passCount++;
         if (passCount===2 && lastNonPassSeat!=null) {
-          // 一轮结束，上一位获领出权
           yield { type:'event', kind:'trick-reset' };
           turn = lastNonPassSeat;
           canPass = false;
@@ -544,7 +471,6 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
         }
       }
     } else {
-      // 合法性校验
       const c = classify(mv.cards, opts.four2||'both');
       if (!c || (req && !canBeat(req, c))) {
         const legal = generateMoves(hands[turn], req, opts.four2||'both');
@@ -556,39 +482,55 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
           const cc = classify(pick, opts.four2||'both')!;
           yield { type:'event', kind:'play', seat: turn, move:'play', cards: pick, comboType: cc.type };
           removeLabels(hands[turn], pick);
-          req = cc;
-          lastNonPassSeat = turn;
-          passCount = 0;
+          playedCount[turn]++;
+          if (cc.type==='bomb' || cc.type==='rocket') multiplier *= 2;
+          req = cc; lastNonPassSeat = turn; passCount = 0;
         }
       } else {
         yield { type:'event', kind:'play', seat: turn, move:'play', cards: mv.cards, comboType: c.type };
         removeLabels(hands[turn], mv.cards);
-        req = c;
-        lastNonPassSeat = turn;
-        passCount = 0;
+        playedCount[turn]++;
+        if (c.type==='bomb' || c.type==='rocket') multiplier *= 2;
+        req = c; lastNonPassSeat = turn; passCount = 0;
       }
     }
 
     await delay();
 
-    // 胜负判定
     if (hands[turn].length===0) {
+      const landlord = g.landlord;
+      const winner = turn;
+
+      // 春天 / 反春天
+      let spring: 'spring'|'anti-spring'|undefined = undefined;
+      if (winner === landlord) {
+        if (playedCount[(landlord+1)%3]===0 && playedCount[(landlord+2)%3]===0) {
+          multiplier *= 2; spring = 'spring';
+        }
+      } else {
+        if (playedCount[landlord]===0) { multiplier *= 2; spring = 'anti-spring'; }
+      }
+
+      const delta = baseScore * multiplier;
       const totals: [number,number,number] = [0,0,0];
-      totals[turn] = 10; // 演示计分
-      yield { type:'score', totals };
+      if (winner === landlord) {
+        totals[landlord] =  2 * delta;
+        totals[(landlord+1)%3] = -delta;
+        totals[(landlord+2)%3] = -delta;
+      } else {
+        totals[landlord] = -2 * delta;
+        totals[(landlord+1)%3] = delta;
+        totals[(landlord+2)%3] = delta;
+      }
+      yield { type:'score', totals, base: baseScore, multiplier, spring };
       yield { type:'terminated' };
       return;
     }
-
-    // 下一家
     turn = (turn + 1) % 3;
     canPass = lastNonPassSeat != null;
   }
 }
 
 function removeLabels(hand: Label[], labels: Label[]) {
-  for (const l of labels) {
-    const k = hand.indexOf(l);
-    if (k>=0) hand.splice(k,1);
-  }
+  for (const l of labels) { const k = hand.indexOf(l); if (k>=0) hand.splice(k,1); }
 }

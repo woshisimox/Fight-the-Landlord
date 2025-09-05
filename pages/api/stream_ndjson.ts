@@ -1,10 +1,8 @@
-// pages/api/stream_ndjson.ts
+
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 
-export const config = {
-  api: { bodyParser: false, responseLimit: false },
-};
+export const config = { api: { bodyParser: false, responseLimit: false } };
 
 function readBody(req: NextApiRequest): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -40,7 +38,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return GreedyMax;
   };
   const botNames = playersStr.split(',').map((s:string)=>s.trim());
-  const bots = [ toBot(botNames[0]||'builtin'), toBot(botNames[1]||'builtin'), toBot(botNames[2]||'builtin') ];
+  const bots = [ toBot(botNames[0]||'builtin'), toBot(botNames[1]||'builtin'), toBot(botNames[2]||'builtin') ] as any;
 
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -49,14 +47,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     'Transfer-Encoding': 'chunked',
     'X-Accel-Buffering': 'no',
   });
-
   const write = (obj: any) => res.write(JSON.stringify(obj) + '\n');
 
   for (let r=0; r<rounds; r++) {
-    const game = runOneGame({ seed: seed + r, players: bots as any, four2, delayMs });
-    for await (const ev of game) {
-      write(ev);
-    }
+    const game = runOneGame({ seed: seed + r, players: bots, four2, delayMs });
+    for await (const ev of game) write(ev);
   }
   res.end();
 }
