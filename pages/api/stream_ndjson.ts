@@ -1,10 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 
 export const config = {
-  api: {
-    bodyParser: false,
-    responseLimit: false,
-  },
+  api: { bodyParser: false, responseLimit: false },
 };
 
 function readBody(req: NextApiRequest): Promise<any> {
@@ -25,10 +23,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  // 读参数（演示不强校验）
-  await readBody(req).catch(() => ({}));
+  const body = await readBody(req).catch(()=>({}));
+  const rounds = Number(body.rounds ?? 1);
+  const seed   = Number(body.seed ?? 0);
+  const delayMs= Number(body.delayMs ?? 200);
+  const four2  = (body.four2 ?? 'both') as 'both'|'2singles'|'2pairs';
+  const playersStr = String(body.players ?? 'builtin,builtin,builtin');
 
-  // 设置 NDJSON 流头
+  // 仅实现“内建”算法（示例），三家都使用内建
+  const toBot = (name: string) => {
+    const n = name.trim().toLowerCase();
+    if (n==='greedymax' || n==='max') return GreedyMax;
+    if (n==='greedymin' || n==='min') return GreedyMin;
+    if (n==='random' || n==='randomlegal') return RandomLegal;
+    if (n==='builtin') return GreedyMax;
+    return GreedyMax;
+  };
+  const botNames = playersStr.split(',').map((s:string)=>s.trim());
+  const bots = [ toBot(botNames[0]||'builtin'), toBot(botNames[1]||'builtin'), toBot(botNames[2]||'builtin') ];
+
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -39,89 +52,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const write = (obj: any) => res.write(JSON.stringify(obj) + '\n');
 
-  // 预设一副“可收尾”的牌（丙地主，乙会出完）
-  const hands: string[][] = [
-    ['A','K','Q','J','T','9','8'],           // 甲
-    ['A','A','7','7','6','5','4'],           // 乙
-    ['K','K','3','3','2','2','J'],           // 丙(地主)
-  ];
-
-  const removeFromHand = (seat: number, labels: string[]) => {
-    for (const lab of labels) {
-      const k = hands[seat].indexOf(lab);
-      if (k >= 0) hands[seat].splice(k, 1);
+  for (let r=0; r<rounds; r++) {
+    const game = runOneGame({ seed: seed + r, players: bots as any, four2, delayMs });
+    for await (const ev of game) {
+      write(ev);
     }
-  };
-  const play = (seat: number, labels: string[], comboType = 'play') => {
-    removeFromHand(seat, labels);
-    write({ type: 'event', kind: 'play', seat, move: 'play', cards: labels, comboType });
-  };
-  const pass = (seat: number, reason = '过') => {
-    write({ type: 'event', kind: 'play', seat, move: 'pass', reason });
-  };
-  const turn = (seat: number, lead = false) => {
-    write({ type: 'event', kind: 'turn', seat, lead });
-  };
-  const checkFinish = () => {
-    for (let i = 0; i < 3; i++) {
-      if (hands[i].length === 0) {
-        write({ type: 'score', totals: [10,10,10] }); // 演示分数
-        write({ type: 'terminated' });
-        try { res.end(); } catch {}
-        return true;
-      }
-    }
-    return false;
-  };
-
-  // 发牌/定地主
-  write({ type: 'event', kind: 'deal', hands, bottom: ['A','8','J'] });
-  write({ type: 'event', kind: 'landlord', landlord: 2, bottom: ['A','8','J'], baseScore: 3 });
-
-  // 预设一个能打光乙手牌的简单流程：
-  // 丙领出 J -> 甲过 -> 乙出 77 -> 丙出 22 -> 甲过 -> 乙出 AA -> 丙出 KK -> 甲过 -> 乙出 654(顺) -> 乙打空 -> 结束
-  let step = 0;
-  const timer = setInterval(() => {
-    step++;
-    if (step === 1) {
-      turn(2, true);
-      play(2, ['J'], 'single');
-      if (checkFinish()) return;
-      turn(0);
-    } else if (step === 2) {
-      pass(0);
-      turn(1);
-    } else if (step === 3) {
-      play(1, ['7','7'], 'pair');
-      if (checkFinish()) return;
-      turn(2);
-    } else if (step === 4) {
-      play(2, ['2','2'], 'pair');
-      if (checkFinish()) return;
-      turn(0);
-    } else if (step === 5) {
-      pass(0);
-      turn(1);
-    } else if (step === 6) {
-      play(1, ['A','A'], 'pair');
-      if (checkFinish()) return;
-      turn(2);
-    } else if (step === 7) {
-      play(2, ['K','K'], 'pair');
-      if (checkFinish()) return;
-      turn(0);
-    } else if (step === 8) {
-      pass(0);
-      turn(1);
-    } else if (step === 9) {
-      play(1, ['6','5','4'], 'straight');
-      if (checkFinish()) return; // 乙打空 -> 结束
-      // 不会走到这里
-    } else {
-      clearInterval(timer);
-      try { res.end(); } catch {}
-    }
-  }, 500);
-
-  req.on('close', () => { clearInterval(timer); });
+  }
+  res.end();
 }
