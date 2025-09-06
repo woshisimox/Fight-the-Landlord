@@ -2,6 +2,29 @@ type BotMove = { move: 'play'|'pass'; cards?: string[]; reason?: string };
 type BotCtx = { hands: string[]; require: any; canPass: boolean; policy: any };
 type BotFunc = (ctx: BotCtx) => Promise<BotMove>;
 
+
+function normalizeAndExtractJson(raw: string): any {
+  if (!raw) return null;
+  let s = String(raw).trim();
+  // Strip markdown code fences like ```json ... ```
+  if (s.startsWith('```')) {
+    s = s.replace(/^```(?:json|javascript)?\s*/i, '').replace(/```\s*$/i, '');
+  }
+  // Normalize quotes
+  s = s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[「」『』]/g, '"');
+  // Try direct parse
+  try { return JSON.parse(s); } catch {}
+  // Extract the first {...} block, then try lenient fixes
+  const start = s.indexOf('{'); const end = s.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    let mid = s.slice(start, end + 1);
+    try { return JSON.parse(mid); } catch {}
+    // Remove trailing commas
+    mid = mid.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+    try { return JSON.parse(mid); } catch {}
+  }
+  return null;
+}
 type KimiOpts = { apiKey: string; model?: string };
 
 function buildPrompt(ctx: BotCtx): string {
@@ -49,11 +72,7 @@ export const KimiBot = (opts: KimiOpts): BotFunc => {
       let move: 'play'|'pass' = parsed.move === 'pass' ? 'pass' : 'play';
       let cards: string[] = Array.isArray(parsed.cards) ? parsed.cards : [];
       const reason = parsed.reason || '';
-      if (move === 'pass' && !ctx.canPass) {
-        const legal = generateMoves(ctx.hands, ctx.require, ctx.policy);
-        const force = (legal && legal[0]) || [ctx.hands[0]];
-        move = 'play'; cards = force;
-      }
+      if (move === 'pass' && !ctx.canPass) { const force = [ctx.hands[0]]; move = 'play'; cards = force; }
       return move === 'pass' ? { move: 'pass', reason } : { move: 'play', cards, reason };
     } catch (e) {
       if (ctx.canPass) return { move: 'pass', reason: 'Kimi 调用/解析异常，已兜底过牌' };
