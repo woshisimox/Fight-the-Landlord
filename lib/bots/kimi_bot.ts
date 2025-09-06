@@ -1,4 +1,6 @@
-import { BotFunc, BotMove, BotCtx, generateMoves } from '../doudizhu/engine';
+type BotMove = { move: 'play'|'pass'; cards?: string[]; reason?: string };
+type BotCtx = { hands: string[]; require: any; canPass: boolean; policy: any };
+type BotFunc = (ctx: BotCtx) => Promise<BotMove>;
 
 type KimiOpts = { apiKey: string; model?: string };
 
@@ -55,8 +57,7 @@ export const KimiBot = (opts: KimiOpts): BotFunc => {
       return move === 'pass' ? { move: 'pass', reason } : { move: 'play', cards, reason };
     } catch (e) {
       if (ctx.canPass) return { move: 'pass', reason: 'Kimi 调用/解析异常，已兜底过牌' };
-      const legal = generateMoves(ctx.hands, ctx.require, ctx.policy);
-      const force = (legal && legal[0]) || [ctx.hands[0]];
+      const force = [ctx.hands[0]];
       return { move: 'play', cards: force, reason: 'Kimi 调用/解析异常，使用兜底出牌' };
     }
   };
