@@ -12,7 +12,6 @@ import {
   type Label,
 } from './doudizhu/engine';
 
-// In this project, an "IBot" is just a function matching the BotFunc signature.
 export type IBot = BotFunc;
 
 export class Engine {
@@ -25,7 +24,6 @@ export class Engine {
       seed,
       players,
       four2: this.opts?.four2 ?? 'both',
-      // Default interval to 1000ms unless explicitly provided
       delayMs: this.opts?.delayMs ?? 1000,
     });
   }
