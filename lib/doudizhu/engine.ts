@@ -475,10 +475,20 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
       if (!c || (req && !canBeat(req, c))) {
         const legal = generateMoves(hands[turn], req, opts.four2||'both');
         const pick = legal[0] || (canPass? null : [hands[turn][hands[turn].length-1]]);
+        
         if (!pick) {
           yield { type:'event', kind:'play', seat: turn, move:'pass', reason:'无牌可接' };
           passCount++;
+          if (passCount===2 && lastNonPassSeat!=null) {
+            yield { type:'event', kind:'trick-reset' };
+            turn = lastNonPassSeat;
+            canPass = false;
+            req = null;
+            passCount = 0;
+            continue;
+          }
         } else {
+ else {
           const cc = classify(pick, opts.four2||'both')!;
           yield { type:'event', kind:'play', seat: turn, move:'play', cards: pick, comboType: cc.type };
           removeLabels(hands[turn], pick);
