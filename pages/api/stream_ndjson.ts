@@ -5,6 +5,7 @@ import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
 import { HttpBot } from '../../lib/bots/http_bot';
 import { KimiBot } from '../../lib/bots/kimi_bot';
+import { QwenBot } from '../../lib/bots/qwen_bot';
 
 export const config = { api: { bodyParser: false, responseLimit: false } };
 
@@ -33,7 +34,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const four2   = (body.four2 ?? 'both') as 'both'|'2singles'|'2pairs';
   const playersStr = String(body.players ?? 'builtin,builtin,builtin');
 
-  // per-seat provider & keys（keys 不回显）
   const seatProviders: string[] = Array.isArray(body.seatProviders) ? body.seatProviders : String(playersStr).split(',').map((s:string)=>s.trim());
   const seatKeys: any[] = Array.isArray(body.seatKeys) ? body.seatKeys : [];
 
@@ -44,6 +44,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (n==='grok')   return GrokBot({ apiKey: (seatKeys[idx]?.grok)||'' });
     if (n==='http')   return HttpBot({ base: (seatKeys[idx]?.httpBase)||'', token: (seatKeys[idx]?.httpToken)||'' });
     if (n==='kimi')   return KimiBot({ apiKey: (seatKeys[idx]?.kimi)||'' });
+    if (n==='qwen' || n==='qianwen') return QwenBot({ apiKey: (seatKeys[idx]?.qwen)||'' });
     if (n==='greedymax' || n==='max' || n==='builtin') return GreedyMax;
     if (n==='greedymin' || n==='min') return GreedyMin;
     if (n==='random' || n==='randomlegal') return RandomLegal;
@@ -52,7 +53,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const botNames = playersStr.split(',').map((s:string)=>s.trim());
   const botLabels = botNames.map((s:string)=>{
     const n = (s||'').trim().toLowerCase();
-    if (['openai','gemini','grok','http','kimi'].includes(n)) return n;
+    if (['openai','gemini','grok','http','kimi','qwen','qianwen'].includes(n)) return n;
     if (n==='greedymax' || n==='max' || n==='builtin') return 'GreedyMax';
     if (n==='greedymin' || n==='min') return 'GreedyMin';
     if (n==='random' || n==='randomlegal') return 'Random';
@@ -69,7 +70,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   });
   const write = (obj: any) => res.write(JSON.stringify(obj) + '\n');
 
-  // meta：便于前端诊断（不含 key）
   write({ type: 'event', kind: 'meta', seatProviders: seatProviders.map(p => String(p||'builtin')) });
 
   for (let r=0; r<rounds; r++) {
@@ -85,13 +85,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             ? `内建算法（${botLabels[seat]}）`
             : `${provider} 已调用但未返回理由（请检查上游是否严格输出 JSON）`
         );
-        const enhanced = {
-          ...(ev as any),
-          provider,
-          reason: noReason ? providerFallbackMsg : rawReason,
-        };
-        write(enhanced);
-        continue;
+        const enhanced = { ...(ev as any), provider, reason: noReason ? providerFallbackMsg : rawReason };
+        write(enhanced); continue;
       }
       write(ev);
     }
