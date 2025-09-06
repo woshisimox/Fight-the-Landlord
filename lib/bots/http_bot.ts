@@ -1,21 +1,39 @@
+// lib/bots/http_bot.ts
 import { BotFunc, BotMove, BotCtx, generateMoves } from '../doudizhu/engine';
 
-type HttpBotOpts = { url: string; apiKey?: string };
+type HttpBotOpts = {
+  /** 完整 URL（优先使用） */
+  url?: string;
+  /** 向后兼容：旧写法，用作完整 URL */
+  base?: string;
+  /** Bearer 令牌 */
+  apiKey?: string;
+  /** 向后兼容：旧写法，等价于 apiKey */
+  token?: string;
+  /** 额外请求头（可选） */
+  headers?: Record<string, string>;
+};
 
 export const HttpBot = (opts: HttpBotOpts): BotFunc => {
-  const url = opts.url;
-  const key = opts.apiKey || '';
+  const endpoint = ((opts.url || opts.base || '') as string).replace(/\/$/, '');
+  const auth = (opts.apiKey || opts.token || '').trim();
+  const extraHeaders = opts.headers || {};
+
   return async (ctx: BotCtx): Promise<BotMove> => {
     try {
-      if (!url) throw new Error('Missing HTTP endpoint');
-      const r = await fetch(url, {
+      if (!endpoint) throw new Error('Missing HTTP endpoint');
+      const r = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+        headers: {
+          'content-type': 'application/json',
+          ...(auth ? { authorization: `Bearer ${auth}` } : {}),
+          ...extraHeaders,
+        },
         body: JSON.stringify(ctx),
       });
       if (!r.ok) {
-        const err = await r.text().catch(()=>'') as string;
-        throw new Error(`HTTP ${r.status} ${err.slice(0,200)}`);
+        const err = await r.text().catch(() => '') as string;
+        throw new Error(`HTTP ${r.status} ${err.slice(0, 200)}`);
       }
       const j: any = await r.json();
       const move = j.move === 'pass' ? 'pass' : 'play';
