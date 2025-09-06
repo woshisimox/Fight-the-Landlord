@@ -597,6 +597,31 @@ export default function Home(): JSX.Element {
                   {['甲', '乙', '丙'][i]} · 当前算法：{providerLabel(seatProviders[i])}
                 </div>
 
+        {/* 每家出牌最小间隔（独立） */}
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>每家出牌最小间隔 (ms)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+            {[0, 1, 2].map((i) => (
+              <div key={i} style={{ border: '1px dashed #eee', borderRadius: 6, padding: 10 }}>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>{['甲','乙','丙'][i]}</div>
+                <label style={{ display: 'block' }}>
+                  最小间隔 (ms)
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    value={seatDelayMs[i]}
+                    onChange={(e) => setSeatDelay(i, e.target.value)}
+                    style={{ width: '100%' }}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+        </div>
+
+
+
                 {seatProviders[i] === 'openai' && (
                   <label style={{ display: 'block', marginBottom: 8 }}>
                     OpenAI Key
