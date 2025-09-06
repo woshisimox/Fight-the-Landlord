@@ -101,20 +101,21 @@ function LivePanel(props: LiveProps): JSX.Element {
 
   function handle(obj: any) {
     if (obj?.type === 'event') {
+      
       if (obj.kind === 'turn') {
-        const seat = ['甲','乙','丙'][obj.seat];
+        const seatName = ['甲','乙','丙'][obj.seat];
         const req = obj.require ? `需跟:${obj.require.type}>${obj.require.mainRank}` : '';
-        push(`【回合】${seat} ${obj.lead ? '(领出)' : ''} ${req}`);
+        push(`【回合】${seatName} ${obj.lead ? '(领出)' : ''} ${req}`);
       } else if (obj.kind === 'ai-call') {
-        const seat = ['甲','乙','丙'][obj.seat];
-        push(`⇢ 调用AI【${obj.provider||''}】@${seat} 可过:${obj.canPass?'是':'否'} ${obj.require?('需跟:'+obj.require.type):''}`);
-      } else if (obj.kind === 'ai-result') {
-        const seat = ['甲','乙','丙'][obj.seat];
-        push(`⇠ 返回AI【${obj.provider||''}】@${seat} ${obj.move==='pass'?'过':('出牌 '+(obj.cards||[]).join(''))} — 理由：${obj.reason||'无'}`);
-        const seat = ['甲', '乙', '丙'][obj.seat];
+        const seatName = ['甲','乙','丙'][obj.seat];
         const req = obj.require ? `需跟:${obj.require.type}>${obj.require.mainRank}` : '';
-        push(`【回合】${seat} ${obj.lead ? '(领出)' : ''} ${req}`);
+        push(`⇢ 调用AI【${obj.provider||''}】@${seatName} 可过:${obj.canPass?'是':'否'} ${req}`);
+      } else if (obj.kind === 'ai-result') {
+        const seatName = ['甲','乙','丙'][obj.seat];
+        const moveText = obj.move === 'pass' ? '过' : `出牌 ${(obj.cards||[]).join('')}`;
+        push(`⇠ 返回AI【${obj.provider||''}】@${seatName} ${moveText} — 理由：${obj.reason||'无'}`);
       } else if (obj.kind === 'deal') {
+
         const SUITS = ['S', 'H', 'D', 'C'];
         const nextIdx: Record<string, number> = {};
         const take = (label: string) => {
