@@ -316,6 +316,9 @@ function LivePanel(props: LiveProps): JSX.Element {
   }
 
   async function start() {
+    // 初始化各家起始分（修复：启动后立即显示起始分）
+    try { setTotals([props.startScore||0, props.startScore||0, props.startScore||0]); } catch {}
+
     try {
       setLines([]);
       setStatus('connecting');
