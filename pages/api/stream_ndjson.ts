@@ -33,37 +33,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const four2   = (body.four2 ?? 'both') as 'both'|'2singles'|'2pairs';
   const playersStr = String(body.players ?? 'builtin,builtin,builtin');
 
-  // NEW: per-seat provider & keys (keys不记录日志/不回显)
+  // per-seat provider & keys（keys 不回显）
   const seatProviders: string[] = Array.isArray(body.seatProviders) ? body.seatProviders : String(playersStr).split(',').map((s:string)=>s.trim());
   const seatKeys: any[] = Array.isArray(body.seatKeys) ? body.seatKeys : [];
 
   const toBot = (name: string, idx: number) => {
     const n = (name || '').trim().toLowerCase();
-    if (n==='greedymax' || n==='max') return GreedyMax;
     if (n==='openai') return OpenAIBot({ apiKey: (seatKeys[idx]?.openai)||'' });
-    if (n==='greedymin' || n==='min') return GreedyMin;
     if (n==='gemini') return GeminiBot({ apiKey: (seatKeys[idx]?.gemini)||'' });
-    if (n==='random'   || n==='randomlegal') return RandomLegal;
-    if (n==='http') return HttpBot({ base: (seatKeys[idx]?.httpBase)||'', token: (seatKeys[idx]?.httpToken)||'' });
-    if (n==='kimi') return KimiBot({ apiKey: (seatKeys[idx]?.kimi)||'' });
-    if (n==='grok') return GrokBot({ apiKey: (seatKeys[idx]?.grok)||'' });
-    if (n==='kimi') return KimiBot({ apiKey: (seatKeys[idx]?.kimi)||'' });
-    if (n==='builtin') return GreedyMax;
-    // 未接入外部AI时，全部回退到 GreedyMax
+    if (n==='grok')   return GrokBot({ apiKey: (seatKeys[idx]?.grok)||'' });
+    if (n==='http')   return HttpBot({ base: (seatKeys[idx]?.httpBase)||'', token: (seatKeys[idx]?.httpToken)||'' });
+    if (n==='kimi')   return KimiBot({ apiKey: (seatKeys[idx]?.kimi)||'' });
+    if (n==='greedymax' || n==='max' || n==='builtin') return GreedyMax;
+    if (n==='greedymin' || n==='min') return GreedyMin;
+    if (n==='random' || n==='randomlegal') return RandomLegal;
     return GreedyMax;
   };
-  const labelOf = (name: string) => {
-    const n = (name || '').trim().toLowerCase();
-    if (n==='greedymax' || n==='max') return 'GreedyMax';
-    if (n==='greedymin' || n==='min') return 'GreedyMin';
-    if (n==='random'   || n==='randomlegal') return 'Random';
-    if (n==='builtin') return 'GreedyMax';
-    return 'GreedyMax';
-  }
-
   const botNames = playersStr.split(',').map((s:string)=>s.trim());
+  const botLabels = botNames.map((s:string)=>{
+    const n = (s||'').trim().toLowerCase();
+    if (['openai','gemini','grok','http','kimi'].includes(n)) return n;
+    if (n==='greedymax' || n==='max' || n==='builtin') return 'GreedyMax';
+    if (n==='greedymin' || n==='min') return 'GreedyMin';
+    if (n==='random' || n==='randomlegal') return 'Random';
+    return 'GreedyMax';
+  });
   const bots = [ toBot(botNames[0]||'builtin',0), toBot(botNames[1]||'builtin',1), toBot(botNames[2]||'builtin',2) ] as any;
-  const botLabels = [ labelOf(botNames[0]||'builtin'), labelOf(botNames[1]||'builtin'), labelOf(botNames[2]||'builtin') ];
 
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -74,23 +69,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   });
   const write = (obj: any) => res.write(JSON.stringify(obj) + '\n');
 
-  // 先发一条 meta，便于前端诊断（不含敏感 key）
+  // meta：便于前端诊断（不含 key）
   write({ type: 'event', kind: 'meta', seatProviders: seatProviders.map(p => String(p||'builtin')) });
 
   for (let r=0; r<rounds; r++) {
     const game = runOneGame({ seed: seed + r, players: bots, four2, delayMs });
     for await (const ev of game) {
-      // NEW: 在 play 事件上补充 provider / reason（内建给出简要理由提示）
       if (ev && ev.type==='event' && ev.kind==='play' && typeof (ev as any).seat === 'number') {
         const seat = (ev as any).seat as number;
-        const provider = seatProviders?.[seat] || botLabels[seat] || 'builtin';
-        const fallbackReason = provider==='builtin' || provider==='GreedyMax' || provider==='GreedyMin' || provider==='Random'
-          ? `内建算法（${botLabels[seat]}）`
-          : `外部AI(${provider})未接入后端，已回退内建（${botLabels[seat]}）`;
+        const provider = (seatProviders?.[seat] || botLabels[seat] || 'builtin') + '';
+        const rawReason = ((ev as any).reason ?? (ev as any).aiReason ?? (ev as any).explain ?? '').toString().trim();
+        const noReason = !rawReason || rawReason.length === 0;
+        const providerFallbackMsg = (
+          provider==='builtin' || provider==='GreedyMax' || provider==='GreedyMin' || provider==='Random'
+            ? `内建算法（${botLabels[seat]}）`
+            : `${provider} 已调用但未返回理由（请检查上游是否严格输出 JSON）`
+        );
         const enhanced = {
           ...(ev as any),
-          provider: (ev as any).provider ?? provider,
-          reason: (ev as any).reason ?? (ev as any).aiReason ?? (ev as any).explain ?? fallbackReason,
+          provider,
+          reason: noReason ? providerFallbackMsg : rawReason,
         };
         write(enhanced);
         continue;
