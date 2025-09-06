@@ -460,7 +460,7 @@ export default function Home(): JSX.Element {
   const [startScore, setStartScore] = useState<number>(0);
 
   const [players, setPlayers] = useState<string>('builtin,builtin,builtin');
-  const [seatProviders, setSeatProviders] = useState<('builtin' | 'openai' | 'gemini' | 'kimi' | 'grok' | 'http')[]>([
+  const [seatProviders, setSeatProviders] = useState<('builtin'|'openai'|'gemini'|'kimi'|'grok'|'qwen'|'http')[]>([
     'builtin',
     'builtin',
     'builtin',
@@ -475,13 +475,14 @@ export default function Home(): JSX.Element {
     gemini: string;
     kimi: string;
     grok: string;
+    qwen: string;
     httpBase: string;
     httpToken: string;
   };
   const [seatKeys, setSeatKeys] = useState<SeatKey[]>([
-    { openai: '', gemini: '', kimi: '', grok: '', httpBase: '', httpToken: '' }, // 甲
-    { openai: '', gemini: '', kimi: '', grok: '', httpBase: '', httpToken: '' }, // 乙
-    { openai: '', gemini: '', kimi: '', grok: '', httpBase: '', httpToken: '' }, // 丙
+    { openai: '', gemini: '', kimi: '', grok: '', qwen: '', httpBase: '', httpToken: '' }, // 甲
+    { openai: '', gemini: '', kimi: '', grok: '', qwen: '', httpBase: '', httpToken: '' }, // 乙
+    { openai: '', gemini: '', kimi: '', grok: '', qwen: '', httpBase: '', httpToken: '' }, // 丙
   ]);
   const setSeatKey = (i: number, field: keyof SeatKey, value: string) => {
     setSeatKeys((arr) => {
@@ -501,6 +502,8 @@ export default function Home(): JSX.Element {
       ? 'Kimi'
       : p === 'grok'
       ? 'Grok'
+      : p === 'qwen'
+      ? 'Qwen(千问)'
       : p === 'http'
       ? 'HTTP'
       : p;
@@ -580,6 +583,7 @@ export default function Home(): JSX.Element {
                   <option value="gemini">Gemini</option>
                   <option value="kimi">Kimi</option>
                   <option value="grok">Grok</option>
+                  <option value="qwen">Qwen(千问)</option>
                   <option value="http">HTTP</option>
                 </select>
               </label>
@@ -634,7 +638,19 @@ export default function Home(): JSX.Element {
                   </label>
                 )}
 
-                {seatProviders[i] === 'grok' && (
+                
+                {seatProviders[i] === 'qwen' && (
+                  <label style={{ display: 'block', marginBottom: 8 }}>
+                    Qwen(千问) Key
+                    <input
+                      type="password"
+                      value={seatKeys[i].qwen}
+                      onChange={(e) => setSeatKey(i, 'qwen', e.target.value)}
+                      style={{ width: '100%' }}
+                    />
+                  </label>
+                )}
+{seatProviders[i] === 'grok' && (
                   <label style={{ display: 'block', marginBottom: 8 }}>
                     Grok Key
                     <input

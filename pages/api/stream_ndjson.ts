@@ -34,8 +34,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const four2   = (body.four2 ?? 'both') as 'both'|'2singles'|'2pairs';
   const playersStr = String(body.players ?? 'builtin,builtin,builtin');
 
-  const seatProviders: string[] = Array.isArray(body.seatProviders) ? body.seatProviders : String(playersStr).split(',').map((s:string)=>s.trim());
-  const seatKeys: any[] = Array.isArray(body.seatKeys) ? body.seatKeys : [];
+  const seatProviders: string[] = Array.isArray(body.seatProviders)
+    ? body.seatProviders
+    : String(playersStr).split(',').map((s:string)=>s.trim());
+const seatKeys: any[] = Array.isArray(body.seatKeys) ? body.seatKeys : [];
 
   const toBot = (name: string, idx: number) => {
     const n = (name || '').trim().toLowerCase();
@@ -51,6 +53,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return GreedyMax;
   };
   const botNames = playersStr.split(',').map((s:string)=>s.trim());
+  const pickedProviders = (seatProviders || botNames).map((s:any)=> String(s||'builtin').trim().toLowerCase());
   const botLabels = botNames.map((s:string)=>{
     const n = (s||'').trim().toLowerCase();
     if (['openai','gemini','grok','http','kimi','qwen','qianwen'].includes(n)) return n;
@@ -59,7 +62,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (n==='random' || n==='randomlegal') return 'Random';
     return 'GreedyMax';
   });
-  const bots = [ toBot(botNames[0]||'builtin',0), toBot(botNames[1]||'builtin',1), toBot(botNames[2]||'builtin',2) ] as any;
+  const bots = [ toBot(pickedProviders[0]||'builtin',0), toBot(pickedProviders[1]||'builtin',1), toBot(pickedProviders[2]||'builtin',2) ] as any;
 
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -78,7 +81,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     for await (const ev of game) {
       if (ev && ev.type==='event' && ev.kind==='play' && typeof (ev as any).seat === 'number') {
         const seat = (ev as any).seat as number;
-        const provider = (seatProviders?.[seat] || botLabels[seat] || 'builtin') + '';
+        const provider = (pickedProviders[seat] || botLabels[seat] || 'builtin') + '';
         const rawReason = ((ev as any).reason ?? (ev as any).aiReason ?? (ev as any).explain ?? '').toString().trim();
         const noReason = !rawReason || rawReason.length === 0;
         const providerFallbackMsg = (
