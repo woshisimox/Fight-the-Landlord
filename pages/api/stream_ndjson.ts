@@ -34,7 +34,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const four2   = (body.four2 ?? 'both') as 'both'|'2singles'|'2pairs';
   const playersStr = String(body.players ?? 'builtin,builtin,builtin');
 
-  const seatProviders: string[] = Array.isArray(body.seatProviders) ? body.seatProviders : String(playersStr).split(',').map((s:string)=>s.trim());
+  const seatProviders: string[] = Array.isArray(body.seatProviders)
+    ? body.seatProviders
+    : String(playersStr).split(',').map((s:string)=>s.trim());
   const seatKeys: any[] = Array.isArray(body.seatKeys) ? body.seatKeys : [];
 
   const toBot = (name: string, idx: number) => {
@@ -50,6 +52,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (n==='random' || n==='randomlegal') return RandomLegal;
     return GreedyMax;
   };
+
   const botNames = playersStr.split(',').map((s:string)=>s.trim());
   const botLabels = botNames.map((s:string)=>{
     const n = (s||'').trim().toLowerCase();
@@ -70,7 +73,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   });
   const write = (obj: any) => res.write(JSON.stringify(obj) + '\n');
 
-  // 写入 meta（不包含任何 Key）
   write({ type: 'event', kind: 'meta', seatProviders: seatProviders.map(p => String(p||'builtin')) });
 
   for (let r=0; r<rounds; r++) {

@@ -44,14 +44,14 @@ export const OpenAIBot = (opts: OpenAIOpts): BotFunc => {
       try { parsed = JSON.parse(txt); } catch {}
       const move = parsed.move === 'pass' ? 'pass' : 'play';
       const cards = Array.isArray(parsed.cards) ? parsed.cards : [];
-      const reason = parsed.reason || '';
-      return move === 'pass' ? { move: 'pass' } : { move: 'play', cards, reason };
-    } catch (e) {
-      // Fallback
-      if (ctx.canPass) return { move: 'pass' };
+      const reason = (parsed.reason ?? '').toString().trim() || 'OpenAI 给出的建议';
+      return move === 'pass' ? { move: 'pass', reason } : { move: 'play', cards, reason };
+    } catch (e: any) {
+      const reason = `OpenAI 调用失败：${e?.message || e}，已回退`;
+      if (ctx.canPass) return { move: 'pass', reason };
       const legal = generateMoves(ctx.hands, ctx.require, ctx.policy);
       const force = (legal && legal[0]) || [ctx.hands[0]];
-      return { move: 'play', cards: force };
+      return { move: 'play', cards: force, reason };
     }
   };
 };

@@ -1,5 +1,6 @@
 import { BotFunc, BotMove, BotCtx, generateMoves } from '../doudizhu/engine';
 
+// Qwen（DashScope）OpenAI 兼容接口：/compatible-mode/v1/chat/completions，Bearer 头
 type QwenOpts = { apiKey: string; model?: string };
 
 function buildPrompt(ctx: BotCtx): string {
