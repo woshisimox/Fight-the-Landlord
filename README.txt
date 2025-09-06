@@ -1,19 +1,12 @@
-# v1.0.2-aifix6-bundle（后端与适配器 + index.tsx 变更指导）
+# v1.0.2-qwen-patch（基于 v1.0.2-aifix5 增量补丁，仅加入千问）
 
-本包包含：
-- lib/bots/*.ts：OpenAI / Gemini / Grok / Kimi / HTTP / Qwen 适配器（始终返回非空 reason）
-- pages/api/stream_ndjson.ts：按座位选择 provider，读取 seatKeys[i] 中各自的 key，写事件时增强 provider/reason
+本补丁**仅新增千问(Qwen)** 后端调用，尽可能不改动其它逻辑：
+- 新增文件：lib/bots/qwen_bot.ts（DashScope OpenAI 兼容接口）
+- 更新文件：pages/api/stream_ndjson.ts（映射 provider='qwen'|'qianwen' → QwenBot，并从 seatKeys[idx].qwen 读取 Key）
 
-前端（pages/index.tsx）最小改动：
-1) 状态中确保：
-   const [seatProviders, setSeatProviders] = useState<string[]>(['builtin','builtin','builtin']);
-   type SeatKeys = { openai?: string; gemini?: string; grok?: string; kimi?: string; httpBase?: string; httpToken?: string; qwen?: string };
-   const [seatKeys, setSeatKeys] = useState<SeatKeys[]>([{},{},{}]);
+前端最小改动（若你已有“每位玩家独立 Key”）：
+1) 在算法下拉框中新增：<option value="qwen">Qwen（千问）</option>
+2) 当 seatProviders[i]==='qwen' 时，显示并写入 seatKeys[i].qwen（例如一个密码输入框）
+3) 发起请求体确保包含：{ seatProviders, seatKeys }，seatKeys[i].qwen 会被后端读取使用
 
-2) 算法下拉框新增：<option value="qwen">Qwen（千问）</option>
-
-3) 当 seatProviders[i]==='qwen' 时渲染输入框：
-   <input type="password" placeholder="dsk-..." value={seatKeys[i]?.qwen||''} onChange={e=>setSeatKeys(v=>{const n=v.slice(); n[i]={...(n[i]||{}), qwen:e.target.value}; return n;})}/>
-
-4) 发起请求体中包含：
-   body = { ..., players: seatProviders.join(','), seatProviders, seatKeys }
+其余保持原状。

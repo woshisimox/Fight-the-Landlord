@@ -70,6 +70,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   });
   const write = (obj: any) => res.write(JSON.stringify(obj) + '\n');
 
+  // 写入 meta（不包含任何 Key）
   write({ type: 'event', kind: 'meta', seatProviders: seatProviders.map(p => String(p||'builtin')) });
 
   for (let r=0; r<rounds; r++) {
