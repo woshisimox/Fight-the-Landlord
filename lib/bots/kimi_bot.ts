@@ -46,14 +46,18 @@ export const KimiBot = (opts: KimiOpts): BotFunc => {
       try { parsed = JSON.parse(txt); } catch {}
       const move = parsed.move === 'pass' ? 'pass' : 'play';
       const cards = Array.isArray(parsed.cards) ? parsed.cards : [];
+      const reason = parsed.reason && String(parsed.reason).trim()
+        ? String(parsed.reason).trim()
+        : 'Kimi 给出的建议';
       return move === 'pass'
-        ? { move: 'pass' }
-        : { move: 'play', cards };
-    } catch (e) {
-      if (ctx.canPass) return { move: 'pass' };
+        ? { move: 'pass', reason }
+        : { move: 'play', cards, reason };
+    } catch (e: any) {
+      const reason = `Kimi 调用失败：${e?.message || e}，已回退`;
+      if (ctx.canPass) return { move: 'pass', reason };
       const legal = generateMoves(ctx.hands, ctx.require, ctx.policy);
       const force = (legal && legal[0]) || [ctx.hands[0]];
-      return { move: 'play', cards: force };
+      return { move: 'play', cards: force, reason };
     }
   };
 };
