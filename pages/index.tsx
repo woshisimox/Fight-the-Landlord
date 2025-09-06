@@ -1,748 +1,535 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-/** ---------- 花色渲染 ---------- **/
-const SUIT_CHAR: Record<string, string> = { S: '♠', H: '♥', D: '♦', C: '♣', RJ: '🃏', BJ: '🃏' };
-const SUIT_COLOR: Record<string, string> = { S: '#222', C: '#222', H: '#c00', D: '#c00', RJ: '#c00', BJ: '#222' };
-const labelText = (l: string) => (l === 'T' ? '10' : l);
+type Label = string;
+type ComboType = 'single'|'pair'|'triple'|'bomb'|'rocket'|'straight'|'pair-straight'|'plane'|'triple-with-single'|'triple-with-pair'|'four-with-two-singles'|'four-with-two-pairs';
+type Four2Policy = 'both'|'2singles'|'2pairs';
 
-function CardLine({ cards }: { cards: any[] }): JSX.Element {
-  if (!cards || !cards.length) return <span style={{ opacity: 0.6 }}>过</span>;
+type EventObj =
+  | { type:'state'; kind:'init'; landlord: number; hands: Label[][] }
+  | { type:'event'; kind:'play'; seat:number; move:'play'|'pass'; cards?:Label[]; comboType?:ComboType; reason?:string }
+  | { type:'event'; kind:'rob'; seat:number; rob:boolean }
+  | { type:'event'; kind:'trick-reset' }
+  | { type:'event'; kind:'win'; winner:number; multiplier:number; deltaScores:[number,number,number] }
+  | { type:'log';  message:string };
+
+type BotChoice = 'built-in:greedy-max'|'built-in:greedy-min'|'built-in:random-legal'
+  | 'ai:openai'|'ai:gemini'|'ai:grok'|'ai:kimi'|'ai:qwen'|'http';
+
+type LiveProps = {
+  delayMs: number;
+  startScore: number;
+  seatDelayMs?: number[]; // 新增：每家独立最小间隔
+  enabled: boolean;
+  rob: boolean;
+  four2: Four2Policy;
+  seats: BotChoice[];
+  seatModels: string[];
+  seatKeys: {
+    openai?: string;
+    gemini?: string;
+    grok?: string;
+    kimi?: string;
+    qwen?: string;
+    httpBase?: string;
+    httpToken?: string;
+  }[];
+  onTotals: (totals:[number,number,number])=>void;
+};
+
+function SeatTitle({i}:{i:number}) {
+  return <span style={{fontWeight:700}}>{['甲','乙','丙'][i]}</span>;
+}
+
+function Card({label}:{label:Label}) {
+  const pretty = label.replace('10','T');
+  const color =
+    /[sh]/.test(label) ? '#1a1a1a' :
+    /[hd]/.test(label) ? '#af1d22' : '#0b5';
   return (
-    <span>
-      {cards.map((c: any, idx: number) => (
-        <span key={c.code || `${c.label}-${idx}`} style={{ marginRight: 6, color: SUIT_COLOR[c.suit] || '#222' }}>
-          <span>{SUIT_CHAR[c.suit] || ''}</span>
-          <span style={{ marginLeft: 2 }}>{labelText(c.label || '')}</span>
-        </span>
-      ))}
-    </span>
+    <span style={{
+      display:'inline-block',
+      border:'1px solid #ddd',
+      borderRadius:6,
+      padding:'6px 8px',
+      marginRight:4,
+      marginBottom:4,
+      minWidth:28,
+      textAlign:'center',
+      fontWeight:700,
+      color
+    }}>{pretty.toUpperCase()}</span>
   );
 }
 
-/** ---------- 类型 ---------- **/
-type Board = {
-  hands: string[][];
-  last: string[];
-  landlord: number | null;
-  bottom: string[];
-  handsRich: any[][];
-  lastRich: any[][];
-  bottomRich: any[];
-  trick: Array<{ seat: number; pass?: boolean; cardsRich?: any[] }>;
-};
+function Hand({cards}:{cards:Label[]}) {
+  if (!cards || !cards.length) return <span style={{ opacity: 0.6 }}>（空）</span>;
+  return <div style={{ display:'flex', flexWrap:'wrap' }}>
+    {cards.map((c,idx)=><Card key={idx} label={c}/>)}
+  </div>;
+}
 
-type LiveProps = {
-  rounds: number;
-  seed: number;
-  rob: boolean;
-  four2: 'both' | '2singles' | '2pairs';
-  delayMs: number;
-  startScore: number;
-  players: string;
-  apiKeys?: {
-    openai?: string;
-    gemini?: string;
-    kimi?: string;
-    grok?: string;
-    httpBase?: string;
-    httpToken?: string;
-  
-  seatDelayMs?: number[];
-};
-  // 新增：把前端每位玩家的设置传给后端（可选，后端按需读取）
-  seatKeys?: any[];
-  seatProviders?: string[];
-};
-type Mode = 'auto' | 'post' | 'sse';
+function PlayRow({seat, move, cards, reason}:{seat:number, move:'play'|'pass', cards?:Label[], reason?:string}) {
+  return (
+    <div style={{ display:'flex', gap:8, alignItems:'center', padding:'6px 0' }}>
+      <div style={{ width:32, textAlign:'right', opacity:0.8 }}>{['甲','乙','丙'][seat]}</div>
+      <div style={{ width:56, fontWeight:700 }}>{move==='pass'?'过':'出牌'}</div>
+      <div style={{ flex:1 }}>
+        {move==='pass' ? <span style={{ opacity:0.6 }}>过</span> : <Hand cards={cards||[]}/>}
+      </div>
+      {reason && <div style={{ width:220, fontSize:12, color:'#666' }}>{reason}</div>}
+    </div>
+  );
+}
 
-/** ---------- 实时面板 ---------- **/
-function LivePanel(props: LiveProps): JSX.Element {
-  const [lines, setLines] = useState<string[]>([]);
-  const push = (t: string) => setLines((l) => [...l, t]);
+function LogLine({text}:{text:string}) {
+  return <div style={{ fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace', fontSize:12, color:'#555', padding:'2px 0' }}>{text}</div>;
+}
 
-  const [board, setBoard] = useState<Board>({
-    hands: [[], [], []],
-    last: ['', '', ''],
-    landlord: null,
-    bottom: [],
-    handsRich: [[], [], []],
-    lastRich: [[], [], []],
-    bottomRich: [],
-    trick: [],
-  });
+function Section({title, children}:{title:string, children:React.ReactNode}) {
+  return (
+    <div style={{ marginBottom:16 }}>
+      <div style={{ fontWeight:700, marginBottom:8 }}>{title}</div>
+      <div>{children}</div>
+    </div>
+  );
+}
 
-  const [totals, setTotals] = useState<[number, number, number]>([
-    props.startScore || 0,
-    props.startScore || 0,
-    props.startScore || 0,
-  ]);
+function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'connecting' | 'streaming' | 'terminated'>('idle');
+  const [landlord, setLandlord] = useState<number|null>(null);
+  const [hands, setHands] = useState<Label[][]>([[],[],[]]);
+  const [plays, setPlays] = useState<{seat:number, move:'play'|'pass', cards?:Label[], reason?:string}[]>([]);
+  const [multiplier, setMultiplier] = useState(1);
+  const [winner, setWinner] = useState<number|null>(null);
+  const [delta, setDelta] = useState<[number,number,number] | null>(null);
+  const [log, setLog] = useState<string[]>([]);
+  const [totals, setTotals] = useState<[number,number,number]>([
+    props.startScore || 0, props.startScore || 0, props.startScore || 0,
+  ]);
 
-  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
-  const esRef = useRef<EventSource | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const gotFirstChunkRef = useRef(false);
-
-  const [endpointOverride, setEndpointOverride] = useState<string>('');
-  const [mode, setMode] = useState<Mode>('auto');
-
-  function clearWatchdog() {
-    if (watchdogRef.current) {
-      clearTimeout(watchdogRef.current as any);
-      watchdogRef.current = null;
-    }
-  }
-  function armWatchdog() {
-    clearWatchdog();
-    watchdogRef.current = setTimeout(() => {
-      if (!gotFirstChunkRef.current) push('⚠️ 长时间未收到数据，请检查后端是否返回 NDJSON 或 SSE。');
-    }, 5000);
-  }
-
-  function handle(obj: any) {
-    if (obj?.type === 'event') {
-      if (obj.kind === 'turn') {
-        const seat = ['甲', '乙', '丙'][obj.seat];
-        const req = obj.require ? `需跟:${obj.require.type}>${obj.require.mainRank}` : '';
-        push(`【回合】${seat} ${obj.lead ? '(领出)' : ''} ${req}`);
-      } else if (obj.kind === 'deal') {
-        const SUITS = ['S', 'H', 'D', 'C'];
-        const nextIdx: Record<string, number> = {};
-        const take = (label: string) => {
-          if (label === 'X') return { label, suit: 'RJ', code: 'J-R' };
-          if (label === 'x') return { label, suit: 'BJ', code: 'J-B' };
-          const i = nextIdx[label] || 0;
-          const suit = SUITS[i % 4];
-          nextIdx[label] = i + 1;
-          return { label, suit, code: `${label}-${suit}-${i + 1}` };
-        };
-        const handsRich = (obj.hands || []).map((arr: string[]) => arr.map(take));
-        const bottomRich = (obj.bottom || []).map(take);
-        setBoard((b) => ({
-          ...b,
-          hands: obj.hands,
-          bottom: obj.bottom,
-          handsRich,
-          bottomRich,
-          lastRich: [[], [], []],
-          trick: [],
-        }));
-        push(`发牌：底牌 ${obj.bottom?.join('') ?? ''}`);
-      } else if (obj.kind === 'landlord') {
-        setBoard((b) => ({ ...b, landlord: obj.landlord }));
-        push(`确定地主：${['甲', '乙', '丙'][obj.landlord]}，底牌 ${obj.bottom?.join('') ?? ''} 基础分 ${obj.baseScore ?? ''}`);
-      } else if (obj.kind === 'trick-reset') {
-        setBoard((b) => ({ ...b, trick: [] }));
-        push('新一轮开始。');
-      } else if (obj.kind === 'play') {
-        // —— 兼容显示 AI 理由/来源 —— //
-        const seatName = ['甲', '乙', '丙'][obj.seat];
-        const by = obj.provider || obj.model || obj.bot || obj.agent || obj.ai || '';
-        const pickedReason =
-          obj.aiReason ?? obj.reason ?? obj.explain ?? (obj.meta ? obj.meta.reason : undefined) ?? '';
-        const reasonSuffix = pickedReason ? ` — 理由：${pickedReason}` : '';
-        const byPrefix = by ? `【AI:${by}】` : '';
-
-        if (obj.move === 'pass') {
-          push(`${byPrefix}${seatName}：过${reasonSuffix}`);
-          setBoard((b) => {
-            const last = b.last.slice();
-            last[obj.seat] = '过';
-            const lastRich = b.lastRich.map((x) => x.slice());
-            lastRich[obj.seat] = [];
-            const trick = b.trick.slice();
-            trick.push({ seat: obj.seat, pass: true, cardsRich: [] });
-            return { ...b, last, lastRich, trick };
-          });
-        } else {
-          const labels: string[] = obj.cards || [];
-          const text = labels.join('');
-          push(`${byPrefix}${seatName}：${obj.comboType || obj.type || '出牌'} ${text}${reasonSuffix}`);
-          setBoard((b) => {
-            const last = b.last.slice();
-            last[obj.seat] = text;
-            const hands = b.hands.map((a) => a.slice());
-            for (const lab of labels) {
-              const k = hands[obj.seat].indexOf(lab);
-              if (k >= 0) hands[obj.seat].splice(k, 1);
-            }
-            const handsRich = b.handsRich.map((arr) => arr.slice());
-            const taken: any[] = [];
-            for (const lab of labels) {
-              const k = handsRich[obj.seat].findIndex((c: any) => c.label === lab);
-              if (k >= 0) taken.push(handsRich[obj.seat].splice(k, 1)[0]);
-            }
-            const lastRich = b.lastRich.map((x) => x.slice());
-            lastRich[obj.seat] = taken;
-            const trick = b.trick.slice();
-            trick.push({ seat: obj.seat, cardsRich: taken });
-            return { ...b, last, hands, handsRich, lastRich, trick };
-          });
-        }
-      }
-    } else if (obj?.type === 'score') {
-      // 把起始分叠加到 totals 上
+  // 在“开始”后立即按当前初始分刷新分数展示
+  const prevRunningRef = useRef(false);
+  useEffect(() => {
+    if (running && !prevRunningRef.current) {
       const base = props.startScore || 0;
-      const tt: [number, number, number] = [
-        (obj.totals?.[0] ?? 0) + base,
-        (obj.totals?.[1] ?? 0) + base,
-        (obj.totals?.[2] ?? 0) + base,
-      ];
-      setTotals(tt);
-      const spring = obj.spring ? (obj.spring === 'spring' ? ' · 春天×2' : ' · 反春天×2') : '';
-      push(`积分：甲 ${tt[0]} / 乙 ${tt[1]} / 丙 ${tt[2]}  · 底分=${obj.base} 倍数=${obj.multiplier}${spring}`);
-    } else if (obj?.type === 'terminated') {
-      setStatus('terminated');
-      push('对局已终止。');
+      setTotals([base, base, base]);
     }
-  }
+    prevRunningRef.current = running;
+  }, [running, props.startScore]);
 
-  async function runPOST(url: string) {
-    const body: any = {
-      rounds: props.rounds,
-      seed: props.seed,
-      rob: props.rob,
-      four2: props.four2,
-      delayMs: props.delayMs,
-      startScore: props.startScore,
-      start_score: props.startScore,
-      players: props.players,
-      playersList: (props.players || '').split(',').map((s) => s.trim()),
-      apiKeys: props.apiKeys || {},
-      // 新增：把每位的 provider & key 一起传给后端（推荐只在 POST 里传，不放到 GET 查询串）
-      seatProviders: props.seatProviders || [],
-      seatKeys: props.seatKeys || [],
-    };
-    const ac = new AbortController();
-    abortRef.current = ac;
-    push(`连接(POST NDJSON)：${url}`);
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: ac.signal,
-    });
-    push(`HTTP ${r.status}  · content-type=${r.headers.get('content-type')}`);
-    if (!r.ok || !r.body) throw new Error('响应不可读');
-    setStatus('streaming');
-    gotFirstChunkRef.current = false;
-    armWatchdog();
-    const reader = r.body.getReader();
-    readerRef.current = reader;
-    const dec = new TextDecoder('utf-8');
-    let buf = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const chunk = dec.decode(value, { stream: true });
-      if (!gotFirstChunkRef.current) {
-        gotFirstChunkRef.current = true;
-        push('✅ 已收到数据流(POST)。');
-        clearWatchdog();
-      }
-      buf += chunk;
-      let idxLine: number;
-      while ((idxLine = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, idxLine).trim();
-        buf = buf.slice(idxLine + 1);
-        if (!line) continue;
-        try {
-          const payload = line.startsWith('data:') ? line.slice(5).trim() : line;
-          const obj = JSON.parse(payload);
-          handle(obj);
-        } catch {}
-      }
-    }
-    // flush tail without trailing newline
-    const rest = buf.trim();
-    if (rest) {
-      try {
-        const payload = rest.startsWith('data:') ? rest.slice(5).trim() : rest;
-        const obj = JSON.parse(payload);
-        handle(obj);
-      } catch {}
-    }
-  }
+  // 将 totals 回推给父级
+  useEffect(() => {
+    props.onTotals?.(totals);
+  }, [totals]);
 
-  function runSSE(url: string) {
-    return new Promise<void>((resolve, reject) => {
-      const qs = new URLSearchParams({
-        rounds: String(props.rounds),
-        seed: String(props.seed),
-        rob: String(props.rob),
-        four2: String(props.four2),
-        delayMs: String(props.delayMs),
-        startScore: String(props.startScore),
-        players: props.players,
-        // 出于安全考虑，不把 key 放到 query
-      });
-      const full = url.includes('?') ? url + '&' + qs.toString() : url + '?' + qs.toString();
-      push(`连接(GET SSE)：${full}`);
-      const es = new EventSource(full);
-      esRef.current = es;
-      let opened = false;
-      setStatus('streaming');
-      armWatchdog();
-      es.onopen = () => {
-        opened = true;
-        push('SSE 打开');
-      };
-      es.onerror = () => {
-        if (!opened) reject(new Error('SSE 打开失败'));
-        else push('SSE 错误');
-      };
-      es.onmessage = (ev) => {
-        if (!gotFirstChunkRef.current) {
-          gotFirstChunkRef.current = true;
-          push('✅ 已收到数据流(SSE)。');
-          clearWatchdog();
-        }
-        try {
-          const obj = JSON.parse(ev.data);
-          handle(obj);
-        } catch {}
-      };
-    });
-  }
+  const controllerRef = useRef<AbortController|null>(null);
 
-  async function start() {
+  const start = async () => {
+    if (running) return;
+    setRunning(true);
+    setLandlord(null);
+    setHands([[],[],[]]);
+    setPlays([]);
+    setWinner(null);
+    setDelta(null);
+    setMultiplier(1);
+    setLog([]);
+
+    controllerRef.current = new AbortController();
+
     try {
-      setLines([]);
-      setStatus('connecting');
-      setRunning(true);
-      gotFirstChunkRef.current = false;
-      const candidates = endpointOverride ? [endpointOverride] : ['/api/stream_ndjson', '/api/stream', '/api/live_ndjson', '/api/live'];
-      const tryModes: Mode[] = mode === 'auto' ? ['post', 'sse'] : [mode];
-      let connected = false;
-      for (const u of candidates) {
-        for (const m of tryModes) {
-          try {
-            if (m === 'post') await runPOST(u);
-            else await runSSE(u);
-            connected = true;
-            break;
-          } catch (e: any) {
-            push(`连接失败(${m}): ${u} · ${String(e?.message || e)}`);
+      const r = await fetch('/api/stream_ndjson', {
+        method:'POST',
+        headers: { 'content-type':'application/json' },
+        body: JSON.stringify({
+          delayMs: props.delayMs,
+          startScore: props.startScore,
+          seatDelayMs: props.seatDelayMs, // 传给后端
+          enabled: props.enabled,
+          rob: props.rob,
+          four2: props.four2,
+          seats: props.seats,
+          seatModels: props.seatModels,
+          seatKeys: props.seatKeys,
+        }),
+        signal: controllerRef.current.signal,
+      });
+
+      if (!r.ok || !r.body) {
+        throw new Error(`HTTP ${r.status}`);
+      }
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buf = '';
+
+      const pump = async (): Promise<void> => {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, idx).trim();
+            buf = buf.slice(idx + 1);
+            if (!line) continue;
+            let msg: EventObj | null = null;
+            try { msg = JSON.parse(line) } catch { msg = null }
+            if (!msg) continue;
+
+            if (msg.type==='state' && msg.kind==='init') {
+              setLandlord(msg.landlord);
+              setHands(msg.hands.map(x=>[...x]));
+              setLog(l => [...l, `发牌完成，${['甲','乙','丙'][msg.landlord]}为地主`]);
+            } else if (msg.type==='event' && msg.kind==='rob') {
+              setLog(l => [...l, `${['甲','乙','丙'][msg.seat]} ${msg.rob?'抢地主':'不抢'}`]);
+            } else if (msg.type==='event' && msg.kind==='play') {
+              if (msg.move==='pass') {
+                setPlays(p => [...p, { seat: msg.seat, move:'pass', reason: msg.reason }]);
+                setLog(l => [...l, `${['甲','乙','丙'][msg.seat]} 过${msg.reason?`（${msg.reason}）`:''}`]);
+              } else {
+                setPlays(p => [...p, { seat: msg.seat, move:'play', cards: msg.cards }]);
+                setLog(l => [...l, `${['甲','乙','丙'][msg.seat]} 出牌：${(msg.cards||[]).join(' ')}`]);
+                // 移除手牌中打出的牌
+                if (msg.cards && msg.cards.length) {
+                  setHands(h => {
+                    const nh = h.map(x => [...x]);
+                    const seat = msg!.seat;
+                    for (const c of msg.cards!) {
+                      const k = nh[seat].indexOf(c);
+                      if (k>=0) nh[seat].splice(k,1);
+                    }
+                    return nh;
+                  });
+                }
+              }
+            } else if (msg.type==='event' && msg.kind==='trick-reset') {
+              setLog(l => [...l, `一轮结束，重新起牌`]);
+              setPlays([]);
+            } else if (msg.type==='event' && msg.kind==='win') {
+              setWinner(msg.winner);
+              setMultiplier(msg.multiplier);
+              setDelta(msg.deltaScores);
+              setLog(l => [...l, `胜者：${['甲','乙','丙'][msg.winner]}，倍数 x${msg.multiplier}，当局积分变更 ${msg.deltaScores.join(' / ')}`]);
+
+              // 更新 totals
+              setTotals((t) => {
+                const nt:[number,number,number] = [
+                  t[0] + msg!.deltaScores[0],
+                  t[1] + msg!.deltaScores[1],
+                  t[2] + msg!.deltaScores[2],
+                ];
+                return nt;
+              });
+              break; // 一局结束
+            } else if (msg.type==='log') {
+              setLog(l => [...l, msg.message]);
+            }
           }
         }
-        if (connected) break;
-      }
-      if (!connected) {
-        push('❌ 所有尝试均失败，请确认后端端点与返回格式（NDJSON 或 SSE）。');
-        setStatus('idle');
-        setRunning(false);
-      }
-    } catch (err: any) {
-      push('启动异常：' + String(err?.message || err));
-      setStatus('idle');
+      };
+
+      await pump();
+    } catch (e:any) {
+      setLog(l => [...l, `错误：${e?.message||e}`]);
+    } finally {
       setRunning(false);
     }
-  }
+  };
 
-  function stop() {
-    try {
-      abortRef.current?.abort();
-    } catch {}
-    try {
-      esRef.current?.close();
-    } catch {}
-    if (watchdogRef.current) clearTimeout(watchdogRef.current);
-    watchdogRef.current = null;
-    setStatus('idle');
+  const stop = () => {
+    controllerRef.current?.abort();
     setRunning(false);
-    push('已停止。');
-  }
-
-  useEffect(() => {
-    return () => {
-      stop();
-    };
-  }, []);
+  };
 
   return (
-    <div style={{ border: '1px solid #eee', padding: 12, borderRadius: 8, marginTop: 12 }}>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <button onClick={running ? stop : start}>{running ? '停止' : '开始'}</button>
-        <span style={{ opacity: 0.7 }}>状态：{status}</span>
-        <details>
-          <summary>连接设置</summary>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: 8, marginTop: 8 }}>
-            <label>
-              自定义端点（留空自动尝试）
-              <br />
-              <input value={endpointOverride} onChange={(e) => setEndpointOverride(e.target.value)} placeholder="/api/stream_ndjson" />
-            </label>
-            <label>
-              方式
-              <br />
-              <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
-                <option value="auto">自动（POST→SSE）</option>
-                <option value="post">POST（NDJSON）</option>
-                <option value="sse">GET（SSE）</option>
-              </select>
-            </label>
-          </div>
-        </details>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 12 }}>
-        {[0, 1, 2].map((i) => (
-          <div key={i} style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>
-              {['甲', '乙', '丙'][i]} {board.landlord === i ? '（地主）' : ''}
-            </div>
-            <div>当前分数：{totals[i]}</div>
-            <div>手牌数：{board.hands[i]?.length ?? 0}</div>
-            <div style={{ marginTop: 6, lineHeight: 1.6 }}>
-              手牌：<code><CardLine cards={board.handsRich ? board.handsRich[i] : []} /></code>
-            </div>
-            <div style={{ marginTop: 6 }}>
-              最近出牌：<code><CardLine cards={board.lastRich ? board.lastRich[i] : []} /></code>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <div style={{ fontWeight: 700 }}>本轮出牌顺序</div>
-        <div
-          style={{
-            whiteSpace: 'pre-wrap',
-            background: '#fcfcfc',
-            padding: '6px 8px',
-            border: '1px solid #eee',
-            borderRadius: 4,
-          }}
-        >
-          {board.trick && board.trick.length ? (
-            board.trick.map((t: any, idx: number) => (
-              <div key={idx} style={{ marginBottom: 4 }}>
-                <span style={{ marginRight: 6 }}>{['甲', '乙', '丙'][t.seat]}：</span>
-                {t.pass ? <span style={{ opacity: 0.7 }}>过</span> : <CardLine cards={t.cardsRich || []} />}
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+      <div>
+        <Section title="手牌">
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
+            {[0,1,2].map(i => (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
+                <div style={{ marginBottom:6 }}><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+                <Hand cards={hands[i]}/>
               </div>
-            ))
-          ) : (
-            <span style={{ opacity: 0.6 }}>（暂无）</span>
-          )}
+            ))}
+          </div>
+        </Section>
+
+        <Section title="出牌">
+          <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
+            {plays.length===0 ? <div style={{ opacity:0.6 }}>（尚无出牌）</div> :
+              plays.map((p,idx)=><PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason}/>)}
+          </div>
+        </Section>
+
+        <Section title="结果">
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+            <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+              <div>倍数</div>
+              <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
+            </div>
+            <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+              <div>胜者</div>
+              <div style={{ fontSize:24, fontWeight:800 }}>
+                {winner==null ? '—' : ['甲','乙','丙'][winner]}
+              </div>
+            </div>
+            <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+              <div>本局加减分</div>
+              <div style={{ fontSize:20, fontWeight:700 }}>
+                {delta ? delta.join(' / ') : '—'}
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={start} disabled={running} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
+          <button onClick={stop} disabled={!running} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
         </div>
       </div>
 
-      <div style={{ marginTop: 12 }}>
-        <div style={{ fontWeight: 700 }}>事件日志（诊断信息）</div>
-        <div
-          style={{
-            whiteSpace: 'pre-wrap',
-            background: '#fcfcfc',
-            padding: '6px 8px',
-            border: '1px solid #eee',
-            borderRadius: 4,
-            maxHeight: 260,
-            overflow: 'auto',
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-          }}
-        >
-          {lines.map((l, i) => (
-            <div key={i}>• {l}</div>
-          ))}
-        </div>
+      <div>
+        <Section title="运行日志">
+          <div style={{
+            border:'1px solid #eee', borderRadius:8, padding:'8px 10px',
+            maxHeight:420, overflow:'auto', background:'#fafafa'
+          }}>
+            {log.length===0 ? <div style={{ opacity:0.6 }}>（暂无）</div> :
+              log.map((t,idx)=><LogLine key={idx} text={t}/>)}
+          </div>
+        </Section>
+
+        <Section title="积分（总分）">
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+            {[0,1,2].map(i=>(
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+                <div><SeatTitle i={i}/></div>
+                <div style={{ fontSize:24, fontWeight:800 }}>{totals[i]}</div>
+              </div>
+            ))}
+          </div>
+        </Section>
       </div>
     </div>
   );
 }
 
-/** ---------- 页面 ---------- **/
-export default function Home(): JSX.Element {
-  const [rounds, setRounds] = useState<number>(1);
-  const [seed, setSeed] = useState<number>(0);
+export default function Home() {
+  const [enabled, setEnabled] = useState<boolean>(true);
+  const [delayMs, setDelayMs] = useState<number>(1000);
+  const [startScore, setStartScore] = useState<number>(100);
   const [rob, setRob] = useState<boolean>(true);
   const [four2, setFour2] = useState<'both' | '2singles' | '2pairs'>('both');
-  \1
   const [seatDelayMs, setSeatDelayMs] = useState<number[]>([1000, 1000, 1000]);
   const setSeatDelay = (i: number, v: number | string) =>
     setSeatDelayMs(arr => { const n = [...arr]; n[i] = Math.max(0, Math.floor(Number(v) || 0)); return n; });
 
-  const [startScore, setStartScore] = useState<number>(100);
-
-  const [players, setPlayers] = useState<string>('builtin,builtin,builtin');
-  const [seatProviders, setSeatProviders] = useState<('builtin' | 'openai' | 'gemini' | 'kimi' | 'grok' | 'http')[]>([
-    'builtin',
-    'builtin',
-    'builtin',
+  const [seats, setSeats] = useState<BotChoice[]>([
+    'built-in:greedy-max',
+    'built-in:greedy-min',
+    'built-in:random-legal',
+  ]);
+  const [seatModels, setSeatModels] = useState<string[]>(['gpt-4o-mini','gemini-1.5-flash','grok-2-latest']);
+  const [seatKeys, setSeatKeys] = useState<{openai?:string; gemini?:string; grok?:string; kimi?:string; qwen?:string; httpBase?:string; httpToken?:string;}[]>([
+    { openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }
   ]);
 
-  // 旧的全局 apiKeys（保持不变；后端若想兼容旧格式仍可读取）
-  const [apiKeys] = useState({ openai: '', gemini: '', kimi: '', grok: '', httpBase: '', httpToken: '' });
-
-  // —— 每位玩家独立的 Key（仅 UI） —— //
-  type SeatKey = {
-    openai: string;
-    gemini: string;
-    kimi: string;
-    grok: string;
-    httpBase: string;
-    httpToken: string;
-  };
-  const [seatKeys, setSeatKeys] = useState<SeatKey[]>([
-    { openai: '', gemini: '', kimi: '', grok: '', httpBase: '', httpToken: '' }, // 甲
-    { openai: '', gemini: '', kimi: '', grok: '', httpBase: '', httpToken: '' }, // 乙
-    { openai: '', gemini: '', kimi: '', grok: '', httpBase: '', httpToken: '' }, // 丙
-  ]);
-  const setSeatKey = (i: number, field: keyof SeatKey, value: string) => {
-    setSeatKeys((arr) => {
-      const next = arr.map((x) => ({ ...x }));
-      next[i][field] = value;
-      return next;
-    });
-  };
-  const providerLabel = (p: string) =>
-    p === 'builtin'
-      ? '内建'
-      : p === 'openai'
-      ? 'OpenAI'
-      : p === 'gemini'
-      ? 'Gemini'
-      : p === 'kimi'
-      ? 'Kimi'
-      : p === 'grok'
-      ? 'Grok'
-      : p === 'http'
-      ? 'HTTP'
-      : p;
-
-  function syncFromPlayersString(s: string) {
-    const arr = (s || '').split(',').map((x) => x.trim());
-    const pad: any[] = ['builtin', 'builtin', 'builtin'];
-    for (let i = 0; i < Math.min(3, arr.length); i++) {
-      if (arr[i]) pad[i] = arr[i];
-    }
-    setSeatProviders(pad as any);
-  }
+  const [totals, setTotals] = useState<[number,number,number]>([startScore, startScore, startScore]);
 
   return (
-    <div style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto', padding: 20, maxWidth: 1100, margin: '0 auto' }}>
-      <h1>斗地主 AI 比赛 · 甲 / 乙 / 丙</h1>
-      <p>为每位选手选择内建或外部 AI，并可设置每步出牌延迟（ms）。</p>
+    <div style={{ maxWidth:1080, margin:'24px auto', padding:'0 16px' }}>
+      <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Bot Arena</h1>
 
-      <fieldset style={{ border: '1px solid #ddd', padding: 12, borderRadius: 8 }}>
-        <legend>对局参数</legend>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, alignItems: 'end' }}>
-          <label>
-            局数
-            <br />
-            <input type="number" value={rounds} min={1} onChange={(e) => setRounds(Number(e.target.value))} />
-          </label>
-          <label>
-            随机种子
-            <br />
-            <input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))} />
-          </label>
-          <label>
-            抢地主制
-            <br />
-            <input type="checkbox" checked={rob} onChange={(e) => setRob(e.target.checked)} />
-          </label>
-          <label>
-            四带二
-            <br />
-            <select value={four2} onChange={(e) => setFour2(e.target.value as any)}>
-              <option value="both">两种都允许</option>
-              <option value="2singles">只允许两单</option>
-              <option value="2pairs">只允许两对</option>
-            </select>
-          </label>
-          <label>
-            延迟（ms）
-            <br />
-            <input type="number" value={delayMs} min={0} onChange={(e) => setDelayMs(Number(e.target.value))} />
-          </label>
-          <label>
-            起始分
-            <br />
-            <input type="number" value={startScore} onChange={(e) => setStartScore(Number(e.target.value))} />
-          </label>
-        </div>
+      <div style={{ display:'grid', gridTemplateColumns:'1.1fr 1.4fr', gap:16 }}>
+        <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+          <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
 
-        {/* 每家算法选择 */}
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>每家算法选择</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-            {['甲', '乙', '丙'].map((label, i) => (
-              <label key={i}>
-                {label}：
-                <select
-                  value={seatProviders[i]}
-                  onChange={(e) => {
-                    const v = e.target.value as any;
-                    const arr = seatProviders.slice() as any[];
-                    arr[i] = v;
-                    setSeatProviders(arr as any);
-                    setPlayers((arr as any).join(','));
-                  }}
-                >
-                  <option value="builtin">内建</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="gemini">Gemini</option>
-                  <option value="kimi">Kimi</option>
-                  <option value="grok">Grok</option>
-                  <option value="http">HTTP</option>
-                </select>
-              </label>
-            ))}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12 }}>
+            <label>
+              启用对局
+              <div><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} /></div>
+            </label>
+
+            <label>
+              出牌最小间隔 (ms)
+              <input type="number" min={0} step={50} value={delayMs} onChange={e=>setDelayMs(Number(e.target.value)||0)} style={{ width:'100%' }} />
+            </label>
+
+            <label>
+              初始分
+              <input type="number" step={10} value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ width:'100%' }} />
+            </label>
+
+            <label>
+              可抢地主
+              <div><input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} /></div>
+            </label>
+
+            <label>
+              4带2 规则
+              <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
+                <option value="both">都可</option>
+                <option value="2singles">两张单牌</option>
+                <option value="2pairs">两对</option>
+              </select>
+            </label>
           </div>
-        </div>
 
-        {/* 每家 API 设置（独立） */}
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>每家 API 设置（独立）</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-            {[0, 1, 2].map((i) => (
-              <div key={i} style={{ border: '1px solid #eee', borderRadius: 6, padding: 10 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8 }}>
-                  {['甲', '乙', '丙'][i]} · 当前算法：{providerLabel(seatProviders[i])}
+          <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
+            <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>(
+                <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
+                  <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i}/></div>
+
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    选择
+                    <select value={seats[i]} onChange={e=>{
+                      const v = e.target.value as BotChoice;
+                      setSeats(arr => { const n=[...arr]; n[i]=v; return n; });
+                    }} style={{ width:'100%' }}>
+                      <optgroup label="内置">
+                        <option value="built-in:greedy-max">Greedy Max</option>
+                        <option value="built-in:greedy-min">Greedy Min</option>
+                        <option value="built-in:random-legal">Random Legal</option>
+                      </optgroup>
+                      <optgroup label="AI">
+                        <option value="ai:openai">OpenAI</option>
+                        <option value="ai:gemini">Gemini</option>
+                        <option value="ai:grok">Grok</option>
+                        <option value="ai:kimi">Kimi</option>
+                        <option value="ai:qwen">Qwen</option>
+                        <option value="http">HTTP</option>
+                      </optgroup>
+                    </select>
+                  </label>
+
+                  {seats[i].startsWith('ai:') && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      模型（可选）
+                      <input type="text" value={seatModels[i]||''} onChange={e=>{
+                        const v = e.target.value;
+                        setSeatModels(arr => { const n=[...arr]; n[i]=v; return n; });
+                      }} style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {/* key 或 endpoint */}
+                  {seats[i]==='ai:openai' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      OpenAI API Key
+                      <input type="password" value={seatKeys[i]?.openai||''} onChange={e=>{
+                        const v=e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i]={...(n[i]||{}), openai:v}; return n; });
+                      }} style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i]==='ai:gemini' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      Gemini API Key
+                      <input type="password" value={seatKeys[i]?.gemini||''} onChange={e=>{
+                        const v=e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i]={...(n[i]||{}), gemini:v}; return n; });
+                      }} style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i]==='ai:grok' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      xAI (Grok) API Key
+                      <input type="password" value={seatKeys[i]?.grok||''} onChange={e=>{
+                        const v=e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i]={...(n[i]||{}), grok:v}; return n; });
+                      }} style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i]==='ai:kimi' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      Kimi API Key
+                      <input type="password" value={seatKeys[i]?.kimi||''} onChange={e=>{
+                        const v=e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i]={...(n[i]||{}), kimi:v}; return n; });
+                      }} style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i]==='ai:qwen' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      Qwen API Key
+                      <input type="password" value={seatKeys[i]?.qwen||''} onChange={e=>{
+                        const v=e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i]={...(n[i]||{}), qwen:v}; return n; });
+                      }} style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i]==='http' && (
+                    <>
+                      <label style={{ display:'block', marginBottom:6 }}>
+                        HTTP Base / URL
+                        <input type="text" value={seatKeys[i]?.httpBase||''} onChange={e=>{
+                          const v=e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i]={...(n[i]||{}), httpBase:v}; return n; });
+                        }} style={{ width:'100%' }} />
+                      </label>
+                      <label style={{ display:'block', marginBottom:6 }}>
+                        HTTP Token（可选）
+                        <input type="password" value={seatKeys[i]?.httpToken||''} onChange={e=>{
+                          const v=e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i]={...(n[i]||{}), httpToken:v}; return n; });
+                        }} style={{ width:'100%' }} />
+                      </label>
+                    </>
+                  )}
                 </div>
+              ))}
+            </div>
 
-        {/* 每家出牌最小间隔（独立） */}
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>每家出牌最小间隔 (ms)</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-            {[0, 1, 2].map((i) => (
-              <div key={i} style={{ border: '1px dashed #eee', borderRadius: 6, padding: 10 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8 }}>{['甲','乙','丙'][i]}</div>
-                <label style={{ display: 'block' }}>
-                  最小间隔 (ms)
-                  <input
-                    type="number"
-                    min={0}
-                    step={100}
-                    value={seatDelayMs[i]}
-                    onChange={(e) => setSeatDelay(i, e.target.value)}
-                    style={{ width: '100%' }}
-                  />
-                </label>
-              </div>
-            ))}
-          </div>
-        </div>
-
-
-
-                {seatProviders[i] === 'openai' && (
-                  <label style={{ display: 'block', marginBottom: 8 }}>
-                    OpenAI Key
-                    <input
-                      type="password"
-                      value={seatKeys[i].openai}
-                      onChange={(e) => setSeatKey(i, 'openai', e.target.value)}
-                      placeholder="sk-..."
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                )}
-
-                {seatProviders[i] === 'gemini' && (
-                  <label style={{ display: 'block', marginBottom: 8 }}>
-                    Gemini Key
-                    <input
-                      type="password"
-                      value={seatKeys[i].gemini}
-                      onChange={(e) => setSeatKey(i, 'gemini', e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                )}
-
-                {seatProviders[i] === 'kimi' && (
-                  <label style={{ display: 'block', marginBottom: 8 }}>
-                    Kimi Key
-                    <input
-                      type="password"
-                      value={seatKeys[i].kimi}
-                      onChange={(e) => setSeatKey(i, 'kimi', e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                )}
-
-                {seatProviders[i] === 'grok' && (
-                  <label style={{ display: 'block', marginBottom: 8 }}>
-                    Grok Key
-                    <input
-                      type="password"
-                      value={seatKeys[i].grok}
-                      onChange={(e) => setSeatKey(i, 'grok', e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                )}
-
-                {seatProviders[i] === 'http' && (
-                  <>
-                    <label style={{ display: 'block', marginBottom: 8 }}>
-                      HTTP Base URL
+            {/* 每家出牌最小间隔（独立） */}
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>每家出牌最小间隔 (ms)</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                {[0, 1, 2].map((i) => (
+                  <div key={i} style={{ border: '1px dashed #eee', borderRadius: 6, padding: 10 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 8 }}>{['甲','乙','丙'][i]}</div>
+                    <label style={{ display: 'block' }}>
+                      最小间隔 (ms)
                       <input
-                        value={seatKeys[i].httpBase}
-                        onChange={(e) => setSeatKey(i, 'httpBase', e.target.value)}
-                        placeholder="https://example.com/api"
+                        type="number"
+                        min={0}
+                        step={100}
+                        value={seatDelayMs[i]}
+                        onChange={(e) => setSeatDelay(i, e.target.value)}
                         style={{ width: '100%' }}
                       />
                     </label>
-                    <label style={{ display: 'block', marginBottom: 8 }}>
-                      HTTP Token
-                      <input
-                        type="password"
-                        value={seatKeys[i].httpToken}
-                        onChange={(e) => setSeatKey(i, 'httpToken', e.target.value)}
-                        style={{ width: '100%' }}
-                      />
-                    </label>
-                  </>
-                )}
-
-                {['builtin'].includes(seatProviders[i]) && (
-                  <div style={{ opacity: 0.7 }}>选择 OpenAI / Gemini / Kimi / Grok / HTTP 后可在此输入该玩家专属 Key。</div>
-                )}
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
         </div>
 
-        {/* 选手（旧字段，保持兼容） */}
-        <div style={{ marginTop: 12 }}>
-          <label>
-            选手（逗号分隔）
-            <br />
-            <input
-              style={{ width: '100%' }}
-              value={players}
-              onChange={(e) => {
-                const v = e.target.value;
-                setPlayers(v);
-                syncFromPlayersString(v);
-              }}
-              placeholder="builtin,builtin,builtin"
-            />
-          </label>
+        <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+          <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
+          <LivePanel
+            delayMs={delayMs}
+            startScore={startScore}
+            seatDelayMs={seatDelayMs}
+            enabled={enabled}
+            rob={rob}
+            four2={four2}
+            seats={seats}
+            seatModels={seatModels}
+            seatKeys={seatKeys}
+            onTotals={setTotals}
+          />
         </div>
-      </fieldset>
-
-      <details style={{ marginTop: 16 }}>
-        <summary>实时运行（流式）</summary>
-        {React.createElement(LivePanel as any, {
-          rounds,
-          seed,
-          rob,
-          four2,
-          delayMs,
-          startScore,
-          players,
-          apiKeys,
-          // 新增：把 seatProviders 与 seatKeys 传给 LivePanel，再由 LivePanel 传给后端
-          seatProviders,
-          seatKeys,
-        })}
-      </details>
+      </div>
     </div>
   );
 }
