@@ -1,7 +1,7 @@
 import { BotFunc, BotMove, BotCtx, generateMoves } from '../doudizhu/engine';
 import { extractFirstJsonObject, nonEmptyReason } from './util';
 
-type KimiOpts = { apiKey: string; model?: string; baseUrl?: string };
+type QwenOpts = { apiKey: string; model?: string; baseUrl?: string };
 
 function buildPrompt(ctx: BotCtx): string {
   const hand = ctx.hands.join('');
@@ -20,13 +20,14 @@ function buildPrompt(ctx: BotCtx): string {
   ].join('\n');
 }
 
-export const KimiBot = (opts: KimiOpts): BotFunc => {
+export const QwenBot = (opts: QwenOpts): BotFunc => {
   const apiKey = opts.apiKey;
-  const model = opts.model || 'moonshot-v1-8k';
-  const baseUrl = (opts.baseUrl || 'https://api.moonshot.cn').replace(/\/$/, '');
+  // Use OpenAI-compatible endpoint for DashScope to simplify
+  const model = opts.model || 'qwen-plus';
+  const baseUrl = (opts.baseUrl || 'https://dashscope.aliyuncs.com/compatible-mode').replace(/\/$/, '');
   return async (ctx: BotCtx): Promise<BotMove> => {
     try {
-      if (!apiKey) throw new Error('Missing Kimi API Key');
+      if (!apiKey) throw new Error('Missing Qwen API Key');
       const prompt = buildPrompt(ctx);
       const r = await fetch(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
@@ -49,10 +50,10 @@ export const KimiBot = (opts: KimiOpts): BotFunc => {
       const parsed: any = extractFirstJsonObject(txt) ?? {};
       const move = parsed.move === 'pass' ? 'pass' : 'play';
       const cards = Array.isArray(parsed.cards) ? parsed.cards : [];
-      const reason = nonEmptyReason(parsed.reason, 'Kimi');
+      const reason = nonEmptyReason(parsed.reason, 'Qwen');
       return move === 'pass' ? { move: 'pass', reason } : { move: 'play', cards, reason };
     } catch (e: any) {
-      const reason = `Kimi 调用失败：${e?.message || e}，已回退`;
+      const reason = `Qwen 调用失败：${e?.message || e}，已回退`;
       if (ctx.canPass) return { move: 'pass', reason };
       const legal = generateMoves(ctx.hands, ctx.require, ctx.policy);
       const force = (legal && legal[0]) || [ctx.hands[0]];

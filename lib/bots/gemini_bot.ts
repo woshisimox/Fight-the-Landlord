@@ -1,7 +1,7 @@
 import { BotFunc, BotMove, BotCtx, generateMoves } from '../doudizhu/engine';
 import { extractFirstJsonObject, nonEmptyReason } from './util';
 
-type KimiOpts = { apiKey: string; model?: string; baseUrl?: string };
+type GeminiOpts = { apiKey: string; model?: string };
 
 function buildPrompt(ctx: BotCtx): string {
   const hand = ctx.hands.join('');
@@ -20,24 +20,20 @@ function buildPrompt(ctx: BotCtx): string {
   ].join('\n');
 }
 
-export const KimiBot = (opts: KimiOpts): BotFunc => {
+export const GeminiBot = (opts: GeminiOpts): BotFunc => {
   const apiKey = opts.apiKey;
-  const model = opts.model || 'moonshot-v1-8k';
-  const baseUrl = (opts.baseUrl || 'https://api.moonshot.cn').replace(/\/$/, '');
+  const model = opts.model || 'gemini-1.5-flash';
   return async (ctx: BotCtx): Promise<BotMove> => {
     try {
-      if (!apiKey) throw new Error('Missing Kimi API Key');
+      if (!apiKey) throw new Error('Missing Gemini API Key');
       const prompt = buildPrompt(ctx);
-      const r = await fetch(`${baseUrl}/v1/chat/completions`, {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const r = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: 'Only reply with a strict JSON object for the move.' },
-            { role: 'user', content: prompt },
-          ],
-          temperature: 0.2,
+          generationConfig: { temperature: 0.2 },
+          contents: [{ role: 'user', parts: [{ text: prompt }]}],
         }),
       });
       if (!r.ok) {
@@ -45,14 +41,16 @@ export const KimiBot = (opts: KimiOpts): BotFunc => {
         throw new Error(`HTTP ${r.status} ${errTxt.slice(0,200)}`);
       }
       const j: any = await r.json();
-      const txt: string = j?.choices?.[0]?.message?.content ?? '';
+      const txt: string =
+        j?.candidates?.[0]?.content?.parts?.[0]?.text ??
+        j?.candidates?.[0]?.content?.parts?.map((p:any)=>p?.text).join('') ?? '';
       const parsed: any = extractFirstJsonObject(txt) ?? {};
       const move = parsed.move === 'pass' ? 'pass' : 'play';
       const cards = Array.isArray(parsed.cards) ? parsed.cards : [];
-      const reason = nonEmptyReason(parsed.reason, 'Kimi');
+      const reason = nonEmptyReason(parsed.reason, 'Gemini');
       return move === 'pass' ? { move: 'pass', reason } : { move: 'play', cards, reason };
     } catch (e: any) {
-      const reason = `Kimi 调用失败：${e?.message || e}，已回退`;
+      const reason = `Gemini 调用失败：${e?.message || e}，已回退`;
       if (ctx.canPass) return { move: 'pass', reason };
       const legal = generateMoves(ctx.hands, ctx.require, ctx.policy);
       const force = (legal && legal[0]) || [ctx.hands[0]];
