@@ -36,24 +36,28 @@ export const KimiBot = (opts: KimiOpts): BotFunc => {
             { role: 'system', content: '你是斗地主出牌助手。严格只输出一个JSON对象，形如：{ "move":"play|pass", "cards":["A","A"], "reason":"..." }。不要输出其他内容。' },
             { role: 'user', content: prompt },
           ],
-          temperature: 0.3,
+          temperature: 0.2,
         }),
       });
       if (!r.ok) throw new Error(`Kimi HTTP ${r.status}`);
       const j = await r.json();
       const txt = j?.choices?.[0]?.message?.content || '{}';
       let parsed: any = {};
-      try { parsed = JSON.parse(txt); } catch {}
-      const move = parsed.move === 'pass' ? 'pass' : 'play';
-      const cards = Array.isArray(parsed.cards) ? parsed.cards : [];
-      return move === 'pass'
-        ? { move: 'pass' }
-        : { move: 'play', cards };
+      parsed = normalizeAndExtractJson(txt) || {};
+      let move: 'play'|'pass' = parsed.move === 'pass' ? 'pass' : 'play';
+      let cards: string[] = Array.isArray(parsed.cards) ? parsed.cards : [];
+      const reason = parsed.reason || '';
+      if (move === 'pass' && !ctx.canPass) {
+        const legal = generateMoves(ctx.hands, ctx.require, ctx.policy);
+        const force = (legal && legal[0]) || [ctx.hands[0]];
+        move = 'play'; cards = force;
+      }
+      return move === 'pass' ? { move: 'pass', reason } : { move: 'play', cards, reason };
     } catch (e) {
-      if (ctx.canPass) return { move: 'pass' };
+      if (ctx.canPass) return { move: 'pass', reason: 'Kimi 调用/解析异常，已兜底过牌' };
       const legal = generateMoves(ctx.hands, ctx.require, ctx.policy);
       const force = (legal && legal[0]) || [ctx.hands[0]];
-      return { move: 'play', cards: force };
+      return { move: 'play', cards: force, reason: 'Kimi 调用/解析异常，使用兜底出牌' };
     }
   };
 };
