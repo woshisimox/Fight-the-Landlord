@@ -47,6 +47,9 @@ type LiveProps = {
     httpBase?: string;
     httpToken?: string;
   };
+  // 新增：把前端每位玩家的设置传给后端（可选，后端按需读取）
+  seatKeys?: any[];
+  seatProviders?: string[];
 };
 type Mode = 'auto' | 'post' | 'sse';
 
@@ -132,9 +135,16 @@ function LivePanel(props: LiveProps): JSX.Element {
         setBoard((b) => ({ ...b, trick: [] }));
         push('新一轮开始。');
       } else if (obj.kind === 'play') {
+        // —— 兼容显示 AI 理由/来源 —— //
         const seatName = ['甲', '乙', '丙'][obj.seat];
+        const by = obj.provider || obj.model || obj.bot || obj.agent || obj.ai || '';
+        const pickedReason =
+          obj.aiReason ?? obj.reason ?? obj.explain ?? (obj.meta ? obj.meta.reason : undefined) ?? '';
+        const reasonSuffix = pickedReason ? ` — 理由：${pickedReason}` : '';
+        const byPrefix = by ? `【AI:${by}】` : '';
+
         if (obj.move === 'pass') {
-          push(`${seatName}：过${obj.reason ? ' — 理由：' + obj.reason : ''}`);
+          push(`${byPrefix}${seatName}：过${reasonSuffix}`);
           setBoard((b) => {
             const last = b.last.slice();
             last[obj.seat] = '过';
@@ -147,7 +157,7 @@ function LivePanel(props: LiveProps): JSX.Element {
         } else {
           const labels: string[] = obj.cards || [];
           const text = labels.join('');
-          push(`${seatName}：${obj.comboType || obj.type || '出牌'} ${text}${obj.reason ? ' — 理由：' + obj.reason : ''}`);
+          push(`${byPrefix}${seatName}：${obj.comboType || obj.type || '出牌'} ${text}${reasonSuffix}`);
           setBoard((b) => {
             const last = b.last.slice();
             last[obj.seat] = text;
@@ -171,7 +181,7 @@ function LivePanel(props: LiveProps): JSX.Element {
         }
       }
     } else if (obj?.type === 'score') {
-      // —— 仅此处修改：把起始分叠加到 totals 上 —— //
+      // 把起始分叠加到 totals 上
       const base = props.startScore || 0;
       const tt: [number, number, number] = [
         (obj.totals?.[0] ?? 0) + base,
@@ -199,6 +209,9 @@ function LivePanel(props: LiveProps): JSX.Element {
       players: props.players,
       playersList: (props.players || '').split(',').map((s) => s.trim()),
       apiKeys: props.apiKeys || {},
+      // 新增：把每位的 provider & key 一起传给后端（推荐只在 POST 里传，不放到 GET 查询串）
+      seatProviders: props.seatProviders || [],
+      seatKeys: props.seatKeys || [],
     };
     const ac = new AbortController();
     abortRef.current = ac;
@@ -261,6 +274,7 @@ function LivePanel(props: LiveProps): JSX.Element {
         delayMs: String(props.delayMs),
         startScore: String(props.startScore),
         players: props.players,
+        // 出于安全考虑，不把 key 放到 query
       });
       const full = url.includes('?') ? url + '&' + qs.toString() : url + '?' + qs.toString();
       push(`连接(GET SSE)：${full}`);
@@ -377,7 +391,6 @@ function LivePanel(props: LiveProps): JSX.Element {
             <div style={{ fontWeight: 700, marginBottom: 6 }}>
               {['甲', '乙', '丙'][i]} {board.landlord === i ? '（地主）' : ''}
             </div>
-            {/* 显示当前分数（含起始分） */}
             <div>当前分数：{totals[i]}</div>
             <div>手牌数：{board.hands[i]?.length ?? 0}</div>
             <div style={{ marginTop: 6, lineHeight: 1.6 }}>
@@ -453,10 +466,10 @@ export default function Home(): JSX.Element {
     'builtin',
   ]);
 
-  // 旧的全局 apiKeys（保持不变，以免影响其它逻辑；不再渲染 UI）
+  // 旧的全局 apiKeys（保持不变；后端若想兼容旧格式仍可读取）
   const [apiKeys] = useState({ openai: '', gemini: '', kimi: '', grok: '', httpBase: '', httpToken: '' });
 
-  // —— 每位玩家独立的 Key（仅 UI，不改变现有请求/引擎） —— //
+  // —— 每位玩家独立的 Key（仅 UI） —— //
   type SeatKey = {
     openai: string;
     gemini: string;
@@ -574,7 +587,7 @@ export default function Home(): JSX.Element {
           </div>
         </div>
 
-        {/* 每家 API 设置（独立，仅 UI） */}
+        {/* 每家 API 设置（独立） */}
         <div style={{ marginTop: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>每家 API 设置（独立）</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
@@ -685,7 +698,19 @@ export default function Home(): JSX.Element {
 
       <details style={{ marginTop: 16 }}>
         <summary>实时运行（流式）</summary>
-        {React.createElement(LivePanel as any, { rounds, seed, rob, four2, delayMs, startScore, players, apiKeys })}
+        {React.createElement(LivePanel as any, {
+          rounds,
+          seed,
+          rob,
+          four2,
+          delayMs,
+          startScore,
+          players,
+          apiKeys,
+          // 新增：把 seatProviders 与 seatKeys 传给 LivePanel，再由 LivePanel 传给后端
+          seatProviders,
+          seatKeys,
+        })}
       </details>
     </div>
   );

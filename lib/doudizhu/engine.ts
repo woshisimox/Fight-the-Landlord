@@ -44,8 +44,8 @@ export type EngineOptions = {
 };
 
 export type BotMove =
-  | { move: 'pass' }
-  | { move: 'play', cards: Label[] };
+  | { move: 'pass', reason?: string }
+  | { move: 'play', cards: Label[], reason?: string };
 
 export type BotCtx = {
   seat: number;
@@ -56,7 +56,7 @@ export type BotCtx = {
   lastNonPassSeat: number | null;
 };
 
-export type BotFunc = (ctx: BotCtx) => BotMove;
+export type BotFunc = (ctx: BotCtx) => BotMove | Promise<BotMove>;
 
 export const RANKS: Label[] = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
 export const RANK_IDX = Object.fromEntries(RANKS.map((l, i) => [l, i])) as Record<Label, number>;
@@ -446,7 +446,7 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
 
   while (true) {
     yield { type:'event', kind:'turn', seat: turn, lead: !canPass, require: req || undefined };
-    const mv = bots[turn]({ seat: turn, hands: hands[turn].slice(), require: req, canPass, policy: opts.four2||'both', lastNonPassSeat });
+    const mv = await bots[turn]({ seat: turn, hands: hands[turn].slice(), require: req, canPass, policy: opts.four2||'both', lastNonPassSeat });
 
     if (mv.move==='pass') {
       if (!canPass) {
@@ -487,7 +487,7 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
           req = cc; lastNonPassSeat = turn; passCount = 0;
         }
       } else {
-        yield { type:'event', kind:'play', seat: turn, move:'play', cards: mv.cards, comboType: c.type };
+        yield { type:'event', kind:'play', seat: turn, move:'play', cards: mv.cards, comboType: c.type, reason: (mv as any).reason };
         removeLabels(hands[turn], mv.cards);
         playedCount[turn]++;
         if (c.type==='bomb' || c.type==='rocket') multiplier *= 2;
