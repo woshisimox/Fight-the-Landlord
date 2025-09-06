@@ -474,26 +474,18 @@ export async function* runOneGame(opts: MatchOptions): AsyncGenerator<EventObj> 
       const c = classify(mv.cards, opts.four2||'both');
       if (!c || (req && !canBeat(req, c))) {
         const legal = generateMoves(hands[turn], req, opts.four2||'both');
-const pick = legal[0] || (canPass ? null : [hands[turn][hands[turn].length - 1]]);
-if (!pick) {
-  yield { type:'event', kind:'play', seat: turn, move:'pass', reason:'无牌可接' };
-  passCount++;
-  if (passCount===2 && lastNonPassSeat!=null) {
-    yield { type:'event', kind:'trick-reset' };
-    turn = lastNonPassSeat;
-    canPass = false;
-    req = null;
-    passCount = 0;
-    continue;
-  }
-} else {
-  const cc = classify(pick, opts.four2||'both')!;
-  yield { type:'event', kind:'play', seat: turn, move:'play', cards: pick, comboType: cc.type };
-  removeLabels(hands[turn], pick);
-  playedCount[turn]++;
-  if (cc.type==='bomb' || cc.type==='rocket') multiplier *= 2;
-  req = cc; lastNonPassSeat = turn; passCount = 0;
-}
+        const pick = legal[0] || (canPass? null : [hands[turn][hands[turn].length-1]]);
+        if (!pick) {
+          yield { type:'event', kind:'play', seat: turn, move:'pass', reason:'无牌可接' };
+          passCount++;
+        } else {
+          const cc = classify(pick, opts.four2||'both')!;
+          yield { type:'event', kind:'play', seat: turn, move:'play', cards: pick, comboType: cc.type };
+          removeLabels(hands[turn], pick);
+          playedCount[turn]++;
+          if (cc.type==='bomb' || cc.type==='rocket') multiplier *= 2;
+          req = cc; lastNonPassSeat = turn; passCount = 0;
+        }
       } else {
         yield { type:'event', kind:'play', seat: turn, move:'play', cards: mv.cards, comboType: c.type, reason: (mv as any).reason };
         removeLabels(hands[turn], mv.cards);

@@ -46,7 +46,9 @@ type LiveProps = {
     grok?: string;
     httpBase?: string;
     httpToken?: string;
-  };
+  
+  seatDelayMs?: number[];
+};
   // 新增：把前端每位玩家的设置传给后端（可选，后端按需读取）
   seatKeys?: any[];
   seatProviders?: string[];
@@ -456,8 +458,12 @@ export default function Home(): JSX.Element {
   const [seed, setSeed] = useState<number>(0);
   const [rob, setRob] = useState<boolean>(true);
   const [four2, setFour2] = useState<'both' | '2singles' | '2pairs'>('both');
-  const [delayMs, setDelayMs] = useState<number>(200);
-  const [startScore, setStartScore] = useState<number>(0);
+  \1
+  const [seatDelayMs, setSeatDelayMs] = useState<number[]>([1000, 1000, 1000]);
+  const setSeatDelay = (i: number, v: number | string) =>
+    setSeatDelayMs(arr => { const n = [...arr]; n[i] = Math.max(0, Math.floor(Number(v) || 0)); return n; });
+
+  const [startScore, setStartScore] = useState<number>(100);
 
   const [players, setPlayers] = useState<string>('builtin,builtin,builtin');
   const [seatProviders, setSeatProviders] = useState<('builtin' | 'openai' | 'gemini' | 'kimi' | 'grok' | 'http')[]>([
