@@ -1,5 +1,4 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -8,6 +7,16 @@ import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
 
 export const config = { api: { bodyParser: false, responseLimit: false } };
+
+// ---- Dynamic engine import with fallback paths ----
+// We avoid static import so the build won't fail if the engine lives in a different folder.
+declare const require: any;
+const engineA: any = (() => { try { return require('../../lib/doudizhu/engine'); } catch { return null; } })();
+const engineB: any = engineA || (() => { try { return require('../../lib/engine'); } catch { return null; } })();
+const runOneGame: any     = engineB?.runOneGame;
+const GreedyMax: any      = engineB?.GreedyMax;
+const GreedyMin: any      = engineB?.GreedyMin;
+const RandomLegal: any    = engineB?.RandomLegal;
 
 function readBody(req: NextApiRequest): Promise<any> {
   return new Promise((resolve) => {
@@ -21,13 +30,19 @@ function readBody(req: NextApiRequest): Promise<any> {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // If engine is missing at runtime, fail gracefully with a hint
+  if (!runOneGame) {
+    res.status(500).json({ error: 'Engine module not found. Please ensure lib/doudizhu/engine.ts or lib/engine.ts exists.' });
+    return;
+  }
+
   const body = req.method === 'POST' ? await readBody(req) : (req.query || {});
 
-  const rounds  = Number(body.rounds ?? 1);
-  const seed    = Number(body.seed ?? 0);
-  const delayMs = Number(body.delayMs ?? 200);
-  const four2   = (body.four2 ?? 'both') as 'both'|'2singles'|'2pairs';
-  const playersStr = String(body.players ?? 'builtin,builtin,builtin');
+  const rounds  = Number((body as any).rounds ?? 1);
+  const seed    = Number((body as any).seed ?? 0);
+  const delayMs = Number((body as any).delayMs ?? 200);
+  const four2   = ((body as any).four2 ?? 'both') as any;
+  const playersStr = String((body as any).players ?? 'builtin,builtin,builtin');
 
   const seatProviders: string[] = Array.isArray((body as any).seatProviders)
     ? (body as any).seatProviders
@@ -60,10 +75,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   });
   const write = (obj: any) => res.write(JSON.stringify(obj) + '\n');
 
-  // Meta 首包（便于前端展示）
+  // Meta
   write({ type: 'event', kind: 'meta', seatProviders: picked.map(p=>String(p||'builtin')) });
 
-  // 包装 bot：打印调用与返回，且加超时兜底，便于调试是否真的请求了外部 AI
   const CALL_TIMEOUT_MS = Number((body as any)?.timeoutMs ?? 15000);
   function wrapBot(name: string, i: number, bot: any) {
     return async (ctx: any) => {
