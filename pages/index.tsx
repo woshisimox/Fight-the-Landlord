@@ -82,9 +82,15 @@ function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
     if (!l) return l;
+    // 统一 Joker 显示：小王=🃏X，大王=🃏Y
+    if (l === 'x') return '🃏X';
+    if (l === 'X') return '🃏Y';
     if (l.startsWith('🃏')) return l;
     if ('♠♥♦♣'.includes(l[0])) return l;
-    if (l === 'x' || l === 'X') return `🃏${l}`;  // 保留大小写：x=小王, X=大王
+    const suit = SUITS[idx % SUITS.length]; idx++;
+    return `${suit}${rankOf(l)}`;
+  });
+}`;  // 保留大小写：x=小王, X=大王
     const suit = SUITS[idx % SUITS.length]; idx++;
     return `${suit}${rankOf(l)}`;
   });
