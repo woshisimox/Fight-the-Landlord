@@ -88,20 +88,16 @@ function decorateHandCycle(raw: string[]): string[] {
 
 function Card({ label }: { label:string }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
-  const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : (suit === '🃏' ? '#6b5' : '#1a1a1a');
+  const color = (suit === '♥' || suit === '♦') ? '#af1d22' : (suit === '🃏' ? '#6b5' : '#1a1a1a');
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-  // Joker 专用：大王 X 显示为红色，小王 x 显示为绿色
-  const rankColor = suit === '🃏'
-    ? (rank === 'X' ? '#d11' : '#16a34a')
-    : undefined;
   return (
     <span style={{
       display:'inline-flex', alignItems:'center', gap:6,
       border:'1px solid #ddd', borderRadius:8, padding:'6px 10px',
-      marginRight:6, marginBottom:6, fontWeight:800, color: baseColor
+      marginRight:6, marginBottom:6, fontWeight:800, color
     }}>
       <span style={{ fontSize:16 }}>{suit}</span>
-      <span style={{ fontSize:16, ...(rankColor ? { color: rankColor } : {}) }}>{rank === 'T' ? '10' : rank}</span>
+      <span style={{ fontSize:16 }}>{rank === 'T' ? '10' : rank}</span>
     </span>
   );
 }
@@ -167,6 +163,13 @@ function LivePanel(props: LiveProps) {
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [log, setLog] = useState<string[]>([]);
+  // 追加日志（带上限）：只保留最近若干行，避免多局卡顿
+  const pushLog = (msg: string) => {
+    setLog(prev => {
+      const base = prev.length > 1200 ? prev.slice(-800) : prev;
+      return [...base, msg];
+    });
+  };
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
@@ -260,19 +263,19 @@ function LivePanel(props: LiveProps) {
               const lord =
                 m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
               setLandlord(lord);
-              setLog(l => [...l, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`]);
+              pushLog(`发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`);
               continue;
             }
 
             if (m.type === 'event' && m.kind === 'rob') {
-              setLog(l => [...l, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`]);
+              pushLog(`${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`);
               continue;
             }
 
             if (m.type === 'event' && m.kind === 'play') {
               if (m.move === 'pass') {
                 setPlays(p => [...p, { seat:m.seat, move:'pass', reason:m.reason }]);
-                setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`]);
+                pushLog(`${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`);
               } else {
                 const pretty: string[] = [];
                 setHands(h => {
@@ -288,13 +291,13 @@ function LivePanel(props: LiveProps) {
                   return nh;
                 });
                 setPlays(p => [...p, { seat:m.seat, move:'play', cards: pretty }]);
-                setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`]);
+                pushLog(`${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`]);
               }
               continue;
             }
 
             if (m.type === 'event' && m.kind === 'trick-reset') {
-              setLog(l => [...l, '一轮结束，重新起牌']);
+              pushLog('一轮结束，重新起牌');
               setPlays([]);
               continue;
             }
@@ -303,14 +306,14 @@ function LivePanel(props: LiveProps) {
               setWinner(m.winner);
               setMultiplier(m.multiplier);
               setDelta(m.deltaScores);
-              setLog(l => [...l, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`]);
+              pushLog(`胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`]);
               setTotals(t => [ t[0] + m.deltaScores[0], t[1] + m.deltaScores[1], t[2] + m.deltaScores[2] ]);
               // 不中断，继续读下一局
               continue;
             }
 
             if (m.type === 'log' && typeof m.message === 'string') {
-              setLog(l => [...l, m.message]);
+              pushLog(m.message);
               continue;
             }
           }
@@ -320,9 +323,9 @@ function LivePanel(props: LiveProps) {
       await pump();
     } catch (e:any) {
       if (e?.name === 'AbortError') {
-        setLog(l => [...l, '已手动停止。']);
+        pushLog('已手动停止。');
       } else {
-        setLog(l => [...l, `错误：${e?.message || e}`]);
+        pushLog(`错误：${e?.message || e}`);
       }
     } finally {
       setRunning(false);
