@@ -293,19 +293,38 @@ function LivePanel(props: LiveProps) {
                   }
                   return nh;
                 });
+                if (pendingResetRef.current) {
+                if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+                pendingResetRef.current = false;
+                // 粘合：先清空后立刻加入首出，合并在同一批渲染
+                setPlays([]);
                 setPlays(p => [...p, { seat:m.seat, move:'play', cards: pretty }]);
-                setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`]);
+              } else {
+                setPlays(p => [...p, { seat:m.seat, move:'play', cards: pretty }]);
+              }
+              setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`]);
               }
               continue;
             }
 
             if (m.type === 'event' && m.kind === 'trick-reset') {
               setLog(l => [...l, '一轮结束，重新起牌']);
-              setPlays([]);
+              // 启动粘合窗口：延迟清空，等待下一条play一起提交，避免竞态
+              pendingResetRef.current = true;
+              if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+              resetTimerRef.current = setTimeout(() => {
+                if (pendingResetRef.current) {
+                  setPlays([]);
+                  pendingResetRef.current = false;
+                }
+              }, 30);
               continue;
             }
 
             if (m.type === 'event' && m.kind === 'win') {
+              pendingResetRef.current = false;
+              if (resetTimerRef.current) { clearTimeout(resetTimerRef.current); resetTimerRef.current = null; }
+
               setWinner(m.winner);
               setMultiplier(m.multiplier);
               setDelta(m.deltaScores);

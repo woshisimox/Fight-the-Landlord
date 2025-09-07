@@ -1,6 +1,5 @@
 // pages/api/stream_ndjson.ts (hardened, anti-stall version)
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { sInfo, sError, sDebug } from '../../lib/debug/serverLog';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
@@ -29,8 +28,10 @@ type StartPayload = {
   seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
 };
 
+let __lastWrite = Date.now();
 function writeLine(res: NextApiResponse, obj: any) {
   res.write(JSON.stringify(obj) + '\n');
+  __lastWrite = Date.now();
 }
 
 function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any {
@@ -101,26 +102,24 @@ async function runOneRoundWithGuard(opts: { seats: any[], four2?: 'both'|'2singl
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const __reqId = Math.random().toString(36).slice(2,8);
-  try { sInfo("stream","request:start",{ ua: req.headers["user-agent"], query: req.query }, __reqId); } catch {}
-  try { res.setHeader("Cache-Control","no-store"); res.setHeader("Content-Type","application/x-ndjson; charset=utf-8"); } catch {};
-  let __lastWrite = Date.now();
-  const __origWrite = (res.write as any).bind(res);
-  (res as any).write = (chunk: any, ...args: any[]) => { try { const s = typeof chunk==="string" ? chunk : (Buffer.isBuffer(chunk)? chunk.toString("utf8") : String(chunk)); sDebug("stream","send-chunk",{ sample: s.slice(0,200) }, __reqId); } catch {}; __lastWrite = Date.now(); return __origWrite(chunk, ...(args as any)); };
-  const __origEnd = (res.end as any).bind(res);
-  (res as any).end = (...args: any[]) => { try { sInfo("stream","request:end",{}, __reqId); } catch {}; return __origEnd(...(args as any)); };
-  const __keepAliveTimer = setInterval(() => { try { if (Date.now() - __lastWrite > 2500) { (res as any).write(JSON.stringify({ type: "ka", ts: new Date().toISOString() }) + "\n"); } } catch {} }, 2500);
-if (req.method !== 'POST') {
+  if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  const __ka = setInterval(() => {
+    try {
+      if ((res as any).writableEnded) { clearInterval(__ka as any); return; }
+      if (Date.now() - __lastWrite > 2500) writeLine(res, { type:'ka', ts: new Date().toISOString() });
+    } catch {}
+  }, 2500);
 
   try {
     const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const rounds = Math.max(1, Math.min(50, body.rounds ?? 1));
+    const MAX_ROUNDS = parseInt(process.env.MAX_ROUNDS || '200', 10);
+    const rounds = Math.max(1, Math.min(MAX_ROUNDS, Number(body.rounds) || 1));
     const four2 = body.four2 || 'both';
     const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
 
@@ -151,9 +150,11 @@ if (req.method !== 'POST') {
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
 
+    try { clearInterval(__ka as any); } catch {}
     res.end();
   } catch (e: any) {
     writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
-    try { res.end(); } catch {}
+    try { try { clearInterval(__ka as any); } catch {}
+    res.end(); } catch {}
   }
 }
