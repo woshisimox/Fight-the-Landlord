@@ -338,7 +338,7 @@ function LivePanel(props: LiveProps) {
                 setTotals(t => {
                   const nt:[number,number,number] = [ t[0] + e.deltaScores[0], t[1] + e.deltaScores[1], t[2] + e.deltaScores[2] ];
                   if (Math.min(nt[0], nt[1], nt[2]) < 0) {
-                    earlyStop = True as any; // hacky flag carried via closure
+                    earlyStop = true as any; // hacky flag carried via closure
                   }
                   return nt;
                 });
