@@ -1,1 +1,39 @@
-import { BotFunc, BotCtx, generateMoves } from '../doudizhu/engine';export const HttpBot=(o:{url?:string,base?:string,apiKey?:string,token?:string,headers?:Record<string,string>}):BotFunc=>async (ctx:BotCtx)=>{try{const ep=(o.url||o.base||'').replace(/\/$/,'');if(!ep)throw new Error('Missing HTTP endpoint');const r=await fetch(ep,{method:'POST',headers:{'content-type':'application/json',...(o.apiKey||o.token?{authorization:`Bearer ${o.apiKey||o.token}`}:{}) ,...(o.headers||{})},body:JSON.stringify(ctx)});if(!r.ok)throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,200));const j:any=await r.json();const m=j.move==='pass'?'pass':'play';const cds=Array.isArray(j.cards)?j.cards:[];const reason=(j.reason??'').toString().trim()||'HTTP 端返回';return m==='pass'?{move:'pass',reason}:{move:'play',cards:cds,reason};}catch(e:any){const reason=`HTTP 端调用失败：${e?.message||e}，已回退`;if(ctx.canPass)return{move:'pass',reason};const legal=generateMoves(ctx.hands,ctx.require,ctx.policy);return{move:'play',cards:(legal&&legal[0])||[ctx.hands[0]],reason};}}
+// lib/bots/http_bot.ts
+// 通用 HTTP 代理 bot：把 ctx 以 JSON POST 给你的服务，由服务返回 {move, cards?, reason}
+type BotMove =
+  | { move: 'pass'; reason?: string }
+  | { move: 'play'; cards: string[]; reason?: string };
+type BotCtx = any;
+type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
+
+export const HttpBot = (o: {
+  base?: string;            // 建议使用 base（或 url）
+  url?: string;
+  apiKey?: string;
+  token?: string;
+  headers?: Record<string, string>;
+}): BotFunc =>
+  async (ctx: BotCtx) => {
+    const endpoint = (o.url || o.base || '').replace(/\/$/, '');
+    if (!endpoint) throw new Error('Missing HTTP endpoint (base/url)');
+
+    const r = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(o.apiKey ? { 'x-api-key': o.apiKey } : {}),
+        ...(o.token ? { authorization: `Bearer ${o.token}` } : {}),
+        ...(o.headers || {}),
+      },
+      body: JSON.stringify({ ctx }),
+    });
+
+    const txt = await r.text();
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${txt.slice(0, 200)}`);
+    let obj: any = {};
+    try { obj = JSON.parse(txt); } catch {}
+    const move = obj?.move === 'pass' ? 'pass' : 'play';
+    const cards: string[] = Array.isArray(obj?.cards) ? obj.cards : [];
+    const reason: string | undefined = typeof obj?.reason === 'string' ? obj.reason : undefined;
+    return move === 'pass' ? { move: 'pass', reason } : { move: 'play', cards, reason };
+  };

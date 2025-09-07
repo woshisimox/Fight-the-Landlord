@@ -55,7 +55,6 @@ export function getBot(spec: BotSpec, seatIdx: number): IBot {
   }
 
   if (spec.kind === 'http') {
-    // HttpBot 需要的是 base 或 url，这里用 base
     const base = (spec.baseUrl || '').replace(/\/$/, '');
     return asBot(HttpBot({ base, token: spec.token || '' }), `${label}/HTTP`);
   }
