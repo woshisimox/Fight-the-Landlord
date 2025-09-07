@@ -89,12 +89,8 @@ function decorateHandCycle(raw: string[]): string[] {
     const suit = SUITS[idx % SUITS.length]; idx++;
     return `${suit}${rankOf(l)}`;
   });
-}`;  // 保留大小写：x=小王, X=大王
-    const suit = SUITS[idx % SUITS.length]; idx++;
-    return `${suit}${rankOf(l)}`;
-  });
-}
 
+}
 function Card({ label }: { label:string }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
