@@ -200,6 +200,8 @@ function LivePanel(props: LiveProps) {
   const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
   const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
   const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+  const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
+
   // --- End fix ---
 
   const controllerRef = useRef<AbortController|null>(null);
@@ -271,6 +273,7 @@ let idx: number;
 
             for (const raw of batch) {
               const m: any = raw;
+              try {
 
               const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
               const hasHands =
@@ -309,7 +312,7 @@ let idx: number;
                   const pretty: string[] = [];
                   const seat = m.seat as number;
                   const cards: string[] = m.cards || [];
-                  const nh = nextHands.map(x => [...x]);
+                  const nh = (nextHands && (nextHands as any[]).length===3 ? nextHands : [[],[],[]]).map((x:any)=>[...x]);
                   for (const rawCard of cards) {
                     const options = candDecorations(rawCard);
                     const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
@@ -330,7 +333,7 @@ let idx: number;
                 nextDelta = m.deltaScores;
                 nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
                 nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
-                nextFinished = nextFinished + 1;
+                nextFinished = nextFinished + 1; winsRef.current = (winsRef.current||0) + 1;
                 continue;
               }
 
@@ -338,13 +341,14 @@ let idx: number;
                 nextLog = [...nextLog, m.message];
                 continue;
               }
-            }
+            
+              } catch(e) { console.error('[ingest:batch]', e, raw); }}
 
             // Commit once per chunk
             setHands(nextHands);
             setPlays(nextPlays);
             setTotals(nextTotals);
-            setFinishedCount(nextFinished);
+            setFinishedCount(winsRef.current || nextFinished);
             setLog(nextLog);
             setLandlord(nextLandlord);
             setWinner(nextWinner);
