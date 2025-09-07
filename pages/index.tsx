@@ -166,6 +166,8 @@ function LivePanel(props: LiveProps) {
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
+  const [finishedCount, setFinishedCount] = useState(0);
+
 
   // 首次启动时，将总分重置为初始分；后续多局不会清零
   const prevRunningRef = useRef(false);
@@ -192,6 +194,7 @@ function LivePanel(props: LiveProps) {
     setDelta(null);
     setMultiplier(1);
     setLog([]);
+    setFinishedCount(0);
 
     controllerRef.current = new AbortController();
 
@@ -299,6 +302,7 @@ function LivePanel(props: LiveProps) {
               setWinner(m.winner);
               setMultiplier(m.multiplier);
               setDelta(m.deltaScores);
+              setFinishedCount(c => c + 1);
               setLog(l => [...l, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`]);
               setTotals(t => [ t[0] + m.deltaScores[0], t[1] + m.deltaScores[1], t[2] + m.deltaScores[2] ]);
               // 不中断，继续读下一局
@@ -329,9 +333,20 @@ function LivePanel(props: LiveProps) {
     controllerRef.current?.abort();
     setRunning(false);
   };
+  // --- 新增：剩余局数计算（不影响现有逻辑）
+  const inProgress = running && winner === null && Array.isArray(hands) && hands.some(h => Array.isArray(h) && h.length > 0);
+  const remainingGames = Math.max(0, (props.rounds ?? 1) - (finishedCount + (inProgress ? 1 : 0)));
+
 
   return (
     <div>
+      {/* 剩余局数：最小入侵徽标 */}
+      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
+        <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, lineHeight:1.2, userSelect:'none', background:'#fff' }}>
+          剩余局数：{remainingGames}
+        </span>
+      </div>
+
       {/* 第一行：积分（总分） */}
       <Section title="积分（总分）">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
