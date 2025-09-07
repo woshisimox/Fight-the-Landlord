@@ -120,7 +120,6 @@ function generateMoves(hand: Label[], require: Require): Move[] {
 
   const addSingles = (minRank=0) => {
     for (const g of groups) {
-      // 首家（require=null）可以出等于 minRank（仅当 minRank=0 时才命中）
       if (require === null || g.rank > minRank) {
         for (const l of g.labels) out.push({ kind:'play', cards:[l], type:'single', rank:g.rank });
       }
@@ -179,7 +178,6 @@ export type BotCtx = {
 };
 export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 
-// 类型守卫：把 Move[] 过滤成 PlayMove[]
 type PlayMove = Extract<Move, { kind:'play' }>;
 function isPlay(m: Move): m is PlayMove { return m.kind === 'play'; }
 
@@ -188,189 +186,8 @@ const builtinGreedyMax: BotFunc = ({ legal }) => {
   if (plays.length === 0) return { type:'pass' };
   plays.sort((a,b)=> a.rank===b.rank ? typeOrder(a.type)-typeOrder(b.type) : a.rank-b.rank);
   const pick = plays[plays.length-1];
-  if (!pick) return { type:'pass' };        // 兼容 noUncheckedIndexedAccess
-  return { type:'play', cards: pick.cards, comboType: pick.type };
-};
-
-const builtinGreedyMin: BotFunc = ({ legal }) => {
-  const plays: PlayMove[] = legal.filter(isPlay);
-  if (plays.length === 0) return { type:'pass' };
-  plays.sort((a,b)=> a.rank===b.rank ? typeOrder(a.type)-typeOrder(b.type) : a.rank-b.rank);
-  const pick = plays[0];
   if (!pick) return { type:'pass' };
   return { type:'play', cards: pick.cards, comboType: pick.type };
 };
 
-const builtinRandomLegal: BotFunc = ({ legal, rnd }) => {
-  const plays: PlayMove[] = legal.filter(isPlay);
-  if (plays.length === 0) return { type:'pass' };
-  const idx = Math.floor(rnd()*plays.length);
-  const pick = plays[idx];
-  if (!pick) return { type:'pass' };
-  return { type:'play', cards: pick.cards, comboType: pick.type };
-};
-
-function typeOrder(t: ComboType): number {
-  switch (t) {
-    case 'single': return 1;
-    case 'pair': return 2;
-    case 'triple': return 3;
-    case 'bomb': return 9;
-    case 'rocket': return 10;
-    default: return 5;
-  }
-}
-
-function pickSmallestSingle(hand: Label[]): Label {
-  let best = hand[0], br = rankValue(hand[0] ?? '');
-  for (const c of hand) {
-    const r = rankValue(c);
-    if (r < br) { best = c; br = r; }
-  }
-  return best!;
-}
-
-// ---------- 记分 ----------
-function settle(winner: Seat, landlord: Seat, multiplier: number): [number,number,number] {
-  const base = multiplier; // base × 倍数
-  const delta: [number,number,number] = [0,0,0];
-  if (winner === landlord) {
-    delta[landlord] = +2 * base;
-    delta[(landlord+1)%3] = -1 * base;
-    delta[(landlord+2)%3] = -1 * base;
-  } else {
-    delta[landlord] = -2 * base;
-    delta[(landlord+1)%3] = +1 * base;
-    delta[(landlord+2)%3] = +1 * base;
-  }
-  return delta;
-}
-
-// ---------- 主流程（含两处防止卡死的修复） ----------
-export async function runSeries(opts: RunOptions, emit: Emit) {
-  const rounds = Math.max(1, Math.floor(opts.rounds || 1));
-  const delay = async (ms:number) => new Promise(r=>setTimeout(r, ms));
-  const rnd = mulberry32(0xC0FFEE);
-
-  for (let round=0; round<rounds; round++) {
-    const { hands, landlord } = deal(rnd);
-    await emit({ type:'state', kind:'init', landlord, hands: clone(hands) });
-
-    let turn: Seat = landlord;
-    let leader: Seat = landlord;
-    let require: Require = null;
-    let passCount = 0;
-    let multiplier = 1;
-    let lastPlaySeat: Seat = landlord;
-
-    const bots: BotFunc[] = [
-      builtinGreedyMax, builtinGreedyMin, builtinRandomLegal
-    ];
-
-    const isEmpty = (h:Label[]) => h.length === 0;
-
-    for (;;) {
-      const isLeader = (turn === leader);
-      const effRequire: Require = isLeader ? null : require;
-
-      let legal = generateMoves(hands[turn], effRequire);
-
-      if (opts.debug) {
-        await emit({ type:'log',
-          message: `[turn] seat=${turn} leader=${leader} isLeader=${isLeader} `
-                 + `require=${effRequire?`${(effRequire as any).type}@${(effRequire as any).rank}`:'null'} `
-                 + `cand=${legal.filter(isPlay).length}`
-        });
-      }
-
-      // 修复 #1：首家兜底，永不为 0
-      if (isLeader && legal.filter(isPlay).length === 0) {
-        const c = pickSmallestSingle(hands[turn]);
-        legal = [{ kind:'play', cards:[c], type:'single', rank:rankValue(c) }];
-        if (opts.debug) {
-          await emit({ type:'log', message: '[fallback] empty candidates at lead → force smallest single' });
-        }
-      }
-
-      // 选择动作
-      let move: Move;
-      const plays = legal.filter(isPlay);
-      if (plays.length === 0) {
-        move = { kind:'pass' };       // 跟牌无候选 → 必过
-      } else {
-        const bot = bots[turn] || builtinGreedyMin;
-        const choice = await Promise.resolve(bot({
-          seat: turn, hand: hands[turn], legal, isLeader, require: effRequire, rnd
-        }));
-        move = choice.type === 'play'
-          ? { kind:'play', cards: choice.cards, type: choice.comboType, rank: rankValue(choice.cards[0] ?? '') }
-          : { kind:'pass' };
-      }
-
-      if (move.kind === 'pass') {
-        await emit({ type:'event', kind:'play', seat: turn, move:'pass' });
-        passCount++;
-        // 两家过 → reset
-        if (passCount >= 2) {
-          await emit({ type:'event', kind:'trick-reset' });
-          // 修复 #2：一次性重置上下文
-          require = null;
-          leader  = lastPlaySeat;
-          turn    = leader;
-          passCount = 0;
-          continue;
-        } else {
-          turn = ((turn + 1) % 3) as Seat;
-          continue;
-        }
-      } else {
-        // 执行出牌
-        const cards = move.cards;
-        for (const c of cards) {
-          const idx = hands[turn].indexOf(c);
-          if (idx >= 0) hands[turn].splice(idx,1);
-          else {
-            const r = normalizeRank(c);
-            const j = hands[turn].findIndex(x=>normalizeRank(x)===r);
-            if (j>=0) hands[turn].splice(j,1);
-          }
-        }
-
-        await emit({ type:'event', kind:'play', seat: turn, move:'play', cards: clone(cards), comboType: move.type });
-
-        if (move.type === 'bomb' || move.type === 'rocket') multiplier *= 2;
-
-        leader = turn;
-        lastPlaySeat = turn;
-        passCount = 0;
-
-        if (move.type === 'single') require = { type:'single', rank: move.rank };
-        else if (move.type === 'pair') require = { type:'pair', rank: move.rank };
-        else if (move.type === 'bomb') require = { type:'bomb', rank: move.rank };
-        else require = { type:'single', rank: move.rank };
-
-        if (isEmpty(hands[turn])) {
-          const winner = turn;
-          const delta = settle(winner, landlord, multiplier);
-          await emit({ type:'event', kind:'win', winner, multiplier, deltaScores: delta });
-          break;
-        }
-
-        turn = ((turn + 1) % 3) as Seat;
-      }
-
-      const ms = Math.max(0, Math.floor((opts.seatDelayMs?.[turn] ?? 0)));
-      if (ms) await delay(ms);
-    }
-  }
-}
-
-// ---------- 伪随机 ----------
-function mulberry32(a:number) {
-  return function() {
-    a |= 0; a = a + 0x6D2B79F5 | 0;
-    let t = Math.imul(a ^ a >>> 15, 1 | a);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  }
-}
+const bu
