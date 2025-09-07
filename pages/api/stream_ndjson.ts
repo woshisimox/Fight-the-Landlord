@@ -104,10 +104,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const __reqId = Math.random().toString(36).slice(2,8);
   try { sInfo("stream","request:start",{ ua: req.headers["user-agent"], query: req.query }, __reqId); } catch {}
   try { res.setHeader("Cache-Control","no-store"); res.setHeader("Content-Type","application/x-ndjson; charset=utf-8"); } catch {};
+  let __lastWrite = Date.now();
   const __origWrite = (res.write as any).bind(res);
-  (res as any).write = (chunk: any, ...args: any[]) => { try { const s = typeof chunk==="string" ? chunk : (Buffer.isBuffer(chunk)? chunk.toString("utf8") : String(chunk)); sDebug("stream","send-chunk",{ sample: s.slice(0,200) }, __reqId); } catch {}; return __origWrite(chunk, ...(args as any)); };
+  (res as any).write = (chunk: any, ...args: any[]) => { try { const s = typeof chunk==="string" ? chunk : (Buffer.isBuffer(chunk)? chunk.toString("utf8") : String(chunk)); sDebug("stream","send-chunk",{ sample: s.slice(0,200) }, __reqId); } catch {}; __lastWrite = Date.now(); return __origWrite(chunk, ...(args as any)); };
   const __origEnd = (res.end as any).bind(res);
   (res as any).end = (...args: any[]) => { try { sInfo("stream","request:end",{}, __reqId); } catch {}; return __origEnd(...(args as any)); };
+  const __keepAliveTimer = setInterval(() => { try { if (Date.now() - __lastWrite > 2500) { (res as any).write(JSON.stringify({ type: "ka", ts: new Date().toISOString() }) + "\n"); } } catch {} }, 2500);
 if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
