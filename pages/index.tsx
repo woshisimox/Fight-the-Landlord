@@ -190,6 +190,19 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
+  // --- Batch ingest state mirrors (for robust chunk processing) ---
+const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
+const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
+const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
+const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
+const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
+const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
+const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
+const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
+const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
+// --- End mirrors ---
+
 
   const start = async () => {
     if (running) return;
