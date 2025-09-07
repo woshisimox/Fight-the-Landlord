@@ -370,6 +370,15 @@ export async function runSeries(opts: RunOptions, emit: Emit) {
   }
 }
 
+// ---------- 兼容旧接口的导出 ----------
+export async function runOneGame(opts: Omit<RunOptions, 'rounds'>, emit: Emit) {
+  // 与旧代码兼容：按单局运行
+  await runSeries({ rounds: 1, ...opts }, emit);
+}
+export const GreedyMax    = builtinGreedyMax;
+export const GreedyMin    = builtinGreedyMin;
+export const RandomLegal  = builtinRandomLegal;
+
 // ---------- 伪随机 ----------
 function mulberry32(a:number) {
   return function() {
