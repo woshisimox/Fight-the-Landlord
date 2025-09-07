@@ -66,11 +66,15 @@ const rankOf = (l: string) => {
 // 返回所有可能的装饰写法（用于从后端原始标签映射到前端装饰牌）
 function candDecorations(l: string): string[] {
   if (!l) return [];
+  // Joker 映射：为了避免大小写，统一用大写字母区分：小王=X，大王=Y
+  if (l === 'x') return ['🃏X'];  // 小王
+  if (l === 'X') return ['🃏Y'];  // 大王
   if (l.startsWith('🃏')) return [l];
   if ('♠♥♦♣'.includes(l[0])) return [l];
   const r = rankOf(l);
-  if (r === 'X' || r === 'x' || r === 'JOKER') return [`🃏${r === 'X' ? 'X' : 'x'}`];
+  if (r === 'JOKER') return ['🃏Y']; // 兜底，极少出现
   return SUITS.map(s => `${s}${r}`);
+}${r}`);
 }
 
 // 无花色 → 轮换花色；已有花色/🃏保持不变
@@ -91,7 +95,7 @@ function Card({ label }: { label:string }) {
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
   // Joker：大王 X=红，小王 x=绿
-  const rankColor = suit === '🃏' ? (rank === 'X' ? '#d11' : '#16a34a') : undefined;
+  const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
   return (
     <span style={{
       display:'inline-flex', alignItems:'center', gap:6,
