@@ -1,158 +1,70 @@
-// pages/api/stream_ndjson.ts
-import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
+// lib/doudizhu/engine.ts
+// ⚠️ 这是一个“最小可编译”占位实现，用于修复你意外覆盖导致的编译错误。
+// 目的是先让项目恢复运行与 UI 调试；之后你可以再替换为完整斗地主引擎。
 
-import { OpenAIBot } from '../../lib/bots/openai_bot';
-import { GeminiBot } from '../../lib/bots/gemini_bot';
-import { GrokBot } from '../../lib/bots/grok_bot';
-import { HttpBot } from '../../lib/bots/http_bot';
-import { KimiBot } from '../../lib/bots/kimi_bot';
-import { QwenBot } from '../../lib/bots/qwen_bot';
+export type Four2Policy = 'both' | '2singles' | '2pairs';
+export type Label = string;
+export type BotMove =
+  | { move: 'pass'; reason?: string }
+  | { move: 'play'; cards: Label[]; reason?: string };
+export type BotCtx = { hands: Label[]; require?: any; canPass: boolean; policy?: any };
+export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 
-type BotChoice =
-  | 'built-in:greedy-max'
-  | 'built-in:greedy-min'
-  | 'built-in:random-legal'
-  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
-  | 'http';
+// 简易 bot：能过就过，否则打出第一张（保证流程继续）
+export const RandomLegal: BotFunc = (ctx) =>
+  ctx.canPass ? { move: 'pass' } : { move: 'play', cards: [ctx.hands[0] || '3'] };
+export const GreedyMax: BotFunc = RandomLegal;
+export const GreedyMin: BotFunc = RandomLegal;
 
-type Body = {
+// 一个极简的发牌：把一副小牌均匀分给 3 家（仅为 UI 调试，不是完整规则）
+function dealSimple(): Label[][] {
+  const deck: Label[] = [
+    '3','3','4','4','5','5','6','6','7','7','8','8','9','9','10','10',
+    'J','J','Q','Q','K','K','A','A','2','2','x','X'
+  ];
+  const hands: Label[][] = [[], [], []];
+  let p = 0;
+  for (const c of deck) { hands[p].push(c); p = (p + 1) % 3; }
+  return hands;
+}
+
+// 运行一局（极简版）：发牌 → 轮流出单牌/过 → 给出胜者与积分
+export async function* runOneGame(opts: {
+  seats: [BotFunc, BotFunc, BotFunc] | BotFunc[];
   delayMs?: number;
-  startScore?: number;
-  seatDelayMs?: number[];  // 每家最小间隔（ms）
-  enabled?: boolean;
   rob?: boolean;
-  four2?: 'both'|'2singles'|'2pairs';
-  seats: BotChoice[];
-  seatModels?: string[];
-  seatKeys?: {
-    openai?: string;
-    gemini?: string;
-    grok?: string;
-    kimi?: string;
-    qwen?: string;
-    httpBase?: string;
-    httpToken?: string;
-  }[];
-};
+  four2?: Four2Policy;
+}): AsyncGenerator<any, void, unknown> {
+  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
+  const hands = dealSimple();
+  const landlord = 0;
 
-// 引擎里“bot”就是一个异步/同步函数，这里用最小类型避免依赖外部类型导出
-type EngineBot = (ctx: any) => Promise<any> | any;
+  // 初始化（前端会据此实时显示手牌与花色）
+  yield { type:'state', kind:'init', landlord, hands };
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  // 简单轮流出牌 12 次（仅演示用）
+  let turn = 0;
+  for (let step = 0; step < 12; step++) {
+    const ctx: BotCtx = { hands: hands[turn], require: null, canPass: true, policy: {} };
+    const res = await Promise.resolve(bots[turn](ctx));
 
-function makeBot(name: BotChoice, _idx: number, model: string | undefined, keybag: any): EngineBot {
-  const m = (model || '').trim();
-  const k = keybag || {};
-  switch (name) {
-    case 'built-in:greedy-max': return GreedyMax;
-    case 'built-in:greedy-min': return GreedyMin;
-    case 'built-in:random-legal': return RandomLegal;
-    case 'ai:openai': return OpenAIBot({ apiKey: k.openai || '', model: m || 'gpt-4o-mini' });
-    case 'ai:gemini': return GeminiBot({ apiKey: k.gemini || '', model: m || 'gemini-1.5-flash' });
-    case 'ai:grok':   return GrokBot({ apiKey: k.grok || '', model: m || 'grok-2-latest' });
-    case 'ai:kimi':   return KimiBot({ apiKey: k.kimi || '', model: m || 'moonshot-v1-8k' });
-    case 'ai:qwen':   return QwenBot({ apiKey: k.qwen || '', model: m || 'qwen-plus' });
-    case 'http':      return HttpBot({ baseUrl: (k.httpBase || '').replace(/\/$/, ''), token: k.httpToken || '' });
-    default:          return GreedyMax;
-  }
-}
-
-// 识别并抽取 hands/landlord（兼容多种结构）
-function pickHands(ev: any): { hands: string[][], landlord: number|null } | null {
-  const hands =
-    ev?.hands ??
-    ev?.payload?.hands ??
-    ev?.state?.hands ??
-    ev?.init?.hands;
-
-  if (Array.isArray(hands) && hands.length === 3 && Array.isArray(hands[0])) {
-    const landlord =
-      ev?.landlord ??
-      ev?.payload?.landlord ??
-      ev?.state?.landlord ??
-      ev?.init?.landlord ?? null;
-    return { hands, landlord };
-  }
-  return null;
-}
-
-// 标准化输出一条“初始化”事件（只要带 hands 就发）
-function writeInit(res: NextApiResponse, hands: string[][], landlord: number|null) {
-  res.write(JSON.stringify({ type: 'state', kind: 'init', landlord, hands }) + '\n');
-}
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    res.status(405).json({ error: 'Method Not Allowed' });
-    return;
-  }
-
-  const body: Body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-  const {
-    delayMs = 0,
-    seatDelayMs = [0,0,0],
-    enabled = true,
-    rob = true,
-    four2 = 'both',
-    seats = ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'],
-    seatModels = [],
-    seatKeys = [],
-  } = body;
-
-  // 返回 NDJSON 流
-  res.writeHead(200, {
-    'Content-Type': 'application/x-ndjson; charset=utf-8',
-    'Cache-Control': 'no-cache, no-transform',
-    'Connection': 'keep-alive',
-  });
-
-  if (!enabled) {
-    res.write(JSON.stringify({ type:'log', message:'对局未启用（enabled=false）' }) + '\n');
-    res.end();
-    return;
-  }
-
-  try {
-    const bots: EngineBot[] = [0,1,2].map(i =>
-      makeBot(seats[i] || 'built-in:greedy-max', i, seatModels[i], seatKeys[i])
-    );
-
-    const iter = runOneGame({
-      seats: bots,
-      delayMs,   // 引擎内部的节流
-      rob,
-      four2,
-    } as any);
-
-    let sentInit = false;
-
-    for await (const ev of iter as any) {
-      // 发现包含 hands 的事件：立刻发一条标准化 init（确保前端必然能初始化手牌）
-      if (!sentInit) {
-        const got = pickHands(ev);
-        if (got) {
-          writeInit(res, got.hands, got.landlord);
-          sentInit = true;
-          if (ev?.kind === 'init') continue; // 避免重复发送同一帧
-        }
+    if (res.move === 'play' && Array.isArray(res.cards) && res.cards.length) {
+      // 扣牌
+      for (const c of res.cards) {
+        const i = hands[turn].indexOf(c);
+        if (i >= 0) hands[turn].splice(i, 1);
       }
-
-      // 每家延迟：仅在出牌事件上应用
-      if (ev?.type === 'event' && ev?.kind === 'play') {
-        const s = Number(seatDelayMs?.[ev.seat] ?? 0);
-        if (s > 0) await sleep(s);
-      } else if (delayMs > 0) {
-        await sleep(delayMs);
-      }
-
-      res.write(JSON.stringify(ev) + '\n');
+      yield { type:'event', kind:'play', seat: turn, move:'play', cards: res.cards, comboType: 'single' };
+    } else {
+      yield { type:'event', kind:'play', seat: turn, move:'pass', reason: res.reason };
     }
 
-    res.end();
-  } catch (e: any) {
-    res.write(JSON.stringify({ type:'log', message:`后端错误：${e?.message || String(e)}` }) + '\n');
-    try { res.end(); } catch {}
+    if (opts.delayMs && opts.delayMs > 0) await wait(opts.delayMs);
+    turn = (turn + 1) % 3;
   }
+
+  // 结束（演示用积分变化）
+  const delta: [number, number, number] = [ +10, -5, -5 ];
+  yield { type:'event', kind:'win', winner: landlord, multiplier: 1, deltaScores: delta };
 }
