@@ -1,12 +1,21 @@
 // lib/bots/grok_bot.ts
 import { extractFirstJsonObject, nonEmptyReason } from './util';
-import { generateMoves } from '../doudizhu/engine';
 
 type BotMove =
   | { move: 'pass'; reason?: string }
   | { move: 'play'; cards: string[]; reason?: string };
 type BotCtx = { hands: string[]; require?: any; canPass: boolean; policy?: any };
 type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
+
+// 简易兜底（当上游 API 出错时）：
+// - 若允许过牌：直接过牌
+// - 否则：打出第一张手牌（可能不是最优，但可让引擎继续运行）
+function fallbackMove(ctx: BotCtx, reason: string): BotMove {
+  if (ctx && ctx.canPass) return { move: 'pass', reason };
+  const first = Array.isArray(ctx?.hands) && ctx.hands.length ? ctx.hands[0] : '3';
+  return { move: 'play', cards: [first], reason };
+}
+
 
 export const GrokBot = (o: { apiKey: string; model?: string }): BotFunc =>
   async (ctx: BotCtx) => {
@@ -43,8 +52,6 @@ export const GrokBot = (o: { apiKey: string; model?: string }): BotFunc =>
       return m==='pass'?{move:'pass',reason}:{move:'play',cards:cds,reason};
     } catch(e:any) {
       const reason=`Grok 调用失败：${e?.message||e}，已回退`;
-      if (ctx.canPass) return { move:'pass', reason };
-      const legal = generateMoves(ctx.hands, ctx.require, ctx.policy);
-      return { move:'play', cards:(legal&&legal[0])||[ctx.hands[0]], reason };
+      return fallbackMove(ctx, reason);
     }
   };
