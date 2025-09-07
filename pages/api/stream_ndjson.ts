@@ -7,13 +7,18 @@ function writeLine(res: NextApiResponse, obj: unknown) {
   res.write(JSON.stringify(obj) + '\n');
 }
 
+// 扩展一下请求体类型，包含前端可能传来的额外字段（引擎当前未使用）
+type RequestBody = Partial<RunOptions> & {
+  seatModels?: string[];
+  seatKeys?: unknown[];
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method Not Allowed' });
     return;
   }
 
-  // 读取前端传参（保持与现有 index.tsx 对齐）
   const {
     rounds = 10,
     startScore = 100,
@@ -21,13 +26,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     enabled = true,
     rob = true,
     four2 = 'both',
-    seats = ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'],
-    seatModels = [],
-    seatKeys = [],
-    debug = true, // 开启调试日志，方便定位
-  } = (req.body || {}) as Partial<RunOptions & any>;
+    seats = ['built-in:greedy-max', 'built-in:greedy-min', 'built-in:random-legal'],
+    // 下面两项目前引擎未使用，读出即可，不向引擎透传
+    seatModels,
+    seatKeys,
+    debug = true,
+  } = (req.body || {}) as RequestBody;
 
-  // 如果未启用对局，直接返回
   if (!enabled) {
     res.status(200).json({ ok: true, message: 'disabled' });
     return;
@@ -52,10 +57,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   };
 
   try {
-    // 先写一条开场日志（可选）
     writeLine(res, { type: 'log', message: `准备开始，共 ${rounds} 局` });
 
-    // 运行多局（引擎内部会在每局开始时发 {type:'state',kind:'init',...}）
+    // 调用引擎（注意：不再传 seatModels/seatKeys）
     await runSeries(
       {
         rounds,
@@ -65,17 +69,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         rob,
         four2,
         seats,
-        // seatModels/seatKeys 目前引擎未用，透传即可
-        // @ts-expect-error - 兼容透传
-        seatModels,
-        // @ts-expect-error - 兼容透传
-        seatKeys,
         debug,
       },
       emit
     );
 
-    // 结束
     if (!closed) {
       writeLine(res, { type: 'log', message: '全部对局结束' });
       res.end();
