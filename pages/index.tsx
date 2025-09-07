@@ -189,21 +189,6 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onTotals?.(totals); }, [totals]);
   useEffect(() => { props.onLog?.(log); }, [log]);
 
-  
-  // --- Fix: queue-based batch ingest to avoid trick-reset/play race ---
-  const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
-  const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
-  const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
-  const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
-  const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
-  const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
-  const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
-  const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
-  const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
-  const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
-
-  // --- End fix ---
-
   const controllerRef = useRef<AbortController|null>(null);
 
   const start = async () => {
@@ -250,7 +235,7 @@ function LivePanel(props: LiveProps) {
           buf += decoder.decode(value, { stream:true });
 
           
-let idx: number;
+          let idx: number;
           const batch: any[] = [];
           while ((idx = buf.indexOf('\n')) >= 0) {
             const line = buf.slice(0, idx).trim();
@@ -274,75 +259,76 @@ let idx: number;
             for (const raw of batch) {
               const m: any = raw;
               try {
+                const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+                const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
 
-              const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
-              const hasHands =
-                Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
-
-              if (hasHands) {
-                nextPlays = [];
-                nextWinner = null;
-                nextDelta = null;
-                nextMultiplier = 1;
-                const handsRaw: string[][] = rh as string[][];
-                const decorated: string[][] = handsRaw.map(decorateHandCycle);
-                nextHands = decorated;
-                const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
-                nextLandlord = lord;
-                nextLog = [`发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`];
-                continue;
-              }
-
-              if (m.type === 'event' && m.kind === 'rob') {
-                nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`];
-                continue;
-              }
-
-              if (m.type === 'event' && m.kind === 'trick-reset') {
-                nextLog = [...nextLog, '一轮结束，重新起牌'];
-                nextPlays = [];
-                continue;
-              }
-
-              if (m.type === 'event' && m.kind === 'play') {
-                if (m.move === 'pass') {
-                  nextPlays = [...nextPlays, { seat:m.seat, move:'pass', reason:m.reason }];
-                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`];
-                } else {
-                  const pretty: string[] = [];
-                  const seat = m.seat as number;
-                  const cards: string[] = m.cards || [];
-                  const nh = (nextHands && (nextHands as any[]).length===3 ? nextHands : [[],[],[]]).map((x:any)=>[...x]);
-                  for (const rawCard of cards) {
-                    const options = candDecorations(rawCard);
-                    const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
-                    const k = nh[seat].indexOf(chosen);
-                    if (k >= 0) nh[seat].splice(k, 1);
-                    pretty.push(chosen);
-                  }
-                  nextHands = nh;
-                  nextPlays = [...nextPlays, { seat:m.seat, move:'play', cards: pretty }];
-                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`];
+                if (hasHands) {
+                  nextPlays = [];
+                  nextWinner = null;
+                  nextDelta = null;
+                  nextMultiplier = 1;
+                  const handsRaw: string[][] = rh as string[][];
+                  const decorated: string[][] = handsRaw.map(decorateHandCycle);
+                  nextHands = decorated;
+                  const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+                  nextLandlord = lord;
+                  nextLog = [...nextLog, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`];
+                  continue;
                 }
-                continue;
-              }
 
-              if (m.type === 'event' && m.kind === 'win') {
-                nextWinner = m.winner;
-                nextMultiplier = m.multiplier;
-                nextDelta = m.deltaScores;
-                nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
-                nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
-                nextFinished = nextFinished + 1; winsRef.current = (winsRef.current||0) + 1;
-                continue;
-              }
+                if (m.type === 'event' && m.kind === 'rob') {
+                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`];
+                  continue;
+                }
 
-              if (m.type === 'log' && typeof m.message === 'string') {
-                nextLog = [...nextLog, m.message];
-                continue;
+                if (m.type === 'event' && m.kind === 'trick-reset') {
+                  nextLog = [...nextLog, '一轮结束，重新起牌'];
+                  nextPlays = [];
+                  continue;
+                }
+
+                if (m.type === 'event' && m.kind === 'play') {
+                  if (m.move === 'pass') {
+                    nextPlays = [...nextPlays, { seat:m.seat, move:'pass', reason:m.reason }];
+                    nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`];
+                  } else {
+                    const pretty: string[] = [];
+                    const seat = m.seat as number;
+                    const cards: string[] = m.cards || [];
+                    const nh = (nextHands && (nextHands as any[]).length===3 ? nextHands : [[],[],[]]).map((x:any)=>[...x]);
+                    for (const rawCard of cards) {
+                      const options = candDecorations(rawCard);
+                      const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
+                      const k = nh[seat].indexOf(chosen);
+                      if (k >= 0) nh[seat].splice(k, 1);
+                      pretty.push(chosen);
+                    }
+                    nextHands = nh;
+                    nextPlays = [...nextPlays, { seat:m.seat, move:'play', cards: pretty }];
+                    nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`];
+                  }
+                  continue;
+                }
+
+                if (m.type === 'event' && m.kind === 'win') {
+                  nextWinner = m.winner;
+                  nextMultiplier = m.multiplier;
+                  nextDelta = m.deltaScores;
+                  nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
+                  nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
+                  nextFinished = nextFinished + 1;
+                  winsRef.current = (winsRef.current||0) + 1;
+                  continue;
+                }
+
+                if (m.type === 'log' && typeof m.message === 'string') {
+                  nextLog = [...nextLog, m.message];
+                  continue;
+                }
+              } catch(e) {
+                console.error('[ingest:batch]', e, raw);
               }
-            
-              } catch(e) { console.error('[ingest:batch]', e, raw); }}
+            }
 
             // Commit once per chunk
             setHands(nextHands);

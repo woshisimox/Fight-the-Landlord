@@ -107,10 +107,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  let __lastWrite = Date.now();
+  function writeLineKA(obj:any){ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); }
+  const __ka = setInterval(()=>{ try{ if((res as any).writableEnded){ clearInterval(__ka as any); return; } if(Date.now()-__lastWrite>2500){ writeLineKA({ type:'ka', ts: new Date().toISOString() }); } }catch{} }, 2500);
 
   try {
     const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const rounds = Math.max(1, Math.min(50, body.rounds ?? 1));
+    const MAX_ROUNDS = parseInt(process.env.MAX_ROUNDS || '200', 10);
+    const rounds = Math.max(1, Math.min(MAX_ROUNDS, Number(body.rounds) || 1));
     const four2 = body.four2 || 'both';
     const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
 
@@ -141,9 +145,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
 
-    res.end();
+    try{ clearInterval(__ka as any);}catch{}; res.end();
   } catch (e: any) {
     writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
-    try { res.end(); } catch {}
+    try { try{ clearInterval(__ka as any);}catch{}; res.end(); } catch {}
   }
 }
