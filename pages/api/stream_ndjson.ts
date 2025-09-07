@@ -1,6 +1,5 @@
-// pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal, type IBot as EngineIBot } from '../../lib/doudizhu/engine';
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
@@ -19,7 +18,7 @@ type BotChoice =
 type Body = {
   delayMs?: number;
   startScore?: number;
-  seatDelayMs?: number[];  // 每家最小间隔
+  seatDelayMs?: number[];  // 每家最小间隔（ms）
   enabled?: boolean;
   rob?: boolean;
   four2?: 'both'|'2singles'|'2pairs';
@@ -36,29 +35,49 @@ type Body = {
   }[];
 };
 
+// 引擎里“bot”就是一个异步/同步函数，这里用最小类型避免依赖外部类型导出
+type EngineBot = (ctx: any) => Promise<any> | any;
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-function makeBot(name: BotChoice, idx: number, model: string | undefined, keybag: any): EngineIBot {
+function makeBot(name: BotChoice, _idx: number, model: string | undefined, keybag: any): EngineBot {
   const m = (model || '').trim();
-  const keys = keybag || {};
+  const k = keybag || {};
   switch (name) {
     case 'built-in:greedy-max': return GreedyMax;
     case 'built-in:greedy-min': return GreedyMin;
     case 'built-in:random-legal': return RandomLegal;
-    case 'ai:openai': return OpenAIBot({ apiKey: keys.openai || '', model: m || 'gpt-4o-mini' });
-    case 'ai:gemini': return GeminiBot({ apiKey: keys.gemini || '', model: m || 'gemini-1.5-flash' });
-    case 'ai:grok':   return GrokBot({ apiKey: keys.grok || '', model: m || 'grok-2-latest' });
-    case 'ai:kimi':   return KimiBot({ apiKey: keys.kimi || '', model: m || 'moonshot-v1-8k' });
-    case 'ai:qwen':   return QwenBot({ apiKey: keys.qwen || '', model: m || 'qwen-plus' });
-    case 'http':      return HttpBot({ baseUrl: (keys.httpBase || '').replace(/\/$/, ''), token: keys.httpToken || '' });
+    case 'ai:openai': return OpenAIBot({ apiKey: k.openai || '', model: m || 'gpt-4o-mini' });
+    case 'ai:gemini': return GeminiBot({ apiKey: k.gemini || '', model: m || 'gemini-1.5-flash' });
+    case 'ai:grok':   return GrokBot({ apiKey: k.grok || '', model: m || 'grok-2-latest' });
+    case 'ai:kimi':   return KimiBot({ apiKey: k.kimi || '', model: m || 'moonshot-v1-8k' });
+    case 'ai:qwen':   return QwenBot({ apiKey: k.qwen || '', model: m || 'qwen-plus' });
+    case 'http':      return HttpBot({ baseUrl: (k.httpBase || '').replace(/\/$/, ''), token: k.httpToken || '' });
     default:          return GreedyMax;
   }
 }
 
+// 识别并抽取 hands/landlord（兼容多种结构）
+function pickHands(ev: any): { hands: string[][], landlord: number|null } | null {
+  const hands =
+    ev?.hands ??
+    ev?.payload?.hands ??
+    ev?.state?.hands ??
+    ev?.init?.hands;
+
+  if (Array.isArray(hands) && hands.length === 3 && Array.isArray(hands[0])) {
+    const landlord =
+      ev?.landlord ??
+      ev?.payload?.landlord ??
+      ev?.state?.landlord ??
+      ev?.init?.landlord ?? null;
+    return { hands, landlord };
+  }
+  return null;
+}
+
 // 标准化输出一条“初始化”事件（只要带 hands 就发）
-function writeInit(res: NextApiResponse, ev: any) {
-  const landlord = ev.landlord ?? 0;
-  const hands = ev.hands;
+function writeInit(res: NextApiResponse, hands: string[][], landlord: number|null) {
   res.write(JSON.stringify({ type: 'state', kind: 'init', landlord, hands }) + '\n');
 }
 
@@ -81,7 +100,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     seatKeys = [],
   } = body;
 
-  // 立即返回一个可读的 NDJSON 流
+  // 返回 NDJSON 流
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -95,31 +114,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const bots: EngineIBot[] = [0,1,2].map(i =>
+    const bots: EngineBot[] = [0,1,2].map(i =>
       makeBot(seats[i] || 'built-in:greedy-max', i, seatModels[i], seatKeys[i])
     );
 
-    // 从引擎跑一局；这里假设 runOneGame 返回 AsyncIterable 事件
     const iter = runOneGame({
       seats: bots,
-      delayMs,                 // 建议引擎内部设为 0；外层按 seatDelayMs 控速
+      delayMs,   // 引擎内部的节流
       rob,
       four2,
     } as any);
 
+    let sentInit = false;
+
     for await (const ev of iter as any) {
-      // 若事件里自带 hands（无论它叫 init、deal、state...），先发一条标准化初始化
-      if (ev && Array.isArray(ev.hands) && ev.hands.length === 3) {
-        writeInit(res, ev);
-        continue;
+      // 发现包含 hands 的事件：立刻发一条标准化 init（确保前端必然能初始化手牌）
+      if (!sentInit) {
+        const got = pickHands(ev);
+        if (got) {
+          writeInit(res, got.hands, got.landlord);
+          sentInit = true;
+          if (ev?.kind === 'init') continue; // 避免重复发送同一帧
+        }
       }
 
-      // 每家延时（最小间隔）：在出牌事件时应用
+      // 每家延迟：仅在出牌事件上应用
       if (ev?.type === 'event' && ev?.kind === 'play') {
         const s = Number(seatDelayMs?.[ev.seat] ?? 0);
         if (s > 0) await sleep(s);
       } else if (delayMs > 0) {
-        // 其它事件的全局节流（可选）
         await sleep(delayMs);
       }
 
