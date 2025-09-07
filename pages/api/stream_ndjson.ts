@@ -1,6 +1,7 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/engine';
+// 依据你的工程结构，直接从 doudizhu 引擎导入：
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -16,8 +17,8 @@ type BotChoice =
   | 'http';
 
 type Body = {
-  startScore?: number;
-  seatDelayMs?: number[];  // 每家延迟
+  startScore?: number;                  // 初始分（各家相同）
+  seatDelayMs?: number[];               // 每家延迟（毫秒）
   enabled?: boolean;
   rob?: boolean;
   four2?: 'both'|'2singles'|'2pairs';
@@ -32,12 +33,11 @@ type Body = {
     httpBase?: string;
     httpToken?: string;
   }[];
-  rounds?: number;         // ✅ 多局数
+  rounds?: number;                      // 多局数
+  stopBelowZero?: boolean;              // 是否启用“低于0分提前终止”（默认 true）
 };
 
 type EngineBot = (ctx:any)=>Promise<any>|any;
-
-const asBot = (fn: EngineBot) => (ctx:any)=> fn(ctx);
 
 function makeBot(name: BotChoice, model: string|undefined, keybag: any): EngineBot {
   const m = (model||'').trim();
@@ -59,7 +59,7 @@ function makeBot(name: BotChoice, model: string|undefined, keybag: any): EngineB
   }
 }
 
-// 识别 init
+// 从一条 event 里识别是否包含初始化的 hands / landlord
 function pickHands(ev:any): { hands:string[][], landlord:number|null } | null {
   const hands =
     ev?.hands ?? ev?.payload?.hands ?? ev?.state?.hands ?? ev?.init?.hands;
@@ -71,8 +71,8 @@ function pickHands(ev:any): { hands:string[][], landlord:number|null } | null {
   return null;
 }
 
-function writeInit(res: NextApiResponse, hands:string[][], landlord:number|null) {
-  res.write(JSON.stringify({ type:'state', kind:'init', landlord, hands }) + '\\n');
+function writeLine(res: NextApiResponse, obj:any) {
+  res.write(JSON.stringify(obj) + '\n');
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -87,7 +87,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     seatModels = [],
     seatKeys = [],
     seatDelayMs = [0,0,0],
-    rounds = 1,                                  // ✅ 多局数
+    rounds = 1,
+    startScore = 0,
+    stopBelowZero = true,
   } = body;
 
   res.writeHead(200, {
@@ -96,39 +98,62 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     'Connection':'keep-alive',
   });
 
-  if (!enabled) { res.write(JSON.stringify({ type:'log', message:'对局未启用（enabled=false）' })+'\\n'); res.end(); return; }
+  if (!enabled) { writeLine(res, { type:'log', message:'对局未启用（enabled=false）' }); res.end(); return; }
 
   try {
-    // bots
+    // 准备 Bot
     const bots: EngineBot[] = [0,1,2].map(i => makeBot(seats[i]||'built-in:greedy-max', seatModels[i], seatKeys[i]));
 
-    for (let round = 1; round <= Math.max(1, rounds|0); round++) {
-      const iter = runOneGame({ seats: bots, rob, four2 } as any);
+    // 维护总分（仅用于早停 & 旁路可视化日志；前端仍可自己统计）
+    let totals:[number,number,number] = [startScore, startScore, startScore];
 
+    for (let round = 1; round <= Math.max(1, rounds|0); round++) {
+      writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
+
+      const iter = runOneGame({ seats: bots as any, rob, four2 } as any);
       let sentInit = false;
+
       for await (const ev of iter as any) {
         if (!sentInit) {
           const got = pickHands(ev);
-          if (got) { writeInit(res, got.hands, got.landlord); sentInit = true; if (ev?.kind==='init') continue; }
+          if (got) {
+            writeLine(res, { type:'state', kind:'init', landlord: got.landlord, hands: got.hands });
+            sentInit = true;
+            if (ev?.kind==='init') continue; // 已手动发了 init，不重复写
+          }
         }
 
-        // 按每家延迟（仅在出牌事件生效）
+        // 每家延迟：只对出牌事件生效
         if (ev?.type==='event' && ev?.kind==='play') {
           const s = Number(seatDelayMs?.[ev.seat] ?? 0);
           if (s>0) await new Promise(r=>setTimeout(r,s));
         }
-        res.write(JSON.stringify(ev) + '\\n');
+
+        writeLine(res, ev);
+
+        // 统计并检查早停
+        if (ev?.type==='event' && ev?.kind==='win') {
+          const ds = ev?.deltaScores as [number,number,number] | undefined;
+          if (ds) {
+            totals = [ totals[0]+ds[0], totals[1]+ds[1], totals[2]+ds[2] ];
+            writeLine(res, { type:'log', message:`当前总分：${totals.join(' / ')}` });
+            if (stopBelowZero && Math.min(...totals) < 0) {
+              writeLine(res, { type:'log', message:`有选手积分 < 0，提前终止多轮。` });
+              res.end(); 
+              return;
+            }
+          }
+        }
       }
 
       if (round < rounds) {
-        // 插入一条日志分隔
-        res.write(JSON.stringify({ type:'log', message:`—— 第 ${round} 局结束 ——` }) + '\\n');
+        writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
       }
     }
 
     res.end();
   } catch (e:any) {
-    res.write(JSON.stringify({ type:'log', message:`后端错误：${e?.message||String(e)}` }) + '\\n');
+    writeLine(res, { type:'log', message:`后端错误：${e?.message||String(e)}` });
     try { res.end(); } catch {}
   }
 }
