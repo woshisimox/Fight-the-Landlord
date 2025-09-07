@@ -1,4 +1,3 @@
-// === 省略说明：这份就是你现有 index.tsx 的“最小改动”版，只把全局最小间隔改成“局数”，并把该值传给 rounds ===
 import React, { useEffect, useRef, useState } from 'react';
 
 type Label = string;
@@ -62,11 +61,19 @@ const isJoker = (l: string) => l === 'x' || l === 'X' || l === '🃏x' || l === 
 const rankOf = (l: string) => {
   if (!l) return '';
   const c0 = l[0];
-  if ('♠♥♦♣'.includes(c0)) return l.slice(1).replace(/10/i, 'T').toUpperCase();
-  if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
+  // 已带花色：去掉首字符（♠♥♦♣）
+  if ('♠♥♦♣'.includes(c0)) {
+    return l.slice(1).replace(/10/i, 'T').toUpperCase();
+  }
+  // 已装饰的大小王：'🃏x' / '🃏X'
+  if (c0 === '🃏') {
+    return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
+  }
+  // 原始不带花色
   return l.replace(/10/i, 'T').toUpperCase();
 };
 
+// ✅ 若原始标签已带花色或是🃏，直接返回自身；否则给出所有可能花色
 function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l.startsWith('🃏')) return [l];
@@ -76,12 +83,13 @@ function candDecorations(l: string): string[] {
   return SUITS.map(s => `${s}${r}`);
 }
 
+// ✅ 只对“无花色的牌”进行轮换装饰；已有花色/🃏保持不变
 function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
     if (!l) return l;
-    if (l.startsWith('🃏')) return l;
-    if ('♠♥♦♣'.includes(l[0])) return l;
+    if (l.startsWith('🃏')) return l;              // 已装饰大小王
+    if ('♠♥♦♣'.includes(l[0])) return l;          // 已带花色
     if (l === 'x' || l === 'X') return `🃏${l.toUpperCase()}`;
     const suit = SUITS[idx % SUITS.length]; idx++;
     return `${suit}${rankOf(l)}`;
@@ -155,7 +163,10 @@ function Section({ title, children }:{title:string; children:React.ReactNode}) {
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
 
+  // UI：装饰后的手牌
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
+
+  // 其他状态
   const [landlord, setLandlord] = useState<number|null>(null);
   const [plays, setPlays] = useState<{seat:number; move:'play'|'pass'; cards?:string[]; reason?:string}[]>([]);
   const [multiplier, setMultiplier] = useState(1);
@@ -166,6 +177,7 @@ function LivePanel(props: LiveProps) {
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
 
+  // 开始后立即刷新“总分”为当前初始分
   const prevRunningRef = useRef(false);
   useEffect(() => {
     if (running && !prevRunningRef.current) {
@@ -175,6 +187,7 @@ function LivePanel(props: LiveProps) {
     prevRunningRef.current = running;
   }, [running, props.startScore]);
 
+  // 抛出 totals & log
   useEffect(() => { props.onTotals?.(totals); }, [totals]);
   useEffect(() => { props.onLog?.(log); }, [log]);
 
@@ -198,6 +211,7 @@ function LivePanel(props: LiveProps) {
         method:'POST',
         headers: { 'content-type':'application/json' },
         body: JSON.stringify({
+          // delayMs: 已移除（全局最小间隔取消）
           rounds: props.rounds,          // ✅ 多轮次
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
@@ -233,6 +247,7 @@ function LivePanel(props: LiveProps) {
             if (!msg) continue;
             const m = msg as EventObj;
 
+            // ✅ 任何含 hands 的消息都视为“初始化/刷新手牌”
             const rawHands =
               (m as any).hands ??
               (m as any).payload?.hands ??
@@ -244,6 +259,12 @@ function LivePanel(props: LiveProps) {
               Array.isArray(rawHands[0]);
 
             if (hasHands) {
+              // 每局开始：重置当局显示
+              setPlays([]);
+              setWinner(null);
+              setDelta(null);
+              setMultiplier(1);
+
               const handsRaw: string[][] = rawHands as string[][];
               const decorated: string[][] = handsRaw.map(decorateHandCycle);
               setHands(decorated);
@@ -270,6 +291,7 @@ function LivePanel(props: LiveProps) {
                 setPlays(p => [...p, { seat:e.seat, move:'pass', reason:e.reason }]);
                 setLog(l => [...l, `${['甲','乙','丙'][e.seat]} 过${e.reason ? `（${e.reason}）` : ''}`]);
               } else {
+                // 从当前手牌中匹配并移除对应“带花色”的牌（兼容后端传入'Q'或'♠Q'）
                 const pretty: string[] = [];
                 setHands(h => {
                   const nh = h.map(x => [...x]);
@@ -301,6 +323,18 @@ function LivePanel(props: LiveProps) {
               setMultiplier(e.multiplier);
               setDelta(e.deltaScores);
               setLog(l => [...l, `胜者：${['甲','乙','丙'][e.winner]}，倍数 x${e.multiplier}，当局积分变更 ${e.deltaScores.join(' / ')}`]);
+              setTotals(t => {
+                const nt:[number,number,number] = [ t[0] + e.deltaScores[0], t[1] + e.deltaScores[1], t[2] + e.deltaScores[2] ];
+                // 若任何一方分数为负，提前终止本次多轮
+                if (Math.min(nt[0], nt[1], nt[2]) < 0) {
+                  setLog(l => [...l, '有选手积分 < 0，提前终止。']);
+                  try { controllerRef.current?.abort(); } catch {}
+                  setRunning(false);
+                }
+                return nt;
+              });
+              continue;
+            }，倍数 x${e.multiplier}，当局积分变更 ${e.deltaScores.join(' / ')}`]);
               setTotals(t => [ t[0] + e.deltaScores[0], t[1] + e.deltaScores[1], t[2] + e.deltaScores[2] ]);
               break;
             }
@@ -325,8 +359,10 @@ function LivePanel(props: LiveProps) {
     setRunning(false);
   };
 
+  // “对局”区域（不含日志；日志由页面底部统一展示）
   return (
     <div>
+      {/* 第一行：积分（总分） */}
       <Section title="积分（总分）">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           {[0,1,2].map(i=>(
