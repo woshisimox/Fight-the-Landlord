@@ -90,7 +90,6 @@ function Card({ label }: { label:string }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : (suit === '🃏' ? '#6b5' : '#1a1a1a');
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-  // Joker：大王 X = 红，小王 x = 绿
   const rankColor = suit === '🃏' ? (rank === 'X' ? '#d11' : '#16a34a') : undefined;
   return (
     <span style={{
@@ -166,10 +165,10 @@ function LivePanel(props: LiveProps) {
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [totals, setTotals] = useState<[number,number,number]>([
-
   const [finishedCount, setFinishedCount] = useState(0);
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
+
 
   // 首次启动时，将总分重置为初始分；后续多局不会清零
   const prevRunningRef = useRef(false);
@@ -196,6 +195,7 @@ function LivePanel(props: LiveProps) {
     setDelta(null);
     setMultiplier(1);
     setLog([]);
+    setFinishedCount(0);
     setFinishedCount(0);
 
     controllerRef.current = new AbortController();
