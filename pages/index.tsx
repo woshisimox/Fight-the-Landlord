@@ -185,6 +185,20 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
+  // Debug 模式：采集完整 NDJSON 行并可下载
+const [debugEnabled, setDebugEnabled] = useState(false);
+const debugRef = useRef<string[]>([]);
+const appendDebug = (line: string) => { if (debugEnabled) debugRef.current.push(line); };
+const downloadDebug = () => {
+  const blob = new Blob([debugRef.current.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `doudizhu-debug-${new Date().toISOString().replace(/[:.]/g,'-')}.ndjson`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 
   const start = async () => {
     if (running) return;
@@ -196,6 +210,7 @@ function LivePanel(props: LiveProps) {
     setDelta(null);
     setMultiplier(1);
     setLog([]);
+	if (debugEnabled) debugRef.current = [];
     setFinishedCount(0);
 
     controllerRef.current = new AbortController();
@@ -236,6 +251,7 @@ function LivePanel(props: LiveProps) {
             if (!line) continue;
 
             let msg: EventObj | null = null;
+			appendDebug(line);
             try { msg = JSON.parse(line) } catch { msg = null; }
             if (!msg) continue;
             const m: any = msg as any;
@@ -406,6 +422,16 @@ function LivePanel(props: LiveProps) {
           style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
         <button onClick={stop} disabled={!running}
           style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
+		  <label style={{ marginLeft:12, display:'inline-flex', alignItems:'center', gap:6 }}>
+  <input type="checkbox" checked={debugEnabled} onChange={e => setDebugEnabled(e.target.checked)} />
+  <span>Debug</span>
+</label>
+{debugEnabled && (
+  <button onClick={downloadDebug} style={{ padding:'6px 12px', borderRadius:8, marginLeft:8 }}>
+    下载调试日志
+  </button>
+)}
+
       </div>
     </div>
   );
