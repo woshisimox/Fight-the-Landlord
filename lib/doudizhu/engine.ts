@@ -15,11 +15,45 @@ export type BotMove =
   | { move: 'pass'; reason?: string }
   | { move: 'play'; cards: Label[]; reason?: string };
 
+export type PlayEvent = {
+  seat: number;
+  move: 'play' | 'pass';
+  cards?: Label[];
+  comboType?: Combo['type'];
+  trick: number;            // 第几轮（从 0 开始）
+};
+
 export type BotCtx = {
   hands: Label[];
-  require: Combo | null;  // 当前需跟牌型
+  require: Combo | null;    // 当前需跟牌型（首家为 null）
   canPass: boolean;
   policy?: { four2?: Four2Policy };
+
+  // --- 新增：对局上下文（记牌 / 历史 / 角色信息） ---
+  seat: number;             // 当前出牌座位（0/1/2）
+  landlord: number;         // 地主座位
+  leader: number;           // 本轮首家座位
+  trick: number;            // 当前轮次（从 0 开始）
+
+  history: PlayEvent[];     // 截至当前的全部出牌/过牌历史（含 trick 序号）
+  currentTrick: PlayEvent[];// 当前这一轮里，至今为止的出牌序列
+
+  seen: Label[];            // 所有“已公开可见”的牌：底牌 + 历史出牌
+  bottom: Label[];          // 亮底的三张牌（开局已公布）
+
+  handsCount: [number, number, number]; // 各家的手牌张数
+  role: 'landlord' | 'farmer';          // 当前角色
+  teammates: number[];      // 队友座位（农民互为队友；地主为空数组）
+  opponents: number[];      // 对手座位
+
+  // 计数信息（便于策略快速使用）
+  counts: {
+    handByRank: Record<string, number>;
+    seenByRank: Record<string, number>;
+    remainingByRank: Record<string, number>; // 54 张减去 seen 与自己手牌后的估计余量
+  };
+};
+
 };
 
 export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
@@ -28,6 +62,16 @@ export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 const SUITS = ['♠', '♥', '♦', '♣'] as const;
 const RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const; // x=小王 X=大王
 const ORDER: Record<string, number> = Object.fromEntries(RANKS.map((r, i) => [r, i]));
+function tallyByRank(labels: Label[]): Record<string, number> {
+  const map = countByRank(labels);
+  const out: Record<string, number> = {};
+  for (const [idx, arr] of map.entries()) out[RANKS[idx]] = arr.length;
+  for (const r of RANKS) if (!(r in out)) out[r] = 0;
+  return out;
+}
+
+function clone<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
+
 
 function rankOf(label: Label): string {
   const s = String(label);
@@ -524,6 +568,16 @@ export async function* runOneGame(opts: {
 
   // 初始化（带上地主）
   yield { type:'state', kind:'init', landlord, hands: hands.map(h => [...h]) };
+  // 历史与记牌数据
+  let trick = 0;                          // 轮次（从 0 开始）
+  const history: PlayEvent[] = [];        // 全部出牌/过牌历史
+  const seen: Label[] = [];               // 已公开的牌（底牌 + 历史出牌）
+
+  // 亮底即公开
+  seen.push(...bottom);
+
+  const handsCount = (): [number,number,number] => [hands[0].length, hands[1].length, hands[2].length];
+
 
   // 防春天统计
   const playedCount = [0,0,0];
@@ -541,7 +595,45 @@ export async function* runOneGame(opts: {
   // 游戏循环
   while (true) {
     const isLeader = (require == null && turn === leader);
-    const ctx: BotCtx = { hands: hands[turn], require, canPass: !isLeader, policy: { four2 } };
+    const ctx: BotCtx = {
+      hands: hands[turn],
+      require,
+      canPass: !isLeader,
+      policy: { four2 },
+      seat: turn,
+      landlord,
+      leader,
+      trick,
+      history: clone(history),
+      currentTrick: clone(history.filter(h => h.trick === trick)),
+      seen: clone(seen),
+      bottom: clone(bottom),
+      handsCount: handsCount(),
+      role: (turn === landlord ? 'landlord' : 'farmer'),
+      teammates: (turn === landlord ? [] : [ (turn=== (landlord+1)%3 ? (landlord+2)%3 : (landlord+1)%3 ) ]),
+      opponents: (turn === landlord ? [ (landlord+1)%3, (landlord+2)%3 ] : [ landlord ]),
+      counts: {
+        handByRank: tallyByRank(hands[turn]),
+        seenByRank: tallyByRank(seen),
+        remainingByRank: (function () {
+          // 54张全集（只看点数计数），减去 seen 与自己的手牌
+          const total: Record<string, number> = {};
+          for (const r of RANKS) {
+            total[r] = (r === 'x' || r === 'X') ? 1 : 4;
+          }
+
+          const minus = (obj:Record<string,number>, sub:Record<string,number>) => {
+            const out: Record<string, number> = { ...obj };
+            for (const r of RANKS) out[r] = (out[r]||0) - (sub[r]||0);
+            return out;
+          };
+
+          const seenCnt = tallyByRank(seen);
+          const handCnt = tallyByRank(hands[turn]);
+          return minus(minus(total, seenCnt), handCnt);
+        })(),
+      },
+    };
 
     let mv = await Promise.resolve(bots[turn](clone(ctx)));
 
@@ -602,11 +694,15 @@ export async function* runOneGame(opts: {
 
     if (act.kind === 'pass') {
       yield { type:'event', kind:'play', seat: turn, move:'pass' };
+      history.push({ seat: turn, move: 'pass', trick });
+
       if (require != null) {
         passes += 1;
         if (passes >= 2) {
           // 两家过，重开一轮
           yield { type:'event', kind:'trick-reset' };
+          trick += 1;
+
           require = null;
           passes = 0;
           leader = lastPlayed; // 最后出牌者继续做首家
@@ -626,6 +722,9 @@ export async function* runOneGame(opts: {
         type:'event', kind:'play', seat: turn, move:'play',
         cards: pick, comboType: cc.type
       };
+      history.push({ seat: turn, move:'play', cards: clone(pick), comboType: cc.type, trick });
+      seen.push(...pick);
+
 
       require = cc;
       passes = 0;
