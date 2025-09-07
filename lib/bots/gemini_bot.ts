@@ -16,7 +16,6 @@ function fallbackMove(ctx: BotCtx, reason: string): BotMove {
   return { move: 'play', cards: [first], reason };
 }
 
-
 export const GeminiBot = (o: { apiKey: string; model?: string }): BotFunc =>
   async (ctx: BotCtx) => {
     try {
