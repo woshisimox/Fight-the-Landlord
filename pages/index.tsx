@@ -88,9 +88,9 @@ function decorateHandCycle(raw: string[]): string[] {
 
 function Card({ label }: { label:string }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
-  const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
+  const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : (suit === '🃏' ? '#6b5' : '#1a1a1a');
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-  // Joker：大王 X=红，小王 x=绿
+  // Joker：大王 X = 红，小王 x = 绿
   const rankColor = suit === '🃏' ? (rank === 'X' ? '#d11' : '#16a34a') : undefined;
   return (
     <span style={{
