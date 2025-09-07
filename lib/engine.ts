@@ -1,6 +1,6 @@
 // lib/engine.ts
 // 统一导出入口：从 ./doudizhu/engine 转发，并提供 IBot 类型别名。
-// 本文件不再依赖 EventObj 类型，以兼容精简引擎实现。
+// ⚠️ 不再导入/导出 EventObj，以兼容精简/占位引擎。
 
 import {
   runOneGame,
