@@ -25,9 +25,9 @@ type BotChoice =
   | 'http';
 
 type LiveProps = {
-  rounds: number;                 // ✅ 改为局数
+  rounds: number;                 // 多局数（后端连打）
   startScore: number;
-  seatDelayMs?: number[];          // 每家最小间隔（ms）
+  seatDelayMs?: number[];         // 每家最小间隔（ms）
   enabled: boolean;
   rob: boolean;
   four2: Four2Policy;
@@ -54,26 +54,16 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 
-// ✅ 兼容原始 x/X 以及装饰后的 🃏x/🃏X
-const isJoker = (l: string) => l === 'x' || l === 'X' || l === '🃏x' || l === '🃏X';
-
-// ✅ 只提取“点数”，不带花色；处理 10→T、大小写
+// 只提取点数；处理 10→T、大小写
 const rankOf = (l: string) => {
   if (!l) return '';
   const c0 = l[0];
-  // 已带花色：去掉首字符（♠♥♦♣）
-  if ('♠♥♦♣'.includes(c0)) {
-    return l.slice(1).replace(/10/i, 'T').toUpperCase();
-  }
-  // 已装饰的大小王：'🃏x' / '🃏X'
-  if (c0 === '🃏') {
-    return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
-  }
-  // 原始不带花色
+  if ('♠♥♦♣'.includes(c0)) return l.slice(1).replace(/10/i, 'T').toUpperCase();
+  if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
   return l.replace(/10/i, 'T').toUpperCase();
 };
 
-// ✅ 若原始标签已带花色或是🃏，直接返回自身；否则给出所有可能花色
+// 返回所有可能的装饰写法（用于从后端原始标签映射到前端装饰牌）
 function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l.startsWith('🃏')) return [l];
@@ -83,13 +73,13 @@ function candDecorations(l: string): string[] {
   return SUITS.map(s => `${s}${r}`);
 }
 
-// ✅ 只对“无花色的牌”进行轮换装饰；已有花色/🃏保持不变
+// 无花色 → 轮换花色；已有花色/🃏保持不变
 function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
     if (!l) return l;
-    if (l.startsWith('🃏')) return l;              // 已装饰大小王
-    if ('♠♥♦♣'.includes(l[0])) return l;          // 已带花色
+    if (l.startsWith('🃏')) return l;
+    if ('♠♥♦♣'.includes(l[0])) return l;
     if (l === 'x' || l === 'X') return `🃏${l.toUpperCase()}`;
     const suit = SUITS[idx % SUITS.length]; idx++;
     return `${suit}${rankOf(l)}`;
@@ -177,7 +167,7 @@ function LivePanel(props: LiveProps) {
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
 
-  // 开始后立即刷新“总分”为当前初始分
+  // 首次启动时，将总分重置为初始分；后续多局不会清零
   const prevRunningRef = useRef(false);
   useEffect(() => {
     if (running && !prevRunningRef.current) {
@@ -187,13 +177,11 @@ function LivePanel(props: LiveProps) {
     prevRunningRef.current = running;
   }, [running, props.startScore]);
 
-  // 抛出 totals & log
   useEffect(() => { props.onTotals?.(totals); }, [totals]);
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
 
-  
   const start = async () => {
     if (running) return;
     setRunning(true);
@@ -205,190 +193,143 @@ function LivePanel(props: LiveProps) {
     setMultiplier(1);
     setLog([]);
 
-    // 首次启动：把总分重置为初始分
-    const baseScore = props.startScore || 0;
-    setTotals([baseScore, baseScore, baseScore]);
+    controllerRef.current = new AbortController();
 
-    // 用 ref 管理剩余局数
-    const roundsTotal = Math.max(1, Math.floor(props.rounds || 1));
-    let aborted = false;
+    try {
+      const r = await fetch('/api/stream_ndjson', {
+        method:'POST',
+        headers: { 'content-type':'application/json' },
+        body: JSON.stringify({
+          rounds: props.rounds,          // 后端连续多局
+          startScore: props.startScore,
+          seatDelayMs: props.seatDelayMs,
+          enabled: props.enabled,
+          rob: props.rob,
+          four2: props.four2,
+          seats: props.seats,
+          seatModels: props.seatModels,
+          seatKeys: props.seatKeys,
+        }),
+        signal: controllerRef.current.signal,
+      });
+      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
 
-    const runOne = async (roundIdx: number) => {
-      if (!running) return false;
-      controllerRef.current = new AbortController();
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buf = '';
 
-      try {
-        const r = await fetch('/api/stream_ndjson', {
-          method:'POST',
-          headers: { 'content-type':'application/json' },
-          body: JSON.stringify({
-            // 固定按单局请求，方便前端循环驱动
-            rounds: 1,
-            startScore: props.startScore,
-            seatDelayMs: props.seatDelayMs,
-            enabled: props.enabled,
-            rob: props.rob,
-            four2: props.four2,
-            seats: props.seats,
-            seatModels: props.seatModels,
-            seatKeys: props.seatKeys,
-          }),
-          signal: controllerRef.current.signal,
-        });
-        if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+      const pump = async (): Promise<void> => {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream:true });
 
-        const reader = r.body.getReader();
-        const decoder = new TextDecoder('utf-8');
-        let buf = '';
+          let idx: number;
+          while ((idx = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, idx).trim();
+            buf = buf.slice(idx + 1);
+            if (!line) continue;
 
-        setLog(l => [...l, `—— 第 ${roundIdx} 局开始 ——`]);
+            let msg: EventObj | null = null;
+            try { msg = JSON.parse(line) } catch { msg = null; }
+            if (!msg) continue;
+            const m: any = msg as any;
 
-        const pump = async (): Promise<void> => {
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream:true });
+            // 任何含 hands 的消息都视为“初始化/刷新手牌”
+            const rawHands =
+              m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+            const hasHands =
+              Array.isArray(rawHands) &&
+              rawHands.length === 3 &&
+              Array.isArray(rawHands[0]);
 
-            let idx;
-            while ((idx = buf.indexOf('\n')) >= 0) {
-              const line = buf.slice(0, idx).trim();
-              buf = buf.slice(idx + 1);
-              if (!line) continue;
+            if (hasHands) {
+              // 每局开始：重置当局显示
+              setPlays([]);
+              setWinner(null);
+              setDelta(null);
+              setMultiplier(1);
 
-              let msg: EventObj | null = null;
-              try { msg = JSON.parse(line) } catch { msg = null; }
-              if (!msg) continue;
-              const m = msg as EventObj;
+              const handsRaw: string[][] = rawHands as string[][];
+              const decorated: string[][] = handsRaw.map(decorateHandCycle);
+              setHands(decorated);
+              const lord =
+                m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+              setLandlord(lord);
+              setLog(l => [...l, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`]);
+              continue;
+            }
 
-              const rawHands =
-                (m as any).hands ??
-                (m as any).payload?.hands ??
-                (m as any).state?.hands ??
-                (m as any).init?.hands;
-              const hasHands =
-                Array.isArray(rawHands) &&
-                rawHands.length === 3 &&
-                Array.isArray(rawHands[0]);
+            if (m.type === 'event' && m.kind === 'rob') {
+              setLog(l => [...l, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`]);
+              continue;
+            }
 
-              if (hasHands) {
-                // 每局开始：重置当局显示
-                setPlays([]);
-                setWinner(null);
-                setDelta(null);
-                setMultiplier(1);
-
-                const handsRaw: string[][] = rawHands as string[][];
-                const decorated: string[][] = handsRaw.map(decorateHandCycle);
-                setHands(decorated);
-                const lord =
-                  (m as any).landlord ??
-                  (m as any).payload?.landlord ??
-                  (m as any).state?.landlord ??
-                  (m as any).init?.landlord ??
-                  null;
-                setLandlord(lord);
-                setLog(l => [...l, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`]);
-                continue;
-              }
-
-              if ((m as any).type === 'event' && (m as any).kind === 'rob') {
-                const e = m as any;
-                setLog(l => [...l, `${['甲','乙','丙'][e.seat]} ${e.rob ? '抢地主' : '不抢'}`]);
-                continue;
-              }
-
-              if ((m as any).type === 'event' && (m as any).kind === 'play') {
-                const e = m as any;
-                if (e.move === 'pass') {
-                  setPlays(p => [...p, { seat:e.seat, move:'pass', reason:e.reason }]);
-                  setLog(l => [...l, `${['甲','乙','丙'][e.seat]} 过${e.reason ? `（${e.reason}）` : ''}`]);
-                } else {
-                  const pretty: string[] = [];
-                  setHands(h => {
-                    const nh = h.map(x => [...x]);
-                    const seat = e.seat;
-                    for (const raw of (e.cards || [])) {
-                      const options = candDecorations(raw);
-                      const chosen = options.find(d => nh[seat].includes(d)) || options[0];
-                      const k = nh[seat].indexOf(chosen);
-                      if (k >= 0) nh[seat].splice(k, 1);
-                      pretty.push(chosen);
-                    }
-                    return nh;
-                  });
-                  setPlays(p => [...p, { seat:e.seat, move:'play', cards: pretty }]);
-                  setLog(l => [...l, `${['甲','乙','丙'][e.seat]} 出牌：${pretty.join(' ')}`]);
-                }
-                continue;
-              }
-
-              if ((m as any).type === 'event' && (m as any).kind === 'trick-reset') {
-                setLog(l => [...l, '一轮结束，重新起牌']);
-                setPlays([]);
-                continue;
-              }
-
-              if ((m as any).type === 'event' && (m as any).kind === 'win') {
-                const e = m as any;
-                setWinner(e.winner);
-                setMultiplier(e.multiplier);
-                setDelta(e.deltaScores);
-                setLog(l => [...l, `胜者：${['甲','乙','丙'][e.winner]}，倍数 x${e.multiplier}，当局积分变更 ${e.deltaScores.join(' / ')}`]);
-                let earlyStop = false;
-                setTotals(t => {
-                  const nt:[number,number,number] = [ t[0] + e.deltaScores[0], t[1] + e.deltaScores[1], t[2] + e.deltaScores[2] ];
-                  if (Math.min(nt[0], nt[1], nt[2]) < 0) {
-                    earlyStop = true as any; // hacky flag carried via closure
+            if (m.type === 'event' && m.kind === 'play') {
+              if (m.move === 'pass') {
+                setPlays(p => [...p, { seat:m.seat, move:'pass', reason:m.reason }]);
+                setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`]);
+              } else {
+                const pretty: string[] = [];
+                setHands(h => {
+                  const nh = h.map(x => [...x]);
+                  const seat = m.seat as number;
+                  for (const raw of (m.cards || [])) {
+                    const options = candDecorations(raw);
+                    const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
+                    const k = nh[seat].indexOf(chosen);
+                    if (k >= 0) nh[seat].splice(k, 1);
+                    pretty.push(chosen);
                   }
-                  return nt;
+                  return nh;
                 });
-                if (earlyStop) {
-                  setLog(l => [...l, '有选手积分 < 0，提前终止。']);
-                  try { controllerRef.current?.abort(); } catch {}
-                  aborted = true;
-                }
-                continue;
+                setPlays(p => [...p, { seat:m.seat, move:'play', cards: pretty }]);
+                setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`]);
               }
+              continue;
+            }
 
-              if ((m as any).type === 'log') {
-                setLog(l => [...l, (m as any).message]);
-              }
+            if (m.type === 'event' && m.kind === 'trick-reset') {
+              setLog(l => [...l, '一轮结束，重新起牌']);
+              setPlays([]);
+              continue;
+            }
+
+            if (m.type === 'event' && m.kind === 'win') {
+              setWinner(m.winner);
+              setMultiplier(m.multiplier);
+              setDelta(m.deltaScores);
+              setLog(l => [...l, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`]);
+              setTotals(t => [ t[0] + m.deltaScores[0], t[1] + m.deltaScores[1], t[2] + m.deltaScores[2] ]);
+              // 不中断，继续读下一局
+              continue;
+            }
+
+            if (m.type === 'log' && typeof m.message === 'string') {
+              setLog(l => [...l, m.message]);
+              continue;
             }
           }
-        };
-
-        await pump();
-      } catch (e:any) {
-        if (e?.name === 'AbortError') {
-          aborted = true;
-        } else {
-          setLog(l => [...l, `错误：${e?.message || e}`]);
         }
-      } finally {
-        setLog(l => [...l, `—— 第 ${roundIdx} 局结束 ——`]);
+      };
+
+      await pump();
+    } catch (e:any) {
+      if (e?.name === 'AbortError') {
+        setLog(l => [...l, '已手动停止。']);
+      } else {
+        setLog(l => [...l, `错误：${e?.message || e}`]);
       }
-      return !aborted;
-    };
-
-    // 顺序执行 N 局（或提前终止）
-    for (let r = 1; r <= roundsTotal; r++) {
-      if (!running || aborted) break;
-      const ok = await runOne(r);
-      if (!ok) break;
+    } finally {
+      setRunning(false);
     }
-
-    setRunning(false);
   };
 
   const stop = () => {
     controllerRef.current?.abort();
     setRunning(false);
   };
-    controllerRef.current?.abort();
-    setRunning(false);
-  };
 
-  // “对局”区域（不含日志；日志由页面底部统一展示）
   return (
     <div>
       {/* 第一行：积分（总分） */}
@@ -457,7 +398,7 @@ function LivePanel(props: LiveProps) {
 /* ==================== 页面（布局：对局设置 → 对局 → 运行日志） ==================== */
 export default function Home() {
   const [enabled, setEnabled] = useState<boolean>(true);
-  const [rounds, setRounds] = useState<number>(1);        // ✅ 改为局数
+  const [rounds, setRounds] = useState<number>(10);
   const [startScore, setStartScore] = useState<number>(100);
   const [rob, setRob] = useState<boolean>(true);
   const [four2, setFour2] = useState<'both'|'2singles'|'2pairs'>('both');
@@ -686,7 +627,7 @@ export default function Home() {
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
         <LivePanel
-          rounds={rounds}                 // ✅ 传入局数
+          rounds={rounds}
           startScore={startScore}
           seatDelayMs={seatDelayMs}
           enabled={enabled}
