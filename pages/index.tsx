@@ -423,13 +423,13 @@ const downloadDebug = () => {
         <button onClick={stop} disabled={!running}
           style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
 		  <label style={{ marginLeft:12, display:'inline-flex', alignItems:'center', gap:6 }}>
-  <input type="checkbox" checked={debugEnabled} onChange={e => setDebugEnabled(e.target.checked)} />
-  <span>Debug</span>
-</label>
-{debugEnabled && (
-  <button onClick={downloadDebug} style={{ padding:'6px 12px', borderRadius:8, marginLeft:8 }}>
+       <input type="checkbox" checked={debugEnabled} onChange={e => setDebugEnabled(e.target.checked)} />
+       <span>Debug</span>
+       </label>
+        {debugEnabled && (
+        <button onClick={downloadDebug} style={{ padding:'6px 12px', borderRadius:8, marginLeft:8 }}>
     下载调试日志
-  </button>
+       </button>
 )}
 
       </div>
