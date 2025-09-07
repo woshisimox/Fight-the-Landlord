@@ -191,6 +191,11 @@ function LivePanel(props: LiveProps) {
 
   const controllerRef = useRef<AbortController|null>(null);
 
+
+  // 粘合窗口：在 trick-reset 与下一条 play 之间，避免 UI 闪断/竞态
+  const pendingResetRef = useRef(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const start = async () => {
     if (running) return;
     setRunning(true);
