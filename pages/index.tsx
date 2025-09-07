@@ -175,26 +175,27 @@ function LivePanel(props: LiveProps) {
             let msg: EventObj | null = null;
             try { msg = JSON.parse(line) } catch { msg = null }
             if (!msg) continue;
+            const m = msg as EventObj;
 
-            if (msg.type==='state' && msg.kind==='init') {
-              setLandlord(msg.landlord);
-              setHands(msg.hands.map(x=>[...x]));
-              setLog(l => [...l, `发牌完成，${['甲','乙','丙'][msg.landlord]}为地主`]);
-            } else if (msg.type==='event' && msg.kind==='rob') {
-              setLog(l => [...l, `${['甲','乙','丙'][msg.seat]} ${msg.rob?'抢地主':'不抢'}`]);
-            } else if (msg.type==='event' && msg.kind==='play') {
-              if (msg.move==='pass') {
-                setPlays(p => [...p, { seat: msg.seat, move:'pass', reason: msg.reason }]);
-                setLog(l => [...l, `${['甲','乙','丙'][msg.seat]} 过${msg.reason?`（${msg.reason}）`:''}`]);
+            if (m.type==='state' && m.kind==='init') {
+              setLandlord(m.landlord);
+              setHands(m.hands.map(x=>[...x]));
+              setLog(l => [...l, `发牌完成，${['甲','乙','丙'][m.landlord]}为地主`]);
+            } else if (m.type==='event' && m.kind==='rob') {
+              setLog(l => [...l, `${['甲','乙','丙'][m.seat]} ${m.rob?'抢地主':'不抢'}`]);
+            } else if (m.type==='event' && m.kind==='play') {
+              if (m.move==='pass') {
+                setPlays(p => [...p, { seat: m.seat, move:'pass', reason: m.reason }]);
+                setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 过${m.reason?`（${m.reason}）`:''}`]);
               } else {
-                setPlays(p => [...p, { seat: msg.seat, move:'play', cards: msg.cards }]);
-                setLog(l => [...l, `${['甲','乙','丙'][msg.seat]} 出牌：${(msg.cards||[]).join(' ')}`]);
+                setPlays(p => [...p, { seat: m.seat, move:'play', cards: m.cards }]);
+                setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 出牌：${(m.cards||[]).join(' ')}`]);
                 // 移除手牌中打出的牌
-                if (msg.cards && msg.cards.length) {
+                if (m.cards && m.cards.length) {
                   setHands(h => {
                     const nh = h.map(x => [...x]);
-                    const seat = msg!.seat;
-                    for (const c of msg.cards!) {
+                    const seat = m!.seat;
+                    for (const c of m.cards!) {
                       const k = nh[seat].indexOf(c);
                       if (k>=0) nh[seat].splice(k,1);
                     }
@@ -202,27 +203,27 @@ function LivePanel(props: LiveProps) {
                   });
                 }
               }
-            } else if (msg.type==='event' && msg.kind==='trick-reset') {
+            } else if (m.type==='event' && m.kind==='trick-reset') {
               setLog(l => [...l, `一轮结束，重新起牌`]);
               setPlays([]);
-            } else if (msg.type==='event' && msg.kind==='win') {
-              setWinner(msg.winner);
-              setMultiplier(msg.multiplier);
-              setDelta(msg.deltaScores);
-              setLog(l => [...l, `胜者：${['甲','乙','丙'][msg.winner]}，倍数 x${msg.multiplier}，当局积分变更 ${msg.deltaScores.join(' / ')}`]);
+            } else if (m.type==='event' && m.kind==='win') {
+              setWinner(m.winner);
+              setMultiplier(m.multiplier);
+              setDelta(m.deltaScores);
+              setLog(l => [...l, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`]);
 
               // 更新 totals
               setTotals((t) => {
                 const nt:[number,number,number] = [
-                  t[0] + msg!.deltaScores[0],
-                  t[1] + msg!.deltaScores[1],
-                  t[2] + msg!.deltaScores[2],
+                  t[0] + m!.deltaScores[0],
+                  t[1] + m!.deltaScores[1],
+                  t[2] + m!.deltaScores[2],
                 ];
                 return nt;
               });
               break; // 一局结束
-            } else if (msg.type==='log') {
-              setLog(l => [...l, msg.message]);
+            } else if (m.type==='log') {
+              setLog(l => [...l, m.message]);
             }
           }
         }
