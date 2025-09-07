@@ -189,12 +189,20 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onTotals?.(totals); }, [totals]);
   useEffect(() => { props.onLog?.(log); }, [log]);
 
+  
+  // --- Fix: queue-based batch ingest to avoid trick-reset/play race ---
+  const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
+  const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
+  const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
+  const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
+  const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
+  const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
+  const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
+  const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
+  const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+  // --- End fix ---
+
   const controllerRef = useRef<AbortController|null>(null);
-
-
-  // 粘合窗口：在 trick-reset 与下一条 play 之间，避免 UI 闪断/竞态
-  const pendingResetRef = useRef(false);
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const start = async () => {
     if (running) return;
@@ -239,112 +247,111 @@ function LivePanel(props: LiveProps) {
           if (done) break;
           buf += decoder.decode(value, { stream:true });
 
-          let idx: number;
+          
+let idx: number;
+          const batch: any[] = [];
           while ((idx = buf.indexOf('\n')) >= 0) {
             const line = buf.slice(0, idx).trim();
             buf = buf.slice(idx + 1);
             if (!line) continue;
+            try { batch.push(JSON.parse(line)); } catch {}
+          }
 
-            let msg: EventObj | null = null;
-            try { msg = JSON.parse(line) } catch { msg = null; }
-            if (!msg) continue;
-            const m: any = msg as any;
+          if (batch.length) {
+            // Take snapshots
+            let nextHands = handsRef.current.map(x => [...x]);
+            let nextPlays = [...playsRef.current];
+            let nextTotals = [...totalsRef.current] as [number,number,number];
+            let nextFinished = finishedRef.current;
+            let nextLog = [...logRef.current];
+            let nextLandlord = landlordRef.current;
+            let nextWinner = winnerRef.current as number|null;
+            let nextDelta = deltaRef.current as [number,number,number]|null;
+            let nextMultiplier = multiplierRef.current;
 
-            // 任何含 hands 的消息都视为“初始化/刷新手牌”
-            const rawHands =
-              m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
-            const hasHands =
-              Array.isArray(rawHands) &&
-              rawHands.length === 3 &&
-              Array.isArray(rawHands[0]);
+            for (const raw of batch) {
+              const m: any = raw;
 
-            if (hasHands) {
-              // 每局开始：重置当局显示
-              setPlays([]);
-              setWinner(null);
-              setDelta(null);
-              setMultiplier(1);
+              const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+              const hasHands =
+                Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
 
-              const handsRaw: string[][] = rawHands as string[][];
-              const decorated: string[][] = handsRaw.map(decorateHandCycle);
-              setHands(decorated);
-              const lord =
-                m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
-              setLandlord(lord);
-              setLog([`发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`]);
-              continue;
-            }
+              if (hasHands) {
+                nextPlays = [];
+                nextWinner = null;
+                nextDelta = null;
+                nextMultiplier = 1;
+                const handsRaw: string[][] = rh as string[][];
+                const decorated: string[][] = handsRaw.map(decorateHandCycle);
+                nextHands = decorated;
+                const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+                nextLandlord = lord;
+                nextLog = [`发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`];
+                continue;
+              }
 
-            if (m.type === 'event' && m.kind === 'rob') {
-              setLog(l => [...l, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`]);
-              continue;
-            }
+              if (m.type === 'event' && m.kind === 'rob') {
+                nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`];
+                continue;
+              }
 
-            if (m.type === 'event' && m.kind === 'play') {
-              if (m.move === 'pass') {
-                setPlays(p => [...p, { seat:m.seat, move:'pass', reason:m.reason }]);
-                setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`]);
-              } else {
-                const pretty: string[] = [];
-                setHands(h => {
-                  const nh = h.map(x => [...x]);
+              if (m.type === 'event' && m.kind === 'trick-reset') {
+                nextLog = [...nextLog, '一轮结束，重新起牌'];
+                nextPlays = [];
+                continue;
+              }
+
+              if (m.type === 'event' && m.kind === 'play') {
+                if (m.move === 'pass') {
+                  nextPlays = [...nextPlays, { seat:m.seat, move:'pass', reason:m.reason }];
+                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`];
+                } else {
+                  const pretty: string[] = [];
                   const seat = m.seat as number;
-                  for (const raw of (m.cards || [])) {
-                    const options = candDecorations(raw);
+                  const cards: string[] = m.cards || [];
+                  const nh = nextHands.map(x => [...x]);
+                  for (const rawCard of cards) {
+                    const options = candDecorations(rawCard);
                     const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
                     const k = nh[seat].indexOf(chosen);
                     if (k >= 0) nh[seat].splice(k, 1);
                     pretty.push(chosen);
                   }
-                  return nh;
-                });
-                if (pendingResetRef.current) {
-                if (resetTimerRef.current) clearTimeout(resetTimerRef.current!); resetTimerRef.current = null;
-                pendingResetRef.current = false;
-                // 粘合：先清空后立刻加入首出，合并在同一批渲染
-                setPlays([]);
-                setPlays(p => [...p, { seat:m.seat, move:'play', cards: pretty }]);
-              } else {
-                setPlays(p => [...p, { seat:m.seat, move:'play', cards: pretty }]);
-              }
-              setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`]);
-              }
-              continue;
-            }
-
-            if (m.type === 'event' && m.kind === 'trick-reset') {
-              setLog(l => [...l, '一轮结束，重新起牌']);
-              // 启动粘合窗口：延迟清空，等待下一条play一起提交，避免竞态
-              pendingResetRef.current = true;
-              if (resetTimerRef.current) clearTimeout(resetTimerRef.current!); resetTimerRef.current = null;
-              resetTimerRef.current = setTimeout(() => {
-                if (pendingResetRef.current) {
-                  setPlays([]);
-                  pendingResetRef.current = false;
+                  nextHands = nh;
+                  nextPlays = [...nextPlays, { seat:m.seat, move:'play', cards: pretty }];
+                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`];
                 }
-              }, 30);
-              continue;
+                continue;
+              }
+
+              if (m.type === 'event' && m.kind === 'win') {
+                nextWinner = m.winner;
+                nextMultiplier = m.multiplier;
+                nextDelta = m.deltaScores;
+                nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
+                nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
+                nextFinished = nextFinished + 1;
+                continue;
+              }
+
+              if (m.type === 'log' && typeof m.message === 'string') {
+                nextLog = [...nextLog, m.message];
+                continue;
+              }
             }
 
-            if (m.type === 'event' && m.kind === 'win') {
-              pendingResetRef.current = false;
-              if (resetTimerRef.current) { clearTimeout(resetTimerRef.current!); resetTimerRef.current = null; resetTimerRef.current = null; }
-
-              setWinner(m.winner);
-              setMultiplier(m.multiplier);
-              setDelta(m.deltaScores);
-              setLog(l => [...l, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`]);
-              setTotals(t => [ t[0] + m.deltaScores[0], t[1] + m.deltaScores[1], t[2] + m.deltaScores[2] ]);
-              // 不中断，继续读下一局
-              setFinishedCount(c => c + 1);
-              continue;
-            }
-
-            if (m.type === 'log' && typeof m.message === 'string') {
-              setLog(l => [...l, m.message]);
-              continue;
-            }
+            // Commit once per chunk
+            setHands(nextHands);
+            setPlays(nextPlays);
+            setTotals(nextTotals);
+            setFinishedCount(nextFinished);
+            setLog(nextLog);
+            setLandlord(nextLandlord);
+            setWinner(nextWinner);
+            setMultiplier(nextMultiplier);
+            setDelta(nextDelta);
           }
+
         }
       };
 
