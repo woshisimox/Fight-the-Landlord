@@ -10,7 +10,7 @@ type Four2Policy = 'both' | '2singles' | '2pairs';
 
 type EventObj =
   | { type:'state'; kind:'init'; landlord:number; hands: Label[][] }
-  | { type:'event'; kind:'init'; landlord:number; hands: Label[][] }   // 兼容部分后端
+  | { type:'event'; kind:'init'; landlord:number; hands: Label[][] }
   | { type:'event'; kind:'play'; seat:number; move:'play'|'pass'; cards?:Label[]; comboType?:ComboType; reason?:string }
   | { type:'event'; kind:'rob'; seat:number; rob:boolean }
   | { type:'event'; kind:'trick-reset' }
@@ -25,9 +25,9 @@ type BotChoice =
   | 'http';
 
 type LiveProps = {
-  rounds: number;                 // 多局数（后端连打）
+  rounds: number;
   startScore: number;
-  seatDelayMs?: number[];         // 每家最小间隔（ms）
+  seatDelayMs?: number[];
   enabled: boolean;
   rob: boolean;
   four2: Four2Policy;
@@ -54,7 +54,6 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 
-// 只提取点数；处理 10→T、大小写
 const rankOf = (l: string) => {
   if (!l) return '';
   const c0 = l[0];
@@ -63,7 +62,6 @@ const rankOf = (l: string) => {
   return l.replace(/10/i, 'T').toUpperCase();
 };
 
-// 返回所有可能的装饰写法（用于从后端原始标签映射到前端装饰牌）
 function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l.startsWith('🃏')) return [l];
@@ -73,7 +71,6 @@ function candDecorations(l: string): string[] {
   return SUITS.map(s => `${s}${r}`);
 }
 
-// 无花色 → 轮换花色；已有花色/🃏保持不变
 function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
@@ -90,8 +87,7 @@ function Card({ label }: { label:string }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-  // Joker：大王 X=红，小王 x=绿
-  const rankColor = suit === '🃏' ? (rank === 'X' ? '#d11' : '#16a34a') : undefined;
+  const rankColor = suit === '🃏' ? (rank === 'X' ? '#d11' : '#16a34a') : undefined; // Joker：大王红，小王绿
   return (
     <span style={{
       display:'inline-flex', alignItems:'center', gap:6,
@@ -155,10 +151,7 @@ function Section({ title, children }:{title:string; children:React.ReactNode}) {
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
 
-  // UI：装饰后的手牌
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
-
-  // 其他状态
   const [landlord, setLandlord] = useState<number|null>(null);
   const [plays, setPlays] = useState<{seat:number; move:'play'|'pass'; cards?:string[]; reason?:string}[]>([]);
   const [multiplier, setMultiplier] = useState(1);
@@ -170,8 +163,9 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
+  // 剩余局数（包含当前局）：总局数 - 已完成局数
+  const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
-  // 首次启动时，将总分重置为初始分；后续多局不会清零
   const prevRunningRef = useRef(false);
   useEffect(() => {
     if (running && !prevRunningRef.current) {
@@ -185,20 +179,21 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
-  // Debug 模式：采集完整 NDJSON 行并可下载
-const [debugEnabled, setDebugEnabled] = useState(false);
-const debugRef = useRef<string[]>([]);
-const appendDebug = (line: string) => { if (debugEnabled) debugRef.current.push(line); };
-const downloadDebug = () => {
-  const blob = new Blob([debugRef.current.join('\n')], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `doudizhu-debug-${new Date().toISOString().replace(/[:.]/g,'-')}.ndjson`;
-  a.click();
-  URL.revokeObjectURL(url);
-};
 
+  // === Debug 模式：采集完整 NDJSON 行并可下载（仅新增） ===
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const debugRef = useRef<string[]>([]);
+  const appendDebug = (line: string) => { if (debugEnabled) debugRef.current.push(line); };
+  const downloadDebug = () => {
+    const blob = new Blob([debugRef.current.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `doudizhu-debug-${new Date().toISOString().replace(/[:.]/g,'-')}.ndjson`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  // === Debug 结束 ===
 
   const start = async () => {
     if (running) return;
@@ -210,7 +205,7 @@ const downloadDebug = () => {
     setDelta(null);
     setMultiplier(1);
     setLog([]);
-	if (debugEnabled) debugRef.current = [];
+    if (debugEnabled) debugRef.current = []; // Debug：新一轮清空缓存
     setFinishedCount(0);
 
     controllerRef.current = new AbortController();
@@ -220,7 +215,7 @@ const downloadDebug = () => {
         method:'POST',
         headers: { 'content-type':'application/json' },
         body: JSON.stringify({
-          rounds: props.rounds,          // 后端连续多局
+          rounds: props.rounds,
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
@@ -241,7 +236,21 @@ const downloadDebug = () => {
       const pump = async (): Promise<void> => {
         while (true) {
           const { value, done } = await reader.read();
-          if (done) break;
+
+          if (done) {
+            // （可选）最后一段没有换行时也尝试处理一次
+            try { buf += decoder.decode(); } catch {}
+            const tail = buf.trim();
+            if (tail) {
+              appendDebug(tail);
+              try {
+                const m: any = JSON.parse(tail);
+                handleMsg(m);
+              } catch {}
+            }
+            break;
+          }
+
           buf += decoder.decode(value, { stream:true });
 
           let idx: number;
@@ -250,88 +259,90 @@ const downloadDebug = () => {
             buf = buf.slice(idx + 1);
             if (!line) continue;
 
+            appendDebug(line); // Debug：记录原始行
+
             let msg: EventObj | null = null;
-			appendDebug(line);
             try { msg = JSON.parse(line) } catch { msg = null; }
             if (!msg) continue;
-            const m: any = msg as any;
-
-            // 任何含 hands 的消息都视为“初始化/刷新手牌”
-            const rawHands =
-              m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
-            const hasHands =
-              Array.isArray(rawHands) &&
-              rawHands.length === 3 &&
-              Array.isArray(rawHands[0]);
-
-            if (hasHands) {
-              // 每局开始：重置当局显示
-              setPlays([]);
-              setWinner(null);
-              setDelta(null);
-              setMultiplier(1);
-
-              const handsRaw: string[][] = rawHands as string[][];
-              const decorated: string[][] = handsRaw.map(decorateHandCycle);
-              setHands(decorated);
-              const lord =
-                m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
-              setLandlord(lord);
-              setLog([`发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`]);
-              continue;
-            }
-
-            if (m.type === 'event' && m.kind === 'rob') {
-              setLog(l => [...l, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`]);
-              continue;
-            }
-
-            if (m.type === 'event' && m.kind === 'play') {
-              if (m.move === 'pass') {
-                setPlays(p => [...p, { seat:m.seat, move:'pass', reason:m.reason }]);
-                setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`]);
-              } else {
-                const pretty: string[] = [];
-                setHands(h => {
-                  const nh = h.map(x => [...x]);
-                  const seat = m.seat as number;
-                  for (const raw of (m.cards || [])) {
-                    const options = candDecorations(raw);
-                    const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
-                    const k = nh[seat].indexOf(chosen);
-                    if (k >= 0) nh[seat].splice(k, 1);
-                    pretty.push(chosen);
-                  }
-                  return nh;
-                });
-                setPlays(p => [...p, { seat:m.seat, move:'play', cards: pretty }]);
-                setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`]);
-              }
-              continue;
-            }
-
-            if (m.type === 'event' && m.kind === 'trick-reset') {
-              setLog(l => [...l, '一轮结束，重新起牌']);
-              setPlays([]);
-              continue;
-            }
-
-            if (m.type === 'event' && m.kind === 'win') {
-              setWinner(m.winner);
-              setMultiplier(m.multiplier);
-              setDelta(m.deltaScores);
-              setLog(l => [...l, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`]);
-              setTotals(t => [ t[0] + m.deltaScores[0], t[1] + m.deltaScores[1], t[2] + m.deltaScores[2] ]);
-              // 不中断，继续读下一局
-              setFinishedCount(c => c + 1);
-              continue;
-            }
-
-            if (m.type === 'log' && typeof m.message === 'string') {
-              setLog(l => [...l, m.message]);
-              continue;
-            }
+            handleMsg(msg as any);
           }
+        }
+      };
+
+      // 把事件处理逻辑抽出来，便于尾部复用
+      const handleMsg = (m: any) => {
+        const rawHands =
+          m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+        const hasHands =
+          Array.isArray(rawHands) &&
+          rawHands.length === 3 &&
+          Array.isArray(rawHands[0]);
+
+        if (hasHands) {
+          setPlays([]);
+          setWinner(null);
+          setDelta(null);
+          setMultiplier(1);
+
+          const handsRaw: string[][] = rawHands as string[][];
+          const decorated: string[][] = handsRaw.map(decorateHandCycle);
+          setHands(decorated);
+          const lord =
+            m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+          setLandlord(lord);
+          // 仅显示本局日志：新局开头清空
+          setLog([`发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`]);
+          return;
+        }
+
+        if (m.type === 'event' && m.kind === 'rob') {
+          setLog(l => [...l, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`]);
+          return;
+        }
+
+        if (m.type === 'event' && m.kind === 'play') {
+          if (m.move === 'pass') {
+            setPlays(p => [...p, { seat:m.seat, move:'pass', reason:m.reason }]);
+            setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`]);
+          } else {
+            const pretty: string[] = [];
+            setHands(h => {
+              const nh = h.map(x => [...x]);
+              const seat = m.seat as number;
+              for (const raw of (m.cards || [])) {
+                const options = candDecorations(raw);
+                const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
+                const k = nh[seat].indexOf(chosen);
+                if (k >= 0) nh[seat].splice(k, 1);
+                pretty.push(chosen);
+              }
+              return nh;
+            });
+            setPlays(p => [...p, { seat:m.seat, move:'play', cards: pretty }]);
+            setLog(l => [...l, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`]);
+          }
+          return;
+        }
+
+        if (m.type === 'event' && m.kind === 'trick-reset') {
+          setLog(l => [...l, '一轮结束，重新起牌']);
+          setPlays([]);
+          return;
+        }
+
+        if (m.type === 'event' && m.kind === 'win') {
+          setWinner(m.winner);
+          setMultiplier(m.multiplier);
+          setDelta(m.deltaScores);
+          setLog(l => [...l, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`]);
+          setTotals(t => [ t[0] + m.deltaScores[0], t[1] + m.deltaScores[1], t[2] + m.deltaScores[2] ]);
+          setFinishedCount(c => c + 1);
+          return;
+        }
+
+        if (m.type === 'log' && typeof m.message === 'string') {
+          setLog(l => [...l, m.message]);
+          return;
         }
       };
 
@@ -351,9 +362,6 @@ const downloadDebug = () => {
     controllerRef.current?.abort();
     setRunning(false);
   };
-  // 剩余局数（包含当前局）：总局数 - 已完成局数
-  const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
-
 
   return (
     <div>
@@ -364,7 +372,6 @@ const downloadDebug = () => {
         </span>
       </div>
 
-      {/* 第一行：积分（总分） */}
       <Section title="积分（总分）">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           {[0,1,2].map(i=>(
@@ -417,21 +424,22 @@ const downloadDebug = () => {
         </div>
       </Section>
 
-      <div style={{ display:'flex', gap:8 }}>
+      <div style={{ display:'flex', gap:8, alignItems:'center' }}>
         <button onClick={start} disabled={running}
           style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
         <button onClick={stop} disabled={!running}
           style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
-		  <label style={{ marginLeft:12, display:'inline-flex', alignItems:'center', gap:6 }}>
-       <input type="checkbox" checked={debugEnabled} onChange={e => setDebugEnabled(e.target.checked)} />
-       <span>Debug</span>
-       </label>
-        {debugEnabled && (
-        <button onClick={downloadDebug} style={{ padding:'6px 12px', borderRadius:8, marginLeft:8 }}>
-    下载调试日志
-       </button>
-)}
 
+        {/* Debug 开关 + 下载按钮（新增，不影响原布局） */}
+        <label style={{ marginLeft:12, display:'inline-flex', alignItems:'center', gap:6 }}>
+          <input type="checkbox" checked={debugEnabled} onChange={e => setDebugEnabled(e.target.checked)} />
+          <span>Debug</span>
+        </label>
+        {debugEnabled && (
+          <button onClick={downloadDebug} style={{ padding:'6px 12px', borderRadius:8, marginLeft:8 }}>
+            下载调试日志
+          </button>
+        )}
       </div>
     </div>
   );
@@ -508,7 +516,6 @@ export default function Home() {
           </label>
         </div>
 
-        {/* 每家 AI 设置（独立） */}
         <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
           <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
 
@@ -555,7 +562,6 @@ export default function Home() {
                   </label>
                 )}
 
-                {/* 各家 key/端点 */}
                 {seats[i] === 'ai:openai' && (
                   <label style={{ display:'block', marginBottom:6 }}>
                     OpenAI API Key
@@ -642,7 +648,6 @@ export default function Home() {
             ))}
           </div>
 
-          {/* 每家出牌最小间隔（独立） */}
           <div style={{ marginTop:12 }}>
             <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)</div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
@@ -665,7 +670,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 2) 对局（设置下面、运行日志上面） */}
+      {/* 2) 对局 */}
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
         <LivePanel
@@ -682,7 +687,7 @@ export default function Home() {
         />
       </div>
 
-      {/* 3) 运行日志（页面底部） */}
+      {/* 3) 运行日志 */}
       <div style={{ marginTop:18 }}>
         <Section title="运行日志">
           <div style={{
