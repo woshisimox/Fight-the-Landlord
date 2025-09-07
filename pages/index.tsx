@@ -193,6 +193,7 @@ function LivePanel(props: LiveProps) {
 
   const controllerRef = useRef<AbortController|null>(null);
 
+  
   const start = async () => {
     if (running) return;
     setRunning(true);
@@ -204,157 +205,185 @@ function LivePanel(props: LiveProps) {
     setMultiplier(1);
     setLog([]);
 
-    controllerRef.current = new AbortController();
+    // 首次启动：把总分重置为初始分
+    const baseScore = props.startScore || 0;
+    setTotals([baseScore, baseScore, baseScore]);
 
-    try {
-      const r = await fetch('/api/stream_ndjson', {
-        method:'POST',
-        headers: { 'content-type':'application/json' },
-        body: JSON.stringify({
-          // delayMs: 已移除（全局最小间隔取消）
-          rounds: props.rounds,          // ✅ 多轮次
-          startScore: props.startScore,
-          seatDelayMs: props.seatDelayMs,
-          enabled: props.enabled,
-          rob: props.rob,
-          four2: props.four2,
-          seats: props.seats,
-          seatModels: props.seatModels,
-          seatKeys: props.seatKeys,
-        }),
-        signal: controllerRef.current.signal,
-      });
-      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+    // 用 ref 管理剩余局数
+    const roundsTotal = Math.max(1, Math.floor(props.rounds || 1));
+    let aborted = false;
 
-      const reader = r.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buf = '';
+    const runOne = async (roundIdx: number) => {
+      if (!running) return false;
+      controllerRef.current = new AbortController();
 
-      const pump = async (): Promise<void> => {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream:true });
+      try {
+        const r = await fetch('/api/stream_ndjson', {
+          method:'POST',
+          headers: { 'content-type':'application/json' },
+          body: JSON.stringify({
+            // 固定按单局请求，方便前端循环驱动
+            rounds: 1,
+            startScore: props.startScore,
+            seatDelayMs: props.seatDelayMs,
+            enabled: props.enabled,
+            rob: props.rob,
+            four2: props.four2,
+            seats: props.seats,
+            seatModels: props.seatModels,
+            seatKeys: props.seatKeys,
+          }),
+          signal: controllerRef.current.signal,
+        });
+        if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
 
-          let idx;
-          while ((idx = buf.indexOf('\n')) >= 0) {
-            const line = buf.slice(0, idx).trim();
-            buf = buf.slice(idx + 1);
-            if (!line) continue;
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buf = '';
 
-            let msg: EventObj | null = null;
-            try { msg = JSON.parse(line) } catch { msg = null; }
-            if (!msg) continue;
-            const m = msg as EventObj;
+        setLog(l => [...l, `—— 第 ${roundIdx} 局开始 ——`]);
 
-            // ✅ 任何含 hands 的消息都视为“初始化/刷新手牌”
-            const rawHands =
-              (m as any).hands ??
-              (m as any).payload?.hands ??
-              (m as any).state?.hands ??
-              (m as any).init?.hands;
-            const hasHands =
-              Array.isArray(rawHands) &&
-              rawHands.length === 3 &&
-              Array.isArray(rawHands[0]);
+        const pump = async (): Promise<void> => {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream:true });
 
-            if (hasHands) {
-              // 每局开始：重置当局显示
-              setPlays([]);
-              setWinner(null);
-              setDelta(null);
-              setMultiplier(1);
+            let idx;
+            while ((idx = buf.indexOf('\n')) >= 0) {
+              const line = buf.slice(0, idx).trim();
+              buf = buf.slice(idx + 1);
+              if (!line) continue;
 
-              const handsRaw: string[][] = rawHands as string[][];
-              const decorated: string[][] = handsRaw.map(decorateHandCycle);
-              setHands(decorated);
-              const lord =
-                (m as any).landlord ??
-                (m as any).payload?.landlord ??
-                (m as any).state?.landlord ??
-                (m as any).init?.landlord ??
-                null;
-              setLandlord(lord);
-              setLog(l => [...l, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`]);
-              continue;
-            }
+              let msg: EventObj | null = null;
+              try { msg = JSON.parse(line) } catch { msg = null; }
+              if (!msg) continue;
+              const m = msg as EventObj;
 
-            if ((m as any).type === 'event' && (m as any).kind === 'rob') {
-              const e = m as any;
-              setLog(l => [...l, `${['甲','乙','丙'][e.seat]} ${e.rob ? '抢地主' : '不抢'}`]);
-              continue;
-            }
+              const rawHands =
+                (m as any).hands ??
+                (m as any).payload?.hands ??
+                (m as any).state?.hands ??
+                (m as any).init?.hands;
+              const hasHands =
+                Array.isArray(rawHands) &&
+                rawHands.length === 3 &&
+                Array.isArray(rawHands[0]);
 
-            if ((m as any).type === 'event' && (m as any).kind === 'play') {
-              const e = m as any;
-              if (e.move === 'pass') {
-                setPlays(p => [...p, { seat:e.seat, move:'pass', reason:e.reason }]);
-                setLog(l => [...l, `${['甲','乙','丙'][e.seat]} 过${e.reason ? `（${e.reason}）` : ''}`]);
-              } else {
-                // 从当前手牌中匹配并移除对应“带花色”的牌（兼容后端传入'Q'或'♠Q'）
-                const pretty: string[] = [];
-                setHands(h => {
-                  const nh = h.map(x => [...x]);
-                  const seat = e.seat;
-                  for (const raw of (e.cards || [])) {
-                    const options = candDecorations(raw);
-                    const chosen = options.find(d => nh[seat].includes(d)) || options[0];
-                    const k = nh[seat].indexOf(chosen);
-                    if (k >= 0) nh[seat].splice(k, 1);
-                    pretty.push(chosen);
-                  }
-                  return nh;
-                });
-                setPlays(p => [...p, { seat:e.seat, move:'play', cards: pretty }]);
-                setLog(l => [...l, `${['甲','乙','丙'][e.seat]} 出牌：${pretty.join(' ')}`]);
+              if (hasHands) {
+                // 每局开始：重置当局显示
+                setPlays([]);
+                setWinner(null);
+                setDelta(null);
+                setMultiplier(1);
+
+                const handsRaw: string[][] = rawHands as string[][];
+                const decorated: string[][] = handsRaw.map(decorateHandCycle);
+                setHands(decorated);
+                const lord =
+                  (m as any).landlord ??
+                  (m as any).payload?.landlord ??
+                  (m as any).state?.landlord ??
+                  (m as any).init?.landlord ??
+                  null;
+                setLandlord(lord);
+                setLog(l => [...l, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`]);
+                continue;
               }
-              continue;
-            }
 
-            if ((m as any).type === 'event' && (m as any).kind === 'trick-reset') {
-              setLog(l => [...l, '一轮结束，重新起牌']);
-              setPlays([]);
-              continue;
-            }
+              if ((m as any).type === 'event' && (m as any).kind === 'rob') {
+                const e = m as any;
+                setLog(l => [...l, `${['甲','乙','丙'][e.seat]} ${e.rob ? '抢地主' : '不抢'}`]);
+                continue;
+              }
 
-            if ((m as any).type === 'event' && (m as any).kind === 'win') {
-              const e = m as any;
-              setWinner(e.winner);
-              setMultiplier(e.multiplier);
-              setDelta(e.deltaScores);
-              setLog(l => [...l, `胜者：${['甲','乙','丙'][e.winner]}，倍数 x${e.multiplier}，当局积分变更 ${e.deltaScores.join(' / ')}`]);
-              setTotals(t => {
-                const nt:[number,number,number] = [ t[0] + e.deltaScores[0], t[1] + e.deltaScores[1], t[2] + e.deltaScores[2] ];
-                // 若任何一方分数为负，提前终止本次多轮
-                if (Math.min(nt[0], nt[1], nt[2]) < 0) {
+              if ((m as any).type === 'event' && (m as any).kind === 'play') {
+                const e = m as any;
+                if (e.move === 'pass') {
+                  setPlays(p => [...p, { seat:e.seat, move:'pass', reason:e.reason }]);
+                  setLog(l => [...l, `${['甲','乙','丙'][e.seat]} 过${e.reason ? `（${e.reason}）` : ''}`]);
+                } else {
+                  const pretty: string[] = [];
+                  setHands(h => {
+                    const nh = h.map(x => [...x]);
+                    const seat = e.seat;
+                    for (const raw of (e.cards || [])) {
+                      const options = candDecorations(raw);
+                      const chosen = options.find(d => nh[seat].includes(d)) || options[0];
+                      const k = nh[seat].indexOf(chosen);
+                      if (k >= 0) nh[seat].splice(k, 1);
+                      pretty.push(chosen);
+                    }
+                    return nh;
+                  });
+                  setPlays(p => [...p, { seat:e.seat, move:'play', cards: pretty }]);
+                  setLog(l => [...l, `${['甲','乙','丙'][e.seat]} 出牌：${pretty.join(' ')}`]);
+                }
+                continue;
+              }
+
+              if ((m as any).type === 'event' && (m as any).kind === 'trick-reset') {
+                setLog(l => [...l, '一轮结束，重新起牌']);
+                setPlays([]);
+                continue;
+              }
+
+              if ((m as any).type === 'event' && (m as any).kind === 'win') {
+                const e = m as any;
+                setWinner(e.winner);
+                setMultiplier(e.multiplier);
+                setDelta(e.deltaScores);
+                setLog(l => [...l, `胜者：${['甲','乙','丙'][e.winner]}，倍数 x${e.multiplier}，当局积分变更 ${e.deltaScores.join(' / ')}`]);
+                let earlyStop = false;
+                setTotals(t => {
+                  const nt:[number,number,number] = [ t[0] + e.deltaScores[0], t[1] + e.deltaScores[1], t[2] + e.deltaScores[2] ];
+                  if (Math.min(nt[0], nt[1], nt[2]) < 0) {
+                    earlyStop = True as any; // hacky flag carried via closure
+                  }
+                  return nt;
+                });
+                if (earlyStop) {
                   setLog(l => [...l, '有选手积分 < 0，提前终止。']);
                   try { controllerRef.current?.abort(); } catch {}
-                  setRunning(false);
+                  aborted = true;
                 }
-                return nt;
-              });
-              continue;
-            }，倍数 x${e.multiplier}，当局积分变更 ${e.deltaScores.join(' / ')}`]);
-              setTotals(t => [ t[0] + e.deltaScores[0], t[1] + e.deltaScores[1], t[2] + e.deltaScores[2] ]);
-              break;
-            }
+                continue;
+              }
 
-            if ((m as any).type === 'log') {
-              setLog(l => [...l, (m as any).message]);
+              if ((m as any).type === 'log') {
+                setLog(l => [...l, (m as any).message]);
+              }
             }
           }
-        }
-      };
+        };
 
-      await pump();
-    } catch (e:any) {
-      setLog(l => [...l, `错误：${e?.message || e}`]);
-    } finally {
-      setRunning(false);
+        await pump();
+      } catch (e:any) {
+        if (e?.name === 'AbortError') {
+          aborted = true;
+        } else {
+          setLog(l => [...l, `错误：${e?.message || e}`]);
+        }
+      } finally {
+        setLog(l => [...l, `—— 第 ${roundIdx} 局结束 ——`]);
+      }
+      return !aborted;
+    };
+
+    // 顺序执行 N 局（或提前终止）
+    for (let r = 1; r <= roundsTotal; r++) {
+      if (!running || aborted) break;
+      const ok = await runOne(r);
+      if (!ok) break;
     }
+
+    setRunning(false);
   };
 
   const stop = () => {
+    controllerRef.current?.abort();
+    setRunning(false);
+  };
     controllerRef.current?.abort();
     setRunning(false);
   };
