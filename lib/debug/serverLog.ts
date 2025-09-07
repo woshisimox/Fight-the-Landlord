@@ -18,7 +18,6 @@ const ring: ServerLogEntry[] = [];
 function push(e: ServerLogEntry) {
   ring.push(e);
   if (ring.length > cap) ring.splice(0, ring.length - cap);
-  // Optional file append (works on platforms that allow writing to /tmp)
   if (process.env.WRITE_LOG_FILE === "1") {
     try {
       const p = process.env.LOG_FILE_PATH || path.join("/tmp", "app.log");

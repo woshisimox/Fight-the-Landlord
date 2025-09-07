@@ -1,7 +1,6 @@
 "use client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-// Minimal inline styles to avoid external CSS dependencies.
 const dockStyle: React.CSSProperties = {
   position: "fixed",
   right: "16px",
@@ -45,8 +44,6 @@ type ClientLog = {
   data?: any;
 };
 
-// Lightweight client logger with console patch + error hooks.
-// Values that look like secrets are redacted.
 class ClientLogger {
   private static _instance: ClientLogger | null = null;
   static get I(): ClientLogger {
@@ -69,7 +66,6 @@ class ClientLogger {
     try {
       if (typeof value === "string") {
         const lower = value.toLowerCase();
-        // redact common key/token patterns or obviously long tokens
         if (/(api[_-]?key|token|secret|bearer)/.test(lower) || value.replace(/[^A-Za-z0-9]/g, "").length > 24) {
           if (value.length <= 8) return "***";
           return value.slice(0, 2) + "****" + value.slice(-2);
@@ -100,7 +96,6 @@ class ClientLogger {
     if (this.patched) return;
     this.patched = true;
 
-    // Console patch
     console.log = (...args: any[]) => {
       this.push({ ts: new Date().toISOString(), level: "info", src: "ui", msg: "console.log", data: args.map(a => this.redact(a)) });
       this.originalConsole.log(...args);
@@ -122,7 +117,6 @@ class ClientLogger {
       this.originalConsole.debug(...args);
     };
 
-    // Error hooks
     window.addEventListener("error", (e) => {
       this.push({ ts: new Date().toISOString(), level: "error", src: "ui", msg: "window.error", data: this.redact({ message: e.message, stack: (e.error && e.error.stack) || undefined }) });
     });
@@ -130,8 +124,7 @@ class ClientLogger {
       this.push({ ts: new Date().toISOString(), level: "error", src: "ui", msg: "unhandledrejection", data: this.redact({ reason: (e as any).reason }) });
     });
 
-    // Fetch heartbeat for backend reachability indicator
-    this.ping(); // initial
+    this.ping();
     setInterval(() => this.ping(), 5000);
   }
 
@@ -194,7 +187,6 @@ export const DebugDock: React.FC = () => {
         visibility: document.visibilityState,
       };
 
-      // Collect safe session config keys (presence only, not values)
       const sessKeys = typeof window !== "undefined" ? Object.keys(sessionStorage || {}).filter(k => !k.toLowerCase().includes("key") && !k.toLowerCase().includes("token")) : [];
       const sesPresence: Record<string, "present" | "absent"> = {};
       for (const k of sessKeys) sesPresence[k] = "present";
@@ -254,14 +246,6 @@ export const DebugDock: React.FC = () => {
       </button>
     </div>
   );
-};
-
-// Named export for manual logging from app code.
-export const debugLog = {
-  info: (src: Src | string, msg: string, data?: any) => ClientLogger.I.info(src, msg, data),
-  warn: (src: Src | string, msg: string, data?: any) => ClientLogger.I.warn(src, msg, data),
-  error: (src: Src | string, msg: string, data?: any) => ClientLogger.I.error(src, msg, data),
-  debug: (src: Src | string, msg: string, data?: any) => ClientLogger.I.debug(src, msg, data),
 };
 
 export default DebugDock;
