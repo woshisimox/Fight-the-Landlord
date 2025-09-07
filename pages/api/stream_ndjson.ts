@@ -52,7 +52,11 @@ function makeBot(name: BotChoice, _idx: number, model: string | undefined, keyba
     case 'ai:grok':   return GrokBot({ apiKey: k.grok || '', model: m || 'grok-2-latest' });
     case 'ai:kimi':   return KimiBot({ apiKey: k.kimi || '', model: m || 'moonshot-v1-8k' });
     case 'ai:qwen':   return QwenBot({ apiKey: k.qwen || '', model: m || 'qwen-plus' });
-    case 'http':      return HttpBot({ baseUrl: (k.httpBase || '').replace(/\/$/, ''), token: k.httpToken || '' });
+    case 'http': {
+      // ✅ 这里改为 base（之前用 baseUrl 会报“不存在该属性”）
+      const base = (k.httpBase || '').replace(/\/$/, '');
+      return HttpBot({ base, token: k.httpToken || '' });
+    }
     default:          return GreedyMax;
   }
 }

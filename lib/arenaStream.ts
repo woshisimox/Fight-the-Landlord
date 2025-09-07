@@ -1,6 +1,5 @@
 // lib/arenaStream.ts
 import {
-  // 你可以把这些改为从 './engine' 统一入口导入
   GreedyMax,
   GreedyMin,
   RandomLegal,
@@ -56,8 +55,9 @@ export function getBot(spec: BotSpec, seatIdx: number): IBot {
   }
 
   if (spec.kind === 'http') {
-    const baseUrl = (spec.baseUrl || '').replace(/\/$/, '');
-    return asBot(HttpBot({ baseUrl, token: spec.token || '' }), `${label}/HTTP`);
+    // HttpBot 需要的是 base 或 url，这里用 base
+    const base = (spec.baseUrl || '').replace(/\/$/, '');
+    return asBot(HttpBot({ base, token: spec.token || '' }), `${label}/HTTP`);
   }
 
   return asBot(GreedyMax, `${label}/GreedyMax`);
