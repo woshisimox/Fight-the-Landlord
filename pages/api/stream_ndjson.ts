@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
+// ✅ 使用统一导出入口，避免直接依赖 doudizhu/engine 的命名导出
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/engine';
 
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
@@ -144,9 +145,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // 每家延迟：仅在出牌事件上应用
       if (ev?.type === 'event' && ev?.kind === 'play') {
         const s = Number(seatDelayMs?.[ev.seat] ?? 0);
-        if (s > 0) await sleep(s);
+        if (s > 0) await new Promise(r=>setTimeout(r, s));
       } else if (delayMs > 0) {
-        await sleep(delayMs);
+        await new Promise(r=>setTimeout(r, delayMs));
       }
 
       res.write(JSON.stringify(ev) + '\n');
