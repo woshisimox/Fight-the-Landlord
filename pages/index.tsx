@@ -294,7 +294,7 @@ function LivePanel(props: LiveProps) {
                   return nh;
                 });
                 if (pendingResetRef.current) {
-                if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+                if (resetTimerRef.current) clearTimeout(resetTimerRef.current!); resetTimerRef.current = null;
                 pendingResetRef.current = false;
                 // 粘合：先清空后立刻加入首出，合并在同一批渲染
                 setPlays([]);
@@ -311,7 +311,7 @@ function LivePanel(props: LiveProps) {
               setLog(l => [...l, '一轮结束，重新起牌']);
               // 启动粘合窗口：延迟清空，等待下一条play一起提交，避免竞态
               pendingResetRef.current = true;
-              if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+              if (resetTimerRef.current) clearTimeout(resetTimerRef.current!); resetTimerRef.current = null;
               resetTimerRef.current = setTimeout(() => {
                 if (pendingResetRef.current) {
                   setPlays([]);
@@ -323,7 +323,7 @@ function LivePanel(props: LiveProps) {
 
             if (m.type === 'event' && m.kind === 'win') {
               pendingResetRef.current = false;
-              if (resetTimerRef.current) { clearTimeout(resetTimerRef.current); resetTimerRef.current = null; }
+              if (resetTimerRef.current) { clearTimeout(resetTimerRef.current!); resetTimerRef.current = null; resetTimerRef.current = null; }
 
               setWinner(m.winner);
               setMultiplier(m.multiplier);
