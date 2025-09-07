@@ -74,7 +74,6 @@ function candDecorations(l: string): string[] {
   const r = rankOf(l);
   if (r === 'JOKER') return ['🃏Y']; // 兜底，极少出现
   return SUITS.map(s => `${s}${r}`);
-}${r}`);
 }
 
 // 无花色 → 轮换花色；已有花色/🃏保持不变
