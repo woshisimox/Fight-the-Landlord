@@ -31,11 +31,11 @@ export type RunOptions = {
   rounds: number;
   startScore?: number;
   enabled?: boolean;
-  rob?: boolean;                 // 这里仅做占位，不实现抢地主流程
-  four2?: Four2Policy;           // 生成牌型时可用
+  rob?: boolean;
+  four2?: Four2Policy;
   seatDelayMs?: number[];
-  seats?: string[];              // 仅内置策略
-  debug?: boolean;               // 打开后输出更多 log
+  seats?: string[];
+  debug?: boolean;
 };
 
 type Require =
@@ -51,11 +51,10 @@ type Move =
 type Group = { rank:number; labels:Label[] };
 
 const SUITS = ['♠','♥','♦','♣'];
-
 const RANK_ORDER = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const;
 const RANK_VAL: Record<string, number> = Object.fromEntries(RANK_ORDER.map((r,i)=>[r,i]));
 
-// ---------- 工具：牌面解析/比较 ----------
+// ---------- 工具 ----------
 function normalizeRank(l: Label): string {
   if (!l) return '';
   if (l.startsWith('🃏')) {
@@ -67,7 +66,6 @@ function normalizeRank(l: Label): string {
     const r = l.slice(1).replace(/10/i,'T').toUpperCase();
     return r;
   }
-  // 兼容无花色
   return l.replace(/10/i,'T').toUpperCase();
 }
 
@@ -78,7 +76,7 @@ function rankValue(l: Label | string): number {
 
 function clone<T>(x:T): T { return JSON.parse(JSON.stringify(x)); }
 
-// ---------- 生成一副牌 / 发牌 ----------
+// ---------- 发牌 ----------
 function makeDeck(): Label[] {
   const ranks = ['3','4','5','6','7','8','9','T','J','Q','K','A','2'];
   const deck: Label[] = [];
@@ -86,26 +84,23 @@ function makeDeck(): Label[] {
   deck.push('🃏x', '🃏X');
   return deck;
 }
-
 function shuffle<T>(a:T[], rnd:()=>number) {
   for (let i=a.length-1;i>0;i--) {
     const j = Math.floor(rnd()*(i+1));
     [a[i],a[j]] = [a[j],a[i]];
   }
 }
-
 function deal(rnd:()=>number): { hands:Label[][], landlord:Seat } {
   const deck = makeDeck();
   shuffle(deck, rnd);
   const hands: Label[][] = [[],[],[]];
   for (let i=0;i<51;i++) hands[i%3].push(deck[i]);
-  // 底牌 3 张给随机地主
   const landlord = Math.floor(rnd()*3) as Seat;
   hands[landlord].push(deck[51], deck[52], deck[53]);
   return { hands, landlord };
 }
 
-// ---------- 牌型识别 & 候选生成（只做最常用：single/pair/bomb/rocket） ----------
+// ---------- 候选生成（最常用：single/pair/bomb/rocket） ----------
 function groupByRank(hand: Label[]): Group[] {
   const m = new Map<string, Label[]>();
   for (const c of hand) {
@@ -124,22 +119,27 @@ function generateMoves(hand: Label[], require: Require): Move[] {
   const out: Move[] = [];
 
   const addSingles = (minRank=0) => {
-    for (const g of groups) if (g.rank > minRank || g.rank === minRank && require===null) {
-      for (const l of g.labels) out.push({ kind:'play', cards:[l], type:'single', rank:g.rank });
+    for (const g of groups) {
+      // 首家（require=null）可以出等于 minRank（仅当 minRank=0 时才命中）
+      if (require === null || g.rank > minRank) {
+        for (const l of g.labels) out.push({ kind:'play', cards:[l], type:'single', rank:g.rank });
+      }
     }
   };
   const addPairs = (minRank=0) => {
-    for (const g of groups) if (g.labels.length>=2 && (g.rank > minRank || g.rank === minRank && require===null)) {
-      out.push({ kind:'play', cards:[g.labels[0], g.labels[1]], type:'pair', rank:g.rank });
+    for (const g of groups) {
+      if (g.labels.length>=2 && (require === null || g.rank > minRank)) {
+        out.push({ kind:'play', cards:[g.labels[0], g.labels[1]], type:'pair', rank:g.rank });
+      }
     }
   };
   const addBombs = (minRank=0) => {
-    for (const g of groups) if (g.labels.length===4 && (require===null || g.rank>minRank)) {
-      out.push({ kind:'play', cards:[...g.labels], type:'bomb', rank:g.rank });
+    for (const g of groups) {
+      if (g.labels.length===4 && (require===null || g.rank>minRank)) {
+        out.push({ kind:'play', cards:[...g.labels], type:'bomb', rank:g.rank });
+      }
     }
   };
-
-  // rocket（任意情况可出，用于压牌）
   const addRocket = () => {
     if (hasx && hasX) out.push({ kind:'play', cards:['🃏x','🃏X'], type:'rocket', rank:RANK_VAL['X'] });
   };
@@ -152,14 +152,13 @@ function generateMoves(hand: Label[], require: Require): Move[] {
     return out;
   }
 
-  // 跟牌：必须同类更大（炸弹/王炸例外）
   if (require.type === 'single') {
     addSingles(require.rank);
-    addBombs();
+    addBombs(require.rank);
     addRocket();
   } else if (require.type === 'pair') {
     addPairs(require.rank);
-    addBombs();
+    addBombs(require.rank);
     addRocket();
   } else if (require.type === 'bomb') {
     addBombs(require.rank);
@@ -178,33 +177,37 @@ export type BotCtx = {
   require: Require;
   rnd: ()=>number;
 };
-
 export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 
+// 类型守卫：把 Move[] 过滤成 PlayMove[]
+type PlayMove = Extract<Move, { kind:'play' }>;
+function isPlay(m: Move): m is PlayMove { return m.kind === 'play'; }
+
 const builtinGreedyMax: BotFunc = ({ legal }) => {
-  if (!legal.length) return { type:'pass' };
-  const plays = legal.filter(m=>m.kind==='play') as Extract<Move,{kind:'play'>}[];
-  if (!plays.length) return { type:'pass' };
+  const plays: PlayMove[] = legal.filter(isPlay);
+  if (plays.length === 0) return { type:'pass' };
   plays.sort((a,b)=> a.rank===b.rank ? typeOrder(a.type)-typeOrder(b.type) : a.rank-b.rank);
   const pick = plays[plays.length-1];
-  return { type:'play', cards:pick.cards, comboType:pick.type };
+  if (!pick) return { type:'pass' };        // 兼容 noUncheckedIndexedAccess
+  return { type:'play', cards: pick.cards, comboType: pick.type };
 };
 
 const builtinGreedyMin: BotFunc = ({ legal }) => {
-  if (!legal.length) return { type:'pass' };
-  const plays = legal.filter(m=>m.kind==='play') as Extract<Move,{kind:'play'>}[];
-  if (!plays.length) return { type:'pass' };
+  const plays: PlayMove[] = legal.filter(isPlay);
+  if (plays.length === 0) return { type:'pass' };
   plays.sort((a,b)=> a.rank===b.rank ? typeOrder(a.type)-typeOrder(b.type) : a.rank-b.rank);
   const pick = plays[0];
-  return { type:'play', cards:pick.cards, comboType:pick.type };
+  if (!pick) return { type:'pass' };
+  return { type:'play', cards: pick.cards, comboType: pick.type };
 };
 
 const builtinRandomLegal: BotFunc = ({ legal, rnd }) => {
-  if (!legal.length) return { type:'pass' };
-  const plays = legal.filter(m=>m.kind==='play') as Extract<Move,{kind:'play'>}[];
-  if (!plays.length) return { type:'pass' };
-  const pick = plays[Math.floor(rnd()*plays.length)];
-  return { type:'play', cards:pick.cards, comboType:pick.type };
+  const plays: PlayMove[] = legal.filter(isPlay);
+  if (plays.length === 0) return { type:'pass' };
+  const idx = Math.floor(rnd()*plays.length);
+  const pick = plays[idx];
+  if (!pick) return { type:'pass' };
+  return { type:'play', cards: pick.cards, comboType: pick.type };
 };
 
 function typeOrder(t: ComboType): number {
@@ -219,32 +222,31 @@ function typeOrder(t: ComboType): number {
 }
 
 function pickSmallestSingle(hand: Label[]): Label {
-  let best = hand[0], br = rankValue(hand[0]);
+  let best = hand[0], br = rankValue(hand[0] ?? '');
   for (const c of hand) {
     const r = rankValue(c);
     if (r < br) { best = c; br = r; }
   }
-  return best;
+  return best!;
 }
 
 // ---------- 记分 ----------
 function settle(winner: Seat, landlord: Seat, multiplier: number): [number,number,number] {
-  // base = 1；地主 ±2×mult，农民 ±1×mult
-  const base = multiplier;
+  const base = multiplier; // base × 倍数
   const delta: [number,number,number] = [0,0,0];
   if (winner === landlord) {
-    delta[landlord] = +2*base;
-    delta[(landlord+1)%3] = -1*base;
-    delta[(landlord+2)%3] = -1*base;
+    delta[landlord] = +2 * base;
+    delta[(landlord+1)%3] = -1 * base;
+    delta[(landlord+2)%3] = -1 * base;
   } else {
-    delta[landlord] = -2*base;
-    delta[(landlord+1)%3] = ( (landlord+1)%3 === winner ? +base : +base );
-    delta[(landlord+2)%3] = ( (landlord+2)%3 === winner ? +base : +base );
+    delta[landlord] = -2 * base;
+    delta[(landlord+1)%3] = +1 * base;
+    delta[(landlord+2)%3] = +1 * base;
   }
   return delta;
 }
 
-// ---------- 主流程（含 “不再卡死”的两处修复） ----------
+// ---------- 主流程（含两处防止卡死的修复） ----------
 export async function runSeries(opts: RunOptions, emit: Emit) {
   const rounds = Math.max(1, Math.floor(opts.rounds || 1));
   const delay = async (ms:number) => new Promise(r=>setTimeout(r, ms));
@@ -252,11 +254,8 @@ export async function runSeries(opts: RunOptions, emit: Emit) {
 
   for (let round=0; round<rounds; round++) {
     const { hands, landlord } = deal(rnd);
-
-    // 推送开局
     await emit({ type:'state', kind:'init', landlord, hands: clone(hands) });
 
-    // 状态
     let turn: Seat = landlord;
     let leader: Seat = landlord;
     let require: Require = null;
@@ -270,24 +269,22 @@ export async function runSeries(opts: RunOptions, emit: Emit) {
 
     const isEmpty = (h:Label[]) => h.length === 0;
 
-    // 回合循环
     for (;;) {
       const isLeader = (turn === leader);
       const effRequire: Require = isLeader ? null : require;
 
       let legal = generateMoves(hands[turn], effRequire);
 
-      // Debug 信息（可选）
       if (opts.debug) {
         await emit({ type:'log',
-          message: `[turn] seat=${turn} leader=${leader} isLeader=${isLeader} ` +
-                   `require=${effRequire?`${(effRequire as any).type}@${(effRequire as any).rank}`:'null'} ` +
-                   `cand=${legal.filter(x=>x.kind==='play').length}`
+          message: `[turn] seat=${turn} leader=${leader} isLeader=${isLeader} `
+                 + `require=${effRequire?`${(effRequire as any).type}@${(effRequire as any).rank}`:'null'} `
+                 + `cand=${legal.filter(isPlay).length}`
         });
       }
 
-      // --------- 修复点 #1：首家兜底，永不为 0 ----------
-      if (isLeader && legal.filter(m=>m.kind==='play').length === 0) {
+      // 修复 #1：首家兜底，永不为 0
+      if (isLeader && legal.filter(isPlay).length === 0) {
         const c = pickSmallestSingle(hands[turn]);
         legal = [{ kind:'play', cards:[c], type:'single', rank:rankValue(c) }];
         if (opts.debug) {
@@ -297,56 +294,42 @@ export async function runSeries(opts: RunOptions, emit: Emit) {
 
       // 选择动作
       let move: Move;
-      const plays = legal.filter(m=>m.kind==='play') as Extract<Move,{kind:'play'>}[];
-      if (!plays.length) {
-        // 跟牌无候选 → 必过
-        move = { kind:'pass' };
+      const plays = legal.filter(isPlay);
+      if (plays.length === 0) {
+        move = { kind:'pass' };       // 跟牌无候选 → 必过
       } else {
         const bot = bots[turn] || builtinGreedyMin;
-        const pick = bot({
-          seat: turn,
-          hand: hands[turn],
-          legal,
-          isLeader,
-          require: effRequire,
-          rnd
-        });
-        const chosen = await Promise.resolve(pick);
-        move = chosen.type === 'play'
-          ? { kind:'play', cards: chosen.cards, type: chosen.comboType, rank: rankValue(chosen.cards[0]) }
+        const choice = await Promise.resolve(bot({
+          seat: turn, hand: hands[turn], legal, isLeader, require: effRequire, rnd
+        }));
+        move = choice.type === 'play'
+          ? { kind:'play', cards: choice.cards, type: choice.comboType, rank: rankValue(choice.cards[0] ?? '') }
           : { kind:'pass' };
       }
 
-      // 执行动作
       if (move.kind === 'pass') {
         await emit({ type:'event', kind:'play', seat: turn, move:'pass' });
         passCount++;
-        // 两家都过 → trick-reset
+        // 两家过 → reset
         if (passCount >= 2) {
           await emit({ type:'event', kind:'trick-reset' });
-
-          // --------- 修复点 #2：一次性重置（防止上下文错乱） ----------
+          // 修复 #2：一次性重置上下文
           require = null;
-          leader = lastPlaySeat;     // 上一手出牌者成为新一轮首家
-          turn   = leader;
+          leader  = lastPlaySeat;
+          turn    = leader;
           passCount = 0;
-
-          // 继续下一循环
           continue;
         } else {
-          // 过后换下一家
           turn = ((turn + 1) % 3) as Seat;
           continue;
         }
       } else {
-        // play
+        // 执行出牌
         const cards = move.cards;
-        // 从手牌移除
         for (const c of cards) {
           const idx = hands[turn].indexOf(c);
           if (idx >= 0) hands[turn].splice(idx,1);
           else {
-            // 若找不到精确花色，用 rank 兜底（不同显示花色时）
             const r = normalizeRank(c);
             const j = hands[turn].findIndex(x=>normalizeRank(x)===r);
             if (j>=0) hands[turn].splice(j,1);
@@ -355,33 +338,27 @@ export async function runSeries(opts: RunOptions, emit: Emit) {
 
         await emit({ type:'event', kind:'play', seat: turn, move:'play', cards: clone(cards), comboType: move.type });
 
-        // 炸弹/王炸 → 倍数×2
         if (move.type === 'bomb' || move.type === 'rocket') multiplier *= 2;
 
-        // 设置该玩家为本轮 leader
         leader = turn;
         lastPlaySeat = turn;
         passCount = 0;
 
-        // 设置 require
         if (move.type === 'single') require = { type:'single', rank: move.rank };
         else if (move.type === 'pair') require = { type:'pair', rank: move.rank };
         else if (move.type === 'bomb') require = { type:'bomb', rank: move.rank };
-        else require = { type:'single', rank: move.rank }; // 其他都按单张规则比较（降级）
+        else require = { type:'single', rank: move.rank };
 
-        // 胜负判定
         if (isEmpty(hands[turn])) {
           const winner = turn;
           const delta = settle(winner, landlord, multiplier);
           await emit({ type:'event', kind:'win', winner, multiplier, deltaScores: delta });
-          break; // 进入下一局
+          break;
         }
 
-        // 下一家
         turn = ((turn + 1) % 3) as Seat;
       }
 
-      // 节流（可选）
       const ms = Math.max(0, Math.floor((opts.seatDelayMs?.[turn] ?? 0)));
       if (ms) await delay(ms);
     }
