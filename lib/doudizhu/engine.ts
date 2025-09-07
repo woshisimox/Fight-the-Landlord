@@ -54,7 +54,6 @@ export type BotCtx = {
   };
 };
 
-};
 
 export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 
@@ -106,7 +105,6 @@ function removeLabels(hand: Label[], pick: Label[]) {
   }
 }
 
-function clone<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
 
 // ========== 牌型判定 ==========
 type ComboType =
