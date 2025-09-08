@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-/* -------------------- 基础类型 -------------------- */
 type Label = string;
 type ComboType =
   | 'single' | 'pair' | 'triple' | 'bomb' | 'rocket'
@@ -10,16 +9,15 @@ type ComboType =
 type Four2Policy = 'both' | '2singles' | '2pairs';
 
 type EventObj =
-  | { ts?:string; seq?:number; type:'state'; kind:'init'; landlord:number; hands: Label[][] }
-  | { ts?:string; seq?:number; type:'event'; kind:'init'; landlord:number; hands: Label[][] }   // 兼容部分后端
-  | { ts?:string; seq?:number; type:'event'; kind:'play'; seat:number; move:'play'|'pass'; cards?:Label[]; comboType?:ComboType; reason?:string }
-  | { ts?:string; seq?:number; type:'event'; kind:'rob'; seat:number; rob:boolean }
-  | { ts?:string; seq?:number; type:'event'; kind:'trick-reset' }
-  | { ts?:string; seq?:number; type:'event'; kind:'win'; winner:number; multiplier:number; deltaScores:[number,number,number] }
-  | { ts?:string; seq?:number; type:'log';  message:string }
-  | { ts?:string; seq?:number; type:'ka' };
+  | { type:'state'; kind:'init'; landlord:number; hands: Label[][] }
+  | { type:'event'; kind:'init'; landlord:number; hands: Label[][] }   // 兼容部分后端
+  | { type:'event'; kind:'play'; seat:number; move:'play'|'pass'; cards?:Label[]; comboType?:ComboType; reason?:string }
+  | { type:'event'; kind:'rob'; seat:number; rob:boolean }
+  | { type:'event'; kind:'trick-reset' }
+  | { type:'event'; kind:'win'; winner:number; multiplier:number; deltaScores:[number,number,number] }
+  | { type:'log';  message:string }
+  | { type:'ka' };
 
-/* -------------------- Bot 选择 -------------------- */
 type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
@@ -138,7 +136,7 @@ function LogLine({ text }: { text:string }) {
   return (
     <div
       style={{
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace',
         fontSize:12, color:'#555', padding:'2px 0'
       }}
     >
@@ -154,36 +152,6 @@ function Section({ title, children }:{title:string; children:React.ReactNode}) {
       <div>{children}</div>
     </div>
   );
-}
-
-/* ==================== EventQueue（批处理 + 排序 + 去重） ==================== */
-class EventQueue {
-  private buf: EventObj[] = [];
-  private seen = new Set<number>(); // 只按 seq 去重（后端已保证）
-  enqueue(arr: any[]) {
-    for (const x of arr) {
-      if (!x || typeof x !== 'object') continue;
-      if ((x as any).type === 'ka') continue; // 丢弃 keep-alive
-      const seq = (x as any).seq;
-      if (typeof seq === 'number') {
-        if (this.seen.has(seq)) continue;
-        this.seen.add(seq);
-      }
-      this.buf.push(x as EventObj);
-    }
-    // 排序：ts（可空）→ seq
-    const normTs = (t?:string|number) => {
-      if (t == null) return 0;
-      if (typeof t === 'number') return t;
-      const n = Date.parse(t); return isNaN(n) ? 0 : n;
-    };
-    this.buf.sort((a,b)=> (normTs(a.ts) - normTs(b.ts)) || ((a.seq||0)-(b.seq||0)));
-  }
-  drain(): EventObj[] {
-    const out = this.buf;
-    this.buf = [];
-    return out;
-  }
 }
 
 /* ==================== LivePanel（对局） ==================== */
@@ -230,9 +198,7 @@ function LivePanel(props: LiveProps) {
   const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
   const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
   const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
-  // 进度监控
-  const lastProgressAtRef = useRef<number>(0);
-  const lastWarnAtRef = useRef<number>(0);
+  // --- End mirrors ---
 
   const start = async () => {
     if (running) return;
@@ -245,21 +211,6 @@ function LivePanel(props: LiveProps) {
     setMultiplier(1);
     setLog([]);
     setFinishedCount(0);
-
-    // 立即记一次进度时间（避免刚开始就报超时）
-    lastProgressAtRef.current = Date.now();
-    lastWarnAtRef.current = 0;
-
-    // watchdog：每 1s 检查一次
-    const WATCHDOG = setInterval(() => {
-      const now = Date.now();
-      const silent = now - (lastProgressAtRef.current || 0);
-      const threshold = 7035; // 与后端 KA 抖动相配，避开 7 秒“心跳+相位”死局
-      if (silent > threshold && (!lastWarnAtRef.current || now - lastWarnAtRef.current > 4000)) {
-        setLog(l => [...l, `⚠️ 长时间无进度（>${threshold}ms），可能与心跳/间隔相位重叠。`]);
-        lastWarnAtRef.current = now;
-      }
-    }, 1000);
 
     controllerRef.current = new AbortController();
 
@@ -286,136 +237,144 @@ function LivePanel(props: LiveProps) {
       const decoder = new TextDecoder('utf-8');
       let buf = '';
 
-      const Q = new EventQueue();
+      let lastNonKA = Date.now(); // 看门狗基准
+      const pump = async (): Promise<void> => {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream:true });
 
-      const processBatch = (batch: any[]) => {
-        Q.enqueue(batch);
-        const items = Q.drain();
-        if (!items.length) return;
+          let idx: number;
+          const batch: any[] = [];
+          while ((idx = buf.indexOf('\\n')) >= 0) {
+            const line = buf.slice(0, idx).trim();
+            buf = buf.slice(idx + 1);
+            if (!line) continue;
+            try { batch.push(JSON.parse(line)); } catch {}
+          }
 
-        // 快照
-        let nextHands = handsRef.current.map(x => [...x]);
-        let nextPlays = [...playsRef.current];
-        let nextTotals = [...totalsRef.current] as [number,number,number];
-        let nextFinished = finishedRef.current;
-        let nextLog = [...logRef.current];
-        let nextLandlord = landlordRef.current;
-        let nextWinner = winnerRef.current as number|null;
-        let nextDelta = deltaRef.current as [number,number,number]|null;
-        let nextMultiplier = multiplierRef.current;
+          if (batch.length) {
+            // ===== 过滤 keep-alive，并按 (ts, seq) 排序 =====
+            const normTs = (x:any) => {
+              const t = x?.ts;
+              if (t == null) return 0;
+              if (typeof t === 'number') return t;
+              const n = Date.parse(t);
+              return isNaN(n) ? 0 : n;
+            };
+            const items = batch
+              .filter(ev => ev && ev.type !== 'ka')
+              .sort((a,b) => (normTs(a) - normTs(b)) || ((a.seq ?? 0) - (b.seq ?? 0)));
 
-        for (const raw of items) {
-          const m:any = raw;
-          try {
-            const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
-            const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
+            // 快照
+            let nextHands = handsRef.current.map(x => [...x]);
+            let nextPlays = [...playsRef.current];
+            let nextTotals = [...totalsRef.current] as [number,number,number];
+            let nextFinished = finishedRef.current;
+            let nextLog = [...logRef.current];
+            let nextLandlord = landlordRef.current;
+            let nextWinner = winnerRef.current as number|null;
+            let nextDelta = deltaRef.current as [number,number,number]|null;
+            let nextMultiplier = multiplierRef.current;
 
-            if (hasHands) {
-              nextPlays = [];
-              nextWinner = null;
-              nextDelta = null;
-              nextMultiplier = 1;
-              const handsRaw: string[][] = rh as string[][];
-              const decorated: string[][] = handsRaw.map(decorateHandCycle);
-              nextHands = decorated;
-              const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
-              nextLandlord = lord;
-              nextLog = [...nextLog, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`];
-              lastProgressAtRef.current = Date.now();
-              continue;
-            }
+            for (const raw of items) {
+              const m: any = raw;
+              try {
+                if (m.type !== 'ka') lastNonKA = Date.now();
 
-            if (m.type === 'event' && m.kind === 'rob') {
-              nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`];
-              lastProgressAtRef.current = Date.now();
-              continue;
-            }
+                const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+                const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
 
-            if (m.type === 'event' && m.kind === 'trick-reset') {
-              nextLog = [...nextLog, '一轮结束，重新起牌'];
-              nextPlays = [];
-              lastProgressAtRef.current = Date.now();
-              continue;
-            }
-
-            if (m.type === 'event' && m.kind === 'play') {
-              if (m.move === 'pass') {
-                nextPlays = [...nextPlays, { seat:m.seat, move:'pass', reason:m.reason }];
-                nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`];
-              } else {
-                const pretty: string[] = [];
-                const seat = m.seat as number;
-                const cards: string[] = m.cards || [];
-                const nh = (nextHands && (nextHands as any[]).length===3 ? nextHands : [[],[],[]]).map((x:any)=>[...x]);
-                for (const rawCard of cards) {
-                  const options = candDecorations(rawCard);
-                  const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
-                  const k = nh[seat].indexOf(chosen);
-                  if (k >= 0) nh[seat].splice(k, 1);
-                  pretty.push(chosen);
+                if (hasHands) {
+                  nextPlays = [];
+                  nextWinner = null;
+                  nextDelta = null;
+                  nextMultiplier = 1;
+                  const handsRaw: string[][] = rh as string[][];
+                  const decorated: string[][] = handsRaw.map(decorateHandCycle);
+                  nextHands = decorated;
+                  const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+                  nextLandlord = lord;
+                  nextLog = [...nextLog, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`];
+                  continue;
                 }
-                nextHands = nh;
-                nextPlays = [...nextPlays, { seat:m.seat, move:'play', cards: pretty }];
-                nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`];
+
+                if (m.type === 'event' && m.kind === 'rob') {
+                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`];
+                  continue;
+                }
+
+                if (m.type === 'event' && m.kind === 'trick-reset') {
+                  nextLog = [...nextLog, '一轮结束，重新起牌'];
+                  nextPlays = [];
+                  continue;
+                }
+
+                if (m.type === 'event' && m.kind === 'play') {
+                  if (m.move === 'pass') {
+                    nextPlays = [...nextPlays, { seat:m.seat, move:'pass', reason:m.reason }];
+                    nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`];
+                  } else {
+                    const pretty: string[] = [];
+                    const seat = m.seat as number;
+                    const cards: string[] = m.cards || [];
+                    const nh = (nextHands && (nextHands as any[]).length===3 ? nextHands : [[],[],[]]).map((x:any)=>[...x]);
+                    for (const rawCard of cards) {
+                      const options = candDecorations(rawCard);
+                      const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
+                      const k = nh[seat].indexOf(chosen);
+                      if (k >= 0) nh[seat].splice(k, 1);
+                      pretty.push(chosen);
+                    }
+                    nextHands = nh;
+                    nextPlays = [...nextPlays, { seat:m.seat, move:'play', cards: pretty }];
+                    nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`];
+                  }
+                  continue;
+                }
+
+                if (m.type === 'event' && m.kind === 'win') {
+                  nextWinner = m.winner;
+                  nextMultiplier = m.multiplier;
+                  nextDelta = m.deltaScores;
+                  nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
+                  nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
+                  nextFinished = nextFinished + 1;
+                  winsRef.current = (winsRef.current||0) + 1;
+                  continue;
+                }
+
+                if (m.type === 'log' && typeof m.message === 'string') {
+                  nextLog = [...nextLog, m.message];
+                  continue;
+                }
+              } catch(e) {
+                console.error('[ingest:batch]', e, raw);
               }
-              lastProgressAtRef.current = Date.now();
-              continue;
             }
 
-            if (m.type === 'event' && m.kind === 'win') {
-              nextWinner = m.winner;
-              nextMultiplier = m.multiplier;
-              nextDelta = m.deltaScores;
-              nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
-              nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
-              nextFinished = nextFinished + 1;
-              winsRef.current = (winsRef.current||0) + 1;
-              lastProgressAtRef.current = Date.now();
-              continue;
-            }
+            // commit：一次 chunk 只 setState 一次
+            setHands(nextHands);
+            setPlays(nextPlays);
+            setTotals(nextTotals);
+            setFinishedCount(winsRef.current || nextFinished);
+            setLog(nextLog);
+            setLandlord(nextLandlord);
+            setWinner(nextWinner);
+            setMultiplier(nextMultiplier);
+            setDelta(nextDelta);
+          }
 
-            if (m.type === 'log' && typeof m.message === 'string') {
-              nextLog = [...nextLog, m.message];
-              lastProgressAtRef.current = Date.now();
-              continue;
-            }
-          } catch(e) {
-            console.error('[ingest:batch]', e, raw);
+          // 看门狗：超过 ~7s 没有非 KA 事件就提示
+          if (Date.now() - lastNonKA > 7035) {
+            setLog(l => [...l, '⚠️  长时间无进度（>7035ms），可能与心跳/间隔相位重叠。']);
+            lastNonKA = Date.now(); // 避免重复刷屏
           }
         }
-
-        // commit：一次批次只 setState 一次
-        setHands(nextHands);
-        setPlays(nextPlays);
-        setTotals(nextTotals);
-        setFinishedCount(winsRef.current || nextFinished);
-        setLog(nextLog);
-        setLandlord(nextLandlord);
-        setWinner(nextWinner);
-        setMultiplier(nextMultiplier);
-        setDelta(nextDelta);
       };
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream:true });
-
-        let idx: number;
-        const batch: any[] = [];
-        while ((idx = buf.indexOf('\\n')) >= 0) {
-          const line = buf.slice(0, idx).trim();
-          buf = buf.slice(idx + 1);
-          if (!line) continue;
-          try { batch.push(JSON.parse(line)); } catch {}
-        }
-
-        if (batch.length) processBatch(batch);
-      }
-
-      clearInterval(WATCHDOG);
+      await pump();
     } catch (e:any) {
-      clearInterval(WATCHDOG);
       if (e?.name === 'AbortError') {
         setLog(l => [...l, '已手动停止。']);
       } else {
