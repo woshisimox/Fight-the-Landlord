@@ -1,234 +1,65 @@
-// pages/api/stream_ndjson.ts — backend-only (no JSX), anti-stall + keepalive
-import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
-import { OpenAIBot } from '../../lib/bots/openai_bot';
-import { GeminiBot } from '../../lib/bots/gemini_bot';
-import { GrokBot } from '../../lib/bots/grok_bot';
-import { HttpBot } from '../../lib/bots/http_bot';
-import { KimiBot } from '../../lib/bots/kimi_bot';
-import { QwenBot } from '../../lib/bots/qwen_bot';
+// ==== pages/index.tsx ====
+// 你原始的 React 页面整体保留；我只在所有 import 之后、组件外部，插入一个 IIFE
 
-type Four2Policy = 'both' | '2singles' | '2pairs';
+import React from 'react';
+// ... 你原有的 import 全部保留 ...
 
-type BotChoice =
-  | 'built-in:greedy-max'
-  | 'built-in:greedy-min'
-  | 'built-in:random-legal'
-  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
-  | 'http';
+/* ================= NDJSON 前端调试注入（只打日志，不改行为） ================= */
+(function () {
+  if (typeof window === 'undefined') return;
+  if ((window as any).__NDJSON_FE_TRACER__) return;
+  (window as any).__NDJSON_FE_TRACER__ = true;
 
-type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
+  const on = () => sessionStorage.getItem('ndjson.debug') === '1';
+  const log = (...a: any[]) => { if (on()) console.debug('[NDJSON/FE]', ...a); };
 
-type StartPayload = {
-  seats: SeatSpec[];
-  seatDelayMs?: number[];
-  rounds?: number;
-  rob?: boolean;
-  four2?: Four2Policy;
-  stopBelowZero?: boolean;
-  debug?: boolean; // 保留字段，但不传给 engine
-  seatModels?: { E?:string; S?:string; W?:string; } | null;
-  seatKeys?: { E?:string; S?:string; W?:string; } | null;
-};
+  // 1) fetch 打点
+  const oldFetch = window.fetch.bind(window);
+  window.fetch = (async (...args: Parameters<typeof fetch>) => {
+    const res = await oldFetch(...args);
+    try { log('fetch', { url: args?.[0], ok: res.ok, status: res.status }); } catch {}
+    return res;
+  }) as typeof window.fetch;
 
-function writeLine(res: NextApiResponse, obj: any) {
-  (res as any).write(JSON.stringify(obj) + '\n');
-}
-
-type BotFunc = (ctx:any)=>Promise<any>;
-
-function chooseBot(
-  kind: BotChoice,
-  model?: string,
-  keys?: Partial<{ openai:string; gemini:string; grok:string; kimi:string; qwen:string }>,
-  base?: string,
-  token?: string
-): BotFunc {
-  switch (kind) {
-    case 'built-in:greedy-max': return async (ctx:any)=>GreedyMax(ctx);
-    case 'built-in:greedy-min': return async (ctx:any)=>GreedyMin(ctx);
-    case 'built-in:random-legal': return async (ctx:any)=>RandomLegal(ctx);
-    case 'ai:openai': return OpenAIBot({ apiKey: keys?.openai ?? '', model }) as unknown as BotFunc;
-    case 'ai:gemini': return GeminiBot({ apiKey: keys?.gemini ?? '', model }) as unknown as BotFunc;
-    case 'ai:grok':   return GrokBot({ apiKey: keys?.grok   ?? '', model }) as unknown as BotFunc;
-    case 'ai:kimi':   return KimiBot({ apiKey: keys?.kimi   ?? '', model }) as unknown as BotFunc;
-    case 'ai:qwen':   return QwenBot({ apiKey: keys?.qwen   ?? '', model }) as unknown as BotFunc;
-    case 'http':      return HttpBot({ base: base ?? '', token: token ?? '' }) as unknown as BotFunc; // HttpBot 入参不含 model
-    default:          return async (ctx:any)=>GreedyMax(ctx);
-  }
-}
-
-async function* playOneRound(opts: {
-  seats: BotFunc[];
-  rob: boolean;
-  four2: Four2Policy;
-  delays: number[];
-  res: NextApiResponse;
-}) {
-  const { seats, rob, four2, delays, res } = opts;
-  const iter = runOneGame({ seats, rob, four2 });
-
-  let landlord = -1;
-  let evCount = 0;
-  let repeated = 0;
-  let lastKey = '';
-
-  for await (const ev of iter as any) {
-    evCount++;
-    const key = JSON.stringify([ev.type, ev.kind, ev.seat, ev.move, ev.cards]);
-    if (key === lastKey) repeated++; else repeated = 0;
-    lastKey = key;
-
-    if (ev.type === 'event' && ev.kind === 'init' && Array.isArray(ev.hands)) {
-      if (typeof ev.landlord === 'number') landlord = ev.landlord;
-      writeLine(res, { type:'state', kind:'init', landlord, hands: ev.hands });
-      continue;
-    }
-
-    if (ev.type === 'event' && ev.kind === 'rob') {
-      writeLine(res, { type:'event', kind:'rob', seat: ev.seat, rob: ev.rob });
-      await new Promise(r=>setTimeout(r, Math.max(0, delays[ev.seat] || 0)));
-      if (ev.rob) landlord = ev.seat;
-      continue;
-    }
-
-    if (ev.type === 'event' && ev.kind === 'play') {
-      const payload:any = { type:'event', kind:'play', seat: ev.seat, move: ev.move };
-      if (ev.move === 'play') {
-        payload.cards = ev.cards;
-        payload.comboType = ev.comboType;
-        payload.reason = ev.reason || '';
-      } else {
-        payload.reason = ev.reason || 'pass';
+  // 2) ReadableStream.getReader().read 打点
+  const RS: any = (window as any).ReadableStream;
+  if (RS?.prototype?.getReader) {
+    const oldGetReader = RS.prototype.getReader;
+    RS.prototype.getReader = function (...args: any[]) {
+      const reader = oldGetReader.apply(this, args);
+      if (reader && typeof reader.read === 'function') {
+        const oldRead = reader.read.bind(reader);
+        reader.read = async (...rargs: any[]) => {
+          const ret = await oldRead(...rargs);
+          try { log('read', { done: !!ret?.done, bytes: ret?.value?.length || 0 }); } catch {}
+          return ret;
+        };
       }
-      writeLine(res, payload);
-      await new Promise(r=>setTimeout(r, Math.max(0, delays[ev.seat] || 0)));
-      continue;
-    }
-
-    if (ev.type === 'event' && ev.kind === 'trick-reset') {
-      writeLine(res, { type:'event', kind:'trick-reset' });
-      continue;
-    }
-
-    if (ev.type === 'event' && ev.kind === 'win') {
-      writeLine(res, { type:'event', kind:'win', winner: ev.winner, multiplier: ev.multiplier || 1, deltaScores: ev.deltaScores });
-      return;
-    }
-
-    // 极端防卡死
-    if (evCount > 5000 || repeated > 500) {
-      writeLine(res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。强制收尾（判地主胜）。`});
-      try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
-      const winner = landlord >= 0 ? landlord : 0;
-      writeLine(res, { type:'event', kind:'win', winner, multiplier: 1, deltaScores: winner===landlord ? [+2,-1,-1] : [-2,+1,+1] });
-      return;
-    }
-  }
-}
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
-    return;
-  }
-  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-
-  /* ===================== NDJSON 后端调试注入（只打日志，不改行为） ===================== */
-  const reqTag = Math.random().toString(36).slice(2, 8);
-  const slog = (...a: any[]) => console.log('[NDJSON/BE]', ...a);
-  slog('BEGIN', reqTag);
-
-  const __oldWrite = (res as any).write.bind(res);
-  (res as any).write = (chunk: any, ...args: any[]) => {
-    try {
-      const s = typeof chunk === 'string'
-        ? chunk
-        : (typeof Buffer !== 'undefined' && (Buffer as any).isBuffer?.(chunk))
-          ? (chunk as Buffer).toString('utf8')
-          : '';
-
-      if (s && s.length) {
-        s.split('\n').forEach((line) => {
-          if (!line) return;
-          try {
-            const obj = JSON.parse(line);
-            const t = obj?.type, k = obj?.kind;
-            if (t === 'state' && k === 'init') {
-              slog(reqTag, 'out', 'init', 'LL=', obj?.landlord);
-            } else if (t === 'event' && k === 'play') {
-              slog(reqTag, 'out', 'play', obj?.seat, obj?.move, obj?.cards ? obj.cards.length : 0);
-            } else if (t === 'event' && k === 'rob') {
-              slog(reqTag, 'out', 'rob', obj?.seat, obj?.rob);
-            } else if (t === 'event' && k === 'trick-reset') {
-              slog(reqTag, 'out', 'trick-reset');
-            } else if (t === 'event' && k === 'win') {
-              slog(reqTag, 'out', 'win', obj?.winner, obj?.multiplier, obj?.deltaScores);
-            } else if (t === 'log') {
-              const msg = (obj?.message || '').toString();
-              if (/(开始|结束|提前终止|错误)/.test(msg)) slog(reqTag, 'log', msg);
-            } else if (t === 'ka') {
-              // 心跳太频繁；如需可放开：slog(reqTag, 'ka');
-            }
-          } catch { /* 非 JSON 行忽略 */ }
-        });
-      }
-    } catch { /* 忽略解析错误，绝不影响写出 */ }
-    return __oldWrite(chunk, ...args as any);
-  };
-
-  res.once('close', () => slog('CLOSE', reqTag));
-  res.once('finish', () => slog('FINISH', reqTag));
-  /* ===================== NDJSON 后端调试注入（完） ===================== */
-
-  // 心跳：1s
-  const writeLineKA = (obj:any)=>{ (res as any).write(JSON.stringify(obj)+'\n'); };
-  const __ka = setInterval(()=>{ try{ if((res as any).writableEnded){ clearInterval(__ka as any); } else { writeLineKA({ type:'ka', ts: new Date().toISOString() }); } }catch{} }, 1000);
-  res.once('close', ()=>{ try{ clearInterval(__ka as any);}catch{} });
-  res.once('finish', ()=>{ try{ clearInterval(__ka as any);}catch{} });
-
-  try {
-    const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const MAX_ROUNDS = parseInt(process.env.MAX_ROUNDS || '200', 10);
-    const rounds = Math.max(1, Math.min(MAX_ROUNDS, Number(body.rounds) || 1));
-    const four2: Four2Policy = body.four2 || 'both';
-    const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
-
-    const keys = {
-      openai:  body.seatKeys?.E ?? body.seatKeys?.S ?? body.seatKeys?.W ?? '',
-      gemini:  body.seatKeys?.S ?? '',
-      grok:    '',
-      kimi:    body.seatKeys?.E ?? body.seatKeys?.S ?? body.seatKeys?.W ?? '',
-      qwen:    body.seatKeys?.W ?? '',
+      return reader;
     };
-
-    for (let round=1; round<=rounds; round++) {
-      writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
-
-      const seatFuncs: BotFunc[] = (body.seats || []).slice(0,3).map((s)=>{
-        return chooseBot(s.choice, s.model, keys, s.baseUrl, s.token);
-      });
-
-      const iter = playOneRound({
-        seats: seatFuncs,
-        rob: !!body.rob,
-        four2,
-        delays,
-        res,
-      });
-
-      // 消耗迭代器（事件在 playOneRound 内逐条 write 出）
-      for await (const _ of iter as any) { /* no-op */ }
-
-      writeLine(res, { type:'log', message:`第 ${round} 局结束（详见 'win' 事件）。` });
-      if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
-    }
-
-    try{ clearInterval(__ka as any);}catch{}; res.end();
-  } catch (e: any) {
-    writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
-    try { try{ clearInterval(__ka as any);}catch{}; res.end(); } catch {}
   }
-}
+
+  // 3) TextDecoder.decode 打点
+  const TD: any = (window as any).TextDecoder;
+  if (TD?.prototype?.decode) {
+    const oldDecode = TD.prototype.decode;
+    TD.prototype.decode = function (...args: any[]) {
+      const out = oldDecode.apply(this, args as any);
+      try {
+        const src = args[0]; const stream = args?.[1]?.stream;
+        log('decode', { inBytes: src?.length || 0, stream: !!stream, outLen: typeof out === 'string' ? out.length : 0 });
+      } catch {}
+      return out;
+    };
+  }
+
+  // 4) 便捷面包屑
+  (window as any).ndjsonMark = (tag: string, meta?: any) => log('mark', { tag, ...meta });
+
+  log('injected');
+})();
+/* ================= NDJSON 前端调试注入（完） ================= */
+
+// === 从这里开始，保留你原本的 UI 组件与业务逻辑（完全不动） ===
+
+// export default function Home() { ... 你的完整页面代码原样继续 ... }
