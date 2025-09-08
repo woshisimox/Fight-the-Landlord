@@ -433,7 +433,7 @@ function LivePanel(props: {
 
 export default function Home() {
   // 维持你的原始默认 UI 配置；若你的外层已有这些控件，可忽略下面容器，只保留 <LivePanel ... />
-  const [rounds] = useState(10);
+  const [rounds] = useState(50);
   const [startScore] = useState<[number,number,number]>([0,0,0]);
   const [seatDelayMs] = useState(500);
   const [enabled] = useState<boolean[]|undefined>(undefined);
