@@ -55,7 +55,6 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 
-// 只提取点数；处理 10→T、大小写
 const rankOf = (l: string) => {
   if (!l) return '';
   const c0 = l[0];
@@ -64,11 +63,10 @@ const rankOf = (l: string) => {
   return l.replace(/10/i, 'T').toUpperCase();
 };
 
-// 返回所有可能的装饰写法（用于从后端原始标签映射到前端装饰牌）
 function candDecorations(l: string): string[] {
   if (!l) return [];
-  if (l === 'x') return ['🃏X'];  // 小王
-  if (l === 'X') return ['🃏Y'];  // 大王
+  if (l === 'x') return ['🃏X'];
+  if (l === 'X') return ['🃏Y'];
   if (l.startsWith('🃏')) return [l];
   if ('♠♥♦♣'.includes(l[0])) return [l];
   const r = rankOf(l);
@@ -76,7 +74,6 @@ function candDecorations(l: string): string[] {
   return SUITS.map(s => `${s}${r}`);
 }
 
-// 无花色 → 轮换花色；已有花色/🃏保持不变
 function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
@@ -173,6 +170,10 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
+  // 新增：跨 chunk 防重与单调 seq 保障
+  const seenSeqRef = useRef<Set<number>>(new Set());
+  const lastSeqRef = useRef<number>(0);
+
   // 首次启动时，将总分重置为初始分；后续多局不会清零
   const prevRunningRef = useRef(false);
   useEffect(() => {
@@ -187,7 +188,7 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
-  // --- Batch ingest state mirrors (for robust chunk processing) ---
+  // --- Batch ingest state mirrors ---
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
@@ -197,7 +198,6 @@ function LivePanel(props: LiveProps) {
   const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
   const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
   const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
-  const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
   // --- End mirrors ---
 
   const start = async () => {
@@ -212,6 +212,10 @@ function LivePanel(props: LiveProps) {
     setLog([]);
     setFinishedCount(0);
 
+    // 重置跨 chunk 防重
+    seenSeqRef.current.clear();
+    lastSeqRef.current = 0;
+
     controllerRef.current = new AbortController();
 
     try {
@@ -225,7 +229,7 @@ function LivePanel(props: LiveProps) {
           enabled: props.enabled,
           rob: props.rob,
           four2: props.four2,
-          seats: props.seats,            // 字符串数组；后端已兼容 normalize
+          seats: props.seats,
           seatModels: props.seatModels,
           seatKeys: props.seatKeys,
         }),
@@ -253,7 +257,7 @@ function LivePanel(props: LiveProps) {
           }
 
           if (batch.length) {
-            // ===== 新增：过滤 keep-alive，并按 (ts, seq) 排序 =====
+            // 过滤 ka，并按 seq 主序排序（无 seq 时退化到 ts）
             const normTs = (x:any) => {
               const t = x?.ts;
               if (t == null) return 0;
@@ -263,8 +267,21 @@ function LivePanel(props: LiveProps) {
             };
             const items = batch
               .filter(ev => ev && ev.type !== 'ka')
-              .sort((a,b) => (normTs(a) - normTs(b)) || ((a.seq ?? 0) - (b.seq ?? 0)));
-            // ===== 以上新增 =====
+              .sort((a,b) => {
+                const sa = a.seq ?? 0, sb = b.seq ?? 0;
+                if (sa !== 0 || sb !== 0) return sa - sb;
+                return normTs(a) - normTs(b);
+              })
+              // 跨 chunk 防重：丢弃已见 seq 或逆序 seq
+              .filter(e => {
+                const s = e.seq;
+                if (typeof s === 'number') {
+                  if (seenSeqRef.current.has(s)) return false;
+                  if (s <= lastSeqRef.current) return false;
+                  seenSeqRef.current.add(s);
+                }
+                return true;
+              });
 
             // 快照
             let nextHands = handsRef.current.map(x => [...x]);
@@ -280,6 +297,11 @@ function LivePanel(props: LiveProps) {
             for (const raw of items) {
               const m: any = raw;
               try {
+                // 更新 lastSeq
+                if (typeof m.seq === 'number' && m.seq > lastSeqRef.current) {
+                  lastSeqRef.current = m.seq;
+                }
+
                 const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
                 const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
 
@@ -338,7 +360,6 @@ function LivePanel(props: LiveProps) {
                   nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
                   nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
                   nextFinished = nextFinished + 1;
-                  winsRef.current = (winsRef.current||0) + 1;
                   continue;
                 }
 
@@ -355,7 +376,7 @@ function LivePanel(props: LiveProps) {
             setHands(nextHands);
             setPlays(nextPlays);
             setTotals(nextTotals);
-            setFinishedCount(winsRef.current || nextFinished);
+            setFinishedCount(nextFinished);
             setLog(nextLog);
             setLandlord(nextLandlord);
             setWinner(nextWinner);
@@ -381,7 +402,7 @@ function LivePanel(props: LiveProps) {
     controllerRef.current?.abort();
     setRunning(false);
   };
-  // 剩余局数（包含当前局）：总局数 - 已完成局数
+
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
   return (
