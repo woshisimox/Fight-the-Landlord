@@ -167,6 +167,9 @@ async function forwardGameCompat(
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const WALL_T0 = Date.now();
+  const MAX_WALL_MS = 55_000; // safe wall time per request
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })
     return
@@ -191,6 +194,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {})
+  // Safe rounds fallback
+  const safeSeatDelay = Math.max(0, Number((req.body?.seatDelayMs) ?? 0));
+  const safeRounds = (safeSeatDelay >= 800 ? 1 : Math.max(1, Number((req.body?.rounds) ?? 1)));
+
     const MAX_ROUNDS = parseInt(process.env.MAX_ROUNDS || '200', 10)
     const rounds = Math.max(1, Math.min(MAX_ROUNDS, Number(body.rounds) || 1))
     const four2 = (body.four2 as Four2Policy) || 'both'
@@ -202,7 +209,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     emit({ type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` })
 
-    for (let round = 1; round <= rounds; round++) {
+    for (let round = 1; round <= safeRounds; round++) {
+    if (Date.now() - WALL_T0 > MAX_WALL_MS) {
+      writeLine(res, { type:'log', message:'⏱️ Wall-clock guard: end this connection early to avoid serverless timeout.' });
+      break;
+    }
       emit({ type:'log', message:`—— 第 ${round} 局开始 ——` })
 
       // 每局重新构造 bot，保证状态干净
