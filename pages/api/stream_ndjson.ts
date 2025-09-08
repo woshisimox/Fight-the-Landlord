@@ -15,87 +15,101 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
   | 'http';
 
-type SeatSpec =
-  | { choice:'built-in:greedy-max'|'built-in:greedy-min'|'built-in:random-legal' }
-  | { choice:'ai:openai'|'ai:gemini'|'ai:grok'|'ai:kimi'|'ai:qwen', apiKey?:string, model?:string }
-  | { choice:'http', baseUrl?:string, token?:string };
+type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
 
 type StartPayload = {
-  rounds: number;
-  four2?: 'both'|'2singles'|'2pairs';
-  rob?: boolean;
-  seatDelayMs?: [number,number,number];
   seats: SeatSpec[];
-  seatModels?: (string|null)[];
-  seatKeys?: any[];
+  seatDelayMs?: number[];
+  rounds?: number;
+  rob?: boolean;
+  four2?: 'both' | '2singles' | '2pairs';
   stopBelowZero?: boolean;
+  debug?: boolean;
+  seatModels?: { E?:string; S?:string; W?:string; } | null;
+  seatKeys?: { E?:string; S?:string; W?:string; } | null;
 };
-
-function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any {
-  switch (choice) {
-    case 'built-in:greedy-max': return GreedyMax;
-    case 'built-in:greedy-min': return GreedyMin;
-    case 'built-in:random-legal': return RandomLegal;
-    case 'ai:openai': return OpenAIBot({ apiKey: (spec as any)?.apiKey || '', model: (spec as any)?.model || 'gpt-4o-mini' });
-    case 'ai:gemini': return GeminiBot({ apiKey: (spec as any)?.apiKey || '', model: (spec as any)?.model || 'gemini-1.5-flash' });
-    case 'ai:grok':   return GrokBot({ apiKey: (spec as any)?.apiKey || '', model: (spec as any)?.model || 'grok-2' });
-    case 'ai:kimi':   return KimiBot({ apiKey: (spec as any)?.apiKey || '', model: (spec as any)?.model || 'moonshot-v1-8k' });
-    case 'ai:qwen':   return QwenBot({ apiKey: (spec as any)?.apiKey || '', model: (spec as any)?.model || 'qwen-plus' });
-    case 'http':      return HttpBot({ base: ((spec as any)?.baseUrl||'').replace(/\/$/,''), token: (spec as any)?.token || '' });
-    default:          return GreedyMax;
-  }
-}
 
 function writeLine(res: NextApiResponse, obj: any) {
   (res as any).write(JSON.stringify(obj) + '\n');
 }
 
-async function runOneRoundWithGuard(opts: { seats: any[], four2?: 'both'|'2singles'|'2pairs', delayMs?: number }, res: NextApiResponse, roundNo: number) {
-  const MAX_EVENTS = 4000;              // safety ceiling: total events per round
-  const MAX_REPEATED_HEARTBEAT = 200;   // safety ceiling: consecutive 'pass/pass/reset' type heartbeats
-  const iter: AsyncIterator<any> = (runOneGame as any)({ seats: opts.seats, four2: opts.four2, delayMs: opts.delayMs });
-  let evCount = 0;
+type BotFunc = (ctx:any)=>Promise<any>;
+
+function chooseBot(kind: BotChoice, model?: string, keys?: { openai?:string; gemini?:string; grok?:string; kimi?:string; qwen?:string }, base?:string, token?:string): BotFunc {
+  switch (kind) {
+    case 'built-in:greedy-max': return async (ctx:any)=>GreedyMax(ctx);
+    case 'built-in:greedy-min': return async (ctx:any)=>GreedyMin(ctx);
+    case 'built-in:random-legal': return async (ctx:any)=>RandomLegal(ctx);
+    case 'ai:openai': return OpenAIBot({ apiKey: keys?.openai, model }) as unknown as BotFunc;
+    case 'ai:gemini': return GeminiBot({ apiKey: keys?.gemini, model }) as unknown as BotFunc;
+    case 'ai:grok':   return GrokBot({ apiKey: keys?.grok,   model }) as unknown as BotFunc;
+    case 'ai:kimi':   return KimiBot({ apiKey: keys?.kimi,   model }) as unknown as BotFunc;
+    case 'ai:qwen':   return QwenBot({ apiKey: keys?.qwen,   model }) as unknown as BotFunc;
+    case 'http':      return HttpBot({ base, token, model }) as unknown as BotFunc;
+    default:          return async (ctx:any)=>GreedyMax(ctx);
+  }
+}
+
+async function* playOneRound(opts: any) {
+  const { seats, rob, four2, delays, debug } = opts;
+  const iter = runOneGame({ seats, rob, four2, debug });
+
   let landlord = -1;
-  let trick = 0;
-  let lastSignature = '';
+  let multiplier = 1;
+  let evCount = 0;
   let repeated = 0;
+  let lastKey = '';
 
-  while (true) {
-    const { value, done } = await (iter.next() as any);
-    if (done) break;
+  for await (const ev of iter as any) {
     evCount++;
+    const key = JSON.stringify([ev.type, ev.kind, ev.seat, ev.move, ev.cards]);
+    if (key === lastKey) repeated++; else repeated = 0;
+    lastKey = key;
 
-    // forward downstream
-    writeLine(res, value);
-
-    // book-keeping for diagnostics
-    const kind = value?.kind || value?.type;
-    if (value?.kind === 'init' && typeof value?.landlord === 'number') {
-      landlord = value.landlord;
+    if (ev.type === 'event' && ev.kind === 'init' && Array.isArray(ev.hands)) {
+      landlord = typeof ev.landlord === 'number' ? ev.landlord : landlord;
+      writeLine(opts.res, { type:'state', kind:'init', landlord, hands: ev.hands });
+      continue;
     }
-    if (value?.kind === 'trick-reset') {
-      trick += 1;
+
+    if (ev.type === 'event' && ev.kind === 'rob') {
+      writeLine(opts.res, { type:'event', kind:'rob', seat: ev.seat, rob: ev.rob });
+      await new Promise(r=>setTimeout(r, Math.max(0, delays[ev.seat] || 0)));
+      if (ev.rob) landlord = ev.seat;
+      continue;
     }
-    // simple repetition signature to catch livelocks
-    const sig = JSON.stringify({
-      kind: value?.kind,
-      seat: value?.seat,
-      move: value?.move,
-      require: value?.require?.type || value?.comboType || null,
-      leader: value?.leader,
-      trick
-    });
 
-    if (sig === lastSignature) repeated++; else repeated = 0;
-    lastSignature = sig;
+    if (ev.type === 'event' && ev.kind === 'play') {
+      const payload:any = { type:'event', kind:'play', seat: ev.seat, move: ev.move };
+      if (ev.move === 'play') {
+        payload.cards = ev.cards;
+        payload.comboType = ev.comboType;
+        payload.reason = ev.reason || '';
+      } else {
+        payload.reason = ev.reason || 'pass';
+      }
+      writeLine(opts.res, payload);
+      await new Promise(r=>setTimeout(r, Math.max(0, delays[ev.seat] || 0)));
+      continue;
+    }
 
-    if (evCount > MAX_EVENTS || repeated > MAX_REPEATED_HEARTBEAT) {
-      writeLine(res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束（判地主胜）。`});
-      // Gracefully close the generator if possible
+    if (ev.type === 'event' && ev.kind === 'trick-reset') {
+      writeLine(opts.res, { type:'event', kind:'trick-reset' });
+      continue;
+    }
+
+    if (ev.type === 'event' && ev.kind === 'win') {
+      multiplier = ev.multiplier || 1;
+      writeLine(opts.res, { type:'event', kind:'win', winner: ev.winner, multiplier, deltaScores: ev.deltaScores });
+      return;
+    }
+
+    // 防卡死：极端情况下（非 1000ms 相关），若事件重复过多，强制收尾
+    if (evCount > 5000 || repeated > 500) {
+      writeLine(opts.res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束（判地主胜）。`});
       try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
-      // Emit a synthetic win so前端能收尾
       const winner = landlord >= 0 ? landlord : 0;
-      writeLine(res, { type:'event', kind:'win', winner, multiplier: 1, deltaScores: winner===landlord ? [+2,-1,-1] : [-2,+1,+1] });
+      writeLine(opts.res, { type:'event', kind:'win', winner, multiplier: 1, deltaScores: winner===landlord ? [+2,-1,-1] : [-2,+1,+1] });
       return;
     }
   }
@@ -111,7 +125,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Connection', 'keep-alive');
   let __lastWrite = Date.now();
   function writeLineKA(obj:any){ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); }
-  const __ka = setInterval(()=>{ try{ if((res as any).writableEnded) return; if(Date.now()-__lastWrite>2000) writeLineKA({ type:'ka', ts: new Date().toISOString() }); } catch{} }, 2500);
+  const __ka = setInterval(()=>{ try{ if((res as any).writableEnded){ clearInterval(__ka as any); } else { writeLineKA({ type:'ka', ts: new Date().toISOString() }); } }catch{} }, 1000);
+  res.once('close', ()=>{ try{ clearInterval(__ka as any);}catch{} });
+  res.once('finish', ()=>{ try{ clearInterval(__ka as any);}catch{} });
 
   try {
     const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -120,28 +136,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const four2 = body.four2 || 'both';
     const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
 
-    // build bots
-    const seatBots = (body.seats || []).slice(0,3).map((s, i) => asBot(s.choice as BotChoice, s as any));
-
-    writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
+    const keys = {
+      openai:  body.seatKeys?.E || body.seatKeys?.S || body.seatKeys?.W || '',
+      gemini:  body.seatKeys?.S || '',
+      grok:    '',
+      kimi:    body.seatKeys?.E || body.seatKeys?.S || body.seatKeys?.W || '',
+      qwen:    body.seatKeys?.W || '',
+    };
 
     let scores: [number,number,number] = [0,0,0];
-    for (let round = 1; round <= rounds; round++) {
-      writeLine(res, { type:'progress', phase:'round-start', round, ts: Date.now() });
+
+    for (let round=1; round<=rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
 
-      // wrap seats with per-seat delay (防止显式 await 造成阻塞)
-      const delayedSeats = seatBots.map((bot, idx) => async (ctx:any) => {
-        const ms = delays[idx] || 0;
-        if (ms) await new Promise(r => setTimeout(r, ms));
-        return bot(ctx);
+      const seatFuncs: BotFunc[] = (body.seats || []).slice(0,3).map((s,idx)=>{
+        return chooseBot(s.choice, s.model, keys, s.baseUrl, s.token);
       });
 
-      await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0 }, res, round);
+      const iter = playOneRound({
+        seats: seatFuncs,
+        rob: !!body.rob,
+        four2,
+        delays,
+        debug: !!body.debug,
+        res,
+      });
 
-      writeLine(res, { type:'progress', phase:'round-end', round, ts: Date.now() });
+      let winner = 0;
+      let multiplier = 1;
+      for await (const ev of iter as any) {
+        // 这里只是把迭代器“跑完”，事件早已通过 writeLine 写出
+        if (ev?.type === 'event' && ev?.kind === 'win') {
+          winner = ev.winner; multiplier = ev.multiplier || 1;
+        }
+      }
 
-      // 前端会自行累计分数；这里只做可选的“低于0提前终止”
+      const delta = winner===0 ? [+2,-1,-1] : (winner===1 ? [-1,+2,-1] : [-1,-1,+2]);
+      scores = [ scores[0]+delta[0], scores[1]+delta[1], scores[2]+delta[2] ] as [number,number,number];
+      writeLine(res, { type:'log', message:`第 ${round} 局结束：胜者 ${['甲','乙','丙'][winner]}，倍数 x${multiplier}，累计积分：${scores.join(' / ')}` });
+
       if (body.stopBelowZero && (scores[0]<0 || scores[1]<0 || scores[2]<0)) {
         writeLine(res, { type:'log', message:`某方积分 < 0，提前终止。` });
         break;
@@ -149,8 +182,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
-
-    writeLine(res, { type:'summary', roundsCompleted: rounds, ts: Date.now() });
 
     try{ clearInterval(__ka as any);}catch{}; res.end();
   } catch (e: any) {
