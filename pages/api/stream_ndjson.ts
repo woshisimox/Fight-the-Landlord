@@ -35,17 +35,23 @@ function writeLine(res: NextApiResponse, obj: any) {
 
 type BotFunc = (ctx:any)=>Promise<any>;
 
-function chooseBot(kind: BotChoice, model?: string, keys?: { openai?:string; gemini?:string; grok?:string; kimi?:string; qwen?:string }, base?:string, token?:string): BotFunc {
+function chooseBot(
+  kind: BotChoice,
+  model?: string,
+  keys?: Partial<{ openai:string; gemini:string; grok:string; kimi:string; qwen:string }>,
+  base?: string,
+  token?: string
+): BotFunc {
   switch (kind) {
     case 'built-in:greedy-max': return async (ctx:any)=>GreedyMax(ctx);
     case 'built-in:greedy-min': return async (ctx:any)=>GreedyMin(ctx);
     case 'built-in:random-legal': return async (ctx:any)=>RandomLegal(ctx);
-    case 'ai:openai': return OpenAIBot({ apiKey: keys?.openai, model }) as unknown as BotFunc;
-    case 'ai:gemini': return GeminiBot({ apiKey: keys?.gemini, model }) as unknown as BotFunc;
-    case 'ai:grok':   return GrokBot({ apiKey: keys?.grok,   model }) as unknown as BotFunc;
-    case 'ai:kimi':   return KimiBot({ apiKey: keys?.kimi,   model }) as unknown as BotFunc;
-    case 'ai:qwen':   return QwenBot({ apiKey: keys?.qwen,   model }) as unknown as BotFunc;
-    case 'http':      return HttpBot({ base, token, model }) as unknown as BotFunc;
+    case 'ai:openai': return OpenAIBot({ apiKey: keys?.openai ?? '', model }) as unknown as BotFunc;
+    case 'ai:gemini': return GeminiBot({ apiKey: keys?.gemini ?? '', model }) as unknown as BotFunc;
+    case 'ai:grok':   return GrokBot({ apiKey: keys?.grok   ?? '', model }) as unknown as BotFunc;
+    case 'ai:kimi':   return KimiBot({ apiKey: keys?.kimi   ?? '', model }) as unknown as BotFunc;
+    case 'ai:qwen':   return QwenBot({ apiKey: keys?.qwen   ?? '', model }) as unknown as BotFunc;
+    case 'http':      return HttpBot({ base: base ?? '', token: token ?? '', model }) as unknown as BotFunc;
     default:          return async (ctx:any)=>GreedyMax(ctx);
   }
 }
@@ -104,7 +110,7 @@ async function* playOneRound(opts: any) {
       return;
     }
 
-    // 防卡死：极端情况下（非 1000ms 相关），若事件重复过多，强制收尾
+    // 防卡死：极端情况下（与 1000ms 无直接关系），若事件重复过多，强制收尾
     if (evCount > 5000 || repeated > 500) {
       writeLine(opts.res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束（判地主胜）。`});
       try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
@@ -137,11 +143,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
 
     const keys = {
-      openai:  body.seatKeys?.E || body.seatKeys?.S || body.seatKeys?.W || '',
-      gemini:  body.seatKeys?.S || '',
-      grok:    '',
-      kimi:    body.seatKeys?.E || body.seatKeys?.S || body.seatKeys?.W || '',
-      qwen:    body.seatKeys?.W || '',
+      openai:  body.seatKeys?.E ?? body.seatKeys?.S ?? body.seatKeys?.W ?? '',
+      gemini:  body.seatKeys?.S ?? '',
+      grok:    '', // 如需启用再补
+      kimi:    body.seatKeys?.E ?? body.seatKeys?.S ?? body.seatKeys?.W ?? '',
+      qwen:    body.seatKeys?.W ?? '',
     };
 
     let scores: [number,number,number] = [0,0,0];
@@ -162,18 +168,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         res,
       });
 
-      let winner = 0;
-      let multiplier = 1;
-      for await (const ev of iter as any) {
-        // 这里只是把迭代器“跑完”，事件早已通过 writeLine 写出
-        if (ev?.type === 'event' && ev?.kind === 'win') {
-          winner = ev.winner; multiplier = ev.multiplier || 1;
-        }
-      }
+      // 消耗掉迭代器（事件已通过 writeLine 输出）
+      for await (const _ of iter as any) { /* no-op */ }
 
-      const delta = winner===0 ? [+2,-1,-1] : (winner===1 ? [-1,+2,-1] : [-1,-1,+2]);
-      scores = [ scores[0]+delta[0], scores[1]+delta[1], scores[2]+delta[2] ] as [number,number,number];
-      writeLine(res, { type:'log', message:`第 ${round} 局结束：胜者 ${['甲','乙','丙'][winner]}，倍数 x${multiplier}，累计积分：${scores.join(' / ')}` });
+      // 服务器端仅做日志与累计（胜负由前面的 writeLine 'win' 事件给前端）
+      // 这里仍给出一个“本局结束”的辅助日志
+      writeLine(res, { type:'log', message:`第 ${round} 局结束（详见前端 'win' 事件）；当前累计积分以前端为准。` });
 
       if (body.stopBelowZero && (scores[0]<0 || scores[1]<0 || scores[2]<0)) {
         writeLine(res, { type:'log', message:`某方积分 < 0，提前终止。` });
