@@ -433,9 +433,9 @@ function LivePanel(props: {
 
 export default function Home() {
   // 维持你的原始默认 UI 配置；若你的外层已有这些控件，可忽略下面容器，只保留 <LivePanel ... />
-  const [rounds] = useState(50);
+  const [rounds] = useState(500);
   const [startScore] = useState<[number,number,number]>([0,0,0]);
-  const [seatDelayMs] = useState(500);
+  const [seatDelayMs] = useState(100);
   const [enabled] = useState<boolean[]|undefined>(undefined);
   const [rob] = useState<boolean>(true);
   const [four2] = useState<Four2Policy>('both');
@@ -462,19 +462,6 @@ export default function Home() {
         />
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:12, marginTop:12 }}>
-        <Section title="运行日志">
-          <div style={{
-            border:'1px solid #eee', borderRadius:8, padding:'8px 10px',
-            maxHeight:420, overflow:'auto', background:'#fafafa'
-          }}>
-            {liveLog.length === 0
-              ? <div style={{ opacity:0.6 }}>（暂无）</div>
-              : liveLog.map((t, idx) => <LogLine key={idx} text={t} />)
-            }
-          </div>
-        </Section>
-      </div>
-    </div>
+
   );
 }
