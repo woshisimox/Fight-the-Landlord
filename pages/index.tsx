@@ -270,6 +270,8 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
             let nextMultiplier = multiplierRef.current;
 
             for (const raw of batch) {
+              // bypass keep-alive frames to prevent boundary interference
+              if ((raw as any)?.type === 'ka') continue;
               const m: any = raw;
               try {
                 const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
@@ -330,7 +332,6 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
                   nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
                   nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
                   nextFinished = nextFinished + 1;
-                  winsRef.current = (winsRef.current||0) + 1;
                   continue;
                 }
 
@@ -347,7 +348,7 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
             setHands(nextHands);
             setPlays(nextPlays);
             setTotals(nextTotals);
-            setFinishedCount(winsRef.current || nextFinished);
+            setFinishedCount(nextFinished);
             setLog(nextLog);
             setLandlord(nextLandlord);
             setWinner(nextWinner);
