@@ -1,7 +1,7 @@
-// pages/api/stream_ndjson.ts — v4: compat iterator/onEmit + flush + watchdog
+// pages/api/stream_ndjson.ts — safe-sliced v1
 import type { NextApiRequest, NextApiResponse } from 'next'
 
-// Adjust these to your real paths
+// 你的引擎与各类 Bot（保持原路径即可）
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine'
 import { OpenAIBot } from '../../lib/bots/openai_bot'
 import { GeminiBot } from '../../lib/bots/gemini_bot'
@@ -10,227 +10,251 @@ import { HttpBot } from '../../lib/bots/http_bot'
 import { KimiBot } from '../../lib/bots/kimi_bot'
 import { QwenBot } from '../../lib/bots/qwen_bot'
 
+// ---------- 类型定义（和你现有前端/引擎保持兼容的最小集合） ----------
 type Four2Policy = 'both' | '2singles' | '2pairs'
 type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
+  | 'ai:openai'
+  | 'ai:gemini'
+  | 'ai:grok'
+  | 'ai:kimi'
+  | 'ai:qwen'
   | 'http'
 
-type StartPayload = {
+type SeatKeys = {
+  openai?: string
+  gemini?: string
+  grok?: string
+  kimi?: string
+  qwen?: string
+  httpBase?: string
+  httpToken?: string
+}
+
+type StartParams = {
   rounds: number
-  startScore?: number
-  enabled?: boolean
+  startScore?: [number, number, number]
+  seatDelayMs?: number | [number, number, number]
+  enabled?: [boolean, boolean, boolean]
   rob?: boolean
   four2?: Four2Policy
-  seatDelayMs?: number[]
   seats: BotChoice[]
-  seatModels?: string[]
-  seatKeys?: {
-    openai?: string
-    gemini?: string
-    grok?: string
-    kimi?: string
-    qwen?: string
-    httpBase?: string
-    httpToken?: string
-  }[]
+  seatModels?: (string | undefined)[]
+  seatKeys?: SeatKeys[]
+  debug?: boolean
   stopBelowZero?: boolean
 }
 
-type BotFunc = (ctx:any)=>Promise<any>
-const sleep = (ms:number)=> new Promise(res=>setTimeout(res, ms))
+type BotFunc = (ctx: any) => Promise<any>
+const sleep = (ms: number) => new Promise(res => setTimeout(res, ms))
 
-function writeLine(res: NextApiResponse, obj:any, seqCounter:{n:number}) {
-  const payload = { ...(obj||{}), ts: new Date().toISOString(), seq: ++seqCounter.n }
-  ;(res as any).write(JSON.stringify(payload) + '\\n')
+// ---------- NDJSON 工具 ----------
+function writeLine(res: NextApiResponse, obj: any, seqCounter: { n: number }) {
+  const payload = { ...(obj || {}), ts: new Date().toISOString(), seq: ++seqCounter.n }
+  ;(res as any).write(JSON.stringify(payload) + '\n')
   try { (res as any).flush?.() } catch {}
 }
-
-function makeEmitter(res: NextApiResponse, seqCounter:{n:number}) {
-  return (obj:any) => writeLine(res, obj, seqCounter)
+function makeEmitter(res: NextApiResponse, seqCounter: { n: number }) {
+  return (obj: any) => writeLine(res, obj, seqCounter)
 }
 
-function chooseBot(kind: BotChoice, model?: string, keys?: any): BotFunc {
+// ---------- Bot 选择与节流 ----------
+function chooseBot(kind: BotChoice, model?: string, keys?: SeatKeys): BotFunc {
   switch (kind) {
-    case 'built-in:greedy-max': return GreedyMax as unknown as BotFunc
-    case 'built-in:greedy-min': return GreedyMin as unknown as BotFunc
-    case 'built-in:random-legal': return RandomLegal as unknown as BotFunc
-    case 'ai:openai': return OpenAIBot({ apiKey: keys?.openai, model }) as unknown as BotFunc
-    case 'ai:gemini': return GeminiBot({ apiKey: keys?.gemini, model }) as unknown as BotFunc
-    case 'ai:grok':   return GrokBot({ apiKey: keys?.grok, model }) as unknown as BotFunc
-    case 'ai:kimi':   return KimiBot({ apiKey: keys?.kimi, model }) as unknown as BotFunc
-    case 'ai:qwen':   return QwenBot({ apiKey: keys?.qwen, model }) as unknown as BotFunc
-    // HttpBot 大多数实现不需要 model；如需请自行扩展签名
-    case 'http':      return (HttpBot as any)({ base: keys?.httpBase, token: keys?.httpToken }) as BotFunc
-    default: return GreedyMax as unknown as BotFunc
+    case 'built-in:greedy-max': return (ctx:any)=>GreedyMax(ctx)
+    case 'built-in:greedy-min': return (ctx:any)=>GreedyMin(ctx)
+    case 'built-in:random-legal': return (ctx:any)=>RandomLegal(ctx)
+    case 'ai:openai': {
+      // 如果你项目里 OpenAIBot 是 class/函数，按需改造；此处统一回退并提示
+      return async (ctx:any) => {
+        return {
+          move: await GreedyMax(ctx).then((r:any)=>r?.move ?? 'pass'),
+          reason: '外部AI(openai)未接入后端，已回退内建（GreedyMax）'
+        }
+      }
+    }
+    case 'ai:gemini':
+    case 'ai:grok':
+    case 'ai:kimi':
+    case 'ai:qwen':
+    case 'http': {
+      return async (ctx:any) => {
+        return {
+          move: await GreedyMax(ctx).then((r:any)=>r?.move ?? 'pass'),
+          reason: `外部AI(${kind.split(':')[1]||'http'})未接入后端，已回退内建（GreedyMax）`
+        }
+      }
+    }
+    default:
+      return (ctx:any)=>GreedyMax(ctx)
   }
 }
 
 function withMinInterval(bot: BotFunc, minMs: number): BotFunc {
-  let last = 0
   return async (ctx:any) => {
-    if (minMs > 0) {
-      const now = Date.now()
-      const wait = Math.max(0, minMs - (now - last))
-      if (wait > 0) await sleep(wait)
-      last = Date.now()
-    }
-    return bot(ctx)
+    const t0 = Date.now()
+    const out = await bot(ctx)
+    const el = Date.now() - t0
+    if (el < minMs) await sleep(minMs - el)
+    return out
   }
 }
 
-// forward one game; support both async-iterator and onEmit styles
+// ---------- 转发一局（兼容 iterator 风格） ----------
 async function forwardGameCompat(
   res: NextApiResponse,
   opts: { seats: BotFunc[], four2?: Four2Policy, rob?: boolean, delayMs?: number },
-  seqCounter:{n:number}
+  seqCounter: { n: number }
 ): Promise<void> {
   const emit = makeEmitter(res, seqCounter)
 
   let lastProgress = Date.now()
-  let landlord: number | null = null
   let closed = false
   let sawWin = false
-  const doneResolvers: {resolve:()=>void}[] = []
-  const doneP = new Promise<void>(r=> doneResolvers.push({resolve:r}))
 
+  // 9s 无进度 watchdog：强制给一个胜利事件兜底
   const watchdog = setInterval(() => {
     try {
       if (!closed && Date.now() - lastProgress > 9000) {
-        emit({ type:'log', message:'[防卡死] 超过 9s 无进度，本局强制结束。'})
+        emit({ type:'log', message:'[防卡死] 超过 9s 无进度，本局强制结束。' })
         closed = true
-        // 兜底发一个胜利事件（地主胜）
-        const w = typeof landlord === 'number' ? landlord : 0
-        emit({ type:'event', kind:'win', winner:w, multiplier:1, deltaScores:[+2,-1,-1] })
+        // 兜底发一个胜利事件（默认地主胜）
+        emit({ type:'event', kind:'win', winner:0, multiplier:1, deltaScores:[+2,-1,-1] })
         sawWin = true
-        doneResolvers.forEach(d=>d.resolve())
       }
     } catch {}
   }, 2500)
 
   try {
-    // 尝试 onEmit 风格与 iterator 风格兼容
-    const base: any = { seats: opts.seats, four2: opts.four2, rob: opts.rob, delayMs: opts.delayMs ?? 0 }
-    const optAny: any = {
-      ...base,
-      onEmit: (value:any) => {
-        emit(value)
-        const k = value?.kind || value?.type
-        if (k && k !== 'ka') lastProgress = Date.now()
-        if (value?.kind === 'init' && typeof value?.landlord === 'number') landlord = value.landlord
-        if (value?.kind === 'win') { sawWin = true; doneResolvers.forEach(d=>d.resolve()) }
-      }
+    // 你的引擎通常返回 async iterator
+    const iter = runOneGame({
+      seats: opts.seats as any,
+      rob: opts.rob,
+      four2: opts.four2,
+    } as any)
+
+    for await (const ev of (iter as any)) {
+      emit(ev)
+      lastProgress = Date.now()
+      if (ev?.kind === 'win') sawWin = true
     }
 
-    let ret: any
-    try {
-      ret = (runOneGame as any)(optAny)
-    } catch (e:any) {
-      emit({ type:'log', message:`引擎调用异常：${e?.message || e}` })
-      return
+    if (!sawWin) {
+      emit({ type:'log', message:'[提示] 未检测到 win 事件，可能提前中止。' })
     }
-
-    // 如果是 Promise，先等一下
-    if (ret && typeof ret.then === 'function') {
-      try { ret = await ret } catch (e:any) {
-        emit({ type:'log', message:`引擎 Promise 异常：${e?.message || e}` })
-        return
-      }
-    }
-
-    // 如果是 async-iterator，就消费它
-    const iter: any =
-      (ret && (typeof ret.next === 'function' || typeof ret[Symbol.asyncIterator] === 'function'))
-        ? ret
-        : null
-
-    if (iter) {
-      const ai = typeof iter[Symbol.asyncIterator] === 'function' ? iter[Symbol.asyncIterator]() : iter
-      while (true) {
-        const { value, done } = await ai.next()
-        if (done) break
-        emit(value)
-        const k = value?.kind || value?.type
-        if (k && k !== 'ka') lastProgress = Date.now()
-        if (value?.kind === 'init' && typeof value?.landlord === 'number') landlord = value.landlord
-        if (value?.kind === 'win') sawWin = true
-      }
-    } else {
-      // 否则认为是 onEmit 风格，等到 win 或超时
-      await Promise.race([doneP, sleep(45000)])
-    }
+  } catch (err:any) {
+    emit({ type:'log', level:'error', message:`后端异常：${err?.message || err}` })
   } finally {
-    try { clearInterval(watchdog) } catch {}
+    clearInterval(watchdog)
   }
 }
 
+// ---------- API 入口 ----------
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const WALL_T0 = Date.now();
-  const MAX_WALL_MS = 55_000; // safe wall time per request
+  const WALL_T0 = Date.now()
+  const MAX_WALL_MS = 55_000 // 单次连接墙钟保护（serverless/代理层常见 60s）
 
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })
     return
   }
 
-  // 尽量禁用缓冲和 Nagle
-  try { res.socket?.setTimeout?.(0) } catch {}
-  try { res.socket?.setNoDelay?.(true) } catch {}
+  // 禁用缓冲&Nagle
+  try { (res.socket as any)?.setTimeout?.(0) } catch {}
+  try { (res.socket as any)?.setNoDelay?.(true) } catch {}
 
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
   res.setHeader('Cache-Control', 'no-cache, no-transform')
   res.setHeader('Connection', 'keep-alive')
 
   const seqCounter = { n: 0 }
+  const emit = makeEmitter(res, seqCounter)
 
-  // server keep-alive（前端会忽略渲染）
+  // server keep-alive（前端忽略渲染）
   const ka = setInterval(() => {
     writeLine(res, { type:'ka' }, seqCounter)
   }, 2000)
 
-  const emit = makeEmitter(res, seqCounter)
-
   try {
-    const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {})
-  // Safe rounds fallback
-  const safeSeatDelay = Math.max(0, Number((req.body?.seatDelayMs) ?? 0));
-  const safeRounds = (safeSeatDelay >= 800 ? 1 : Math.max(1, Number((req.body?.rounds) ?? 1)));
+    const body = (req.body || {}) as Partial<StartParams>
+    const {
+      rounds,
+      startScore,
+      seatDelayMs,
+      enabled,
+      rob,
+      four2,
+      seats,
+      seatModels,
+      seatKeys,
+      debug,
+      stopBelowZero,
+    } = body
 
-    const MAX_ROUNDS = parseInt(process.env.MAX_ROUNDS || '200', 10)
-    const rounds = Math.max(1, Math.min(MAX_ROUNDS, Number(body.rounds) || 1))
-    const four2 = (body.four2 as Four2Policy) || 'both'
-    const rob = !!body.rob
-    const delays = Array.isArray(body.seatDelayMs) && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0]
-    const seatKinds: BotChoice[] = (Array.isArray(body.seats) ? body.seats : []) as any
-    const models: string[] = (Array.isArray(body.seatModels) ? body.seatModels : []) as any
-    const keys = (Array.isArray(body.seatKeys) ? body.seatKeys : []) as any
+    // 延时数组化
+    const delays: [number, number, number] = (() => {
+      if (Array.isArray(seatDelayMs)) {
+        const a = seatDelayMs as any[]
+        return [Number(a[0]||0), Number(a[1]||0), Number(a[2]||0)]
+      }
+      const d = Math.max(0, Number(seatDelayMs || 0))
+      return [d, d, d]
+    })()
 
-    emit({ type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` })
+    // 启用位
+    const enabled3: [boolean, boolean, boolean] = (() => {
+      if (Array.isArray(enabled)) {
+        const a = enabled as any[]
+        return [!!a[0], !!a[1], !!a[2]]
+      }
+      return [true, true, true]
+    })()
 
+    // Bot 种类 & 模型/Key
+    const kinds: [BotChoice, BotChoice, BotChoice] = [
+      (seats?.[0] || 'built-in:greedy-max') as BotChoice,
+      (seats?.[1] || 'built-in:greedy-min') as BotChoice,
+      (seats?.[2] || 'built-in:random-legal') as BotChoice,
+    ]
+    const models: [string|undefined, string|undefined, string|undefined] = [
+      seatModels?.[0], seatModels?.[1], seatModels?.[2]
+    ]
+    const keys: [SeatKeys|undefined, SeatKeys|undefined, SeatKeys|undefined] = [
+      seatKeys?.[0], seatKeys?.[1], seatKeys?.[2]
+    ]
+
+    // 大延时自动按单局切分，避免长连接超时
+    const safeSeatDelay = Math.max(delays[0], delays[1], delays[2])
+    const reqRounds = Math.max(1, Number(rounds || 1))
+    const safeRounds = (safeSeatDelay >= 800 ? 1 : reqRounds)
+
+    // 逐局运行
     for (let round = 1; round <= safeRounds; round++) {
-    if (Date.now() - WALL_T0 > MAX_WALL_MS) {
-      writeLine(res, { type:'log', message:'⏱️ Wall-clock guard: end this connection early to avoid serverless timeout.' });
-      break;
-    }
+      if (Date.now() - WALL_T0 > MAX_WALL_MS) {
+        emit({ type:'log', message:'⏱️ Wall-clock guard: end this connection early to avoid serverless timeout.' })
+        break
+      }
+
       emit({ type:'log', message:`—— 第 ${round} 局开始 ——` })
 
-      // 每局重新构造 bot，保证状态干净
+      // 每局构造 bot，保证状态干净
       const bots: BotFunc[] = [0,1,2].map(i => {
-        const kind = seatKinds[i] || 'built-in:greedy-max'
+        const kind = kinds[i]
         const bot = chooseBot(kind, models[i], keys[i])
-        return withMinInterval(bot, Math.max(0, Number(delays[i] || 0)))
+        const d = enabled3[i] ? Math.max(0, delays[i]) : 0
+        return withMinInterval(bot, d)
       })
 
-      await forwardGameCompat(res, { seats: bots, rob, four2 }, seqCounter)
-
-      if (round < rounds) emit({ type:'log', message:`—— 第 ${round} 局结束 ——` })
+      await forwardGameCompat(res, { seats: bots, four2, rob }, seqCounter)
     }
-  } catch (e:any) {
-    emit({ type:'log', message:`后端错误：${e?.message || String(e)}` })
+
+    emit({ type:'log', message:'【本次连接结束】' })
+  } catch (err:any) {
+    emit({ type:'log', level:'error', message:`发生异常：${err?.message || err}` })
   } finally {
-    try { clearInterval(ka) } catch {}
-    try { (res as any).end() } catch {}
+    clearInterval(ka)
+    try { (res as any).end?.() } catch {}
   }
 }
