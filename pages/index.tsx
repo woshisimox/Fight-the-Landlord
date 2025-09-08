@@ -1,27 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-/* ==================== 类型 ==================== */
-
+/* -------------------- 基础类型 -------------------- */
 type Label = string;
-
 type ComboType =
   | 'single' | 'pair' | 'triple' | 'bomb' | 'rocket'
   | 'straight' | 'pair-straight' | 'plane'
   | 'triple-with-single' | 'triple-with-pair'
   | 'four-with-two-singles' | 'four-with-two-pairs';
-
 type Four2Policy = 'both' | '2singles' | '2pairs';
 
 type EventObj =
-  | { type:'state'; kind:'init'; landlord:number; hands: Label[][]; seq?:number; ts?:string }
-  | { type:'event'; kind:'init'; landlord:number; hands: Label[][]; seq?:number; ts?:string }   // 兼容部分后端
-  | { type:'event'; kind:'play'; seat:number; move:'play'|'pass'; cards?:Label[]; comboType?:ComboType; reason?:string; seq?:number; ts?:string }
-  | { type:'event'; kind:'rob'; seat:number; rob:boolean; seq?:number; ts?:string }
-  | { type:'event'; kind:'trick-reset'; seq?:number; ts?:string }
-  | { type:'event'; kind:'win'; winner:number; multiplier:number; deltaScores:[number,number,number]; seq?:number; ts?:string }
-  | { type:'log';  message:string; seq?:number; ts?:string }
-  | { type:'ka';   seq?:number; ts?:string };
+  | { ts?:string; seq?:number; type:'state'; kind:'init'; landlord:number; hands: Label[][] }
+  | { ts?:string; seq?:number; type:'event'; kind:'init'; landlord:number; hands: Label[][] }   // 兼容部分后端
+  | { ts?:string; seq?:number; type:'event'; kind:'play'; seat:number; move:'play'|'pass'; cards?:Label[]; comboType?:ComboType; reason?:string }
+  | { ts?:string; seq?:number; type:'event'; kind:'rob'; seat:number; rob:boolean }
+  | { ts?:string; seq?:number; type:'event'; kind:'trick-reset' }
+  | { ts?:string; seq?:number; type:'event'; kind:'win'; winner:number; multiplier:number; deltaScores:[number,number,number] }
+  | { ts?:string; seq?:number; type:'log';  message:string }
+  | { ts?:string; seq?:number; type:'ka' };
 
+/* -------------------- Bot 选择 -------------------- */
 type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
@@ -56,10 +54,10 @@ function SeatTitle({ i }: { i:number }) {
 }
 
 /* ---------- 花色渲染（前端显示专用） ---------- */
-
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 
+// 只提取点数；处理 10→T、大小写
 const rankOf = (l: string) => {
   if (!l) return '';
   const c0 = l[0];
@@ -68,6 +66,7 @@ const rankOf = (l: string) => {
   return l.replace(/10/i, 'T').toUpperCase();
 };
 
+// 返回所有可能的装饰写法（用于从后端原始标签映射到前端装饰牌）
 function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l === 'x') return ['🃏X'];  // 小王
@@ -79,6 +78,7 @@ function candDecorations(l: string): string[] {
   return SUITS.map(s => `${s}${r}`);
 }
 
+// 无花色 → 轮换花色；已有花色/🃏保持不变
 function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
@@ -156,32 +156,44 @@ function Section({ title, children }:{title:string; children:React.ReactNode}) {
   );
 }
 
-/* ==================== 事件队列（去相位、抗抖） ==================== */
-class EventQueue<T> {
-  private q: T[] = [];
-  private timer: any = null;
-  private readonly base = 41; // 与 1000 互素
-  private tick = 41;
-  constructor(private onFlush:(items:T[])=>void) {}
-  enqueue(v:T){ this.q.push(v); this.arm(); }
-  private arm(){
-    if (this.timer) return;
-    const j = 23 + Math.floor(Math.random()*31); // [23,53)
-    this.tick = this.base + j;
-    this.timer = setTimeout(()=>{
-      this.timer = null;
-      const all = this.q.splice(0, this.q.length);
-      if (all.length) this.onFlush(all);
-      if (this.q.length) this.arm();
-    }, this.tick);
+/* ==================== EventQueue（批处理 + 排序 + 去重） ==================== */
+class EventQueue {
+  private buf: EventObj[] = [];
+  private seen = new Set<number>(); // 只按 seq 去重（后端已保证）
+  enqueue(arr: any[]) {
+    for (const x of arr) {
+      if (!x || typeof x !== 'object') continue;
+      if ((x as any).type === 'ka') continue; // 丢弃 keep-alive
+      const seq = (x as any).seq;
+      if (typeof seq === 'number') {
+        if (this.seen.has(seq)) continue;
+        this.seen.add(seq);
+      }
+      this.buf.push(x as EventObj);
+    }
+    // 排序：ts（可空）→ seq
+    const normTs = (t?:string|number) => {
+      if (t == null) return 0;
+      if (typeof t === 'number') return t;
+      const n = Date.parse(t); return isNaN(n) ? 0 : n;
+    };
+    this.buf.sort((a,b)=> (normTs(a.ts) - normTs(b.ts)) || ((a.seq||0)-(b.seq||0)));
   }
-  clear(){ if (this.timer){ clearTimeout(this.timer); this.timer=null; } this.q.length=0; }
+  drain(): EventObj[] {
+    const out = this.buf;
+    this.buf = [];
+    return out;
+  }
 }
 
 /* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
+
+  // UI：装饰后的手牌
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
+
+  // 其他状态
   const [landlord, setLandlord] = useState<number|null>(null);
   const [plays, setPlays] = useState<{seat:number; move:'play'|'pass'; cards?:string[]; reason?:string}[]>([]);
   const [multiplier, setMultiplier] = useState(1);
@@ -193,30 +205,34 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  // mirrors
-  const handsRef = useRef(hands); useEffect(()=>{handsRef.current=hands;},[hands]);
-  const playsRef = useRef(plays); useEffect(()=>{playsRef.current=plays;},[plays]);
-  const totalsRef = useRef(totals); useEffect(()=>{totalsRef.current=totals;},[totals]);
-  const finishedRef = useRef(finishedCount); useEffect(()=>{finishedRef.current=finishedCount;},[finishedCount]);
-  const logRef = useRef(log); useEffect(()=>{logRef.current=log;},[log]);
-  const landlordRef = useRef(landlord); useEffect(()=>{landlordRef.current=landlord;},[landlord]);
-  const winnerRef = useRef(winner); useEffect(()=>{winnerRef.current=winner;},[winner]);
-  const deltaRef = useRef(delta); useEffect(()=>{deltaRef.current=delta;},[delta]);
-  const multiplierRef = useRef(multiplier); useEffect(()=>{multiplierRef.current=multiplier;},[multiplier]);
+  // 首次启动时，将总分重置为初始分；后续多局不会清零
+  const prevRunningRef = useRef(false);
+  useEffect(() => {
+    if (running && !prevRunningRef.current) {
+      const base = props.startScore || 0;
+      setTotals([base, base, base]);
+    }
+    prevRunningRef.current = running;
+  }, [running, props.startScore]);
 
-  useEffect(()=>{ props.onTotals?.(totals); },[totals]);
-  useEffect(()=>{ props.onLog?.(log); },[log]);
+  useEffect(() => { props.onTotals?.(totals); }, [totals]);
+  useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
-
-  // 仅基于 seq 的 LRU 去重（窗口 8k）
-  const seenSeq = useRef<Set<number>>(new Set());
-  const seqOrder = useRef<number[]>([]);
-  const pushSeq = (s:number)=>{ if(seenSeq.current.has(s)) return false; seenSeq.current.add(s); seqOrder.current.push(s); if(seqOrder.current.length>8000){ const drop=seqOrder.current.splice(0,2000); drop.forEach(x=>seenSeq.current.delete(x)); } return true; };
-
-  // 进度看门狗
-  const lastProgressAt = useRef<number>(Date.now());
-  const touchProgress = ()=>{ lastProgressAt.current = Date.now(); };
+  // --- Batch ingest state mirrors (for robust chunk processing) ---
+  const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
+  const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
+  const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
+  const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
+  const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
+  const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
+  const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
+  const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
+  const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+  const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
+  // 进度监控
+  const lastProgressAtRef = useRef<number>(0);
+  const lastWarnAtRef = useRef<number>(0);
 
   const start = async () => {
     if (running) return;
@@ -229,12 +245,23 @@ function LivePanel(props: LiveProps) {
     setMultiplier(1);
     setLog([]);
     setFinishedCount(0);
-    seenSeq.current.clear(); seqOrder.current.length=0;
+
+    // 立即记一次进度时间（避免刚开始就报超时）
+    lastProgressAtRef.current = Date.now();
+    lastWarnAtRef.current = 0;
+
+    // watchdog：每 1s 检查一次
+    const WATCHDOG = setInterval(() => {
+      const now = Date.now();
+      const silent = now - (lastProgressAtRef.current || 0);
+      const threshold = 7035; // 与后端 KA 抖动相配，避开 7 秒“心跳+相位”死局
+      if (silent > threshold && (!lastWarnAtRef.current || now - lastWarnAtRef.current > 4000)) {
+        setLog(l => [...l, `⚠️ 长时间无进度（>${threshold}ms），可能与心跳/间隔相位重叠。`]);
+        lastWarnAtRef.current = now;
+      }
+    }, 1000);
 
     controllerRef.current = new AbortController();
-
-    // 对 seatDelayMs 做“整秒微抖动”，避免与 1s 心跳相位锁死
-    const safeSeatDelay = (props.seatDelayMs||[0,0,0]).map(ms => (ms>0 && ms%1000===0) ? (ms+7) : ms);
 
     try {
       const r = await fetch('/api/stream_ndjson', {
@@ -243,11 +270,11 @@ function LivePanel(props: LiveProps) {
         body: JSON.stringify({
           rounds: props.rounds,
           startScore: props.startScore,
-          seatDelayMs: safeSeatDelay,
+          seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
           rob: props.rob,
           four2: props.four2,
-          seats: props.seats,
+          seats: props.seats,            // 字符串数组；后端已兼容 normalize
           seatModels: props.seatModels,
           seatKeys: props.seatKeys,
         }),
@@ -259,27 +286,15 @@ function LivePanel(props: LiveProps) {
       const decoder = new TextDecoder('utf-8');
       let buf = '';
 
-      const queue = new EventQueue<EventObj>((items)=>{
-        // 排序：优先 seq，其次 ts
-        const normTs = (x:any)=>{ const n=Date.parse(x?.ts||''); return isNaN(n)?0:n; };
-        const sorted = items
-          .filter(x=>x && (x as any).type !== 'ka')
-          .sort((a:any,b:any)=>{
-            const as = typeof (a as any).seq === 'number' ? (a as any).seq : null;
-            const bs = typeof (b as any).seq === 'number' ? (b as any).seq : null;
-            if (as!=null && bs!=null) return as - bs;
-            return normTs(a) - normTs(b);
-          })
-          .filter((x:any)=>{
-            const s = (x as any).seq;
-            if (typeof s !== 'number') return true;
-            return pushSeq(s);
-          });
+      const Q = new EventQueue();
 
-        if (!sorted.length) return;
+      const processBatch = (batch: any[]) => {
+        Q.enqueue(batch);
+        const items = Q.drain();
+        if (!items.length) return;
 
         // 快照
-        let nextHands = handsRef.current.map(x=>[...x]);
+        let nextHands = handsRef.current.map(x => [...x]);
         let nextPlays = [...playsRef.current];
         let nextTotals = [...totalsRef.current] as [number,number,number];
         let nextFinished = finishedRef.current;
@@ -289,31 +304,37 @@ function LivePanel(props: LiveProps) {
         let nextDelta = deltaRef.current as [number,number,number]|null;
         let nextMultiplier = multiplierRef.current;
 
-        for (const m of sorted as any[]) {
+        for (const raw of items) {
+          const m:any = raw;
           try {
-            if (m.type === 'state' && m.kind === 'init' || (m.type==='event' && m.kind==='init')) {
-              const rh = (m as any).hands;
-              if (Array.isArray(rh) && rh.length===3) {
-                nextPlays = [];
-                nextWinner = null; nextDelta = null; nextMultiplier = 1;
-                nextHands = (rh as string[][]).map(decorateHandCycle);
-                nextLandlord = (m as any).landlord ?? null;
-                nextLog = [...nextLog, `发牌完成，${nextLandlord!=null?['甲','乙','丙'][nextLandlord]:'?'}为地主`];
-                touchProgress();
-                continue;
-              }
+            const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+            const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
+
+            if (hasHands) {
+              nextPlays = [];
+              nextWinner = null;
+              nextDelta = null;
+              nextMultiplier = 1;
+              const handsRaw: string[][] = rh as string[][];
+              const decorated: string[][] = handsRaw.map(decorateHandCycle);
+              nextHands = decorated;
+              const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+              nextLandlord = lord;
+              nextLog = [...nextLog, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`];
+              lastProgressAtRef.current = Date.now();
+              continue;
             }
 
             if (m.type === 'event' && m.kind === 'rob') {
               nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`];
-              touchProgress();
+              lastProgressAtRef.current = Date.now();
               continue;
             }
 
             if (m.type === 'event' && m.kind === 'trick-reset') {
               nextLog = [...nextLog, '一轮结束，重新起牌'];
               nextPlays = [];
-              touchProgress();
+              lastProgressAtRef.current = Date.now();
               continue;
             }
 
@@ -337,7 +358,7 @@ function LivePanel(props: LiveProps) {
                 nextPlays = [...nextPlays, { seat:m.seat, move:'play', cards: pretty }];
                 nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`];
               }
-              touchProgress();
+              lastProgressAtRef.current = Date.now();
               continue;
             }
 
@@ -348,56 +369,53 @@ function LivePanel(props: LiveProps) {
               nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
               nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
               nextFinished = nextFinished + 1;
-              touchProgress();
+              winsRef.current = (winsRef.current||0) + 1;
+              lastProgressAtRef.current = Date.now();
               continue;
             }
 
             if (m.type === 'log' && typeof m.message === 'string') {
               nextLog = [...nextLog, m.message];
+              lastProgressAtRef.current = Date.now();
               continue;
             }
-          } catch (e) {
-            console.error('[ingest:batch]', e, m);
+          } catch(e) {
+            console.error('[ingest:batch]', e, raw);
           }
         }
 
+        // commit：一次批次只 setState 一次
         setHands(nextHands);
         setPlays(nextPlays);
         setTotals(nextTotals);
-        setFinishedCount(nextFinished);
+        setFinishedCount(winsRef.current || nextFinished);
         setLog(nextLog);
         setLandlord(nextLandlord);
         setWinner(nextWinner);
         setMultiplier(nextMultiplier);
         setDelta(nextDelta);
-      });
-
-      // 读循环
-      const pump = async (): Promise<void> => {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream:true });
-
-          // 看门狗：无进度提示
-          const idleMs = Math.max(...safeSeatDelay, 1000) * 5 + 2000;
-          if (Date.now() - lastProgressAt.current > idleMs) {
-            lastProgressAt.current = Date.now();
-            setLog(l => [...l, `⚠️ 长时间无进度（>${idleMs}ms），可能与心跳/间隔相位重叠。`]);
-          }
-
-          let idx: number;
-          while ((idx = buf.indexOf('\n')) >= 0) {
-            const line = buf.slice(0, idx).trim();
-            buf = buf.slice(idx + 1);
-            if (!line) continue;
-            try { queue.enqueue(JSON.parse(line) as EventObj); } catch {}
-          }
-        }
       };
 
-      await pump();
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream:true });
+
+        let idx: number;
+        const batch: any[] = [];
+        while ((idx = buf.indexOf('\\n')) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line) continue;
+          try { batch.push(JSON.parse(line)); } catch {}
+        }
+
+        if (batch.length) processBatch(batch);
+      }
+
+      clearInterval(WATCHDOG);
     } catch (e:any) {
+      clearInterval(WATCHDOG);
       if (e?.name === 'AbortError') {
         setLog(l => [...l, '已手动停止。']);
       } else {
@@ -408,8 +426,11 @@ function LivePanel(props: LiveProps) {
     }
   };
 
-  const stop = () => { controllerRef.current?.abort(); setRunning(false); };
-
+  const stop = () => {
+    controllerRef.current?.abort();
+    setRunning(false);
+  };
+  // 剩余局数（包含当前局）：总局数 - 已完成局数
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
   return (
@@ -484,7 +505,7 @@ function LivePanel(props: LiveProps) {
   );
 }
 
-/* ==================== 页面（布局） ==================== */
+/* ==================== 页面（布局：对局设置 → 对局 → 运行日志） ==================== */
 export default function Home() {
   const [enabled, setEnabled] = useState<boolean>(true);
   const [rounds, setRounds] = useState<number>(10);
@@ -712,7 +733,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 2) 对局 */}
+      {/* 2) 对局（设置下面、运行日志上面） */}
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
         <LivePanel
@@ -729,7 +750,7 @@ export default function Home() {
         />
       </div>
 
-      {/* 3) 运行日志 */}
+      {/* 3) 运行日志（页面底部） */}
       <div style={{ marginTop:18 }}>
         <Section title="运行日志">
           <div style={{

@@ -1,15 +1,16 @@
-// pages/api/stream_ndjson.ts  — jitter keep-alive & safe seat delay
+// pages/api/stream_ndjson.ts — Hotfix: restore `onEmit` (typed as any) + jitter KA + +1ms seat delay tolerance
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-// 请替换为你工程中的实现/导入
-import { runOneGame } from '../../lib/doudizhu/engine';
-import { GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
+// 请替换为你工程中的实际实现/导入路径
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
 import { HttpBot } from '../../lib/bots/http_bot';
 import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
+
+export const config = { api: { responseLimit: false } };
 
 type BotChoice =
   | 'built-in:greedy-max'
@@ -85,11 +86,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   };
   armKA();
 
+  // 统一 emit：附 ts/seq 再写出
+  const emit = (raw:any) => {
+    const obj = (raw && typeof raw==='object') ? raw : { type:'log', message:String(raw) };
+    (obj as any).ts = new Date().toISOString();
+    (obj as any).seq = nextSeq();
+    writeLine(res, obj);
+  };
+
   try {
-    writeLine(res, { ts: new Date().toISOString(), seq: nextSeq(), type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
+    emit({ type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
     for (let round = 1; round <= rounds; round++) {
-      writeLine(res, { ts: new Date().toISOString(), seq: nextSeq(), type:'log', message:`—— 第 ${round} 局开始 ——` });
+      emit({ type:'log', message:`—— 第 ${round} 局开始 ——` });
 
       const seatBots = seatSpecs.map(s => asBot(s.choice, s));
 
@@ -107,35 +116,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       };
       const bots = seatBots.map((b,i)=> wrapSeat(b as any, i));
 
-      // —— 与现有引擎类型对齐：不传 onEmit，只传 seats/rob/four2 ——
-      const gameIter: any = (runOneGame as any)({ seats: bots, rob: !!body.rob, four2 });
+      // —— 优先使用 onEmit（大多数旧版本引擎走回调），用 any 绕过 TS 限制 ——
+      const maybe = (runOneGame as any)({ seats: bots, rob: !!body.rob, four2, onEmit: emit });
 
-      if (gameIter && typeof gameIter[Symbol.asyncIterator] === 'function') {
-        for await (const ev of gameIter) {
-          const obj = (ev && typeof ev==='object') ? ev : { type:'log', message:String(ev) };
-          (obj as any).ts = new Date().toISOString();
-          (obj as any).seq = nextSeq();
-          writeLine(res, obj);
-        }
-      } else if (Array.isArray(gameIter)) {
-        // 兼容：若返回数组，就一次性写出
-        for (const ev of gameIter) {
-          const obj: any = (ev && typeof ev==='object') ? ev : { type:'log', message:String(ev) };
-          obj.ts = new Date().toISOString();
-          obj.seq = nextSeq();
-          writeLine(res, obj);
-        }
-      } else {
-        // 兜底：无可迭代结果，至少写一条提示
-        writeLine(res, { ts: new Date().toISOString(), seq: nextSeq(), type:'log', message:'runOneGame 未返回可迭代结果（已兼容 wrapper 间隔）。' });
+      // —— 若返回了 Promise，则等待它结束；若返回 AsyncIterable（新引擎），也能兼容 ——
+      if (maybe && typeof maybe.then === 'function') {
+        await maybe;
+      } else if (maybe && typeof (maybe as any)[Symbol.asyncIterator] === 'function') {
+        for await (const ev of (maybe as any)) emit(ev);
+      } else if (Array.isArray(maybe)) {
+        for (const ev of maybe) emit(ev);
       }
 
-      writeLine(res, { ts: new Date().toISOString(), seq: nextSeq(), type:'log', message:`—— 第 ${round} 局结束 ——` });
+      emit({ type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
 
     clearInterval(kaTimer); res.end();
   } catch (e:any) {
-    writeLine(res, { ts: new Date().toISOString(), seq: nextSeq(), type:'log', message:`后端错误：${e?.message || String(e)}` });
+    emit({ type:'log', message:`后端错误：${e?.message || String(e)}` });
     try { clearInterval(kaTimer); res.end(); } catch {}
   }
 }
