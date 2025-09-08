@@ -55,6 +55,7 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 
+// 只提取点数；处理 10→T、大小写
 const rankOf = (l: string) => {
   if (!l) return '';
   const c0 = l[0];
@@ -63,10 +64,11 @@ const rankOf = (l: string) => {
   return l.replace(/10/i, 'T').toUpperCase();
 };
 
+// 返回所有可能的装饰写法（用于从后端原始标签映射到前端装饰牌）
 function candDecorations(l: string): string[] {
   if (!l) return [];
-  if (l === 'x') return ['🃏X'];
-  if (l === 'X') return ['🃏Y'];
+  if (l === 'x') return ['🃏X'];  // 小王
+  if (l === 'X') return ['🃏Y'];  // 大王
   if (l.startsWith('🃏')) return [l];
   if ('♠♥♦♣'.includes(l[0])) return [l];
   const r = rankOf(l);
@@ -74,6 +76,7 @@ function candDecorations(l: string): string[] {
   return SUITS.map(s => `${s}${r}`);
 }
 
+// 无花色 → 轮换花色；已有花色/🃏保持不变
 function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
@@ -151,6 +154,46 @@ function Section({ title, children }:{title:string; children:React.ReactNode}) {
   );
 }
 
+/* ==================== EventQueue（带抖动的节流执行器） ==================== */
+type EQOpts = { baseDelay?: number; jitter?: [number, number]; maxPerFlush?: number };
+class EventQueue<T> {
+  private q: T[] = [];
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  constructor(
+    private flushFn: (items: T[]) => void,
+    private opts: EQOpts = {}
+  ) {}
+  private randInt(min:number, max:number) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+  push(item: T) {
+    this.q.push(item);
+    this.schedule();
+  }
+  private schedule() {
+    if (this.timer) return;
+    const base = this.opts.baseDelay ?? 23;
+    const [jmin, jmax] = this.opts.jitter ?? [9, 37];
+    const delay = base + this.randInt(jmin, jmax);
+    this.timer = setTimeout(this.flush, delay);
+  }
+  private flush = () => {
+    this.timer = null;
+    if (this.q.length === 0) return;
+    const cap = this.opts.maxPerFlush ?? 512;
+    const batch = this.q.splice(0, cap);
+    try {
+      this.flushFn(batch);
+    } finally {
+      if (this.q.length) this.schedule();
+    }
+  };
+  clear() {
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    this.q.length = 0;
+  }
+}
+
 /* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
@@ -170,9 +213,12 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  // 新增：跨 chunk 防重与单调 seq 保障
+  // 跨 chunk 防重与单调 seq 保障
   const seenSeqRef = useRef<Set<number>>(new Set());
   const lastSeqRef = useRef<number>(0);
+
+  // EventQueue
+  const evqRef = useRef<EventQueue<any> | null>(null);
 
   // 首次启动时，将总分重置为初始分；后续多局不会清零
   const prevRunningRef = useRef(false);
@@ -188,7 +234,7 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
-  // --- Batch ingest state mirrors ---
+  // --- mirrors for safe reads within queue flush ---
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
@@ -218,6 +264,116 @@ function LivePanel(props: LiveProps) {
 
     controllerRef.current = new AbortController();
 
+    // 初始化 EventQueue（flush 时批量合成 + 一次 commit）
+    evqRef.current = new EventQueue<any>((items) => {
+      // 快照
+      let nextHands = handsRef.current.map(x => [...x]);
+      let nextPlays = [...playsRef.current];
+      let nextTotals = [...totalsRef.current] as [number,number,number];
+      let nextFinished = finishedRef.current;
+      let nextLog = [...logRef.current];
+      let nextLandlord = landlordRef.current;
+      let nextWinner = winnerRef.current as number|null;
+      let nextDelta = deltaRef.current as [number,number,number]|null;
+      let nextMultiplier = multiplierRef.current;
+
+      for (const raw of items) {
+        const m: any = raw;
+        try {
+          // 进一步更新 lastSeq（双保险）
+          if (typeof m.seq === 'number' && m.seq > lastSeqRef.current) {
+            lastSeqRef.current = m.seq;
+          }
+
+          const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+          const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
+
+          if (hasHands) {
+            nextPlays = [];
+            nextWinner = null;
+            nextDelta = null;
+            nextMultiplier = 1;
+            const handsRaw: string[][] = rh as string[][];
+            const decorated: string[][] = handsRaw.map(decorateHandCycle);
+            nextHands = decorated;
+            const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+            nextLandlord = lord;
+            nextLog = [...nextLog, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`];
+            continue;
+          }
+
+          if (m.type === 'event' && m.kind === 'rob') {
+            nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`];
+            continue;
+          }
+
+          if (m.type === 'event' && m.kind === 'trick-reset') {
+            nextLog = [...nextLog, '一轮结束，重新起牌'];
+            nextPlays = [];
+            continue;
+          }
+
+          if (m.type === 'event' && m.kind === 'play') {
+            if (m.move === 'pass') {
+              nextPlays = [...nextPlays, { seat:m.seat, move:'pass', reason:m.reason }];
+              nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`];
+            } else {
+              const pretty: string[] = [];
+              const seat = m.seat as number;
+              const cards: string[] = m.cards || [];
+              const nh = (nextHands && (nextHands as any[]).length===3 ? nextHands : [[],[],[]]).map((x:any)=>[...x]);
+              for (const rawCard of cards) {
+                const options = candDecorations(rawCard);
+                const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
+                const k = nh[seat].indexOf(chosen);
+                if (k >= 0) nh[seat].splice(k, 1);
+                pretty.push(chosen);
+              }
+              nextHands = nh;
+              nextPlays = [...nextPlays, { seat:m.seat, move:'play', cards: pretty }];
+              nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`];
+            }
+            continue;
+          }
+
+          if (m.type === 'event' && m.kind === 'win') {
+            nextWinner = m.winner;
+            nextMultiplier = m.multiplier;
+            nextDelta = m.deltaScores;
+            nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
+            nextTotals = [
+              nextTotals[0] + m.deltaScores[0],
+              nextTotals[1] + m.deltaScores[1],
+              nextTotals[2] + m.deltaScores[2],
+            ] as any;
+            nextFinished = nextFinished + 1;
+            continue;
+          }
+
+          if (m.type === 'log' && typeof m.message === 'string') {
+            nextLog = [...nextLog, m.message];
+            continue;
+          }
+        } catch (e) {
+          console.error('[EventQueue:flush]', e, raw);
+        }
+      }
+
+      // 一次 commit
+      setHands(nextHands);
+      setPlays(nextPlays);
+      setTotals(nextTotals);
+      setFinishedCount(nextFinished);
+      setLog(nextLog);
+      setLandlord(nextLandlord);
+      setWinner(nextWinner);
+      setMultiplier(nextMultiplier);
+      setDelta(nextDelta);
+    }, { baseDelay: 23, jitter: [ nine(), thirtySeven() ], maxPerFlush: 512 } as EQOpts);
+
+    function nine(){ return 9 }       // 小技巧：避免常量在热更新时被提升造成闭包异常
+    function thirtySeven(){ return 37 }
+
     try {
       const r = await fetch('/api/stream_ndjson', {
         method:'POST',
@@ -229,7 +385,7 @@ function LivePanel(props: LiveProps) {
           enabled: props.enabled,
           rob: props.rob,
           four2: props.four2,
-          seats: props.seats,
+          seats: props.seats,            // 字符串数组；后端已兼容 normalize
           seatModels: props.seatModels,
           seatKeys: props.seatKeys,
         }),
@@ -257,7 +413,7 @@ function LivePanel(props: LiveProps) {
           }
 
           if (batch.length) {
-            // 过滤 ka，并按 seq 主序排序（无 seq 时退化到 ts）
+            // ===== 过滤 keep-alive，并按 (seq, ts) 排序，跨 chunk 去重 =====
             const normTs = (x:any) => {
               const t = x?.ts;
               if (t == null) return 0;
@@ -272,7 +428,6 @@ function LivePanel(props: LiveProps) {
                 if (sa !== 0 || sb !== 0) return sa - sb;
                 return normTs(a) - normTs(b);
               })
-              // 跨 chunk 防重：丢弃已见 seq 或逆序 seq
               .filter(e => {
                 const s = e.seq;
                 if (typeof s === 'number') {
@@ -283,105 +438,9 @@ function LivePanel(props: LiveProps) {
                 return true;
               });
 
-            // 快照
-            let nextHands = handsRef.current.map(x => [...x]);
-            let nextPlays = [...playsRef.current];
-            let nextTotals = [...totalsRef.current] as [number,number,number];
-            let nextFinished = finishedRef.current;
-            let nextLog = [...logRef.current];
-            let nextLandlord = landlordRef.current;
-            let nextWinner = winnerRef.current as number|null;
-            let nextDelta = deltaRef.current as [number,number,number]|null;
-            let nextMultiplier = multiplierRef.current;
-
-            for (const raw of items) {
-              const m: any = raw;
-              try {
-                // 更新 lastSeq
-                if (typeof m.seq === 'number' && m.seq > lastSeqRef.current) {
-                  lastSeqRef.current = m.seq;
-                }
-
-                const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
-                const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
-
-                if (hasHands) {
-                  nextPlays = [];
-                  nextWinner = null;
-                  nextDelta = null;
-                  nextMultiplier = 1;
-                  const handsRaw: string[][] = rh as string[][];
-                  const decorated: string[][] = handsRaw.map(decorateHandCycle);
-                  nextHands = decorated;
-                  const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
-                  nextLandlord = lord;
-                  nextLog = [...nextLog, `发牌完成，${lord!=null?['甲','乙','丙'][lord]:'?'}为地主`];
-                  continue;
-                }
-
-                if (m.type === 'event' && m.kind === 'rob') {
-                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`];
-                  continue;
-                }
-
-                if (m.type === 'event' && m.kind === 'trick-reset') {
-                  nextLog = [...nextLog, '一轮结束，重新起牌'];
-                  nextPlays = [];
-                  continue;
-                }
-
-                if (m.type === 'event' && m.kind === 'play') {
-                  if (m.move === 'pass') {
-                    nextPlays = [...nextPlays, { seat:m.seat, move:'pass', reason:m.reason }];
-                    nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`];
-                  } else {
-                    const pretty: string[] = [];
-                    const seat = m.seat as number;
-                    const cards: string[] = m.cards || [];
-                    const nh = (nextHands && (nextHands as any[]).length===3 ? nextHands : [[],[],[]]).map((x:any)=>[...x]);
-                    for (const rawCard of cards) {
-                      const options = candDecorations(rawCard);
-                      const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
-                      const k = nh[seat].indexOf(chosen);
-                      if (k >= 0) nh[seat].splice(k, 1);
-                      pretty.push(chosen);
-                    }
-                    nextHands = nh;
-                    nextPlays = [...nextPlays, { seat:m.seat, move:'play', cards: pretty }];
-                    nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`];
-                  }
-                  continue;
-                }
-
-                if (m.type === 'event' && m.kind === 'win') {
-                  nextWinner = m.winner;
-                  nextMultiplier = m.multiplier;
-                  nextDelta = m.deltaScores;
-                  nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
-                  nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
-                  nextFinished = nextFinished + 1;
-                  continue;
-                }
-
-                if (m.type === 'log' && typeof m.message === 'string') {
-                  nextLog = [...nextLog, m.message];
-                  continue;
-                }
-              } catch(e) {
-                console.error('[ingest:batch]', e, raw);
-              }
-            }
-
-            // commit：一次 chunk 只 setState 一次
-            setHands(nextHands);
-            setPlays(nextPlays);
-            setTotals(nextTotals);
-            setFinishedCount(nextFinished);
-            setLog(nextLog);
-            setLandlord(nextLandlord);
-            setWinner(nextWinner);
-            setMultiplier(nextMultiplier);
-            setDelta(nextDelta);
+            // 入队（由队列决定何时 flush）
+            const q = evqRef.current!;
+            for (const it of items) q.push(it);
           }
         }
       };
@@ -400,9 +459,10 @@ function LivePanel(props: LiveProps) {
 
   const stop = () => {
     controllerRef.current?.abort();
+    evqRef.current?.clear();
     setRunning(false);
   };
-
+  // 剩余局数（包含当前局）：总局数 - 已完成局数
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
   return (
