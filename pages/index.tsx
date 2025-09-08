@@ -15,7 +15,7 @@ type ComboType =
   | 'straight' | 'pair-straight' | 'plane'
   | 'triple-with-single' | 'triple-with-pair'
   | 'four-with-two-singles' | 'four-with-two-pairs';
-type Four2Policy = 'both' | '2singles' | '2pairs';
+type Four2Policy = boolean;
 
 type EventObj =
   | { type:'state'; kind:'init'; landlord:number; hands: Label[][] }
@@ -430,7 +430,7 @@ export default function Home() {
   const [seatDelayMs] = useState(100);
   const [enabled] = useState<boolean[]|undefined>(undefined);
   const [rob] = useState<boolean>(true);
-  const [four2] = useState<Four2Policy>('both');
+  const [four2] = useState<Four2Policy>(true);
   const [seats] = useState<string[]|undefined>(undefined);
   const [seatModels] = useState<string[]|undefined>(undefined);
   const [seatKeys] = useState<Record<string,string>|undefined>(undefined);
