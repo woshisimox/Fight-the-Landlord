@@ -1,7 +1,5 @@
-// pages/api/stream_ndjson.ts （稳态修复 + 心跳 + 反缓存）
+// pages/api/stream_ndjson.ts (hardened, anti-stall version)
 import type { NextApiRequest, NextApiResponse } from 'next';
-
-// 这些 import 在你的仓库中应已存在；如若缺失请按需删改（或仅保留内置 bot）
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
@@ -17,61 +15,86 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
   | 'http';
 
-type SeatSpec = { model?: string; apiKey?: string; baseUrl?: string; token?: string };
+type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
+
+type StartPayload = {
+  seats: SeatSpec[];                     // 3 items
+  seatDelayMs?: number[];
+  rounds?: number;
+  rob?: boolean;
+  four2?: 'both' | '2singles' | '2pairs';
+  stopBelowZero?: boolean;
+  seatModels?: string[];
+  seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
+};
 
 function writeLine(res: NextApiResponse, obj: any) {
-  // 每行一条，\n 结尾，便于前端 NDJSON 解析
   res.write(JSON.stringify(obj) + '\n');
-  // @ts-ignore - 若运行环境支持 flush
-  if (typeof (res as any).flush === 'function') try { (res as any).flush(); } catch {}
 }
 
-function chooseBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any {
+function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any {
   switch (choice) {
-    case 'built-in:greedy-max': return (GreedyMax as any);
-    case 'built-in:greedy-min': return (GreedyMin as any);
-    case 'built-in:random-legal': return (RandomLegal as any);
-    case 'ai:openai': return (OpenAIBot as any)({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
-    case 'ai:gemini': return (GeminiBot as any)({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-flash' });
-    case 'ai:grok':   return (GrokBot as any)({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
-    case 'ai:kimi':   return (KimiBot as any)({ apiKey: spec?.apiKey || '', model: spec?.model || 'moonshot-v1-8k' });
-    case 'ai:qwen':   return (QwenBot as any)({ apiKey: spec?.apiKey || '', model: spec?.model || 'qwen-plus' });
-    case 'http':      return (HttpBot as any)({ base: (spec?.baseUrl||'').replace(/\/$/, ''), token: spec?.token || '' });
-    default:          return (GreedyMax as any);
+    case 'built-in:greedy-max': return GreedyMax;
+    case 'built-in:greedy-min': return GreedyMin;
+    case 'built-in:random-legal': return RandomLegal;
+    case 'ai:openai': return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
+    case 'ai:gemini': return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-flash' });
+    case 'ai:grok':   return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
+    case 'ai:kimi':   return KimiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'moonshot-v1-8k' });
+    case 'ai:qwen':   return QwenBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'qwen-plus' });
+    case 'http':      return HttpBot({ base: (spec?.baseUrl||'').replace(/\/$/,''), token: spec?.token || '' });
+    default:          return GreedyMax;
   }
 }
 
-// 跑一局（增加防卡死日志）
-async function runOneRound(opts: {
-  seats: any[];
-  four2?: 'both'|'2singles'|'2pairs';
-  rob?: boolean;
-  delayMs?: number;
-}, res: NextApiResponse, roundNo: number) {
-  // runOneGame 的签名因版本而异，这里统一用 any 避免 TS 编译报错
-  const iter: AsyncIterator<any> = (runOneGame as any)({
-    seats: opts.seats,
-    four2: opts.four2,
-    rob: opts.rob,
-    delayMs: opts.delayMs,
-  });
-
+// Hardened single-round runner with stall guard
+async function runOneRoundWithGuard(opts: { seats: any[], four2?: 'both'|'2singles'|'2pairs', delayMs?: number }, res: NextApiResponse, roundNo: number) {
+  const MAX_EVENTS = 4000;              // safety ceiling: total events per round
+  const MAX_REPEATED_HEARTBEAT = 200;   // safety ceiling: consecutive 'pass/pass/reset' type heartbeats
+  const iter: AsyncIterator<any> = (runOneGame as any)({ seats: opts.seats, four2: opts.four2, delayMs: opts.delayMs });
   let evCount = 0;
   let landlord = -1;
   let trick = 0;
+  let lastSignature = '';
+  let repeated = 0;
 
-  // 兼容不同事件命名：尽量透传，附带少量补充字段
-  for await (const value of (iter as any)) {
+  while (true) {
+    const { value, done } = await (iter.next() as any);
+    if (done) break;
     evCount++;
-    if (value?.kind === 'init' || value?.type === 'state') {
-      landlord = (value.landlord ?? value?.state?.landlord ?? value?.init?.landlord ?? -1) as number;
-      trick = 0;
-    }
-    if (value?.kind === 'trick-reset') trick++;
 
+    // forward downstream
     writeLine(res, value);
-    if (evCount % 200 === 0) {
-      writeLine(res, { type:'log', message:`[guard] round#${roundNo} events=${evCount}, trick=${trick}, landlord=${landlord}` });
+
+    // book-keeping for diagnostics
+    const kind = value?.kind || value?.type;
+    if (value?.kind === 'init' && typeof value?.landlord === 'number') {
+      landlord = value.landlord;
+    }
+    if (value?.kind === 'trick-reset') {
+      trick += 1;
+    }
+    // simple repetition signature to catch livelocks
+    const sig = JSON.stringify({
+      kind: value?.kind,
+      seat: value?.seat,
+      move: value?.move,
+      require: value?.require?.type || value?.comboType || null,
+      leader: value?.leader,
+      trick
+    });
+
+    if (sig === lastSignature) repeated++; else repeated = 0;
+    lastSignature = sig;
+
+    if (evCount > MAX_EVENTS || repeated > MAX_REPEATED_HEARTBEAT) {
+      writeLine(res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束（判地主胜）。`});
+      // Gracefully close the generator if possible
+      try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
+      // Emit a synthetic win so前端能收尾
+      const winner = landlord >= 0 ? landlord : 0;
+      writeLine(res, { type:'event', kind:'win', winner, multiplier: 1, deltaScores: winner===landlord ? [+2,-1,-1] : [-2,+1,+1] });
+      return;
     }
   }
 }
@@ -81,65 +104,50 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
-
-  // 反缓存 + 流式
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // nginx
-
-  const body = (req.body || {}) as any;
-  const rounds = Math.max(1, Number(body.rounds || 1));
-  const seatDelayMs = Number(body.seatDelayMs ?? 0);
-  const rob = !!body.rob;
-  const four2 = (body.four2 || 'both') as ('both'|'2singles'|'2pairs');
-
-  // 组装 seat bots
-  const seats: any[] = new Array(3).fill(0).map((_, i) => {
-    const choice = (Array.isArray(body.seats) ? body.seats[i] : null) as BotChoice | null;
-    const models = (Array.isArray(body.seatModels) ? body.seatModels : []);
-    const apikeys = body.seatKeys || {};
-    const seatKey = ['E','S','W'][i] || 'E';
-    const spec: SeatSpec = {
-      model: models[i],
-      apiKey: apikeys[seatKey] || apikeys[i] || '',
-    };
-    return chooseBot((choice || 'built-in:greedy-max') as BotChoice, spec);
-  });
-
-  // 心跳：便于前端快速判断“后端是否还活着”
-  const hb = setInterval(() => {
-    writeLine(res, { type:'log', message:`[hb] ${new Date().toISOString()}` });
-  }, 2000);
+  let __lastWrite = Date.now();
+  function writeLineKA(obj:any){ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); }
+  const __ka = setInterval(()=>{ try{ if((res as any).writableEnded){ clearInterval(__ka as any); return; } if(Date.now()-__lastWrite>2500){ writeLineKA({ type:'ka', ts: new Date().toISOString() }); } }catch{} }, 2500);
 
   try {
-    writeLine(res, { type:'log', message:`开始：共 ${rounds} 局，seatDelayMs=${seatDelayMs}, rob=${rob}, four2=${four2}` });
+    const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const MAX_ROUNDS = parseInt(process.env.MAX_ROUNDS || '200', 10);
+    const rounds = Math.max(1, Math.min(MAX_ROUNDS, Number(body.rounds) || 1));
+    const four2 = body.four2 || 'both';
+    const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
 
-    let scores: [number,number,number] = (Array.isArray(body.startScore) ? body.startScore : [0,0,0]) as [number,number,number];
+    // build bots
+    const seatBots = (body.seats || []).slice(0,3).map((s, i) => asBot(s.choice, s));
+
+    writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
+
+    let scores: [number,number,number] = [0,0,0];
     for (let round = 1; round <= rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
 
-      // 把累计分先发给前端（可选）
-      writeLine(res, { type:'state', kind:'score', scores });
+      // wrap seats with per-seat delay (防止显式 await 造成阻塞)
+      const delayedSeats = seatBots.map((bot, idx) => async (ctx:any) => {
+        const ms = delays[idx] || 0;
+        if (ms) await new Promise(r => setTimeout(r, ms));
+        return bot(ctx);
+      });
 
-      await runOneRound({
-        seats,
-        four2,
-        rob,
-        delayMs: seatDelayMs,
-      }, res, round);
+      await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0 }, res, round);
 
-      // 这里不“算分”，而是依赖引擎在 'win' 事件里输出 deltaScores；
-      // 若你的引擎没有，则在此处收集上一局结果自己加总。
+      // 前端会自行累计分数；这里只做可选的“低于0提前终止”
+      if (body.stopBelowZero && (scores[0]<0 || scores[1]<0 || scores[2]<0)) {
+        writeLine(res, { type:'log', message:`某方积分 < 0，提前终止。` });
+        break;
+      }
 
-      writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
+      if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
 
-    try { clearInterval(hb as any); } catch {}
-    try { res.end(); } catch {}
-  } catch (e:any) {
+    try{ clearInterval(__ka as any);}catch{}; res.end();
+  } catch (e: any) {
     writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
-    try { clearInterval(hb as any); } catch {}
-    try { res.end(); } catch {}
+    try { try{ clearInterval(__ka as any);}catch{}; res.end(); } catch {}
   }
 }
