@@ -78,7 +78,7 @@ function chooseBot(kind: BotChoice, model?: string, keys?: any): BotFunc {
     case 'ai:grok':   return GrokBot({ apiKey: keys?.grok, model }) as unknown as BotFunc
     case 'ai:kimi':   return KimiBot({ apiKey: keys?.kimi, model }) as unknown as BotFunc
     case 'ai:qwen':   return QwenBot({ apiKey: keys?.qwen, model }) as unknown as BotFunc
-    case 'http':      return HttpBot({ base: keys?.httpBase, token: keys?.httpToken, model }) as unknown as BotFunc
+    case 'http':      return HttpBot({ base: keys?.httpBase, token: keys?.httpToken }) as unknown as BotFunc
     default: return GreedyMax as unknown as BotFunc
   }
 }
