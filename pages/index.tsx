@@ -15,7 +15,8 @@ type EventObj =
   | { type:'event'; kind:'rob'; seat:number; rob:boolean }
   | { type:'event'; kind:'trick-reset' }
   | { type:'event'; kind:'win'; winner:number; multiplier:number; deltaScores:[number,number,number] }
-  | { type:'log';  message:string };
+  | { type:'log';  message:string }
+  | { type:'ka' };
 
 type BotChoice =
   | 'built-in:greedy-max'
@@ -25,9 +26,9 @@ type BotChoice =
   | 'http';
 
 type LiveProps = {
-  rounds: number;                 // 多局数（后端连打）
+  rounds: number;
   startScore: number;
-  seatDelayMs?: number[];         // 每家最小间隔（ms）
+  seatDelayMs?: number[];
   enabled: boolean;
   rob: boolean;
   four2: Four2Policy;
@@ -66,13 +67,12 @@ const rankOf = (l: string) => {
 // 返回所有可能的装饰写法（用于从后端原始标签映射到前端装饰牌）
 function candDecorations(l: string): string[] {
   if (!l) return [];
-  // Joker 映射：为了避免大小写，统一用大写字母区分：小王=X，大王=Y
   if (l === 'x') return ['🃏X'];  // 小王
   if (l === 'X') return ['🃏Y'];  // 大王
   if (l.startsWith('🃏')) return [l];
   if ('♠♥♦♣'.includes(l[0])) return [l];
   const r = rankOf(l);
-  if (r === 'JOKER') return ['🃏Y']; // 兜底，极少出现
+  if (r === 'JOKER') return ['🃏Y'];
   return SUITS.map(s => `${s}${r}`);
 }
 
@@ -81,7 +81,6 @@ function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
     if (!l) return l;
-    // 统一 Joker 显示：小王=🃏X，大王=🃏Y
     if (l === 'x') return '🃏X';
     if (l === 'X') return '🃏Y';
     if (l.startsWith('🃏')) return l;
@@ -89,13 +88,12 @@ function decorateHandCycle(raw: string[]): string[] {
     const suit = SUITS[idx % SUITS.length]; idx++;
     return `${suit}${rankOf(l)}`;
   });
-
 }
+
 function Card({ label }: { label:string }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-  // Joker：大王 X=红，小王 x=绿
   const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
   return (
     <span style={{
@@ -175,7 +173,6 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-
   // 首次启动时，将总分重置为初始分；后续多局不会清零
   const prevRunningRef = useRef(false);
   useEffect(() => {
@@ -191,18 +188,17 @@ function LivePanel(props: LiveProps) {
 
   const controllerRef = useRef<AbortController|null>(null);
   // --- Batch ingest state mirrors (for robust chunk processing) ---
-const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
-const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
-const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
-const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
-const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
-const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
-const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
-const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
-const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
-const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
-// --- End mirrors ---
-
+  const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
+  const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
+  const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
+  const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
+  const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
+  const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
+  const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
+  const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
+  const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+  const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
+  // --- End mirrors ---
 
   const start = async () => {
     if (running) return;
@@ -223,13 +219,13 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
         method:'POST',
         headers: { 'content-type':'application/json' },
         body: JSON.stringify({
-          rounds: props.rounds,          // 后端连续多局
+          rounds: props.rounds,
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
           rob: props.rob,
           four2: props.four2,
-          seats: props.seats,
+          seats: props.seats,            // 字符串数组；后端已兼容 normalize
           seatModels: props.seatModels,
           seatKeys: props.seatKeys,
         }),
@@ -247,7 +243,6 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
           if (done) break;
           buf += decoder.decode(value, { stream:true });
 
-          
           let idx: number;
           const batch: any[] = [];
           while ((idx = buf.indexOf('\n')) >= 0) {
@@ -258,7 +253,20 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
           }
 
           if (batch.length) {
-            // Take snapshots
+            // ===== 新增：过滤 keep-alive，并按 (ts, seq) 排序 =====
+            const normTs = (x:any) => {
+              const t = x?.ts;
+              if (t == null) return 0;
+              if (typeof t === 'number') return t;
+              const n = Date.parse(t);
+              return isNaN(n) ? 0 : n;
+            };
+            const items = batch
+              .filter(ev => ev && ev.type !== 'ka')
+              .sort((a,b) => (normTs(a) - normTs(b)) || ((a.seq ?? 0) - (b.seq ?? 0)));
+            // ===== 以上新增 =====
+
+            // 快照
             let nextHands = handsRef.current.map(x => [...x]);
             let nextPlays = [...playsRef.current];
             let nextTotals = [...totalsRef.current] as [number,number,number];
@@ -269,7 +277,7 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
             let nextDelta = deltaRef.current as [number,number,number]|null;
             let nextMultiplier = multiplierRef.current;
 
-            for (const raw of batch) {
+            for (const raw of items) {
               const m: any = raw;
               try {
                 const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
@@ -343,7 +351,7 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
               }
             }
 
-            // Commit once per chunk
+            // commit：一次 chunk 只 setState 一次
             setHands(nextHands);
             setPlays(nextPlays);
             setTotals(nextTotals);
@@ -354,7 +362,6 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
             setMultiplier(nextMultiplier);
             setDelta(nextDelta);
           }
-
         }
       };
 
@@ -377,10 +384,9 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
   // 剩余局数（包含当前局）：总局数 - 已完成局数
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
-
   return (
     <div>
-      {/* 剩余局数徽标（最小改动） */}
+      {/* 剩余局数徽标 */}
       <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
         <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, lineHeight:1.2, userSelect:'none', background:'#fff' }}>
           剩余局数：{remainingGames}
