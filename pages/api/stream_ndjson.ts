@@ -7,30 +7,6 @@ import { GrokBot } from '../../lib/bots/grok_bot';
 import { HttpBot } from '../../lib/bots/http_bot';
 import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
-// 响应头（尽量靠前）：
-res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-res.setHeader('Cache-Control', 'no-cache, no-transform');
-res.setHeader('Connection', 'keep-alive');
-res.setHeader('Transfer-Encoding', 'chunked');
-res.setHeader('X-Accel-Buffering', 'no'); // nginx 等反向代理禁用缓冲
-
-const writeLine = (obj:any) => {
-  res.write(JSON.stringify(obj) + '\n');
-  // @ts-ignore
-  if (typeof res.flush === 'function') res.flush();
-};
-
-// ——新增：心跳，每 2s 一条，便于区分“前端卡渲染” vs “后端停了/被缓冲”
-const hb = setInterval(() => {
-  writeLine({ type:'log', message:`[hb] ${new Date().toISOString()}` });
-}, 2000);
-
-// 清理（连接断开或结束时）：
-req.on('close', () => { clearInterval(hb); });
-res.on('close', () => { clearInterval(hb); });
-
-// 你现有的每个事件、每个日志、每局开始/结束，都用 writeLine(...) 输出，确保行尾有 '\n'
-
 
 type BotChoice =
   | 'built-in:greedy-max'
