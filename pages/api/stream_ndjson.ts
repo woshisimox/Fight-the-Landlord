@@ -15,39 +15,41 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
   | 'http';
 
-type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
+type SeatSpec =
+  | { choice:'built-in:greedy-max'|'built-in:greedy-min'|'built-in:random-legal' }
+  | { choice:'ai:openai'|'ai:gemini'|'ai:grok'|'ai:kimi'|'ai:qwen', apiKey?:string, model?:string }
+  | { choice:'http', baseUrl?:string, token?:string };
 
 type StartPayload = {
-  seats: SeatSpec[];                     // 3 items
-  seatDelayMs?: number[];
-  rounds?: number;
+  rounds: number;
+  four2?: 'both'|'2singles'|'2pairs';
   rob?: boolean;
-  four2?: 'both' | '2singles' | '2pairs';
+  seatDelayMs?: [number,number,number];
+  seats: SeatSpec[];
+  seatModels?: (string|null)[];
+  seatKeys?: any[];
   stopBelowZero?: boolean;
-  seatModels?: string[];
-  seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
 };
-
-function writeLine(res: NextApiResponse, obj: any) {
-  res.write(JSON.stringify(obj) + '\n');
-}
 
 function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any {
   switch (choice) {
     case 'built-in:greedy-max': return GreedyMax;
     case 'built-in:greedy-min': return GreedyMin;
     case 'built-in:random-legal': return RandomLegal;
-    case 'ai:openai': return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
-    case 'ai:gemini': return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-flash' });
-    case 'ai:grok':   return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
-    case 'ai:kimi':   return KimiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'moonshot-v1-8k' });
-    case 'ai:qwen':   return QwenBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'qwen-plus' });
-    case 'http':      return HttpBot({ base: (spec?.baseUrl||'').replace(/\/$/,''), token: spec?.token || '' });
+    case 'ai:openai': return OpenAIBot({ apiKey: (spec as any)?.apiKey || '', model: (spec as any)?.model || 'gpt-4o-mini' });
+    case 'ai:gemini': return GeminiBot({ apiKey: (spec as any)?.apiKey || '', model: (spec as any)?.model || 'gemini-1.5-flash' });
+    case 'ai:grok':   return GrokBot({ apiKey: (spec as any)?.apiKey || '', model: (spec as any)?.model || 'grok-2' });
+    case 'ai:kimi':   return KimiBot({ apiKey: (spec as any)?.apiKey || '', model: (spec as any)?.model || 'moonshot-v1-8k' });
+    case 'ai:qwen':   return QwenBot({ apiKey: (spec as any)?.apiKey || '', model: (spec as any)?.model || 'qwen-plus' });
+    case 'http':      return HttpBot({ base: ((spec as any)?.baseUrl||'').replace(/\/$/,''), token: (spec as any)?.token || '' });
     default:          return GreedyMax;
   }
 }
 
-// Hardened single-round runner with stall guard
+function writeLine(res: NextApiResponse, obj: any) {
+  (res as any).write(JSON.stringify(obj) + '\n');
+}
+
 async function runOneRoundWithGuard(opts: { seats: any[], four2?: 'both'|'2singles'|'2pairs', delayMs?: number }, res: NextApiResponse, roundNo: number) {
   const MAX_EVENTS = 4000;              // safety ceiling: total events per round
   const MAX_REPEATED_HEARTBEAT = 200;   // safety ceiling: consecutive 'pass/pass/reset' type heartbeats
@@ -109,7 +111,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Connection', 'keep-alive');
   let __lastWrite = Date.now();
   function writeLineKA(obj:any){ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); }
-  const __ka = setInterval(()=>{ try{ if((res as any).writableEnded){ clearInterval(__ka as any); return; } if(Date.now()-__lastWrite>2500){ writeLineKA({ type:'ka', ts: new Date().toISOString() }); } }catch{} }, 2500);
+  const __ka = setInterval(()=>{ try{ if((res as any).writableEnded) return; if(Date.now()-__lastWrite>2000) writeLineKA({ type:'ka', ts: new Date().toISOString() }); } catch{} }, 2500);
 
   try {
     const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -119,12 +121,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
 
     // build bots
-    const seatBots = (body.seats || []).slice(0,3).map((s, i) => asBot(s.choice, s));
+    const seatBots = (body.seats || []).slice(0,3).map((s, i) => asBot(s.choice as BotChoice, s as any));
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
     let scores: [number,number,number] = [0,0,0];
     for (let round = 1; round <= rounds; round++) {
+      writeLine(res, { type:'progress', phase:'round-start', round, ts: Date.now() });
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
 
       // wrap seats with per-seat delay (防止显式 await 造成阻塞)
@@ -136,6 +139,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0 }, res, round);
 
+      writeLine(res, { type:'progress', phase:'round-end', round, ts: Date.now() });
+
       // 前端会自行累计分数；这里只做可选的“低于0提前终止”
       if (body.stopBelowZero && (scores[0]<0 || scores[1]<0 || scores[2]<0)) {
         writeLine(res, { type:'log', message:`某方积分 < 0，提前终止。` });
@@ -144,6 +149,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
+
+    writeLine(res, { type:'summary', roundsCompleted: rounds, ts: Date.now() });
 
     try{ clearInterval(__ka as any);}catch{}; res.end();
   } catch (e: any) {
