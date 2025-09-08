@@ -1,4 +1,4 @@
-// pages/api/stream_ndjson.ts (hardened, anti-stall version)
+// pages/api/stream_ndjson.ts (anti-stall + type-safe)
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
@@ -24,7 +24,7 @@ type StartPayload = {
   rob?: boolean;
   four2?: 'both' | '2singles' | '2pairs';
   stopBelowZero?: boolean;
-  debug?: boolean;
+  debug?: boolean; // 保留字段但本文件不再传给 engine
   seatModels?: { E?:string; S?:string; W?:string; } | null;
   seatKeys?: { E?:string; S?:string; W?:string; } | null;
 };
@@ -51,13 +51,13 @@ function chooseBot(
     case 'ai:grok':   return GrokBot({ apiKey: keys?.grok   ?? '', model }) as unknown as BotFunc;
     case 'ai:kimi':   return KimiBot({ apiKey: keys?.kimi   ?? '', model }) as unknown as BotFunc;
     case 'ai:qwen':   return QwenBot({ apiKey: keys?.qwen   ?? '', model }) as unknown as BotFunc;
-    case 'http':      return HttpBot({ base: base ?? '', token: token ?? '' }) as unknown as BotFunc; // http 入参无 model
+    case 'http':      return HttpBot({ base: base ?? '', token: token ?? '' }) as unknown as BotFunc; // http 入参不支持 model
     default:          return async (ctx:any)=>GreedyMax(ctx);
   }
 }
 
 async function* playOneRound(opts: any) {
-  const { seats, rob, four2, delays } = opts; // 移除 debug
+  const { seats, rob, four2, delays } = opts; // 不再解构 debug
   const iter = runOneGame({ seats, rob, four2 }); // 不再传 debug
 
   let landlord = -1;
@@ -110,7 +110,7 @@ async function* playOneRound(opts: any) {
       return;
     }
 
-    // 防卡死：极端情况下（与 1000ms 无直接关系），若事件重复过多，强制收尾
+    // 防卡死：极端情况下，若事件重复过多，强制收尾
     if (evCount > 5000 || repeated > 500) {
       writeLine(opts.res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束（判地主胜）。`});
       try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
@@ -129,8 +129,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+
   let __lastWrite = Date.now();
-  function writeLineKA(obj:any){ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); }
+  const writeLineKA = (obj:any)=>{ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); };
   const __ka = setInterval(()=>{ try{ if((res as any).writableEnded){ clearInterval(__ka as any); } else { writeLineKA({ type:'ka', ts: new Date().toISOString() }); } }catch{} }, 1000);
   res.once('close', ()=>{ try{ clearInterval(__ka as any);}catch{} });
   res.once('finish', ()=>{ try{ clearInterval(__ka as any);}catch{} });
@@ -145,7 +146,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const keys = {
       openai:  body.seatKeys?.E ?? body.seatKeys?.S ?? body.seatKeys?.W ?? '',
       gemini:  body.seatKeys?.S ?? '',
-      grok:    '', // 如需启用再补
+      grok:    '',
       kimi:    body.seatKeys?.E ?? body.seatKeys?.S ?? body.seatKeys?.W ?? '',
       qwen:    body.seatKeys?.W ?? '',
     };
@@ -153,7 +154,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     for (let round=1; round<=rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
 
-      const seatFuncs: BotFunc[] = (body.seats || []).slice(0,3).map((s,idx)=>{
+      const seatFuncs: BotFunc[] = (body.seats || []).slice(0,3).map((s)=>{
         return chooseBot(s.choice, s.model, keys, s.baseUrl, s.token);
       });
 
@@ -165,12 +166,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         res,
       });
 
-      // 消耗掉迭代器（事件已通过 writeLine 输出）
+      // 消耗迭代器（事件已在 playOneRound 内 writeLine 输出）
       for await (const _ of iter as any) { /* no-op */ }
 
-      // 服务器端辅助日志
-      writeLine(res, { type:'log', message:`第 ${round} 局结束（详见前端 'win' 事件）。` });
-
+      writeLine(res, { type:'log', message:`第 ${round} 局结束（详见 'win' 事件）。` });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
 
