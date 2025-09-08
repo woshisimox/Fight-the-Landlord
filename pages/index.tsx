@@ -5,8 +5,13 @@ const SUITS = ['♠','♥','♦','♣'] as const;  // 展示花色循环
 function rankOf(label: string){
   const L = label.trim();
   if (L==='X') return 'JOKER'; if (L==='x') return 'joker';
-  const r = L.replace(/^[SHDC♠♥♦♣]/, '');
-  return r.toUpperCase();
+  // 兼容已有：若以花色或英文字母开头，去掉一个花色字符（或 S/H/D/C）
+  const c0 = L[0];
+  if ('SHDC♠♥♦♣'.includes(c0)) return L.slice(1).toUpperCase();
+  // 若第一位是数字或英文字母，保持大小写规则（10 用 T 表示的适配）
+  const l = L.replace(/^10$/,'T').toUpperCase();
+  if (c0 === '🃏') return (l.slice(2) || l); // 容错
+  return l;
 }
 function decorateHandCycle(hand: string[]): string[] {
   let idx = 0;
@@ -117,14 +122,11 @@ export function LivePanel(props: LivePanelProps) {
 
       const reader = r.body.getReader();
       const decoder = new TextDecoder('utf-8');
-      let watchdogLastTs = Date.now();
-      let watchdogCount = 0;
       let buf = '';
 
       const pump = async () => {
         while (true) {
           const { value, done } = await reader.read();
-          if (!value) { if (Date.now()-watchdogLastTs>8000) { setLog((prev)=>[...prev, '（watchdog）已 8s 未收到事件…']); watchdogLastTs = Date.now(); } }
           if (done) break;
           buf += decoder.decode(value, { stream:true });
 
@@ -150,7 +152,8 @@ export function LivePanel(props: LivePanelProps) {
             let nextMultiplier = multiplierRef.current;
 
             for (const raw of batch) {
-              if ((raw as any)?.type === 'ka') continue; // ① 旁路心跳，避免与同秒关键信号互相覆盖
+              // ★ 最小补丁 1：旁路 keep-alive，避免 1000ms 边界与“收尾/开局”同秒事件互相覆盖
+              if ((raw as any)?.type === 'ka') continue;
               const m: any = raw;
               try {
                 const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
@@ -210,7 +213,8 @@ export function LivePanel(props: LivePanelProps) {
                   nextDelta = m.deltaScores;
                   nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
                   nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
-                  nextFinished = nextFinished + 1; // ② 仅用本批统计，避免与 ref 竞态
+                  // ★ 最小补丁 2：仅用本批统计，避免与 ref 竞态造成边界重计
+                  nextFinished = nextFinished + 1;
                   continue;
                 }
 
@@ -228,13 +232,13 @@ export function LivePanel(props: LivePanelProps) {
             setHands(nextHands);
             setPlays(nextPlays);
             setTotals(nextTotals);
-            setFinishedCount(nextFinished); // ③ 以本批结果为准
+            // ★ 最小补丁 3：提交本批结果，防丢/重计
+            setFinishedCount(nextFinished);
             setLog(nextLog);
             setLandlord(nextLandlord);
             setWinner(nextWinner);
             setMultiplier(nextMultiplier);
             setDelta(nextDelta);
-            watchdogLastTs = Date.now(); watchdogCount = 0; // watchdog 刷新
           }
 
         }
