@@ -522,7 +522,6 @@ function LivePanel(props: LiveProps) {
 }
 
 /* ==================== 页面（布局：对局设置 → 对局 → 运行日志） ==================== */
-type BotChoice = 'built-in:greedy-max' | 'built-in:greedy-min' | 'built-in:random-legal' | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'http';
 
 export default function Home() {
   const [enabled, setEnabled] = useState<boolean>(true);
