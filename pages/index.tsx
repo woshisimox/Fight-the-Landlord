@@ -136,6 +136,53 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
 
+  /* ===================== NDJSON 后端调试注入（只打日志，不改行为） ===================== */
+  const reqTag = Math.random().toString(36).slice(2, 8);
+  const slog = (...a: any[]) => console.log('[NDJSON/BE]', ...a);
+  slog('BEGIN', reqTag);
+
+  const __oldWrite = (res as any).write.bind(res);
+  (res as any).write = (chunk: any, ...args: any[]) => {
+    try {
+      const s = typeof chunk === 'string'
+        ? chunk
+        : (typeof Buffer !== 'undefined' && (Buffer as any).isBuffer?.(chunk))
+          ? (chunk as Buffer).toString('utf8')
+          : '';
+
+      if (s && s.length) {
+        s.split('\n').forEach((line) => {
+          if (!line) return;
+          try {
+            const obj = JSON.parse(line);
+            const t = obj?.type, k = obj?.kind;
+            if (t === 'state' && k === 'init') {
+              slog(reqTag, 'out', 'init', 'LL=', obj?.landlord);
+            } else if (t === 'event' && k === 'play') {
+              slog(reqTag, 'out', 'play', obj?.seat, obj?.move, obj?.cards ? obj.cards.length : 0);
+            } else if (t === 'event' && k === 'rob') {
+              slog(reqTag, 'out', 'rob', obj?.seat, obj?.rob);
+            } else if (t === 'event' && k === 'trick-reset') {
+              slog(reqTag, 'out', 'trick-reset');
+            } else if (t === 'event' && k === 'win') {
+              slog(reqTag, 'out', 'win', obj?.winner, obj?.multiplier, obj?.deltaScores);
+            } else if (t === 'log') {
+              const msg = (obj?.message || '').toString();
+              if (/(开始|结束|提前终止|错误)/.test(msg)) slog(reqTag, 'log', msg);
+            } else if (t === 'ka') {
+              // 心跳太频繁；如需可放开：slog(reqTag, 'ka');
+            }
+          } catch { /* 非 JSON 行忽略 */ }
+        });
+      }
+    } catch { /* 忽略解析错误，绝不影响写出 */ }
+    return __oldWrite(chunk, ...args as any);
+  };
+
+  res.once('close', () => slog('CLOSE', reqTag));
+  res.once('finish', () => slog('FINISH', reqTag));
+  /* ===================== NDJSON 后端调试注入（完） ===================== */
+
   // 心跳：1s
   const writeLineKA = (obj:any)=>{ (res as any).write(JSON.stringify(obj)+'\n'); };
   const __ka = setInterval(()=>{ try{ if((res as any).writableEnded){ clearInterval(__ka as any); } else { writeLineKA({ type:'ka', ts: new Date().toISOString() }); } }catch{} }, 1000);

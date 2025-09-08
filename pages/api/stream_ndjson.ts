@@ -1,5 +1,61 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+/* ===================== NDJSON 前端调试注入（只打日志，不改行为） ===================== */
+(function () {
+  if (typeof window === 'undefined') return;
+  if ((window as any).__NDJSON_FE_TRACER__) return;  // 避免重复注入
+  (window as any).__NDJSON_FE_TRACER__ = true;
+
+  const on = () => sessionStorage.getItem('ndjson.debug') === '1';
+  const log = (...a: any[]) => { if (on()) console.debug('[NDJSON/FE]', ...a); };
+
+  // 1) fetch 打点
+  const oldFetch = window.fetch;
+  window.fetch = async (...args: any[]) => {
+    const res = await oldFetch(...args as any);
+    try { log('fetch', { url: args?.[0], ok: res.ok, status: res.status }); } catch {}
+    return res;
+  };
+
+  // 2) ReadableStream.getReader().read 打点
+  const RS: any = (window as any).ReadableStream;
+  if (RS && RS.prototype && RS.prototype.getReader) {
+    const oldGetReader = RS.prototype.getReader;
+    RS.prototype.getReader = function (...args: any[]) {
+      const reader = oldGetReader.apply(this, args);
+      if (reader && typeof reader.read === 'function') {
+        const oldRead = reader.read.bind(reader);
+        reader.read = async (...rargs: any[]) => {
+          const ret = await oldRead(...rargs);
+          try { log('read', { done: !!ret?.done, bytes: ret?.value?.length || 0 }); } catch {}
+          return ret;
+        };
+      }
+      return reader;
+    };
+  }
+
+  // 3) TextDecoder.decode 打点
+  const TD: any = (window as any).TextDecoder;
+  if (TD && TD.prototype) {
+    const oldDecode = TD.prototype.decode;
+    TD.prototype.decode = function (...args: any[]) {
+      const out = oldDecode.apply(this, args as any);
+      try {
+        const src = args[0]; const stream = args?.[1]?.stream;
+        log('decode', { inBytes: src?.length || 0, stream: !!stream, outLen: typeof out === 'string' ? out.length : 0 });
+      } catch {}
+      return out;
+    };
+  }
+
+  // 4) 便捷面包屑：window.ndjsonMark('tag', {meta})
+  (window as any).ndjsonMark = (tag: string, meta?: any) => log('mark', { tag, ...meta });
+
+  log('injected');
+})();
+/* ===================== NDJSON 前端调试注入（完） ===================== */
+
 type Label = string;
 type ComboType =
   | 'single' | 'pair' | 'triple' | 'bomb' | 'rocket'
@@ -10,7 +66,7 @@ type Four2Policy = 'both' | '2singles' | '2pairs';
 
 type EventObj =
   | { type:'state'; kind:'init'; landlord:number; hands: Label[][] }
-  | { type:'event'; kind:'init'; landlord:number; hands: Label[][] }   // 兼容部分后端
+  | { type:'event'; kind:'init'; landlord:number; hands: Label[][] }
   | { type:'event'; kind:'play'; seat:number; move:'play'|'pass'; cards?:Label[]; comboType?:ComboType; reason?:string }
   | { type:'event'; kind:'rob'; seat:number; rob:boolean }
   | { type:'event'; kind:'trick-reset' }
@@ -48,7 +104,7 @@ function prettyCards(cs: Label[]): string {
   const SUITS = ['♠','♥','♣','♦'];
   let idx = 0;
   return cs.map(l=>{
-    if (l==='x' || l==='X') return `${rankOf(l)}`;  // 保留大小写：x=小王, X=大王
+    if (l==='x' || l==='X') return `${rankOf(l)}`;
     const suit = SUITS[idx % SUITS.length]; idx++;
     return `${suit}${rankOf(l)}`;
   }).join(' ');
@@ -91,7 +147,6 @@ export default function Home() {
   const [landlord, setLandlord] = useState<number>(0);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number]|null>(null);
-  // ★ 提前声明 multiplier，并建立稳定引用
   const [multiplier, setMultiplier] = useState<number>(1);
   const multiplierRef = useStable(multiplier);
 
@@ -210,20 +265,18 @@ export default function Home() {
             buf += decoder.decode(value, { stream:true });
             let idx: number;
             while ((idx = buf.indexOf('\n')) >= 0) {
-              const line = buf.slice(0, idx);           // 保留原样
+              const line = buf.slice(0, idx);
               buf = buf.slice(idx + 1);
-              if (!line.trim()) continue;               // 仅用于判空
+              if (!line.trim()) continue;
               try { batch.push(JSON.parse(line)); } catch {}
             }
           } else {
-            // ★ 流结束：把最后缓冲区里没有换行的“残留一行”也吃掉，然后继续走 batch 处理，再 break
             const tail = buf;
             buf = '';
             if (tail && tail.trim()) { try { batch.push(JSON.parse(tail)); } catch {} }
           }
 
           if (batch.length) {
-            // Take snapshots
             let nextHands = handsRef.current.map(x => [...x]);
             let nextPlays = [...playsRef.current];
             let nextTotals = [...totalsRef.current] as [number,number,number];
@@ -266,7 +319,6 @@ export default function Home() {
                   } else {
                     const cards: Label[] = (m.cards || []).slice().sort((a:Label,b:Label)=>orderIndex(a)-orderIndex(b));
                     nextPlays.push({ seat: m.seat, move:'play', cards, comboType: m.comboType, reason: m.reason });
-                    // 从手牌移除已出牌（多张同点数时逐一剔除）
                     const remove = [...(m.cards||[])];
                     nextHands[m.seat] = nextHands[m.seat].filter(x=>{
                       const i = remove.indexOf(x);
@@ -292,8 +344,7 @@ export default function Home() {
                 }
 
                 if (m.type === 'log') nextLog.push(m.message);
-                if (m.type === 'ka') { /* keep-alive; 可选：更新 UI 心跳 */ }
-
+                if (m.type === 'ka') { /* keep-alive */ }
               } catch {}
             }
 
@@ -308,7 +359,7 @@ export default function Home() {
             setMultiplier(nextMultiplier);
           }
 
-          if (done) break; // ★ 放到 batch 处理之后，再退出循环
+          if (done) break;
         }
       };
 
