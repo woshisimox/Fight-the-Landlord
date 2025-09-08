@@ -8,6 +8,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
  * - UI 基本保持你原样，只在标题旁加了 “UI v5” 徽标以便确认已更新
  */
 
+type BotChoice =
+  | 'built-in:greedy-max'
+  | 'built-in:greedy-min'
+  | 'built-in:random-legal'
+  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
+  | 'http';
+
 type Label = string;
 type ComboType =
   | 'single' | 'pair' | 'triple' | 'bomb' | 'rocket'
@@ -27,7 +34,6 @@ type EventObj =
   | { type:'ka' }
   | any;
 
-type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
