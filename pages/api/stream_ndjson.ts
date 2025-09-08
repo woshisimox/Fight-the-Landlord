@@ -51,7 +51,7 @@ function chooseBot(
     case 'ai:grok':   return GrokBot({ apiKey: keys?.grok   ?? '', model }) as unknown as BotFunc;
     case 'ai:kimi':   return KimiBot({ apiKey: keys?.kimi   ?? '', model }) as unknown as BotFunc;
     case 'ai:qwen':   return QwenBot({ apiKey: keys?.qwen   ?? '', model }) as unknown as BotFunc;
-    case 'http':      return HttpBot({ base: base ?? '', token: token ?? '', model }) as unknown as BotFunc;
+    case 'http':      return HttpBot({ base: base ?? '', token: token ?? '' }) as unknown as BotFunc; // ← 移除 model
     default:          return async (ctx:any)=>GreedyMax(ctx);
   }
 }
@@ -150,8 +150,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       qwen:    body.seatKeys?.W ?? '',
     };
 
-    let scores: [number,number,number] = [0,0,0];
-
     for (let round=1; round<=rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
 
@@ -172,12 +170,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       for await (const _ of iter as any) { /* no-op */ }
 
       // 服务器端仅做日志与累计（胜负由前面的 writeLine 'win' 事件给前端）
-      // 这里仍给出一个“本局结束”的辅助日志
-      writeLine(res, { type:'log', message:`第 ${round} 局结束（详见前端 'win' 事件）；当前累计积分以前端为准。` });
+      writeLine(res, { type:'log', message:`第 ${round} 局结束（详见前端 'win' 事件）。` });
 
-      if (body.stopBelowZero && (scores[0]<0 || scores[1]<0 || scores[2]<0)) {
-        writeLine(res, { type:'log', message:`某方积分 < 0，提前终止。` });
-        break;
+      if (body.stopBelowZero) {
+        // 若前端累计出现 <0，可在前端触发停止；后端仅记录提示
+        // 这里不读取前端状态，避免耦合
       }
 
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
