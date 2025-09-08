@@ -25,7 +25,7 @@ type BotChoice =
   | 'http';
 
 type LiveProps = {
-  rounds: number;                 // 多局数（目标总局数）
+  rounds: number;                 // 多局数（后端连打）
   startScore: number;
   seatDelayMs?: number[];         // 每家最小间隔（ms）
   enabled: boolean;
@@ -95,7 +95,7 @@ function Card({ label }: { label:string }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-  // Joker：大王 Y=红，小王 X=绿
+  // Joker：大王 X=红，小王 x=绿
   const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
   return (
     <span style={{
@@ -175,6 +175,7 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
+
   // 首次启动时，将总分重置为初始分；后续多局不会清零
   const prevRunningRef = useRef(false);
   useEffect(() => {
@@ -190,21 +191,31 @@ function LivePanel(props: LiveProps) {
 
   const controllerRef = useRef<AbortController|null>(null);
   // --- Batch ingest state mirrors (for robust chunk processing) ---
-  const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
-  const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
-  const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
-  const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
-  const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
-  const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
-  const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
-  const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
-  const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
-  const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
-  const runningRef = useRef(running); useEffect(() => { runningRef.current = running; }, [running]);
-  // --- End mirrors ---
+const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
+const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
+const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
+const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
+const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
+const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
+const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
+const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
+const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
+// --- End mirrors ---
 
-  // 单局执行：向后端发起 rounds=1 的流式请求；结束后返回 true；若被停止/错误则返回 false
-  const playOne = async (): Promise<boolean> => {
+
+  const start = async () => {
+    if (running) return;
+    setRunning(true);
+    setLandlord(null);
+    setHands([[],[],[]]);
+    setPlays([]);
+    setWinner(null);
+    setDelta(null);
+    setMultiplier(1);
+    setLog([]);
+    setFinishedCount(0);
+
     controllerRef.current = new AbortController();
 
     try {
@@ -212,7 +223,7 @@ function LivePanel(props: LiveProps) {
         method:'POST',
         headers: { 'content-type':'application/json' },
         body: JSON.stringify({
-          rounds: 1,                    // ★ 每次只请求 1 局
+          rounds: props.rounds,          // 后端连续多局
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
@@ -236,6 +247,7 @@ function LivePanel(props: LiveProps) {
           if (done) break;
           buf += decoder.decode(value, { stream:true });
 
+          
           let idx: number;
           const batch: any[] = [];
           while ((idx = buf.indexOf('\n')) >= 0) {
@@ -318,7 +330,7 @@ function LivePanel(props: LiveProps) {
                   nextLog = [...nextLog, `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`];
                   nextTotals = [ nextTotals[0] + m.deltaScores[0], nextTotals[1] + m.deltaScores[1], nextTotals[2] + m.deltaScores[2] ] as any;
                   nextFinished = nextFinished + 1;
-                  winsRef.current = (winsRef.current||0) + 1;  // ★ 累计已完成局数（用于前端串联多局）
+                  winsRef.current = (winsRef.current||0) + 1;
                   continue;
                 }
 
@@ -342,43 +354,16 @@ function LivePanel(props: LiveProps) {
             setMultiplier(nextMultiplier);
             setDelta(nextDelta);
           }
+
         }
       };
 
       await pump();
-      return true;
     } catch (e:any) {
       if (e?.name === 'AbortError') {
         setLog(l => [...l, '已手动停止。']);
       } else {
         setLog(l => [...l, `错误：${e?.message || e}`]);
-      }
-      return false;
-    }
-  };
-
-  const start = async () => {
-    if (running) return;
-    setRunning(true);
-
-    // 首局开始前做清理；后续局由服务端事件驱动刷新（不清 totals）
-    setLandlord(null);
-    setHands([[],[],[]]);
-    setPlays([]);
-    setWinner(null);
-    setDelta(null);
-    setMultiplier(1);
-    setLog([]);
-    setFinishedCount(0);
-    winsRef.current = 0;
-
-    try {
-      // 串行执行：一局一请求，直至达到目标 rounds 或被手动停止
-      while (runningRef.current && (winsRef.current || 0) < (props.rounds || 1)) {
-        const ok = await playOne();
-        if (!ok) break;                        // 发生中断/错误则退出循环
-        if (!runningRef.current) break;        // 手动停止
-        // 循环继续，自动开始下一局（仍旧向后端传 rounds=1）
       }
     } finally {
       setRunning(false);
@@ -389,9 +374,9 @@ function LivePanel(props: LiveProps) {
     controllerRef.current?.abort();
     setRunning(false);
   };
-
   // 剩余局数（包含当前局）：总局数 - 已完成局数
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
+
 
   return (
     <div>
