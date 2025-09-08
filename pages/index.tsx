@@ -14,7 +14,85 @@ type ComboType =
   | 'single' | 'pair' | 'triple' | 'bomb' | 'rocket'
   | 'straight' | 'pair-straight' | 'plane'
   | 'triple-with-single' | 'triple-with-pair'
-...
+  | 'four-with-two-singles' | 'four-with-two-pairs';
+type Four2Policy = 'both' | '2singles' | '2pairs';
+
+type EventObj =
+  | { type:'state'; kind:'init'; landlord:number; hands: Label[][] }
+  | { type:'event'; kind:'init'; landlord:number; hands: Label[][] }   // 兼容部分后端
+  | { type:'event'; kind:'play'; seat:number; move:'play'|'pass'; cards?:Label[]; comboType?:ComboType; reason?:string }
+  | { type:'event'; kind:'rob'; seat:number; rob:boolean }
+  | { type:'event'; kind:'trick-reset' }
+  | { type:'event'; kind:'win'; winner:number; multiplier:number; deltaScores:[number,number,number] }
+  | { type:'log'; message:string }
+  | any;
+
+type PlayRowT = { seat:number; move:'play'|'pass'; cards?:string[]; reason?:string };
+
+function SeatTitle({ i }: { i:number }) {
+  return <span style={{ fontWeight:700 }}>{['甲','乙','丙'][i]}</span>;
+}
+
+/* ---------- 花色渲染（前端显示专用） ---------- */
+type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
+const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
+
+// 只提取点数；处理 10→T、大小写
+const rankOf = (l: string) => {
+  if (!l) return '';
+  const c0 = l[0];
+  if ('♠♥♦♣'.includes(c0)) return l.slice(1).replace(/10/i, 'T').toUpperCase();
+  if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
+  return l.replace(/10/i, 'T').toUpperCase();
+};
+
+// 返回所有可能的装饰写法（用于从后端原始标签映射到前端装饰牌）
+function candDecorations(l: string): string[] {
+  if (!l) return [];
+  // Joker 映射：为避免大小写，统一用大写字母区分：小王=X，大王=Y
+  if (l === 'x') return ['🃏X'];  // 小王
+  if (l === 'X') return ['🃏Y'];  // 大王
+  if (l.startsWith('🃏')) return [l];
+  if ('♠♥♦♣'.includes(l[0])) return [l];
+  const r = rankOf(l);
+  if (r === 'JOKER') return ['🃏Y']; // 兜底，极少出现
+  return SUITS.map(s => `${s}${r}`);
+}
+
+// 把一手原始手牌装饰为均匀花色
+function decorateHandCycle(labels: string[]): string[] {
+  const ranks = labels.map(rankOf);
+  let idx = 0;
+  return ranks.map(r => {
+    if (r === 'X') return '🃏X';
+    if (r === 'Y' || r === 'JOKER') return '🃏Y';
+    const suit = SUITS[idx % SUITS.length]; idx++;
+    return `${suit}${r}`;
+  });
+}
+
+// 单张牌渲染
+function Card({ label }: { label: string }) {
+  const rank = useMemo(() => rankOf(label), [label]);
+  const suit = useMemo(() => (label[0] === '🃏' ? '🃏' : label[0]), [label]) as SuitSym;
+  const rankColor = suit === '♥' || suit === '♦' ? '#d23' : undefined;
+  return (
+    <span style={{
+      display:'inline-flex', alignItems:'center', gap:6,
+      padding:'2px 6px', margin:'2px 2px', border:'1px solid #eee', borderRadius:6
+    }}>
+      <span style={{ fontSize:16 }}>{suit}</span>
+      <span style={{ fontSize:16, ...(rankColor ? { color: rankColor } : {}) }}>{rank === 'T' ? '10' : rank}</span>
+    </span>
+  );
+}
+
+function Hand({ cards }: { cards: string[] }) {
+  if (!cards || !cards.length) return <span style={{ opacity:0.6 }}>（空）</span>;
+  return <div style={{ display:'flex', flexWrap:'wrap' }}>
+    {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
+  </div>;
+}
 
 function PlayRow(
   { seat, move, cards, reason }:
@@ -34,34 +112,47 @@ function PlayRow(
   );
 }
 
-...
+// 简单区块
+function Section({ title, children }:{ title:string; children:React.ReactNode }) {
+  return (
+    <div style={{ marginBottom:16 }}>
+      <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>{title}</div>
+      <div>{children}</div>
+    </div>
+  );
+}
 
-export default function Home(props: {
+function LogLine({ text }:{ text:string }) {
+  return <div style={{ fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace', fontSize:12 }}>{text}</div>;
+}
+
+/* ==================== 实时对局面板 ==================== */
+function LivePanel(props: {
   rounds: number;
-  startScore?: [number,number,number];
-  seatDelayMs?: [number,number,number];
-  enabled?: [boolean,boolean,boolean];
+  startScore: [number,number,number];
+  seatDelayMs: number;
+  enabled?: boolean[];
   rob?: boolean;
-  four2?: boolean;
-  seats?: any;
-  seatModels?: any;
-  seatKeys?: any;
-  onLog?: (lines:string[])=>void;
+  four2?: Four2Policy;
+  seats?: string[];
+  seatModels?: string[];
+  seatKeys?: Record<string,string>;
+  onLog?: (lines: string[]) => void;
 }) {
   const [running, setRunning] = useState(false);
-  const controllerRef = useRef<AbortController|null>(null);
-
-  const [hands, setHands] = useState<Label[][]>([[],[],[]]);
-  const [plays, setPlays] = useState<{seat:number;move:'play'|'pass';cards?:Label[];reason?:string}[]>([]);
-  const [totals, setTotals] = useState<[number,number,number]>(props.startScore || [0,0,0]);
+  const [landlord, setLandlord] = useState<number|null>(null);
+  const [hands, setHands] = useState<string[][]>([[],[],[]]);
+  const [plays, setPlays] = useState<PlayRowT[]>([]);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number]|null>(null);
   const [multiplier, setMultiplier] = useState(1);
+  const [totals, setTotals] = useState<[number,number,number]>(props.startScore || [0,0,0]);
   const [log, setLog] = useState<string[]>([]);
-  const [landlord, setLandlord] = useState<number|null>(null);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  // —— ref 快照，避免闭包读到旧值 ——
+  const controllerRef = useRef<AbortController|null>(null);
+
+  // —— 镜像到 ref，批处理时读取 ——
   const handsRef = useRef(hands); useEffect(()=>{ handsRef.current = hands; },[hands]);
   const playsRef = useRef(plays); useEffect(()=>{ playsRef.current = plays; },[plays]);
   const totalsRef = useRef(totals); useEffect(()=>{ totalsRef.current = totals; },[totals]);
@@ -73,7 +164,6 @@ export default function Home(props: {
   const multiplierRef = useRef(multiplier); useEffect(()=>{ multiplierRef.current = multiplier; },[multiplier]);
   const winsRef = useRef(0); useEffect(()=>{ winsRef.current = finishedCount; },[finishedCount]);
 
-  // ====================== A 方案：分段拉流 + 自动续跑（替换原 start） ======================
   const start = async () => {
     if (running) return;
     setRunning(true);
@@ -87,12 +177,13 @@ export default function Home(props: {
     setFinishedCount(0);
 
     const t0 = (typeof performance!=='undefined' ? performance.now() : Date.now());
+
     try {
       // —— 分段拉流，直到跑满 props.rounds 或被 stop() 终止 ——
-      while (winsRef.current < (props.rounds || 1)) {
-        // 每段连接单独的 AbortController（便于 stop() 立即生效）
+      while ((winsRef.current||0) < (props.rounds || 1)) {
+        // 每段连接单独的 AbortController
         controllerRef.current = new AbortController();
-        const remaining = (props.rounds || 1) - winsRef.current;
+        const remaining = (props.rounds || 1) - (winsRef.current||0);
 
         try {
           const r = await fetch('/api/stream_ndjson', {
@@ -134,7 +225,6 @@ export default function Home(props: {
             for (const raw of batch) {
               const m: any = raw;
               try {
-                // 轻量心跳日志（可注掉）
                 const tt = m?.type || '?'; const kk = m?.kind || '';
                 nextLog.push(`[rx] ${tt}${kk?('/'+kk):''}`);
 
@@ -142,20 +232,22 @@ export default function Home(props: {
                 const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
 
                 if (hasHands) {
-                  // 初始化/重发手牌
-                  nextHands = rh.map((arr: any[]) => (arr || []).map((l: string) => (candDecorations(l)[0] || l)));
-                  if (m.landlord!=null) nextLandlord = m.landlord;
                   nextPlays = [];
+                  nextWinner = null;
+                  nextDelta = null;
+                  // 允许后端在每局开头重发手牌
+                  nextHands = (rh as any[]).map((arr:any[]) => decorateHandCycle(arr || []));
+                  if (m.landlord!=null) nextLandlord = m.landlord;
                   continue;
                 }
 
-                if (m.type === 'event' && m.kind === 'landlord') {
+                if (m.type === 'event' && m.kind === 'rob') {
                   nextLandlord = m.seat;
                   nextLog.push(`地主：${['甲','乙','丙'][m.seat]}`);
                   continue;
                 }
 
-                if (m.type === 'event' && m.kind === 'round-reset') {
+                if (m.type === 'event' && m.kind === 'trick-reset') {
                   nextLog.push('一轮结束，重新起牌');
                   nextPlays = [];
                   continue;
@@ -173,35 +265,41 @@ export default function Home(props: {
                     for (const rawCard of cards) {
                       const options = candDecorations(rawCard);
                       const chosen = options.find((d:string) => nh[seat].includes(d)) || options[0];
+                      const k = nh[seat].indexOf(chosen);
+                      if (k >= 0) nh[seat].splice(k, 1);
                       pretty.push(chosen);
-                      // 从该玩家手牌移除一张
-                      const ix = nh[seat].indexOf(chosen);
-                      if (ix>=0) nh[seat].splice(ix,1);
                     }
                     nextHands = nh;
-                    nextPlays = [...nextPlays, { seat, move:'play', cards: pretty, reason:m.reason }];
-                    nextLog.push(`${['甲','乙','丙'][seat]} 出：${pretty.join(' ')}`);
+                    nextPlays = [...nextPlays, { seat:m.seat, move:'play', cards: pretty }];
+                    nextLog.push(`${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`);
                   }
                   continue;
                 }
 
-                if (m.type === 'event' && m.kind === 'finish') {
-                  nextWinner = m.seat;
-                  nextDelta = m.delta;
+                if (m.type === 'event' && m.kind === 'win') {
+                  nextWinner = m.winner;
+                  nextMultiplier = m.multiplier;
+                  nextDelta = m.deltaScores;
+                  nextLog.push(`胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分变更 ${m.deltaScores.join(' / ')}`);
                   nextTotals = [
-                    nextTotals[0] + (m.delta?.[0] ?? 0),
-                    nextTotals[1] + (m.delta?.[1] ?? 0),
-                    nextTotals[2] + (m.delta?.[2] ?? 0),
-                  ] as [number,number,number];
-                  nextMultiplier = m.multiplier ?? nextMultiplier;
+                    nextTotals[0] + (m.deltaScores?.[0] ?? 0),
+                    nextTotals[1] + (m.deltaScores?.[1] ?? 0),
+                    nextTotals[2] + (m.deltaScores?.[2] ?? 0),
+                  ];
                   nextFinished = nextFinished + 1;
-                  nextLog.push(`—— 第 ${nextFinished} 局结束：胜者 ${['甲','乙','丙'][m.seat]}，倍数 x${nextMultiplier} ——`);
+                  winsRef.current = (winsRef.current||0) + 1;
                   continue;
                 }
-              } catch {}
+
+                if (m.type === 'log' && typeof m.message === 'string') {
+                  nextLog.push(m.message);
+                  continue;
+                }
+              } catch(e) {
+                console.error('[ingest:batch]', e, raw);
+              }
             }
 
-            // 批量提交（合并 setState，降低渲染抖动）
             setHands(nextHands);
             setPlays(nextPlays);
             setTotals(nextTotals);
@@ -219,10 +317,10 @@ export default function Home(props: {
               if (done) break;
               let chunk = decoder.decode(value, { stream:true });
               if (!chunk) continue;
-              // 解析 NDJSON
-              buf += chunk;
               let idx:number;
               const batch:any[] = [];
+              // 累积并分行
+              buf += chunk;
               while ((idx = buf.indexOf('\n')) >= 0) {
                 const line = buf.slice(0, idx).trim();
                 buf = buf.slice(idx + 1);
@@ -231,8 +329,7 @@ export default function Home(props: {
               }
               if (batch.length) {
                 commitBatch(batch);
-                // 微让步一帧，防止 UI 被长批次饿死
-                await new Promise(r => setTimeout(r, 0));
+                await new Promise(r => setTimeout(r, 0)); // 微让步
               }
             }
             // 尾包
@@ -244,12 +341,10 @@ export default function Home(props: {
 
           await pump();
           try { reader.releaseLock(); } catch {}
-          // 一段连接自然结束；若还有剩余局数，外层 while 会立即续跑
         } catch (err:any) {
-          // 用户点击“停止”后触发的中断
-          if (err?.name === 'AbortError') break;
-          // 其他异常：写日志并尝试续跑
+          if (err?.name === 'AbortError') break; // 用户点击停止
           setLog(v => [...v, `[前端异常] ${err?.message || String(err)}（将尝试续跑）`]);
+          // 其他异常：继续 while，立刻续跑
         }
       }
     } finally {
@@ -270,7 +365,7 @@ export default function Home(props: {
     <div>
       {/* 剩余局数徽标（不改 UI 结构，仅补一个轻量展示） */}
       <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
-        <span style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'2px 8px', border:'1px solid #eee', borderRadius:6, fontSize:12, lineHeight:1.2, userSelect:'none', background:'#fff' }}>
+        <span style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'4px 8px', border:'1px solid #eee', borderRadius:8, fontSize:12, lineHeight:1.2, userSelect:'none', background:'#fff' }}>
           剩余局数：{remainingGames}
         </span>
       </div>
@@ -324,6 +419,54 @@ export default function Home(props: {
           }
         </div>
       </Section>
+    </div>
+  );
+}
+
+export default function Home() {
+  // 维持你的原始默认 UI 配置；若你的外层已有这些控件，可忽略下面容器，只保留 <LivePanel ... />
+  const [rounds] = useState(100);
+  const [startScore] = useState<[number,number,number]>([0,0,0]);
+  const [seatDelayMs] = useState(100);
+  const [enabled] = useState<boolean[]|undefined>(undefined);
+  const [rob] = useState<boolean>(true);
+  const [four2] = useState<Four2Policy>('both');
+  const [seats] = useState<string[]|undefined>(undefined);
+  const [seatModels] = useState<string[]|undefined>(undefined);
+  const [seatKeys] = useState<Record<string,string>|undefined>(undefined);
+  const [liveLog, setLiveLog] = useState<string[]>([]);
+
+  return (
+    <div style={{ maxWidth: 1100, margin: '20px auto', padding: '0 12px' }}>
+      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
+        <LivePanel
+          rounds={rounds}
+          startScore={startScore}
+          seatDelayMs={seatDelayMs}
+          enabled={enabled}
+          rob={rob}
+          four2={four2}
+          seats={seats}
+          seatModels={seatModels}
+          seatKeys={seatKeys}
+          onLog={setLiveLog}
+        />
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:12, marginTop:12 }}>
+        <Section title="运行日志">
+          <div style={{
+            border:'1px solid #eee', borderRadius:8, padding:'8px 10px',
+            maxHeight:420, overflow:'auto', background:'#fafafa'
+          }}>
+            {liveLog.length === 0
+              ? <div style={{ opacity:0.6 }}>（暂无）</div>
+              : liveLog.map((t, idx) => <LogLine key={idx} text={t} />)
+            }
+          </div>
+        </Section>
+      </div>
     </div>
   );
 }
