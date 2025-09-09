@@ -8,8 +8,7 @@ import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizh
 function writeLine(res: NextApiResponse, obj: any) {
   try {
     const line = JSON.stringify(obj) + '\n';
-    // @ts-expect-error - Node 写入
-    res.write(line);
+    (res as any).write(line);
   } catch {}
 }
 
@@ -65,11 +64,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
-  // Vercel/Edge 环境下无需强制写 Transfer-Encoding，但保留不影响
-  // res.setHeader('Transfer-Encoding', 'chunked');
 
   // —— 解析 Body —— //
-  const rawBody = typeof req.body === 'string' ? req.body : (req.body ? JSON.stringify(req.body) : '{}');
   const body = (() => {
     try { return typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {}); }
     catch { return {}; }
@@ -97,12 +93,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // Keep-Alive：防止中间层过早断开（15s 一次心跳）
   const __ka = setInterval(() => {
     writeLine(res, { type: 'ping', t: Date.now() });
-    // @ts-expect-error - flush in Node
     try { (res as any).flush?.(); } catch {}
   }, 15000);
 
   // 连接关闭时，清理心跳
-  // @ts-expect-error - Node 'close' 事件
   res.on?.('close', () => { try { clearInterval(__ka as any); } catch {} });
 
   // 组装三个席位的 Bot
@@ -182,7 +176,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     okEnded = true;
     // 结束前尽量 flush，随后关闭 keep-alive 并正常结束流
-    // @ts-expect-error - Node flush
     try { (res as any).flush?.(); } catch {}
     try { clearInterval(__ka as any); } catch {}
     res.end();
