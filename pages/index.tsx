@@ -367,7 +367,7 @@ const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; },
       for (let i = 0; i < props.rounds; i++) {
         if (controllerRef.current?.signal.aborted) break;
         await playOneGame(i);
-		await new Promise(r => setTimeout(r, 2000));//等待2秒发起新一局
+		await new Promise(r => setTimeout(r, 1000 + Math.floor(Math.random() * 1000)));//等待2秒发起新一局
       }
     } catch (e: any) {
       if (e?.name === 'AbortError') {
