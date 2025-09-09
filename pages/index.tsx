@@ -109,4 +109,17 @@ function Card({ label }: { label:string }) {
   );
 }
 
-function Hand(
+// === 修复：Hand 组件（原样替换这整个函数）===
+function Hand({ cards }: { cards: string[] }) {
+  if (!cards || cards.length === 0) {
+    return <span style={{ opacity: 0.6 }}>（空）</span>;
+  }
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+      {cards.map((c, idx) => (
+        <Card key={`${c}-${idx}`} label={c} />
+      ))}
+    </div>
+  );
+}
+// === 修复结束 ===
