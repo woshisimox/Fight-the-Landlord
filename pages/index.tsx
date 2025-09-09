@@ -8,9 +8,10 @@ type ComboType =
   | 'four-with-two-singles' | 'four-with-two-pairs';
 type Four2Policy = 'both' | '2singles' | '2pairs';
 
+// 仅为了类型参考（不强制使用），如你的项目启用了 noUnusedLocals，可删除这段
 type EventObj =
   | { type:'state'; kind:'init'; landlord:number; hands: CardLabel[][] }
-  | { type:'event'; kind:'init'; landlord:number; hands: CardLabel[][] }   // 兼容部分后端
+  | { type:'event'; kind:'init'; landlord:number; hands: CardLabel[][] }
   | { type:'event'; kind:'play'; seat:number; move:'play'|'pass'; cards?:CardLabel[]; comboType?:ComboType; reason?:string }
   | { type:'event'; kind:'rob'; seat:number; rob:boolean }
   | { type:'event'; kind:'trick-reset' }
@@ -63,7 +64,7 @@ const rankOf = (l: string) => {
   return l.replace(/10/i, 'T').toUpperCase();
 };
 
-// 返回所有可能的装饰写法（用于从后端原始标签映射到前端装饰牌）
+// 返回可能的装饰写法（把后端原始标签映射到前端装饰牌）
 function candDecorations(l: string): string[] {
   if (!l) return [];
   // Joker 映射：小王=x→🃏X，大王=X→🃏Y（仅用于前端显示）
@@ -72,7 +73,7 @@ function candDecorations(l: string): string[] {
   if (l.startsWith('🃏')) return [l];
   if ('♠♥♦♣'.includes(l[0])) return [l];
   const r = rankOf(l);
-  if (r === 'JOKER') return ['🃏Y']; // 兜底，极少出现
+  if (r === 'JOKER') return ['🃏Y']; // 兜底
   return SUITS.map(s => `${s}${r}`);
 }
 
@@ -81,7 +82,6 @@ function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
     if (!l) return l;
-    // 统一 Joker 显示：小王=🃏X，大王=🃏Y
     if (l === 'x') return '🃏X';
     if (l === 'X') return '🃏Y';
     if (l.startsWith('🃏')) return l;
@@ -108,7 +108,6 @@ function Card({ label }: { label:string }) {
   );
 }
 
-// === Hand 组件 ===
 function Hand({ cards }: { cards: string[] }) {
   if (!cards || cards.length === 0) {
     return <span style={{ opacity: 0.6 }}>（空）</span>;
@@ -195,7 +194,7 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
-  // --- Batch ingest state mirrors (for robust chunk processing) ---
+  // --- mirrors，用于流式批处理时读到最新状态 ---
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
@@ -206,34 +205,33 @@ function LivePanel(props: LiveProps) {
   const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
   const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
   const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
-  // --- End mirrors ---
+  // --- end mirrors ---
 
-  /* === 新增&强化：将后端“第 1 局开始 / 开始第 1 局… / 开始连打 1 局… / 单局模式…运行 1 局…”改写为真实局号 === */
+  /* === 日志开头“第 1 局/开始第 1 局/开始连打 1 局/单局模式…1 局” → 改写为真实局号 === */
   const rewriteRoundLabel = (msg: string) => {
-    // 用 winsRef（在 win 事件里同步递增）来计算“当前局 = 已完成 + 1”
+    // 当前局号 = 已完成局数 + 1（winsRef 在 win 事件里同步递增）
     const n = Math.max(1, (winsRef.current || 0) + 1);
     if (typeof msg !== 'string') return msg;
 
     let out = msg;
 
-    // 1) 「—— 第 1 局开始 ——」
+    // 「—— 第 1 局开始 ——」
     out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
 
-    // 2) 「开始第 1 局（…」或英文括号
+    // 「开始第 1 局（…」/ 「开始第 1 局(…」
     out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
     out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
 
-    // 3) 「开始连打 1 局（…」或英文括号
+    // 「开始连打 1 局（…」/ 「开始连打 1 局(…」
     out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
     out = out.replace(/开始连打\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
 
-    // 4) 「单局模式……(仅运行|运行) 1 局（…」或英文括号
+    // 「单局模式……(仅运行|运行) 1 局（…」/ 「…(」
     out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
     out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
 
     return out;
   };
-  /* === 新增结束 === */
 
   const start = async () => {
     if (running) return;
@@ -249,16 +247,18 @@ function LivePanel(props: LiveProps) {
     setLog([]);
     setFinishedCount(0);
 
-    // 统一的 Abort 控制器，点击「停止」或页面卸载即可终止当前这局以及后续续跑
     controllerRef.current = new AbortController();
 
-    // 单局请求：复用现有 NDJSON 解析与批量提交逻辑，但每次只打 1 局，后端自然结束流
+    // 每次只打一局；后端流结束→下一次再发请求
     const playOneGame = async (gameIndex: number) => {
+      // ✅ 新一局开始：清空前端日志，只展示本局
+      setLog([]);
+
       const r = await fetch('/api/stream_ndjson', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          rounds: 1,                     // ⭐ 每个请求只打 1 局
+          rounds: 1,
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
@@ -367,12 +367,11 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // === 改动处②：日志进入前先改写为真实局号 ===
+              // —— 其它日志：进入前改写局号 —— //
               if (m.type === 'log' && typeof m.message === 'string') {
                 nextLog = [...nextLog, rewriteRoundLabel(m.message)];
                 continue;
               }
-              // === 改动结束 ===
             } catch (e) {
               console.error('[ingest:batch]', e, raw);
             }
@@ -391,8 +390,8 @@ function LivePanel(props: LiveProps) {
         }
       }
 
-      // 单局结束后追加一条标记日志（可选，方便观察续跑）
-      setLog(l => [...l, `—— 单局流结束，第 ${Math.min(finishedRef.current, gameIndex + 1)}/${props.rounds} 局 ——`]);
+      // （可选）单局流结束提示——仍属于本局日志
+      setLog(l => [...l, `—— 本局流结束 ——`]);
     };
 
     try {
@@ -400,7 +399,7 @@ function LivePanel(props: LiveProps) {
         if (controllerRef.current?.signal.aborted) break;
         await playOneGame(i);
 
-        // 局间等待（示例：固定 1000ms + 随机 <1000ms；如不需要可删除此段）
+        // 局间等待：固定 1000ms + 随机 <1000ms（可按需修改或删除）
         await new Promise(r => setTimeout(r, 1000 + Math.floor(Math.random() * 1000)));
       }
     } catch (e: any) {
