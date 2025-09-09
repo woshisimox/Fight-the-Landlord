@@ -208,20 +208,29 @@ function LivePanel(props: LiveProps) {
   const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
   // --- End mirrors ---
 
-  /* === 新增：把后端“第 1 局开始 / 开始连打 1 局 … / 单局模式…运行 1 局 …”改写为全局真实局号 === */
+  /* === 新增&强化：将后端“第 1 局开始 / 开始第 1 局… / 开始连打 1 局… / 单局模式…运行 1 局…”改写为真实局号 === */
   const rewriteRoundLabel = (msg: string) => {
-    const n = Math.max(1, (finishedRef.current || 0) + 1);
+    // 用 winsRef（在 win 事件里同步递增）来计算“当前局 = 已完成 + 1”
+    const n = Math.max(1, (winsRef.current || 0) + 1);
+    if (typeof msg !== 'string') return msg;
+
     let out = msg;
-    if (typeof out === 'string') {
-      // —— 第 1 局开始 ——  →  —— 第 n 局开始 ——
-      out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
-      // 开始连打 1 局（…）/ (…)
-      out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-      out = out.replace(/开始连打\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
-      // 单局模式…仅运行/运行 1 局（…）/ (…)
-      out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
-      out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
-    }
+
+    // 1) 「—— 第 1 局开始 ——」
+    out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
+
+    // 2) 「开始第 1 局（…」或英文括号
+    out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
+    out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
+
+    // 3) 「开始连打 1 局（…」或英文括号
+    out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
+    out = out.replace(/开始连打\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
+
+    // 4) 「单局模式……(仅运行|运行) 1 局（…」或英文括号
+    out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
+    out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
+
     return out;
   };
   /* === 新增结束 === */
