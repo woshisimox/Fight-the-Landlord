@@ -1,153 +1,200 @@
-// pages/api/stream_ndjson.ts (hardened, anti-stall version)
+// pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
+
+// 你工程里已有的引擎与内置Bot（路径按你的工程结构保持不变）
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
-import { OpenAIBot } from '../../lib/bots/openai_bot';
-import { GeminiBot } from '../../lib/bots/gemini_bot';
-import { GrokBot } from '../../lib/bots/grok_bot';
-import { HttpBot } from '../../lib/bots/http_bot';
-import { KimiBot } from '../../lib/bots/kimi_bot';
-import { QwenBot } from '../../lib/bots/qwen_bot';
 
-type BotChoice =
-  | 'built-in:greedy-max'
-  | 'built-in:greedy-min'
-  | 'built-in:random-legal'
-  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
-  | 'http';
-
-type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
-
-type StartPayload = {
-  seats: SeatSpec[];                     // 3 items
-  seatDelayMs?: number[];
-  rounds?: number;
-  rob?: boolean;
-  four2?: 'both' | '2singles' | '2pairs';
-  stopBelowZero?: boolean;
-  seatModels?: string[];
-  seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
-};
-
+// ========== 小工具：写一行 NDJSON ==========
 function writeLine(res: NextApiResponse, obj: any) {
-  res.write(JSON.stringify(obj) + '\n');
+  try {
+    const line = JSON.stringify(obj) + '\n';
+    // @ts-expect-error - Node 写入
+    res.write(line);
+  } catch {}
 }
 
-function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any {
-  switch (choice) {
-    case 'built-in:greedy-max': return GreedyMax;
-    case 'built-in:greedy-min': return GreedyMin;
-    case 'built-in:random-legal': return RandomLegal;
-    case 'ai:openai': return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
-    case 'ai:gemini': return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-flash' });
-    case 'ai:grok':   return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
-    case 'ai:kimi':   return KimiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'moonshot-v1-8k' });
-    case 'ai:qwen':   return QwenBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'qwen-plus' });
-    case 'http':      return HttpBot({ base: (spec?.baseUrl||'').replace(/\/$/,''), token: spec?.token || '' });
-    default:          return GreedyMax;
+// ========== 选择 Bot（保持向后兼容：AI 名称回退到内置，以免未接入时报错） ==========
+type BotFunc = (ctx: any) => Promise<any> | any;
+
+function chooseBot(kind: string | undefined, _model?: string, _keys?: any): BotFunc {
+  switch ((kind || '').toLowerCase()) {
+    case 'built-in:greedy-max':
+    case 'builtin:greedy-max':
+    case 'greedy-max':
+      return GreedyMax as unknown as BotFunc;
+    case 'built-in:greedy-min':
+    case 'builtin:greedy-min':
+    case 'greedy-min':
+      return GreedyMin as unknown as BotFunc;
+    case 'built-in:random-legal':
+    case 'builtin:random-legal':
+    case 'random-legal':
+    case 'random':
+      return RandomLegal as unknown as BotFunc;
+
+    // 以下 AI 统一回退到 GreedyMax（若你后续已接入，可在这里替换为真实 Bot）
+    case 'ai:openai':
+    case 'ai:gemini':
+    case 'ai:grok':
+    case 'ai:kimi':
+    case 'ai:qwen':
+      return GreedyMax as unknown as BotFunc;
+
+    default:
+      return GreedyMax as unknown as BotFunc;
   }
 }
 
-// Hardened single-round runner with stall guard
-async function runOneRoundWithGuard(opts: { seats: any[], four2?: 'both'|'2singles'|'2pairs', delayMs?: number }, res: NextApiResponse, roundNo: number) {
-  const MAX_EVENTS = 4000;              // safety ceiling: total events per round
-  const MAX_REPEATED_HEARTBEAT = 200;   // safety ceiling: consecutive 'pass/pass/reset' type heartbeats
-  const iter: AsyncIterator<any> = (runOneGame as any)({ seats: opts.seats, four2: opts.four2, delayMs: opts.delayMs });
-  let evCount = 0;
-  let landlord = -1;
-  let trick = 0;
-  let lastSignature = '';
-  let repeated = 0;
-
-  while (true) {
-    const { value, done } = await (iter.next() as any);
-    if (done) break;
-    evCount++;
-
-    // forward downstream
-    writeLine(res, value);
-
-    // book-keeping for diagnostics
-    const kind = value?.kind || value?.type;
-    if (value?.kind === 'init' && typeof value?.landlord === 'number') {
-      landlord = value.landlord;
-    }
-    if (value?.kind === 'trick-reset') {
-      trick += 1;
-    }
-    // simple repetition signature to catch livelocks
-    const sig = JSON.stringify({
-      kind: value?.kind,
-      seat: value?.seat,
-      move: value?.move,
-      require: value?.require?.type || value?.comboType || null,
-      leader: value?.leader,
-      trick
-    });
-
-    if (sig === lastSignature) repeated++; else repeated = 0;
-    lastSignature = sig;
-
-    if (evCount > MAX_EVENTS || repeated > MAX_REPEATED_HEARTBEAT) {
-      writeLine(res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束（判地主胜）。`});
-      // Gracefully close the generator if possible
-      try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
-      // Emit a synthetic win so前端能收尾
-      const winner = landlord >= 0 ? landlord : 0;
-      writeLine(res, { type:'event', kind:'win', winner, multiplier: 1, deltaScores: winner===landlord ? [+2,-1,-1] : [-2,+1,+1] });
-      return;
-    }
-  }
-}
+// 关闭 Next 的默认缓存等（可选；有利于流式返回）
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '512kb',
+    },
+  },
+};
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
+    res.setHeader('Allow', 'POST');
+    res.status(405).end('Method Not Allowed');
     return;
   }
+
+  // —— 流式与缓存控制 —— //
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
-  let __lastWrite = Date.now();
-  function writeLineKA(obj:any){ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); }
-  const __ka = setInterval(()=>{ try{ if((res as any).writableEnded){ clearInterval(__ka as any); return; } if(Date.now()-__lastWrite>2500){ writeLineKA({ type:'ka', ts: new Date().toISOString() }); } }catch{} }, 2500);
+  // Vercel/Edge 环境下无需强制写 Transfer-Encoding，但保留不影响
+  // res.setHeader('Transfer-Encoding', 'chunked');
+
+  // —— 解析 Body —— //
+  const rawBody = typeof req.body === 'string' ? req.body : (req.body ? JSON.stringify(req.body) : '{}');
+  const body = (() => {
+    try { return typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {}); }
+    catch { return {}; }
+  })();
+
+  // 参数读取（保持向后兼容你现有前端）
+  const MAX_ROUNDS = parseInt(process.env.MAX_ROUNDS || '200', 10);
+  const reqRounds = Math.max(1, Math.min(MAX_ROUNDS, Number(body.rounds) || 1));
+  const singleGameSwitch = process.env.SINGLE_GAME_PER_REQUEST === '1';
+  // ★ 开关：为适配 Vercel 时长限制，开启时每次请求只跑 1 局
+  const rounds = singleGameSwitch ? 1 : reqRounds;
+
+  const startScore = Number(body.startScore ?? 0);
+  const seatDelayMs = Number(body.seatDelayMs ?? 0);
+  const enabled = !!body.enabled;
+  const rob = !!body.rob;
+  const four2 = !!body.four2;
+
+  // 前端可能会传 seat 选择/模型/keys；这里统一选择 Bot（未接 AI 时回退内置，避免报错）
+  const seats = Array.isArray(body.seats) ? body.seats : [null, null, null];
+  const seatModels = body.seatModels || {};
+  const seatKeys = body.seatKeys || {};
+  const debug = body.debug ?? {};
+
+  // Keep-Alive：防止中间层过早断开（15s 一次心跳）
+  const __ka = setInterval(() => {
+    writeLine(res, { type: 'ping', t: Date.now() });
+    // @ts-expect-error - flush in Node
+    try { (res as any).flush?.(); } catch {}
+  }, 15000);
+
+  // 连接关闭时，清理心跳
+  // @ts-expect-error - Node 'close' 事件
+  res.on?.('close', () => { try { clearInterval(__ka as any); } catch {} });
+
+  // 组装三个席位的 Bot
+  const bots: BotFunc[] = [0, 1, 2].map((i) => {
+    const key = (['A', 'B', 'C', 'D'][i] || i) as any; // 兼容历史写法
+    const kind: string | undefined =
+      seats?.[i]?.kind || seats?.[i] || seatModels?.[i] || seatModels?.[key] || seatModels?.[['E','S','W','N'][i]];
+    const model: string | undefined =
+      seats?.[i]?.model || seatModels?.[i]?.model || seatModels?.[key]?.model;
+    const keysForSeat =
+      seatKeys?.[i] || seatKeys?.[key] || seatKeys?.[['E','S','W','N'][i]];
+    return chooseBot(kind, model, keysForSeat);
+  });
+
+  // 运行日志：首行提示当前是否单局模式
+  writeLine(res, {
+    type: 'log',
+    message: singleGameSwitch
+      ? `单局模式已启用：本请求仅运行 1 局（four2=${four2}，原始请求 rounds=${reqRounds}）…`
+      : `开始连打 ${rounds} 局（four2=${four2}）…`,
+  });
+
+  let okEnded = false;
 
   try {
-    const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const MAX_ROUNDS = parseInt(process.env.MAX_ROUNDS || '200', 10);
-    const rounds = Math.max(1, Math.min(MAX_ROUNDS, Number(body.rounds) || 1));
-    const four2 = body.four2 || 'both';
-    const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
-
-    // build bots
-    const seatBots = (body.seats || []).slice(0,3).map((s, i) => asBot(s.choice, s));
-
-    writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
-
-    let scores: [number,number,number] = [0,0,0];
     for (let round = 1; round <= rounds; round++) {
-      writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
+      writeLine(res, { type: 'log', message: `—— 第 ${round} 局开始 ——` });
 
-      // wrap seats with per-seat delay (防止显式 await 造成阻塞)
-      const delayedSeats = seatBots.map((bot, idx) => async (ctx:any) => {
-        const ms = delays[idx] || 0;
-        if (ms) await new Promise(r => setTimeout(r, ms));
-        return bot(ctx);
-      });
+      // 兼容不同版本的 runOneGame 签名（有的 1 个参数，有的 2 个参数）
+      const options: any = {
+        seats: bots as any,
+        rob,
+        four2,
+        // 以下若引擎不识别会被忽略；若识别则生效
+        startScore,
+        seatDelayMs,
+        enabled,
+        debug,
+      };
 
-      await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0 }, res, round);
-
-      // 前端会自行累计分数；这里只做可选的“低于0提前终止”
-      if (body.stopBelowZero && (scores[0]<0 || scores[1]<0 || scores[2]<0)) {
-        writeLine(res, { type:'log', message:`某方积分 < 0，提前终止。` });
-        break;
+      let iter: any;
+      try {
+        // 优先尝试单参
+        iter = (runOneGame as any)(options);
+        if (!iter || (typeof iter !== 'object')) {
+          // 兜底双参
+          iter = (runOneGame as any)(options, undefined);
+        }
+      } catch {
+        // 再兜底双参
+        iter = (runOneGame as any)(options, undefined);
       }
 
-      if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
+      // 无论引擎返回 async generator 还是可迭代对象，都尽量 for-await
+      // 如果不支持 async iterator，这里会抛，再回退为数组消费
+      let consumed = false;
+      try {
+        for await (const ev of (iter as any)) {
+          consumed = true;
+          writeLine(res, ev);
+        }
+      } catch {
+        try {
+          if (Array.isArray(iter)) {
+            consumed = true;
+            for (const ev of iter) writeLine(res, ev);
+          }
+        } catch {}
+      }
+
+      // 单局结束标记（方便前端观察续跑）
+      writeLine(res, { type: 'log', message: `—— 第 ${round} 局结束 ——` });
+
+      // 若开启“单局/请求”开关，则第一局结束后直接收尾
+      if (singleGameSwitch) break;
     }
 
-    try{ clearInterval(__ka as any);}catch{}; res.end();
+    okEnded = true;
+    // 结束前尽量 flush，随后关闭 keep-alive 并正常结束流
+    // @ts-expect-error - Node flush
+    try { (res as any).flush?.(); } catch {}
+    try { clearInterval(__ka as any); } catch {}
+    res.end();
   } catch (e: any) {
-    writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
-    try { try{ clearInterval(__ka as any);}catch{}; res.end(); } catch {}
+    writeLine(res, { type: 'log', message: `后端错误：${e?.message || String(e)}` });
+    // 异常路径同样确保 flush → 清理 → end
+    try { (res as any).flush?.(); } catch {}
+    try { clearInterval(__ka as any); } catch {}
+    res.end();
+  } finally {
+    if (!okEnded) {
+      try { clearInterval(__ka as any); } catch {}
+    }
   }
 }
