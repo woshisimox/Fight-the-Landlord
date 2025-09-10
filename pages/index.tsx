@@ -8,16 +8,6 @@ type ComboType =
   | 'four-with-two-singles' | 'four-with-two-pairs';
 type Four2Policy = 'both' | '2singles' | '2pairs';
 
-// 仅为了类型参考（不强制使用），如你的项目启用了 noUnusedLocals，可删除这段
-type EventObj =
-  | { type:'state'; kind:'init'; landlord:number; hands: CardLabel[][] }
-  | { type:'event'; kind:'init'; landlord:number; hands: CardLabel[][] }
-  | { type:'event'; kind:'play'; seat:number; move:'play'|'pass'; cards?:CardLabel[]; comboType?:ComboType; reason?:string }
-  | { type:'event'; kind:'rob'; seat:number; rob:boolean }
-  | { type:'event'; kind:'trick-reset' }
-  | { type:'event'; kind:'win'; winner:number; multiplier:number; deltaScores:[number,number,number] }
-  | { type:'log';  message:string };
-
 type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
@@ -26,9 +16,9 @@ type BotChoice =
   | 'http';
 
 type LiveProps = {
-  rounds: number;                 // 计划跑的总局数（前端“每局一请求”）
+  rounds: number;
   startScore: number;
-  seatDelayMs?: number[];         // 每家最小出牌间隔（ms），仅前端节奏控制
+  seatDelayMs?: number[];
   enabled: boolean;
   rob: boolean;
   four2: Four2Policy;
@@ -55,7 +45,6 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 
-// 只提取点数；处理 10→T、大小写
 const rankOf = (l: string) => {
   if (!l) return '';
   const c0 = l[0];
@@ -63,21 +52,16 @@ const rankOf = (l: string) => {
   if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
   return l.replace(/10/i, 'T').toUpperCase();
 };
-
-// 返回可能的装饰写法（把后端原始标签映射到前端装饰牌）
 function candDecorations(l: string): string[] {
   if (!l) return [];
-  // Joker 映射：小王=x→🃏X，大王=X→🃏Y（仅用于前端显示）
-  if (l === 'x') return ['🃏X'];  // 小王
-  if (l === 'X') return ['🃏Y'];  // 大王
+  if (l === 'x') return ['🃏X'];
+  if (l === 'X') return ['🃏Y'];
   if (l.startsWith('🃏')) return [l];
   if ('♠♥♦♣'.includes(l[0])) return [l];
   const r = rankOf(l);
-  if (r === 'JOKER') return ['🃏Y']; // 兜底
+  if (r === 'JOKER') return ['🃏Y'];
   return SUITS.map(s => `${s}${r}`);
 }
-
-// 无花色 → 轮换花色；已有花色/🃏保持不变
 function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
@@ -165,10 +149,7 @@ function Section({ title, children }:{title:string; children:React.ReactNode}) {
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
 
-  // UI：装饰后的手牌
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
-
-  // 其他状态
   const [landlord, setLandlord] = useState<number|null>(null);
   const [plays, setPlays] = useState<{seat:number; move:'play'|'pass'; cards?:string[]; reason?:string}[]>([]);
   const [multiplier, setMultiplier] = useState(1);
@@ -180,7 +161,6 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  // 首次启动时，将总分重置为初始分；后续多局不会清零
   const prevRunningRef = useRef(false);
   useEffect(() => {
     if (running && !prevRunningRef.current) {
@@ -194,7 +174,6 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
-  // --- mirrors，用于流式批处理时读到最新状态 ---
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
@@ -205,38 +184,24 @@ function LivePanel(props: LiveProps) {
   const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
   const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
   const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
-  // --- end mirrors ---
 
-  /* === 日志开头“第 1 局/开始第 1 局/开始连打 1 局/单局模式…1 局” → 改写为真实局号 === */
   const rewriteRoundLabel = (msg: string) => {
-    // 当前局号 = 已完成局数 + 1（winsRef 在 win 事件里同步递增）
     const n = Math.max(1, (winsRef.current || 0) + 1);
     if (typeof msg !== 'string') return msg;
-
     let out = msg;
-
-    // 「—— 第 1 局开始 ——」
     out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
-
-    // 「开始第 1 局（…」/ 「开始第 1 局(…」
     out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
     out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
-
-    // 「开始连打 1 局（…」/ 「开始连打 1 局(…」
     out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
     out = out.replace(/开始连打\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
-
-    // 「单局模式……(仅运行|运行) 1 局（…」/ 「…(」
     out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
     out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
-
     return out;
   };
 
   const start = async () => {
     if (running) return;
 
-    // —— 首次启动的可见状态清理（总分会在 running→true 的副作用里自动按 startScore 复位）——
     setRunning(true);
     setLandlord(null);
     setHands([[], [], []]);
@@ -249,9 +214,34 @@ function LivePanel(props: LiveProps) {
 
     controllerRef.current = new AbortController();
 
+    // ✅ 关键改动：把 seats/seatModels/seatKeys 组装成 SeatSpec[]
+    const buildSeatSpecs = (): any[] => {
+      return props.seats.slice(0,3).map((choice, i) => {
+        const model = (props.seatModels[i] || '').trim();
+        const keys = props.seatKeys[i] || {};
+        switch (choice) {
+          case 'ai:openai':
+            return { choice, model: model || 'gpt-4o-mini', apiKey: keys.openai || '' };
+          case 'ai:gemini':
+            return { choice, model: model || 'gemini-1.5-flash', apiKey: keys.gemini || '' };
+          case 'ai:grok':
+            return { choice, model: model || 'grok-2', apiKey: keys.grok || '' };
+          case 'ai:kimi':
+            // 默认采用当前官方的 Kimi K2 预览型号；也可在 UI 中改
+            return { choice, model: model || 'kimi-k2-0905-preview', apiKey: keys.kimi || '' };
+          case 'ai:qwen':
+            return { choice, model: model || 'qwen-plus', apiKey: keys.qwen || '' };
+          case 'http':
+            return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
+          default:
+            return { choice }; // built-ins
+        }
+      });
+    };
+
     // 每次只打一局；后端流结束→下一次再发请求
     const playOneGame = async (gameIndex: number) => {
-      // ✅ 新一局开始：清空前端日志，只展示本局
+      // 只显示当前局：清空日志
       setLog([]);
 
       const r = await fetch('/api/stream_ndjson', {
@@ -264,9 +254,8 @@ function LivePanel(props: LiveProps) {
           enabled: props.enabled,
           rob: props.rob,
           four2: props.four2,
-          seats: props.seats,
-          seatModels: props.seatModels,
-          seatKeys: props.seatKeys,
+          seats: buildSeatSpecs(),       // ← 改为 SeatSpec[]
+          // seatModels / seatKeys 不再需要发送；后端并未使用
         }),
         signal: controllerRef.current!.signal,
       });
@@ -291,7 +280,6 @@ function LivePanel(props: LiveProps) {
         }
 
         if (batch.length) {
-          // —— 一次性处理本批所有事件，再统一 setState —— 
           let nextHands = handsRef.current.map(x => [...x]);
           let nextPlays = [...playsRef.current];
           let nextTotals = [...totalsRef.current] as [number, number, number];
@@ -367,7 +355,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // —— 其它日志：进入前改写局号 —— //
               if (m.type === 'log' && typeof m.message === 'string') {
                 nextLog = [...nextLog, rewriteRoundLabel(m.message)];
                 continue;
@@ -377,7 +364,6 @@ function LivePanel(props: LiveProps) {
             }
           }
 
-          // 批量提交一次，避免频繁 setState
           setHands(nextHands);
           setPlays(nextPlays);
           setTotals(nextTotals);
@@ -390,7 +376,6 @@ function LivePanel(props: LiveProps) {
         }
       }
 
-      // （可选）单局流结束提示——仍属于本局日志
       setLog(l => [...l, `—— 本局流结束 ——`]);
     };
 
@@ -398,8 +383,6 @@ function LivePanel(props: LiveProps) {
       for (let i = 0; i < props.rounds; i++) {
         if (controllerRef.current?.signal.aborted) break;
         await playOneGame(i);
-
-        // 局间等待：固定 1000ms + 随机 <1000ms（可按需修改或删除）
         await new Promise(r => setTimeout(r, 1000 + Math.floor(Math.random() * 1000)));
       }
     } catch (e: any) {
@@ -418,19 +401,16 @@ function LivePanel(props: LiveProps) {
     setRunning(false);
   };
 
-  // 剩余局数（包含当前局）：总局数 - 已完成局数
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
   return (
     <div>
-      {/* 剩余局数徽标 */}
       <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
         <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, lineHeight:1.2, userSelect:'none', background:'#fff' }}>
           剩余局数：{remainingGames}
         </span>
       </div>
 
-      {/* 第一行：积分（总分） */}
       <Section title="积分（总分）">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           {[0,1,2].map(i=>(
@@ -611,7 +591,6 @@ function Home() {
                   </label>
                 )}
 
-                {/* 各家 key/端点 */}
                 {seats[i] === 'ai:openai' && (
                   <label style={{ display:'block', marginBottom:6 }}>
                     OpenAI API Key
@@ -721,7 +700,7 @@ function Home() {
         </div>
       </div>
 
-      {/* 2) 对局（设置下面、运行日志上面） */}
+      {/* 2) 对局 */}
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
         <LivePanel
@@ -738,7 +717,7 @@ function Home() {
         />
       </div>
 
-      {/* 3) 运行日志（页面底部） */}
+      {/* 3) 运行日志 */}
       <div style={{ marginTop:18 }}>
         <Section title="运行日志">
           <div style={{
