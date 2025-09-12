@@ -378,6 +378,27 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
+              /* ✅ 新增：显示抢地主评估 rob-eval */
+              if (m.type === 'event' && m.kind === 'rob-eval') {
+                const seatName = ['甲', '乙', '丙'][m.seat];
+                const featText = (() => {
+                  try {
+                    const keys = Object.keys(m.features || {});
+                    if (!keys.length) return '—';
+                    const pairs = keys.slice(0, 6).map(k => {
+                      const v = (m.features as any)[k];
+                      return `${k}:${typeof v === 'number' ? v : String(v)}`;
+                    });
+                    return pairs.join(', ');
+                  } catch { return '—'; }
+                })();
+                nextLog = [
+                  ...nextLog,
+                  `抢地主评估｜${seatName}｜分=${m.score} 阈=${m.threshold}｜特征：${featText}`
+                ];
+                continue;
+              }
+
               if (m.type === 'event' && m.kind === 'rob') {
                 nextLog = [...nextLog, `${['甲', '乙', '丙'][m.seat]} ${m.rob ? '抢地主' : '不抢'}`];
                 continue;
