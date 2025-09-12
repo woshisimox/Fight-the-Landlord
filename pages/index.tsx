@@ -298,7 +298,7 @@ function LivePanel(props: LiveProps) {
       }).join(', ');
 
     // 每次只打一局；后端流结束→下一次再发请求
-    const playOneGame = async (gameIndex: number) => {
+    const playOneGame = async (_gameIndex: number) => {
       // 只显示当前局：清空日志
       setLog([]);
 
@@ -407,7 +407,7 @@ function LivePanel(props: LiveProps) {
                   }
                   nextHands = nh;
                   nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty }];
-                  nextLog = [...nextLog, `${['甲', '乙', '丙'][m.seat]} 出牌：${pretty.join(' ')}`];
+                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`];
                 }
                 continue;
               }
@@ -615,4 +615,223 @@ function Home() {
           <label>
             初始分
             <input type="number" step={10} value={startScore}
-                   onC
+                   onChange={e=>setStartScore(Number(e.target.value)||0)}
+                   style={{ width:'100%' }} />
+          </label>
+
+          <label>
+            可抢地主
+            <div><input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} /></div>
+          </label>
+
+          <label>
+            4带2 规则
+            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
+              <option value="both">都可</option>
+              <option value="2singles">两张单牌</option>
+              <option value="2pairs">两对</option>
+            </select>
+          </label>
+        </div>
+
+        {/* 每家 AI 设置（独立） */}
+        <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
+          <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+            {[0,1,2].map(i=>(
+              <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
+                <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /></div>
+
+                <label style={{ display:'block', marginBottom:6 }}>
+                  选择
+                  <select
+                    value={seats[i]}
+                    onChange={e=>{
+                      const v = e.target.value as BotChoice;
+                      setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
+                    }}
+                    style={{ width:'100%' }}
+                  >
+                    <optgroup label="内置">
+                      <option value="built-in:greedy-max">Greedy Max</option>
+                      <option value="built-in:greedy-min">Greedy Min</option>
+                      <option value="built-in:random-legal">Random Legal</option>
+                    </optgroup>
+                    <optgroup label="AI">
+                      <option value="ai:openai">OpenAI</option>
+                      <option value="ai:gemini">Gemini</option>
+                      <option value="ai:grok">Grok</option>
+                      <option value="ai:kimi">Kimi</option>
+                      <option value="ai:qwen">Qwen</option>
+                      <option value="http">HTTP</option>
+                    </optgroup>
+                  </select>
+                </label>
+
+                {seats[i].startsWith('ai:') && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    模型（可选）
+                    {/* 若 provider 与模型不匹配，此处显示为空，只露出占位符 */}
+                    <input
+                      type="text"
+                      value={normalizeModelForProvider(seats[i], seatModels[i])}
+                      placeholder={defaultModelFor(seats[i])}
+                      onChange={e=>{
+                        const v = e.target.value;
+                        setSeatModels(arr => { const n=[...arr]; n[i] = v; return n; });
+                      }}
+                      style={{ width:'100%' }}
+                    />
+                    <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
+                      留空则使用推荐：{defaultModelFor(seats[i])}
+                    </div>
+                  </label>
+                )}
+
+                {/* 各家 key/端点（不显示/不记录具体值到日志） */}
+                {seats[i] === 'ai:openai' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    OpenAI API Key
+                    <input type="password" value={seatKeys[i]?.openai||''}
+                           onChange={e=>{
+                             const v = e.target.value;
+                             setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), openai:v }; return n; });
+                           }}
+                           style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:gemini' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Gemini API Key
+                    <input type="password" value={seatKeys[i]?.gemini||''}
+                           onChange={e=>{
+                             const v = e.target.value;
+                             setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), gemini:v }; return n; });
+                           }}
+                           style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:grok' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    xAI (Grok) API Key
+                    <input type="password" value={seatKeys[i]?.grok||''}
+                           onChange={e=>{
+                             const v = e.target.value;
+                             setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), grok:v }; return n; });
+                           }}
+                           style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:kimi' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Kimi API Key
+                    <input type="password" value={seatKeys[i]?.kimi||''}
+                           onChange={e=>{
+                             const v = e.target.value;
+                             setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), kimi:v }; return n; });
+                           }}
+                           style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:qwen' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Qwen API Key
+                    <input type="password" value={seatKeys[i]?.qwen||''}
+                           onChange={e=>{
+                             const v = e.target.value;
+                             setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; });
+                           }}
+                           style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'http' && (
+                  <>
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      HTTP Base / URL
+                      <input type="text" value={seatKeys[i]?.httpBase||''}
+                             onChange={e=>{
+                               const v = e.target.value;
+                               setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpBase:v }; return n; });
+                             }}
+                             style={{ width:'100%' }} />
+                    </label>
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      HTTP Token（可选）
+                      <input type="password" value={seatKeys[i]?.httpToken||''}
+                             onChange={e=>{
+                               const v = e.target.value;
+                               setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpToken:v }; return n; });
+                             }}
+                             style={{ width:'100%' }} />
+                    </label>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* 每家出牌最小间隔（独立） */}
+          <div style={{ marginTop:12 }}>
+            <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)</div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>(
+                <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
+                  <div style={{ fontWeight:700, marginBottom:8 }}>{['甲','乙','丙'][i]}</div>
+                  <label style={{ display:'block' }}>
+                    最小间隔 (ms)
+                    <input
+                      type="number" min={0} step={100}
+                      value={seatDelayMs[i]}
+                      onChange={e=>setSeatDelay(i, e.target.value)}
+                      style={{ width:'100%' }}
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2) 对局（设置下面、运行日志上面） */}
+      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
+        <LivePanel
+          rounds={rounds}
+          startScore={startScore}
+          seatDelayMs={seatDelayMs}
+          enabled={enabled}
+          rob={rob}
+          four2={four2}
+          seats={seats}
+          seatModels={seatModels}
+          seatKeys={seatKeys}
+          onLog={setLiveLog}
+        />
+      </div>
+
+      {/* 3) 运行日志（页面底部） */}
+      <div style={{ marginTop:18 }}>
+        <Section title="运行日志">
+          <div style={{
+            border:'1px solid #eee', borderRadius:8, padding:'8px 10px',
+            maxHeight:420, overflow:'auto', background:'#fafafa'
+          }}>
+            {liveLog.length === 0
+              ? <div style={{ opacity:0.6 }}>（暂无）</div>
+              : liveLog.map((t, idx) => <LogLine key={idx} text={t} />)
+            }
+          </div>
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+export default Home;
