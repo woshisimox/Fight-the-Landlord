@@ -165,7 +165,7 @@ function traceWrap(
   };
 }
 
-/** 单局执行：在 play/pass 上贴 reason；每局必产出 stats（含兜底） */
+/** 单局执行：在 play/pass 上贴 reason；每局必产出 stats（含兜底 + final） */
 async function runOneRoundWithGuard(
   opts: { seats: any[], four2?: 'both'|'2singles'|'2pairs', delayMs?: number, lastReason?: (string|null)[] },
   res: NextApiResponse,
@@ -197,6 +197,7 @@ async function runOneRoundWithGuard(
   let repeated = 0;
   let seenWin = false;
   let seenStats = false;
+  let emittedFinal = false;
 
   const iter: AsyncIterator<any> = (runOneGame as any)({ seats: opts.seats, four2: opts.four2, delayMs: opts.delayMs });
 
@@ -228,6 +229,13 @@ async function runOneRoundWithGuard(
 
     writeLine(res, { type:'event', kind:'stats', round: roundNo, landlord, source: tag, perSeat });
     seenStats = true;
+  };
+
+  const emitFinalIfNeeded = () => {
+    if (!emittedFinal) {
+      emitStatsLite('stats-lite/coop-v3(final)');
+      emittedFinal = true;
+    }
   };
 
   while (true) {
@@ -289,9 +297,11 @@ async function runOneRoundWithGuard(
 
     if (kind === 'stats') seenStats = true;
 
-    // 收到 win 时，若此前没产出 stats，先补一条
-    if (kind === 'win' && !seenStats) emitStatsLite('stats-lite/coop-v3(before-win)');
-    if (kind === 'win') seenWin = true;
+    // 收到 win 时，总是补一条 final 统计（避免漏发）
+    if (kind === 'win') {
+      seenWin = true;
+      emitFinalIfNeeded();
+    }
 
     // 防卡死
     const sig = JSON.stringify({
@@ -304,16 +314,16 @@ async function runOneRoundWithGuard(
 
     if (evCount > MAX_EVENTS || repeated > MAX_REPEATED_HEARTBEAT) {
       writeLine(res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束。`});
-      if (!seenStats) emitStatsLite('stats-lite/coop-v3(safety)');
+      emitFinalIfNeeded();
       try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
       writeLine(res, { type:'event', kind:'round-end', round: roundNo, seenWin:false, seenStats:true });
       return { seenWin:false, seenStats:true, landlord, eventCount: evCount };
     }
   }
 
-  if (!seenStats) emitStatsLite('stats-lite/coop-v3(end)');
-  writeLine(res, { type:'event', kind:'round-end', round: roundNo, seenWin:true, seenStats:true });
-  return { seenWin:true, seenStats:true, landlord, eventCount: 0 };
+  emitFinalIfNeeded(); // 局尾兜底
+  writeLine(res, { type:'event', kind:'round-end', round: roundNo, seenWin, seenStats:true });
+  return { seenWin, seenStats:true, landlord, eventCount: 0 };
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
