@@ -210,7 +210,7 @@ function LivePanel(props: LiveProps) {
     controllerRef.current = new AbortController();
 
     const buildSeatSpecs = (): any[] => {
-      return props.seats.slice(0,3).map((choice, i) => {
+      return props.seatChoice.slice(0,3).map((choice, i) => {
         const normalized = normalizeModelForProvider(choice, props.seatModels[i] || '');
         const model = normalized || defaultModelFor(choice);
         const keys = props.seatKeys[i] || {};
@@ -526,7 +526,7 @@ export default function Home() {
           rob={rob}
           four2={four2}
           farmerCoop={farmerCoop}
-          seats={seatChoice}
+          seatChoice={seatChoice}
           seatModels={seatModels}
           seatKeys={seatKeys}
           seatDelayMs={seatDelayMs}
