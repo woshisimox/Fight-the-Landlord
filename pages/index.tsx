@@ -257,6 +257,21 @@ function RadarChart({ title, scores }:{
 }
 
 /* ==================== LivePanel（对局） ==================== */
+
+// 为“某一局”创建一个改写器，固定使用当局的 n（修复“第 N 局”显示问题）
+const makeRewriteRoundLabel = (n: number) => (msg: string) => {
+  if (typeof msg !== 'string') return msg;
+  let out = msg;
+  out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
+  out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
+  out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
+  out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
+  out = out.replace(/开始连打\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
+  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
+  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
+  return out;
+};
+
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
 
@@ -278,6 +293,9 @@ function LivePanel(props: LiveProps) {
   const [aggStats, setAggStats] = useState<Score5[] | null>(null);
   const [aggCount, setAggCount] = useState<number>(0);
 
+  useEffect(() => { props.onTotals?.(totals); }, [totals]);
+  useEffect(() => { props.onLog?.(log); }, [log]);
+
   const controllerRef = useRef<AbortController|null>(null);
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
@@ -294,20 +312,6 @@ function LivePanel(props: LiveProps) {
   const aggCountRef = useRef(aggCount); useEffect(()=>{ aggCountRef.current = aggCount; }, [aggCount]);
   const aggModeRef  = useRef(aggMode);  useEffect(()=>{ aggModeRef.current  = aggMode;  }, [aggMode]);
   const alphaRef    = useRef(alpha);    useEffect(()=>{ alphaRef.current    = alpha;    }, [alpha]);
-
-  const rewriteRoundLabel = (msg: string) => {
-    const n = Math.max(1, (finishedRef.current || 0) + 1);
-    if (typeof msg !== 'string') return msg;
-    let out = msg;
-    out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
-    out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-    out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
-    out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-    out = out.replace(/开始连打\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
-    out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
-    out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
-    return out;
-  };
 
   const start = async () => {
     if (running) return;
@@ -359,15 +363,18 @@ function LivePanel(props: LiveProps) {
         return `${seatName}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
       }).join(', ');
 
-    const playOneGame = async (_gameIndex: number) => {
+    // ★ 新增：用于“显示/改写”的当局局号，不依赖 finishedRef
+    let labelRound = 0;
+
+    // 接收当局局号
+    const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
       setLog([]);
       const specs = buildSeatSpecs();
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
-      const currentRound = Math.max(1, (finishedRef.current || 0) + 1);
 
       setLog(l => [
         ...l,
-        `【前端】开始第 ${currentRound} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`
+        `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`
       ]);
 
       const r = await fetch('/api/stream_ndjson', {
@@ -392,6 +399,9 @@ function LivePanel(props: LiveProps) {
       const reader = r.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let buf = '';
+
+      // 当局专用日志改写器
+      const rewrite = makeRewriteRoundLabel(labelRoundNo);
 
       while (true) {
         const { value, done } = await reader.read();
@@ -560,14 +570,14 @@ function LivePanel(props: LiveProps) {
                   nextAggCount = nextAggCount + 1;
                 }
 
-                // 可选日志：保留本局结果文字
+                // 记录本局数值（文字）
                 const msg = s3.map((v, i)=>`${['甲','乙','丙'][i]}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
                 nextLog = [...nextLog, `战术画像（本局）：${msg}`];
                 continue;
               }
 
               if (m.type === 'log' && typeof m.message === 'string') {
-                nextLog = [...nextLog, rewriteRoundLabel(m.message)];
+                nextLog = [...nextLog, rewrite(m.message)]; // ★ 使用当局改写器
                 continue;
               }
             } catch (e) {
@@ -596,7 +606,8 @@ function LivePanel(props: LiveProps) {
     try {
       for (let i = 0; i < props.rounds; i++) {
         if (controllerRef.current?.signal.aborted) break;
-        await playOneGame(i);
+        const thisRound = ++labelRound;     // ★ 同步自增的当局局号
+        await playOneGame(i, thisRound);    // ★ 传入当局局号
 
         const hasNegative =
           Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
