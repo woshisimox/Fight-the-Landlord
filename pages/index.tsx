@@ -324,6 +324,7 @@ function LivePanel(props: LiveProps) {
           four2: props.four2,
           seats: specs,                 // SeatSpec[]
           clientTraceId: traceId,
+          stopBelowZero: true,          // ★ 新增：让后端也在单请求内判停
         }),
         signal: controllerRef.current!.signal,
       });
@@ -378,7 +379,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              /* ✅ 新增：显示抢地主评估 rob-eval */
+              /* ✅ 已有：显示抢地主评估 rob-eval */
               if (m.type === 'event' && m.kind === 'rob-eval') {
                 const seatName = ['甲', '乙', '丙'][m.seat];
                 const featText = (() => {
@@ -491,6 +492,15 @@ function LivePanel(props: LiveProps) {
       for (let i = 0; i < props.rounds; i++) {
         if (controllerRef.current?.signal.aborted) break;
         await playOneGame(i);
+
+        // ★ 新增：每局后若发现有负分，则终止“连打”
+        const hasNegative =
+          Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
+        if (hasNegative) {
+          setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']);
+          break;
+        }
+
         // 局间等待：固定 1000ms + 随机 <1000ms（可按需调整/删除）
         await new Promise(r => setTimeout(r, 1000 + Math.floor(Math.random() * 1000)));
       }
