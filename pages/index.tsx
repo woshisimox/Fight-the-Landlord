@@ -108,7 +108,7 @@ function PlayRow(
       <div style={{ flex:1 }}>
         {move === 'pass' ? <span style={{ opacity:0.6 }}>过</span> : <Hand cards={cards || []} />}
       </div>
-      {reason && <div style={{ width:220, fontSize:12, color:'#666' }}>{reason}</div>}
+      {reason && <div style={{ width:260, fontSize:12, color:'#666' }}>{reason}</div>}
     </div>
   );
 }
@@ -307,6 +307,9 @@ function LivePanel(props: LiveProps) {
   // ★ 一局是否“打开中”的标志
   const roundOpenRef = useRef<boolean>(false);
 
+  // ★ 新增：缓存最近一次 bot-done 的理由，等到该座位下一条 play/pass 时贴上
+  const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
+
   const start = async () => {
     if (running) return;
     if (!props.enabled) {
@@ -323,6 +326,7 @@ function LivePanel(props: LiveProps) {
     setMultiplier(1);
     setLog([]);
     setFinishedCount(0);
+    lastReasonRef.current = [null, null, null];
 
     // 新一轮连打时，累计画像清空（如需跨次保留，可注释掉）
     setAggStats(null);
@@ -359,6 +363,8 @@ function LivePanel(props: LiveProps) {
 
     const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
       setLog([]);
+      lastReasonRef.current = [null, null, null];
+
       const specs = buildSeatSpecs();
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
 
@@ -461,6 +467,8 @@ function LivePanel(props: LiveProps) {
                 const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
                 nextLandlord = lord;
                 nextLog = [...nextLog, `发牌完成，${lord != null ? ['甲', '乙', '丙'][lord] : '?'}为地主`];
+                // 新局开始，理由缓存清空
+                lastReasonRef.current = [null, null, null];
                 continue;
               }
 
@@ -480,6 +488,8 @@ function LivePanel(props: LiveProps) {
                   `AI完成｜${seatName}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
                   ...(m.reason ? [`AI理由｜${seatName}：${m.reason}`] : []),
                 ];
+                // ★ 新增：把理由写入缓存，等到该座位的 play/pass 事件出现时贴上
+                lastReasonRef.current[m.seat] = m.reason || null;
                 continue;
               }
 
@@ -513,8 +523,11 @@ function LivePanel(props: LiveProps) {
 
               if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
-                  nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason: m.reason }];
-                  nextLog = [...nextLog, `${['甲', '乙', '丙'][m.seat]} 过${m.reason ? `（${m.reason}）` : ''}`];
+                  // ★ 取 play 自带的 reason 或上一条 bot-done 缓存
+                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  lastReasonRef.current[m.seat] = null; // 用过即清
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason }];
+                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 过${reason ? `（${reason}）` : ''}`];
                 } else {
                   const pretty: string[] = [];
                   const seat = m.seat as number;
@@ -527,9 +540,13 @@ function LivePanel(props: LiveProps) {
                     if (k >= 0) nh[seat].splice(k, 1);
                     pretty.push(chosen);
                   }
+                  // ★ 取 play 自带或缓存的 reason
+                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  lastReasonRef.current[m.seat] = null;
+
                   nextHands = nh;
-                  nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty }];
-                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}`];
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason }];
+                  nextLog = [...nextLog, `${['甲','乙','丙'][m.seat]} 出牌：${pretty.join(' ')}${reason ? `（理由：${reason}）` : ''}`];
                 }
                 continue;
               }
