@@ -1,5 +1,5 @@
 // pages/api/stream_ndjson.ts
-// hardened anti-stall + rob-eval + bot-call/done + stopBelowZero(服务端累计)
+// hardened anti-stall + rob-eval + bot-call/done(+reason) + stopBelowZero(服务端累计)
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
@@ -66,6 +66,28 @@ function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any 
   }
 }
 
+/** 从 bot 返回值里提取“理由”字段，并做清洗/截断，避免日志过长 */
+function extractReason(raw: any): string | undefined {
+  try {
+    let r =
+      (typeof raw?.reason === 'string' && raw.reason) ||
+      (typeof raw?.explanation === 'string' && raw.explanation) ||
+      (typeof raw?.explain === 'string' && raw.explain) ||
+      (typeof raw?.analysis === 'string' && raw.analysis) ||
+      (typeof raw?.why === 'string' && raw.why) ||
+      (typeof raw?.meta?.reason === 'string' && raw.meta.reason) ||
+      (typeof raw === 'string' ? raw : '');
+
+    if (!r) return undefined;
+    // 清洗：压缩换行和空白，去掉多余空格
+    r = String(r).replace(/\s+/g, ' ').trim();
+    // 截断到 400 字符，避免日志爆长
+    const MAX = 400;
+    if (r.length > MAX) r = r.slice(0, MAX) + '…';
+    return r;
+  } catch { return undefined; }
+}
+
 // 单局 runner + 防卡死 + rob-eval 注入；返回“座位顺序”的本局增量
 async function runOneRoundWithGuard(
   opts: {
@@ -77,8 +99,8 @@ async function runOneRoundWithGuard(
   res: NextApiResponse,
   roundNo: number
 ): Promise<{ rotatedDelta: [number,number,number] | null }> {
-  const MAX_EVENTS = 4000;              // 每局事件上限
-  const MAX_REPEATED_HEARTBEAT = 200;   // 重复心跳上限
+  const MAX_EVENTS = 4000;
+  const MAX_REPEATED_HEARTBEAT = 200;
   const iter: AsyncIterator<any> = (runOneGame as any)({ seats: opts.seats, four2: opts.four2, delayMs: opts.delayMs });
 
   let evCount = 0;
@@ -194,13 +216,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
-    // 服务端累计总分，仅用于“<0 停赛”；初始为 startScore
+    // 服务端累计总分：仅用于“<0 停赛”；初始为 startScore
     let scores: [number,number,number] = [startScore, startScore, startScore];
 
     for (let round = 1; round <= rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
 
-      // 包裹 seats：每家延时 + bot-call/done 埋点
+      // 包裹 seats：每家延时 + bot-call/done 埋点（含 reason）
       const delayedSeats = seatBots.map((bot, idx) => {
         const meta = seatMeta[idx];
         return async (ctx:any) => {
@@ -216,7 +238,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const t0 = Date.now();
           const out = await bot(ctx);
           const tookMs = Date.now() - t0;
-          writeLine(res, { type:'event', kind:'bot-done', seat: idx, by, model, tookMs });
+
+          const reason = extractReason(out);
+          writeLine(res, { type:'event', kind:'bot-done', seat: idx, by, model, tookMs, ...(reason ? { reason } : {}) });
+
           return out;
         };
       });
