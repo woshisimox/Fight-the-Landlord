@@ -1,3 +1,4 @@
+// pages/index.tsx
 import React, { useEffect, useRef, useState } from 'react';
 
 type CardLabel = string;
@@ -33,6 +34,7 @@ type LiveProps = {
     httpBase?: string;
     httpToken?: string;
   }[];
+  farmerCoop: boolean;            // ★ 新增：农民配合
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
 };
@@ -303,7 +305,7 @@ function LivePanel(props: LiveProps) {
 
       setLog(l => [
         ...l,
-        `【前端】开始第 ${currentRound} 局 | 座位: ${seatSummaryText(specs)} | trace=${traceId}`
+        `【前端】开始第 ${currentRound} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`
       ]);
 
       const r = await fetch('/api/stream_ndjson', {
@@ -319,6 +321,7 @@ function LivePanel(props: LiveProps) {
           seats: specs,
           clientTraceId: traceId,
           stopBelowZero: true,
+          farmerCoop: props.farmerCoop,        // ★ 传给后端
         }),
         signal: controllerRef.current!.signal,
       });
@@ -608,6 +611,7 @@ function Home() {
   const [startScore, setStartScore] = useState<number>(100);
   const [rob, setRob] = useState<boolean>(true);
   const [four2, setFour2] = useState<'both'|'2singles'|'2pairs'>('both');
+  const [farmerCoop, setFarmerCoop] = useState<boolean>(true); // ★ 新增：农民配合
 
   const [seatDelayMs, setSeatDelayMs] = useState<number[]>([1000, 1000, 1000]);
   const setSeatDelay = (i:number, v:number|string) =>
@@ -659,6 +663,11 @@ function Home() {
           <label>
             可抢地主
             <div><input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} /></div>
+          </label>
+
+          <label>
+            农民配合
+            <div><input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} /></div>
           </label>
 
           <label>
@@ -844,6 +853,7 @@ function Home() {
           seats={seats}
           seatModels={seatModels}
           seatKeys={seatKeys}
+          farmerCoop={farmerCoop}   // ★ 传给 LivePanel
           onLog={setLiveLog}
         />
       </div>
