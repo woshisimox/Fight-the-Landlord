@@ -1,4 +1,4 @@
-// pages/api/stream_ndjson.ts (hardened, anti-stall + rob-eval injection)
+// pages/api/stream_ndjson.ts (hardened, anti-stall + stopBelowZero + rob-eval)
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
@@ -15,7 +15,13 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
   | 'http';
 
-type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
+type SeatSpec = {
+  choice: BotChoice;
+  model?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  token?: string;
+};
 
 type StartPayload = {
   seats: SeatSpec[];                     // 3 items
@@ -23,9 +29,13 @@ type StartPayload = {
   rounds?: number;
   rob?: boolean;
   four2?: 'both' | '2singles' | '2pairs';
-  stopBelowZero?: boolean;
+  stopBelowZero?: boolean;               // NEW: 可控（默认 true）
+  startScore?: number;                   // NEW: 用于服务端累计
   seatModels?: string[];
-  seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
+  seatKeys?: {
+    openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string;
+    httpBase?: string; httpToken?: string;
+  }[];
 };
 
 function writeLine(res: NextApiResponse, obj: any) {
@@ -61,19 +71,27 @@ async function runOneRoundWithGuard(
     seats: any[];
     four2?: 'both'|'2singles'|'2pairs';
     delayMs?: number;
-    seatMeta?: SeatSpec[];        // ← 新增：座位元信息，用于 rob-eval
+    seatMeta?: SeatSpec[];        // for rob-eval
   },
   res: NextApiResponse,
   roundNo: number
-) {
+): Promise<{ rotatedDelta: [number,number,number] | null }> {
   const MAX_EVENTS = 4000;              // safety ceiling: total events per round
-  const MAX_REPEATED_HEARTBEAT = 200;   // safety ceiling: consecutive 'pass/pass/reset' type heartbeats
+  const MAX_REPEATED_HEARTBEAT = 200;   // safety ceiling: consecutive 'pass/pass/reset' style
   const iter: AsyncIterator<any> = (runOneGame as any)({ seats: opts.seats, four2: opts.four2, delayMs: opts.delayMs });
+
   let evCount = 0;
   let landlord = -1;
   let trick = 0;
   let lastSignature = '';
   let repeated = 0;
+  let rotatedDelta: [number,number,number] | null = null;
+
+  // 小工具：将“相对地主顺序”的 ds 旋转为“座位顺序”
+  const rotateByLandlord = (ds: number[], L: number): [number,number,number] => {
+    const a = (idx:number) => ds[(idx - L + 3) % 3] || 0;
+    return [a(0), a(1), a(2)];
+  };
 
   while (true) {
     const { value, done } = await (iter.next() as any);
@@ -83,7 +101,7 @@ async function runOneRoundWithGuard(
     // forward downstream
     writeLine(res, value);
 
-    // === rob-eval 注入：当收到 'rob' 事件时，输出一条评估日志（用于前端确认调用来源/模型） ===
+    // rob-eval 注入（用于前端确认 provider / model）
     if (value?.type === 'event' && value?.kind === 'rob' && typeof value?.seat === 'number') {
       const seat: number = value.seat | 0;
       const spec = (opts.seatMeta && opts.seatMeta[seat]) ? opts.seatMeta[seat] : undefined;
@@ -91,8 +109,7 @@ async function runOneRoundWithGuard(
         type: 'event',
         kind: 'rob-eval',
         seat,
-        // 没有引擎评分，这里用 1/0 伪分数；后续可替换为真实分数
-        score: value?.rob ? 1 : 0,
+        score: value?.rob ? 1 : 0,   // 伪分数；如需真实分数可改为引擎侧发
         threshold: 0,
         features: {
           by: providerOf(spec?.choice),
@@ -102,15 +119,22 @@ async function runOneRoundWithGuard(
       });
     }
 
-    // book-keeping for diagnostics
-    const kind = value?.kind || value?.type;
+    // book-keeping
     if (value?.kind === 'init' && typeof value?.landlord === 'number') {
       landlord = value.landlord;
     }
     if (value?.kind === 'trick-reset') {
       trick += 1;
     }
-    // simple repetition signature to catch livelocks
+
+    // 记录 win 的 rotatedDelta，供服务端累计
+    if (value?.type === 'event' && value?.kind === 'win') {
+      const ds = Array.isArray(value?.deltaScores) ? value.deltaScores as number[] : [0,0,0];
+      // 按“相对地主顺序”解释为 [L, L+1, L+2]，旋转到座位顺序
+      rotatedDelta = rotateByLandlord(ds, Math.max(0, landlord));
+    }
+
+    // livelock guard
     const sig = JSON.stringify({
       kind: value?.kind,
       seat: value?.seat,
@@ -127,12 +151,20 @@ async function runOneRoundWithGuard(
       writeLine(res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束（判地主胜）。`});
       // Gracefully close the generator if possible
       try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
-      // Emit a synthetic win so 前端能收尾
+
+      // 生成“相对地主顺序”的合成胜利 ds，并旋转计入
       const winner = landlord >= 0 ? landlord : 0;
-      writeLine(res, { type:'event', kind:'win', winner, multiplier: 1, deltaScores: winner===landlord ? [+2,-1,-1] : [-2,+1,+1] });
-      return;
+      const dsRel = (winner === landlord) ? [+2, -1, -1] : [-2, +1, +1]; // 相对地主顺序
+      const rot = rotateByLandlord(dsRel, Math.max(0, landlord));
+      rotatedDelta = rot;
+
+      // 下发合成 win（deltaScores 保持“相对地主顺序”）
+      writeLine(res, { type:'event', kind:'win', winner, multiplier: 1, deltaScores: dsRel });
+      return { rotatedDelta };
     }
   }
+
+  return { rotatedDelta };
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -143,9 +175,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+
   let __lastWrite = Date.now();
   function writeLineKA(obj:any){ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); }
-  const __ka = setInterval(()=>{ try{ if((res as any).writableEnded){ clearInterval(__ka as any); return; } if(Date.now()-__lastWrite>2500){ writeLineKA({ type:'ka', ts: new Date().toISOString() }); } }catch{} }, 2500);
+  const __ka = setInterval(()=>{ try{
+    if((res as any).writableEnded){ clearInterval(__ka as any); return; }
+    if(Date.now()-__lastWrite>2500){ writeLineKA({ type:'ka', ts: new Date().toISOString() }); }
+  }catch{} }, 2500);
 
   try {
     const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -154,29 +190,42 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const four2 = body.four2 || 'both';
     const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
 
+    const startScore = Number(body.startScore ?? 0) || 0;
+    const stopBelowZero = body.stopBelowZero ?? true;  // 默认开启“<0 停赛”
+
     // build bots
-    const seatBots = (body.seats || []).slice(0,3).map((s, i) => asBot(s.choice, s));
+    const seatBots = (body.seats || []).slice(0,3).map((s) => asBot(s.choice, s));
     const seatMeta = (body.seats || []).slice(0,3); // 用于 rob-eval 的元信息
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
-    let scores: [number,number,number] = [0,0,0];
+    // 服务端累计总分，仅用于“<0 停赛”判定；初始为 startScore
+    let scores: [number,number,number] = [startScore, startScore, startScore];
+
     for (let round = 1; round <= rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
 
-      // wrap seats with per-seat delay (防止显式 await 造成阻塞)
+      // wrap seats with per-seat delay
       const delayedSeats = seatBots.map((bot, idx) => async (ctx:any) => {
         const ms = delays[idx] || 0;
         if (ms) await new Promise(r => setTimeout(r, ms));
         return bot(ctx);
       });
 
-      await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, seatMeta }, res, round);
+      const { rotatedDelta } = await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, seatMeta }, res, round);
 
-      // 前端会自行累计分数；这里只做可选的“低于0提前终止”
-      if (body.stopBelowZero && (scores[0]<0 || scores[1]<0 || scores[2]<0)) {
-        writeLine(res, { type:'log', message:`某方积分 < 0，提前终止。` });
-        break;
+      // 将“座位顺序”的本局增量累加到服务端分数，并判断是否 < 0
+      if (rotatedDelta) {
+        scores = [
+          scores[0] + rotatedDelta[0],
+          scores[1] + rotatedDelta[1],
+          scores[2] + rotatedDelta[2],
+        ];
+      }
+
+      if (stopBelowZero && (scores[0] < 0 || scores[1] < 0 || scores[2] < 0)) {
+        writeLine(res, { type:'log', message:`某方积分 < 0，提前终止。当前总分（座位顺序）：${scores.join(' / ')}` });
+        break;  // 停止后续局数
       }
 
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
