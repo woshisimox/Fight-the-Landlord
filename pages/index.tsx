@@ -17,9 +17,9 @@ type BotChoice =
   | 'http';
 
 type LiveProps = {
-  rounds: number;                 // 计划跑的总局数（前端“每局一请求”）
+  rounds: number;
   startScore: number;
-  seatDelayMs?: number[];         // 每家最小出牌间隔（ms），仅前端节奏控制
+  seatDelayMs?: number[];
   enabled: boolean;
   rob: boolean;
   four2: Four2Policy;
@@ -34,7 +34,7 @@ type LiveProps = {
     httpBase?: string;
     httpToken?: string;
   }[];
-  farmerCoop: boolean;            // ★ 新增：农民配合
+  farmerCoop: boolean;
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
 };
@@ -43,7 +43,7 @@ function SeatTitle({ i }: { i:number }) {
   return <span style={{ fontWeight:700 }}>{['甲','乙','丙'][i]}</span>;
 }
 
-/* ---------- 花色与手牌渲染 ---------- */
+/* ---------- 扑克牌渲染 ---------- */
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 
@@ -57,12 +57,12 @@ const rankOf = (l: string) => {
 
 function candDecorations(l: string): string[] {
   if (!l) return [];
-  if (l === 'x') return ['🃏X'];  // 小王
-  if (l === 'X') return ['🃏Y'];  // 大王
+  if (l === 'x') return ['🃏X'];
+  if (l === 'X') return ['🃏Y'];
   if (l.startsWith('🃏')) return [l];
   if ('♠♥♦♣'.includes(l[0])) return [l];
   const r = rankOf(l);
-  if (r === 'JOKER') return ['🃏Y']; // 兜底
+  if (r === 'JOKER') return ['🃏Y'];
   return SUITS.map(s => `${s}${r}`);
 }
 
@@ -97,14 +97,10 @@ function Card({ label }: { label:string }) {
 }
 
 function Hand({ cards }: { cards: string[] }) {
-  if (!cards || cards.length === 0) {
-    return <span style={{ opacity: 0.6 }}>（空）</span>;
-  }
+  if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>（空）</span>;
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-      {cards.map((c, idx) => (
-        <Card key={`${c}-${idx}`} label={c} />
-      ))}
+      {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
     </div>
   );
 }
@@ -118,9 +114,7 @@ function PlayRow(
       <div style={{ width:32, textAlign:'right', opacity:0.8 }}>{['甲','乙','丙'][seat]}</div>
       <div style={{ width:56, fontWeight:700 }}>{move === 'pass' ? '过' : '出牌'}</div>
       <div style={{ flex:1 }}>
-        {move === 'pass'
-          ? <span style={{ opacity:0.6 }}>过</span>
-          : <Hand cards={cards || []} />}
+        {move === 'pass' ? <span style={{ opacity:0.6 }}>过</span> : <Hand cards={cards || []} />}
       </div>
       {reason && <div style={{ width:220, fontSize:12, color:'#666' }}>{reason}</div>}
     </div>
@@ -149,7 +143,7 @@ function Section({ title, children }:{title:string; children:React.ReactNode}) {
   );
 }
 
-/* ====== 模型占位与归一化（用于 UI 与请求） ====== */
+/* ====== 模型预设 ====== */
 function defaultModelFor(choice: BotChoice): string {
   switch (choice) {
     case 'ai:openai': return 'gpt-4o-mini';
@@ -160,27 +154,19 @@ function defaultModelFor(choice: BotChoice): string {
     default: return '';
   }
 }
-
 function normalizeModelForProvider(choice: BotChoice, input: string): string {
   const m = (input || '').trim();
   if (!m) return '';
   const low = m.toLowerCase();
   switch (choice) {
-    case 'ai:kimi':
-      return /^kimi[-\w]*/.test(low) ? m : '';
-    case 'ai:openai':
-      return /^(gpt-|o[34]|text-|omni)/.test(low) ? m : '';
-    case 'ai:gemini':
-      return /^gemini[-\w.]*/.test(low) ? m : '';
-    case 'ai:grok':
-      return /^grok[-\w.]*/.test(low) ? m : '';
-    case 'ai:qwen':
-      return /^qwen[-\w.]*/.test(low) ? m : '';
-    default:
-      return '';
+    case 'ai:kimi':   return /^kimi[-\w]*/.test(low) ? m : '';
+    case 'ai:openai': return /^(gpt-|o[34]|text-|omni)/.test(low) ? m : '';
+    case 'ai:gemini': return /^gemini[-\w.]*/.test(low) ? m : '';
+    case 'ai:grok':   return /^grok[-\w.]*/.test(low) ? m : '';
+    case 'ai:qwen':   return /^qwen[-\w.]*/.test(low) ? m : '';
+    default: return '';
   }
 }
-
 function choiceLabel(choice: BotChoice): string {
   switch (choice) {
     case 'built-in:greedy-max': return 'Greedy Max';
@@ -193,6 +179,61 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':  return 'Qwen';
     case 'http':     return 'HTTP';
   }
+}
+
+/* ====== 雷达图组件（5 维：Coop/Agg/Cons/Eff/Rob；0~5） ====== */
+function RadarChart({ title, scores }:{
+  title: string;
+  scores: { coop:number; agg:number; cons:number; eff:number; rob:number };
+}) {
+  const keys = ['Coop','Agg','Cons','Eff','Rob'] as const;
+  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
+  const size = 180, R = 70, cx = size/2, cy = size/2;
+
+  const pts = vals.map((v, i)=>{
+    const ang = (-90 + i*(360/keys.length)) * Math.PI/180;
+    const r = (Math.max(0, Math.min(5, v)) / 5) * R;
+    const x = cx + r * Math.cos(ang);
+    const y = cy + r * Math.sin(ang);
+    return `${x},${y}`;
+  }).join(' ');
+
+  return (
+    <div style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
+      <div style={{ fontWeight:700, marginBottom:6 }}>{title}</div>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {/* 轴线与同心多边形 */}
+        {[1,2,3,4,5].map(k=>{
+          const r = (k/5)*R;
+          const polygon = Array.from({length:5}, (_,i)=>{
+            const ang = (-90 + i*(360/5)) * Math.PI/180;
+            const x = cx + r * Math.cos(ang);
+            const y = cy + r * Math.sin(ang);
+            return `${x},${y}`;
+          }).join(' ');
+          return <polygon key={k} points={polygon} fill="none" stroke="#e5e7eb"/>;
+        })}
+        {Array.from({length:5}, (_,i)=>{
+          const ang = (-90 + i*(360/5)) * Math.PI/180;
+          const x = cx + R * Math.cos(ang);
+          const y = cy + R * Math.sin(ang);
+          return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="#e5e7eb"/>;
+        })}
+        {/* 数据面 */}
+        <polygon points={pts} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
+        {/* 标签 */}
+        {(['配合','激进','保守','效率','抢地主']).map((lab, i)=>{
+          const ang = (-90 + i*(360/5)) * Math.PI/180;
+          const x = cx + (R+14) * Math.cos(ang);
+          const y = cy + (R+14) * Math.sin(ang);
+          return <text key={i} x={x} y={y} fontSize="12" textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
+        })}
+      </svg>
+      <div style={{ fontSize:12, color:'#6b7280' }}>
+        分数（0~5）：Coop {scores.coop} / Agg {scores.agg} / Cons {scores.cons} / Eff {scores.eff} / Rob {scores.rob}
+      </div>
+    </div>
+  );
 }
 
 /* ==================== LivePanel（对局） ==================== */
@@ -210,6 +251,11 @@ function LivePanel(props: LiveProps) {
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
+
+  // ★ 新增：本局战术画像（每座位 0~5）
+  const [roundStats, setRoundStats] = useState<
+    { coop:number; agg:number; cons:number; eff:number; rob:number }[] | null
+  >(null);
 
   const prevRunningRef = useRef(false);
   useEffect(() => {
@@ -234,6 +280,7 @@ function LivePanel(props: LiveProps) {
   const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
   const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
   const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
+  const statsRef = useRef(roundStats); useEffect(()=>{ statsRef.current = roundStats; },[roundStats]);
 
   const rewriteRoundLabel = (msg: string) => {
     const n = Math.max(1, (winsRef.current || 0) + 1);
@@ -261,6 +308,7 @@ function LivePanel(props: LiveProps) {
     setMultiplier(1);
     setLog([]);
     setFinishedCount(0);
+    setRoundStats(null);
 
     controllerRef.current = new AbortController();
 
@@ -270,20 +318,13 @@ function LivePanel(props: LiveProps) {
         const model = normalized || defaultModelFor(choice);
         const keys = props.seatKeys[i] || {};
         switch (choice) {
-          case 'ai:openai':
-            return { choice, model, apiKey: keys.openai || '' };
-          case 'ai:gemini':
-            return { choice, model, apiKey: keys.gemini || '' };
-          case 'ai:grok':
-            return { choice, model, apiKey: keys.grok || '' };
-          case 'ai:kimi':
-            return { choice, model, apiKey: keys.kimi || '' };
-          case 'ai:qwen':
-            return { choice, model, apiKey: keys.qwen || '' };
-          case 'http':
-            return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
-          default:
-            return { choice };
+          case 'ai:openai': return { choice, model, apiKey: keys.openai || '' };
+          case 'ai:gemini': return { choice, model, apiKey: keys.gemini || '' };
+          case 'ai:grok':   return { choice, model, apiKey: keys.grok || '' };
+          case 'ai:kimi':   return { choice, model, apiKey: keys.kimi || '' };
+          case 'ai:qwen':   return { choice, model, apiKey: keys.qwen || '' };
+          case 'http':      return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
+          default:          return { choice };
         }
       });
     };
@@ -298,7 +339,6 @@ function LivePanel(props: LiveProps) {
 
     const playOneGame = async (_gameIndex: number) => {
       setLog([]);
-
       const specs = buildSeatSpecs();
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
       const currentRound = Math.max(1, (winsRef.current || 0) + 1);
@@ -321,7 +361,7 @@ function LivePanel(props: LiveProps) {
           seats: specs,
           clientTraceId: traceId,
           stopBelowZero: true,
-          farmerCoop: props.farmerCoop,        // ★ 传给后端
+          farmerCoop: props.farmerCoop,
         }),
         signal: controllerRef.current!.signal,
       });
@@ -355,6 +395,7 @@ function LivePanel(props: LiveProps) {
           let nextWinner = winnerRef.current as number | null;
           let nextDelta = deltaRef.current as [number, number, number] | null;
           let nextMultiplier = multiplierRef.current;
+          let nextStats = statsRef.current;
 
           for (const raw of batch) {
             const m: any = raw;
@@ -367,6 +408,7 @@ function LivePanel(props: LiveProps) {
                 nextWinner = null;
                 nextDelta = null;
                 nextMultiplier = 1;
+                nextStats = null; // 新局开始清空上一局画像
                 const handsRaw: string[][] = rh as string[][];
                 const decorated: string[][] = handsRaw.map(decorateHandCycle);
                 nextHands = decorated;
@@ -376,7 +418,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // AI 调用开始
               if (m.type === 'event' && m.kind === 'bot-call') {
                 const seatName = ['甲','乙','丙'][m.seat];
                 nextLog = [
@@ -386,7 +427,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // AI 调用完成 + 耗时 + 理由（如果返回）
               if (m.type === 'event' && m.kind === 'bot-done') {
                 const seatName = ['甲','乙','丙'][m.seat];
                 nextLog = [
@@ -397,7 +437,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // 抢地主评估
               if (m.type === 'event' && m.kind === 'rob-eval') {
                 const seatName = ['甲', '乙', '丙'][m.seat];
                 const featText = (() => {
@@ -411,10 +450,7 @@ function LivePanel(props: LiveProps) {
                     return pairs.join(', ');
                   } catch { return '—'; }
                 })();
-                nextLog = [
-                  ...nextLog,
-                  `抢地主评估｜${seatName}｜分=${m.score} 阈=${m.threshold}｜特征：${featText}`
-                ];
+                nextLog = [...nextLog, `抢地主评估｜${seatName}｜分=${m.score} 阈=${m.threshold}｜特征：${featText}`];
                 continue;
               }
 
@@ -479,6 +515,26 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
+              // ★ 新增：后端统计事件（本局画像）
+              if (m.type === 'event' && m.kind === 'stats' && Array.isArray(m.perSeat)) {
+                const s3 = [0,1,2].map(i=>{
+                  const rec = m.perSeat.find((x:any)=>x.seat===i);
+                  const sc = rec?.scaled || {};
+                  return {
+                    coop: Number(sc.coop ?? 2.5),
+                    agg : Number(sc.agg  ?? 2.5),
+                    cons: Number(sc.cons ?? 2.5),
+                    eff : Number(sc.eff  ?? 2.5),
+                    rob : Number(sc.rob  ?? 2.5),
+                  };
+                }) as {coop:number;agg:number;cons:number;eff:number;rob:number}[];
+                nextStats = s3;
+
+                const msg = s3.map((v, i)=>`${['甲','乙','丙'][i]}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
+                nextLog = [...nextLog, `战术画像（本局）：${msg}`];
+                continue;
+              }
+
               if (m.type === 'log' && typeof m.message === 'string') {
                 nextLog = [...nextLog, rewriteRoundLabel(m.message)];
                 continue;
@@ -497,6 +553,7 @@ function LivePanel(props: LiveProps) {
           setWinner(nextWinner);
           setMultiplier(nextMultiplier);
           setDelta(nextDelta);
+          setRoundStats(nextStats || null);
         }
       }
 
@@ -571,9 +628,7 @@ function LivePanel(props: LiveProps) {
         <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
           {plays.length === 0
             ? <div style={{ opacity:0.6 }}>（尚无出牌）</div>
-            : plays.map((p, idx) =>
-                <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />
-              )
+            : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)
           }
         </div>
       </Section>
@@ -595,6 +650,24 @@ function LivePanel(props: LiveProps) {
         </div>
       </Section>
 
+      {/* ★ 新增：战术画像（本局） */}
+      <Section title="战术画像（本局，0~5）">
+        {roundStats
+          ? (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>(
+                <RadarChart
+                  key={i}
+                  title={`${['甲','乙','丙'][i]}${landlord===i?'（地主）':'（农民）'}`}
+                  scores={roundStats[i]}
+                />
+              ))}
+            </div>
+          )
+          : <div style={{ opacity:0.6 }}>（等待本局结束生成画像）</div>
+        }
+      </Section>
+
       <div style={{ display:'flex', gap:8 }}>
         <button onClick={start} disabled={running}
           style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
@@ -611,7 +684,7 @@ function Home() {
   const [startScore, setStartScore] = useState<number>(100);
   const [rob, setRob] = useState<boolean>(true);
   const [four2, setFour2] = useState<'both'|'2singles'|'2pairs'>('both');
-  const [farmerCoop, setFarmerCoop] = useState<boolean>(true); // ★ 新增：农民配合
+  const [farmerCoop, setFarmerCoop] = useState<boolean>(true);
 
   const [seatDelayMs, setSeatDelayMs] = useState<number[]>([1000, 1000, 1000]);
   const setSeatDelay = (i:number, v:number|string) =>
@@ -829,7 +902,7 @@ function Home() {
                     最小间隔 (ms)
                     <input
                       type="number" min={0} step={100}
-                      value={seatDelayMs[i]}
+                      value={ (seatDelayMs[i] ?? 0) }
                       onChange={e=>setSeatDelay(i, e.target.value)}
                       style={{ width:'100%' }}
                     />
@@ -853,7 +926,7 @@ function Home() {
           seats={seats}
           seatModels={seatModels}
           seatKeys={seatKeys}
-          farmerCoop={farmerCoop}   // ★ 传给 LivePanel
+          farmerCoop={farmerCoop}
           onLog={setLiveLog}
         />
       </div>
