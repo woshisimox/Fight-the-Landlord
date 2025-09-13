@@ -549,4 +549,536 @@ function LivePanel(props: LiveProps) {
                 nextDelta      = rot;
                 nextLog = [
                   ...nextLog,
-                  `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${['甲','乙','丙'][L]
+                  `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${['甲','乙','丙'][L]}`
+                ];
+                nextTotals     = [
+                  nextTotals[0] + rot[0],
+                  nextTotals[1] + rot[1],
+                  nextTotals[2] + rot[2],
+                ] as any;
+                nextFinished   = nextFinished + 1;
+                continue;
+              }
+
+              // 累计画像（消费后端 stats 事件）
+              if (m.type === 'event' && m.kind === 'stats' && Array.isArray(m.perSeat)) {
+                const s3 = [0,1,2].map(i=>{
+                  const rec = m.perSeat.find((x:any)=>x.seat===i);
+                  const sc = rec?.scaled || {};
+                  return {
+                    coop: Number(sc.coop ?? 2.5),
+                    agg : Number(sc.agg  ?? 2.5),
+                    cons: Number(sc.cons ?? 2.5),
+                    eff : Number(sc.eff  ?? 2.5),
+                    rob : Number(sc.rob  ?? 2.5),
+                  };
+                }) as Score5[];
+
+                const mode  = aggModeRef.current;
+                const a     = alphaRef.current;
+
+                if (!nextAggStats) {
+                  nextAggStats = s3.map(x=>({ ...x }));
+                  nextAggCount = 1;
+                } else {
+                  nextAggStats = nextAggStats.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
+                  nextAggCount = nextAggCount + 1;
+                }
+
+                const msg = s3.map((v, i)=>`${['甲','乙','丙'][i]}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
+                nextLog = [...nextLog, `战术画像（本局）：${msg}`];
+                continue;
+              }
+
+              if (m.type === 'log' && typeof m.message === 'string') {
+                nextLog = [...nextLog, rewrite(m.message)];
+                continue;
+              }
+            } catch (e) {
+              console.error('[ingest:batch]', e, raw);
+            }
+          }
+
+          setHands(nextHands);
+          setPlays(nextPlays);
+          setTotals(nextTotals);
+          setFinishedCount(nextFinished);
+          setLog(nextLog);
+          setLandlord(nextLandlord);
+          setWinner(nextWinner);
+          setMultiplier(nextMultiplier);
+          setDelta(nextDelta);
+
+          setAggStats(nextAggStats || null);
+          setAggCount(nextAggCount || 0);
+        }
+      }
+
+      setLog(l => [...l, `—— 本局流结束 ——`]);
+    };
+
+    try {
+      for (let i = 0; i < props.rounds; i++) {
+        if (controllerRef.current?.signal.aborted) break;
+        const thisRound = ++labelRound;     // 同步自增的当局局号
+        await playOneGame(i, thisRound);
+
+        // 若任意玩家积分为负，提前终止
+        const hasNegative =
+          Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
+        if (hasNegative) {
+          setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']);
+          break;
+        }
+
+        // 局间固定+随机间隔（1.0s~2.0s）
+        await new Promise(r => setTimeout(r, 1000 + Math.floor(Math.random() * 1000)));
+      }
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        setLog(l => [...l, '已手动停止。']);
+      } else {
+        setLog(l => [...l, `错误：${e?.message || e}`]);
+      }
+    } finally {
+      setRunning(false);
+      roundOpenRef.current = false;
+    }
+  };
+
+  const stop = () => {
+    controllerRef.current?.abort();
+    setRunning(false);
+  };
+
+  const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
+        <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, lineHeight:1.2, userSelect:'none', background:'#fff' }}>
+          剩余局数：{remainingGames}
+        </span>
+      </div>
+
+      <Section title="积分（总分）">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+              <div><SeatTitle i={i}/></div>
+              <div style={{ fontSize:24, fontWeight:800 }}>{totals[i]}</div>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="手牌">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
+              <div style={{ marginBottom:6 }}>
+                <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
+              </div>
+              <Hand cards={hands[i]} />
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="出牌">
+        <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
+          {plays.length === 0
+            ? <div style={{ opacity:0.6 }}>（尚无出牌）</div>
+            : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)
+          }
+        </div>
+      </Section>
+
+      <Section title="结果">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>倍数</div>
+            <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
+          </div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>胜者</div>
+            <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : ['甲','乙','丙'][winner]}</div>
+          </div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>本局加减分</div>
+            <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div>
+          </div>
+        </div>
+      </Section>
+
+      {/* 累计雷达图（仅显示累计） */}
+      <Section title="战术画像（累计，0~5）">
+        <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:8 }}>
+          <label>
+            汇总方式
+            <select
+              value={aggMode}
+              onChange={e=>setAggMode(e.target.value as 'mean'|'ewma')}
+              style={{ marginLeft:6 }}
+            >
+              <option value="ewma">指数加权（推荐）</option>
+              <option value="mean">简单平均</option>
+            </select>
+          </label>
+          {aggMode === 'ewma' && (
+            <label>
+              α（0.05–0.95）
+              <input
+                type="number" min={0.05} max={0.95} step={0.05}
+                value={alpha}
+                onChange={e=>setAlpha(Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35)))}
+                style={{ width:80, marginLeft:6 }}
+              />
+            </label>
+          )}
+          <div style={{ fontSize:12, color:'#6b7280' }}>
+            {aggMode==='ewma'
+              ? '越大越看重最近几局'
+              : `已累计 ${aggCount} 局`}
+          </div>
+        </div>
+
+        {aggStats
+          ? (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>(
+                <RadarChart
+                  key={i}
+                  title={`${['甲','乙','丙'][i]}（累计）`}
+                  scores={aggStats[i]}
+                />
+              ))}
+            </div>
+          )
+          : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
+        }
+      </Section>
+
+      <div style={{ display:'flex', gap:8 }}>
+        <button onClick={start} disabled={running || !props.enabled}
+          style={{ padding:'8px 12px', borderRadius:8, background: (running || !props.enabled) ? '#999' : '#222', color:'#fff' }}>
+          开始
+        </button>
+        <button onClick={stop} disabled={!running}
+          style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
+      </div>
+    </div>
+  );
+}
+
+/* ========= 默认值集中定义（用于清空恢复） ========= */
+const DEFAULTS = {
+  enabled: true,
+  rounds: 10,
+  startScore: 100,
+  rob: true,
+  four2: 'both' as Four2Policy,
+  farmerCoop: true,
+  seatDelayMs: [1000,1000,1000] as number[],
+  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
+  seatModels: ['gpt-4o-mini','gemini-1.5-flash','grok-2-latest'],
+  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as { openai?:string; gemini?:string; grok?:string; kimi?:string; qwen?:string; httpBase?:string; httpToken?:string; }[],
+};
+
+function Home() {
+  // 通过 resetKey 重新挂载 LivePanel，清空内部内存
+  const [resetKey, setResetKey] = useState<number>(0);
+
+  const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
+  const [rounds, setRounds] = useState<number>(DEFAULTS.rounds);
+  const [startScore, setStartScore] = useState<number>(DEFAULTS.startScore);
+  const [rob, setRob] = useState<boolean>(DEFAULTS.rob);
+  const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
+  const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
+
+  const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
+  const setSeatDelay = (i:number, v:number|string) =>
+    setSeatDelayMs(arr => { const n=[...arr]; n[i] = Math.max(0, Math.floor(Number(v) || 0)); return n; });
+
+  const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
+  const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
+  const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
+
+  const [liveLog, setLiveLog] = useState<string[]>([]);
+
+  const doResetAll = () => {
+    setEnabled(DEFAULTS.enabled);
+    setRounds(DEFAULTS.rounds);
+    setStartScore(DEFAULTS.startScore);
+    setRob(DEFAULTS.rob);
+    setFour2(DEFAULTS.four2);
+    setFarmerCoop(DEFAULTS.farmerCoop);
+    setSeatDelayMs([...DEFAULTS.seatDelayMs]);
+    setSeats([...DEFAULTS.seats]);
+    setSeatModels([...DEFAULTS.seatModels]);
+    setSeatKeys(DEFAULTS.seatKeys.map(x=>({ ...x })));
+    setLiveLog([]);
+    setResetKey(k => k + 1); // 触发 LivePanel 重新挂载，清空内部状态
+  };
+
+  return (
+    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
+      <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Bot Arena</h1>
+
+      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12 }}>
+          {/* 启用对局 + 清空 */}
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                启用对局
+                <input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} />
+              </label>
+              <button
+                onClick={doResetAll}
+                title="清空所有设置并重置运行内存为默认值"
+                style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >
+                清空
+              </button>
+            </div>
+            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>
+              关闭后不可开始/继续对局；再次勾选即可恢复。
+            </div>
+          </div>
+
+          <label>
+            局数
+            <input
+              type="number" min={1} step={1} value={rounds}
+              onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))}
+              style={{ width:'100%' }}
+            />
+          </label>
+
+          <label>
+            初始分
+            <input type="number" step={10} value={startScore}
+                   onChange={e=>setStartScore(Number(e.target.value)||0)}
+                   style={{ width:'100%' }} />
+          </label>
+
+          <label>
+            可抢地主
+            <div><input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} /></div>
+          </label>
+
+          <label>
+            农民配合
+            <div><input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} /></div>
+          </label>
+
+          <label>
+            4带2 规则
+            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
+              <option value="both">都可</option>
+              <option value="2singles">两张单牌</option>
+              <option value="2pairs">两对</option>
+            </select>
+          </label>
+        </div>
+
+        <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
+          <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+            {[0,1,2].map(i=>(
+              <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
+                <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /></div>
+
+                <label style={{ display:'block', marginBottom:6 }}>
+                  选择
+                  <select
+                    value={seats[i]}
+                    onChange={e=>{
+                      const v = e.target.value as BotChoice;
+                      setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
+                    }}
+                    style={{ width:'100%' }}
+                  >
+                    <optgroup label="内置">
+                      <option value="built-in:greedy-max">Greedy Max</option>
+                      <option value="built-in:greedy-min">Greedy Min</option>
+                      <option value="built-in:random-legal">Random Legal</option>
+                    </optgroup>
+                    <optgroup label="AI">
+                      <option value="ai:openai">OpenAI</option>
+                      <option value="ai:gemini">Gemini</option>
+                      <option value="ai:grok">Grok</option>
+                      <option value="ai:kimi">Kimi</option>
+                      <option value="ai:qwen">Qwen</option>
+                      <option value="http">HTTP</option>
+                    </optgroup>
+                  </select>
+                </label>
+
+                {seats[i].startsWith('ai:') && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    模型（可选）
+                    <input
+                      type="text"
+                      value={normalizeModelForProvider(seats[i], seatModels[i])}
+                      placeholder={defaultModelFor(seats[i])}
+                      onChange={e=>{
+                        const v = e.target.value;
+                        setSeatModels(arr => { const n=[...arr]; n[i] = v; return n; });
+                      }}
+                      style={{ width:'100%' }}
+                    />
+                    <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
+                      留空则使用推荐：{defaultModelFor(seats[i])}
+                    </div>
+                  </label>
+                )}
+
+                {seats[i] === 'ai:openai' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    OpenAI API Key
+                    <input type="password" value={seatKeys[i]?.openai||''}
+                           onChange={e=>{
+                             const v = e.target.value;
+                             setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), openai:v }; return n; });
+                           }}
+                           style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:gemini' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Gemini API Key
+                    <input type="password" value={seatKeys[i]?.gemini||''}
+                           onChange={e=>{
+                             const v = e.target.value;
+                             setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), gemini:v }; return n; });
+                           }}
+                           style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:grok' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    xAI (Grok) API Key
+                    <input type="password" value={seatKeys[i]?.grok||''}
+                           onChange={e=>{
+                             const v = e.target.value;
+                             setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), grok:v }; return n; });
+                           }}
+                           style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:kimi' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Kimi API Key
+                    <input type="password" value={seatKeys[i]?.kimi||''}
+                           onChange={e=>{
+                             const v = e.target.value;
+                             setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), kimi:v }; return n; });
+                           }}
+                           style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:qwen' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Qwen API Key
+                    <input type="password" value={seatKeys[i]?.qwen||''}
+                           onChange={e=>{
+                             const v = e.target.value;
+                             setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; });
+                           }}
+                           style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'http' && (
+                  <>
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      HTTP Base / URL
+                      <input type="text" value={seatKeys[i]?.httpBase||''}
+                             onChange={e=>{
+                               const v = e.target.value;
+                               setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpBase:v }; return n; });
+                             }}
+                             style={{ width:'100%' }} />
+                    </label>
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      HTTP Token（可选）
+                      <input type="password" value={seatKeys[i]?.httpToken||''}
+                             onChange={e=>{
+                               const v = e.target.value;
+                               setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpToken:v }; return n; });
+                             }}
+                             style={{ width:'100%' }} />
+                    </label>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop:12 }}>
+            <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)</div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>(
+                <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
+                  <div style={{ fontWeight:700, marginBottom:8 }}>{['甲','乙','丙'][i]}</div>
+                  <label style={{ display:'block' }}>
+                    最小间隔 (ms)
+                    <input
+                      type="number" min={0} step={100}
+                      value={ (seatDelayMs[i] ?? 0) }
+                      onChange={e=>setSeatDelay(i, e.target.value)}
+                      style={{ width:'100%' }}
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
+        <LivePanel
+          key={resetKey}            // 清空时强制重新挂载
+          rounds={rounds}
+          startScore={startScore}
+          seatDelayMs={seatDelayMs}
+          enabled={enabled}
+          rob={rob}
+          four2={four2}
+          seats={seats}
+          seatModels={seatModels}
+          seatKeys={seatKeys}
+          farmerCoop={farmerCoop}
+          onLog={setLiveLog}
+        />
+      </div>
+
+      <div style={{ marginTop:18 }}>
+        <Section title="运行日志">
+          <div style={{
+            border:'1px solid #eee', borderRadius:8, padding:'8px 10px',
+            maxHeight:420, overflow:'auto', background:'#fafafa'
+          }}>
+            {liveLog.length === 0
+              ? <div style={{ opacity:0.6 }}>（暂无）</div>
+              : liveLog.map((t, idx) => <LogLine key={idx} text={t} />)
+            }
+          </div>
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+export default Home;
