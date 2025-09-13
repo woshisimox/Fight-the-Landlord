@@ -324,7 +324,7 @@ function LivePanel(props: LiveProps) {
           four2: props.four2,
           seats: specs,                 // SeatSpec[]
           clientTraceId: traceId,
-          stopBelowZero: true,          // ★ 新增：让后端也在单请求内判停
+          stopBelowZero: true,          // 让后端在单请求内也判停
         }),
         signal: controllerRef.current!.signal,
       });
@@ -379,7 +379,27 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              /* ✅ 已有：显示抢地主评估 rob-eval */
+              /* ✅ 新增：显示每次 AI 调用（开始） */
+              if (m.type === 'event' && m.kind === 'bot-call') {
+                const seatName = ['甲','乙','丙'][m.seat];
+                nextLog = [
+                  ...nextLog,
+                  `AI调用｜${seatName}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`
+                ];
+                continue;
+              }
+
+              /* ✅ 新增：显示每次 AI 调用（完成）与耗时 */
+              if (m.type === 'event' && m.kind === 'bot-done') {
+                const seatName = ['甲','乙','丙'][m.seat];
+                nextLog = [
+                  ...nextLog,
+                  `AI完成｜${seatName}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`
+                ];
+                continue;
+              }
+
+              /* 已有：显示抢地主评估 rob-eval */
               if (m.type === 'event' && m.kind === 'rob-eval') {
                 const seatName = ['甲', '乙', '丙'][m.seat];
                 const featText = (() => {
@@ -493,7 +513,7 @@ function LivePanel(props: LiveProps) {
         if (controllerRef.current?.signal.aborted) break;
         await playOneGame(i);
 
-        // ★ 新增：每局后若发现有负分，则终止“连打”
+        // 每局后若发现有负分，则终止“连打”
         const hasNegative =
           Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
         if (hasNegative) {
