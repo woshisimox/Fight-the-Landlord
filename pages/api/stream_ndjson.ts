@@ -33,6 +33,36 @@ type StartPayload = {
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
 
+/* ---------- 工具：估算手牌强度 / 候选数 ---------- */
+function rankScore(r:string){
+  // 简单权重：Jokers>2>A>K>Q>J>T>…>3
+  const map:any = { X:10, x:8, '2':7, A:6, K:5, Q:4, J:3, T:2 };
+  return map[r] ?? 1;
+}
+function estimateHandEval(hand:any): number | undefined {
+  try{
+    if (!Array.isArray(hand) || hand.length===0) return undefined;
+    // hand 可能是 ['A','K',...]/ 或 含花色；先取 rank
+    const ranks = hand.map((c:any)=>{
+      const s = String(c);
+      if (s === 'x' || s === 'X' || s.startsWith('🃏')) return s === 'X' || s.endsWith('Y') ? 'X' : 'x';
+      const core = /10/i.test(s) ? s.replace(/10/i,'T') : s;
+      const r = core.match(/[23456789TJQKA]/i)?.[0]?.toUpperCase() ?? '';
+      return r;
+    });
+    const total = ranks.reduce((acc,r)=>acc+rankScore(r),0);
+    const max = hand.length * 10;
+    return Math.round((total/max)*100)/100; // 0~1，小数
+  }catch{return undefined;}
+}
+function inferCandidateCount(ctx:any): number | undefined {
+  try{
+    const cands = ctx?.candidates ?? ctx?.legalMoves ?? ctx?.legal ?? ctx?.moves;
+    if (Array.isArray(cands)) return cands.length;
+  }catch{}
+  return undefined;
+}
+
 function writeLine(res: NextApiResponse, obj: any) {
   (res as any).write(JSON.stringify(obj) + '\n');
 }
@@ -66,27 +96,19 @@ function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any 
   }
 }
 
-/** 生成更完整的人类可读“理由” & 结构化“策略”，适用于内置和 AI */
+/** 生成“理由 & 策略”对象（在不改动 bot/引擎的前提下尽可能丰富） */
 function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx:any, out:any) {
   const by = providerLabel(choice);
   const model = (spec?.model || '').trim();
   const role = (ctx?.seat != null && ctx?.landlord != null) ? (ctx.seat === ctx.landlord ? '地主' : '农民') : '';
   const requireType = ctx?.require?.type || null;
-  const lead = !requireType; // 没有跟牌需求 => 首攻
+  const lead = !requireType;
   const cards = Array.isArray(out?.cards) ? out.cards : [];
   const combo = out?.comboType || out?.combo?.type || (lead ? out?.require?.type : ctx?.require?.type) || null;
-  const cardsStr = cards.join(' ');
   const usedBomb = combo === 'bomb' || combo === 'rocket';
   const handSize = Array.isArray(ctx?.hand) ? ctx.hand.length : undefined;
 
-  // 基于策略名称给一个“高层策略标签”
-  let policy: string;
-  if (choice === 'built-in:greedy-max') policy = 'GreedyMax（优先带走更多牌/长连/大牌力）';
-  else if (choice === 'built-in:greedy-min') policy = 'GreedyMin（用最小可行解应对）';
-  else if (choice === 'built-in:random-legal') policy = 'RandomLegal（随机合法走法）';
-  else policy = 'LLM（语言模型策略）';
-
-  // 文本理由
+  // 若 bot 自带 reason 则用之，否则合成一个
   let reason = out?.reason as (string|undefined);
   if (!reason) {
     if (out?.move === 'pass') {
@@ -98,24 +120,41 @@ function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx
       if (usedBomb) parts.push('争夺/巩固先手');
       if (choice === 'built-in:greedy-max') parts.push('带走更多牌');
       if (choice === 'built-in:greedy-min') parts.push('尽量少出牌应对');
-      reason = `${parts.join('，')}：${cardsStr}`;
+      reason = `${parts.join('，')}：${cards.join(' ')}`;
     }
   }
 
-  const strategy = {
+  // 扩展策略对象（可被前端浓缩为一行展示）
+  const strategy:any = {
     provider: by, model, choice,
     role, lead, require: requireType, combo,
     cards, handSize,
-    factors: { usedBomb }
+    usedBomb,
+    rule: out?.rule || out?.policy || undefined,
+    heuristics: out?.heuristics || out?.weights || undefined,
+    risk: typeof out?.risk === 'number' ? out.risk : undefined,
+    candidateCount: (typeof out?.candidateCount === 'number' ? out.candidateCount : inferCandidateCount(ctx)),
+    handEval: (typeof out?.handEval === 'number' ? out.handEval : estimateHandEval(ctx?.hand)),
+    search: out?.search || out?.trace?.search || undefined,
+    coopSignals: out?.coopSignals || {
+      teammateLow: (()=>{ try{
+        const me = ctx?.seat, L = ctx?.landlord;
+        if (typeof me!=='number' || typeof L!=='number') return undefined;
+        if (me===L) return undefined;
+        const mate = [0,1,2].filter(x=>x!==me && x!==L)[0];
+        const remain = Array.isArray(ctx?.remain) ? ctx.remain[mate] : undefined;
+        return remain!=null ? (remain <= 3 ? 'mate_low' : undefined) : undefined;
+      }catch{return undefined;}})()
+    },
   };
 
   return { reason, strategy };
 }
 
-/** bot 包装：发 bot-call / bot-done，并通过 onReason 回传“理由”，用于给 play 贴上 */
+/** bot 包装：发 bot-call/bot-done，并把“理由”缓存以贴到 play/pass 事件 */
 function traceWrap(
   choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any, res: NextApiResponse,
-  onReason: (seat:number, text?:string, strategy?:any)=>void
+  onReason: (seat:number, text?:string)=>void
 ) {
   const by = providerLabel(choice);
   const model = (spec?.model || '').trim();
@@ -126,16 +165,11 @@ function traceWrap(
     const t0 = Date.now();
     let out: any;
     let err: any = null;
-    try {
-      out = await bot(ctx);
-    } catch (e) {
-      err = e;
-    }
+    try { out = await bot(ctx); } catch (e) { err = e; }
     const tookMs = Date.now() - t0;
 
-    // 生成理由 & 策略（即使 bot 没给 reason，我也给）
     const { reason, strategy } = buildReasonAndStrategy(choice, spec, ctx, out);
-    onReason(ctx?.seat ?? -1, reason, strategy);
+    onReason(ctx?.seat ?? -1, reason);
 
     try {
       writeLine(res, {
@@ -144,13 +178,12 @@ function traceWrap(
       });
     } catch {}
     if (err) throw err;
-    // 也把 reason 写回返回值，若引擎透传，我们就能直接跟随 play 事件
     try { if (out && !out.reason) out.reason = reason; } catch {}
     return out;
   };
 }
 
-/** 单局执行（含卡死保护 + Coop v3 画像兜底 + 在 play 事件上附加 reason） */
+/** 单局执行（含卡死保护 + Coop 画像兜底 + 在 play 上附带 reason） */
 async function runOneRoundWithGuard(
   opts: { seats: any[], four2?: 'both'|'2singles'|'2pairs', delayMs?: number, lastReason?: (string|null)[] },
   res: NextApiResponse,
@@ -222,21 +255,16 @@ async function runOneRoundWithGuard(
 
     const kind = value?.kind || value?.type;
 
-    // 在“转发”前，若是 play 事件，就把“上一条 bot-done 缓存的理由”贴上
+    // 在“转发”前，若是 play/pass，则把上一条 bot-done 的 reason 贴上
     if (kind === 'play' && typeof value?.seat === 'number' && Array.isArray(opts.lastReason)) {
       const s = value.seat as number;
       const reason = value?.reason || opts.lastReason[s];
-      if (reason) {
-        writeLine(res, { ...value, reason });
-        opts.lastReason[s] = null;
-      } else {
-        writeLine(res, value);
-      }
+      writeLine(res, reason ? { ...value, reason } : value);
+      opts.lastReason[s] = null;
     } else {
       writeLine(res, value);
     }
 
-    // 统计钩子
     if (value?.kind === 'init' && typeof value?.landlord === 'number') {
       landlord = value.landlord;
       rem = [17,17,17]; if (landlord>=0) rem[landlord] = 20;
@@ -277,7 +305,6 @@ async function runOneRoundWithGuard(
     }
 
     if (kind === 'stats') seenStats = true;
-
     if (kind === 'win' && !seenStats) emitStatsLite('stats-lite/coop-v3(before-win)');
     if (kind === 'win') seenWin = true;
 
@@ -315,7 +342,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if((res as any).writableEnded){ clearInterval(keepAlive as any); return; }
     if(Date.now()-__lastWrite>2500){ writeLine(res, { type:'ka', ts: new Date().toISOString() }); __lastWrite = Date.now(); }
   }catch{} }, 2500);
-  const _write = (o:any)=>{ writeLine(res, o); __lastWrite = Date.now(); };
 
   try {
     const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -326,20 +352,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const seatSpecs = (body.seats || []).slice(0,3);
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
 
-    _write({ type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
+    writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
     for (let round = 1; round <= rounds; round++) {
-      _write({ type:'log', message:`—— 第 ${round} 局开始 ——` });
-      _write({ type:'event', kind:'round-start', round });
+      writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
+      writeLine(res, { type:'event', kind:'round-start', round });
 
-      // 每局重置“理由缓存”
       const lastReason: (string|null)[] = [null, null, null];
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
 
-      // 为“本局”包一层 trace（带 onReason 回调）
       const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason));
 
-      // per-seat 延迟
       const delayedSeats = roundBots.map((bot, idx) => async (ctx:any) => {
         const ms = delays[idx] || 0; if (ms) await new Promise(r => setTimeout(r, ms));
         return bot(ctx);
@@ -347,11 +370,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, lastReason }, res, round);
 
-      if (round < rounds) _write({ type:'log', message:`—— 第 ${round} 局结束 ——` });
+      if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
   } catch (e:any) {
-    _write({ type:'log', message:`后端错误：${e?.message || String(e)}` });
+    writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
   } finally {
-    try{ clearInterval(keepAlive as any);}catch{}; try{ (res as any).end(); }catch{}
+    try{ clearInterval(keepAlive as any);}catch{};
+    try{ (res as any).end(); }catch{}
   }
 }
