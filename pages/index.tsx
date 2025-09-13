@@ -1,7 +1,6 @@
 // pages/index.tsx
 import React, { useEffect, useRef, useState } from 'react';
 
-type CardLabel = string;
 type ComboType =
   | 'single' | 'pair' | 'triple' | 'bomb' | 'rocket'
   | 'straight' | 'pair-straight' | 'plane'
@@ -181,10 +180,34 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 
-/* ====== 雷达图组件（5 维：Coop/Agg/Cons/Eff/Rob；0~5） ====== */
+/* ====== 分数类型与聚合 ====== */
+type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
+
+function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
+  if (mode === 'mean') {
+    const c = Math.max(0, count);
+    return {
+      coop: (prev.coop*c + curr.coop)/(c+1),
+      agg:  (prev.agg *c + curr.agg )/(c+1),
+      cons: (prev.cons*c + curr.cons)/(c+1),
+      eff:  (prev.eff *c + curr.eff )/(c+1),
+      rob:  (prev.rob *c + curr.rob )/(c+1),
+    };
+  }
+  const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
+  return {
+    coop: a*curr.coop + (1-a)*prev.coop,
+    agg:  a*curr.agg  + (1-a)*prev.agg,
+    cons: a*curr.cons + (1-a)*prev.cons,
+    eff:  a*curr.eff  + (1-a)*prev.eff,
+    rob:  a*curr.rob  + (1-a)*prev.rob,
+  };
+}
+
+/* ====== 雷达图组件（仅累计显示，0~5） ====== */
 function RadarChart({ title, scores }:{
   title: string;
-  scores: { coop:number; agg:number; cons:number; eff:number; rob:number };
+  scores: Score5;
 }) {
   const keys = ['Coop','Agg','Cons','Eff','Rob'] as const;
   const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
@@ -202,7 +225,6 @@ function RadarChart({ title, scores }:{
     <div style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
       <div style={{ fontWeight:700, marginBottom:6 }}>{title}</div>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {/* 轴线与同心多边形 */}
         {[1,2,3,4,5].map(k=>{
           const r = (k/5)*R;
           const polygon = Array.from({length:5}, (_,i)=>{
@@ -219,9 +241,7 @@ function RadarChart({ title, scores }:{
           const y = cy + R * Math.sin(ang);
           return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="#e5e7eb"/>;
         })}
-        {/* 数据面 */}
         <polygon points={pts} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
-        {/* 标签 */}
         {(['配合','激进','保守','效率','抢地主']).map((lab, i)=>{
           const ang = (-90 + i*(360/5)) * Math.PI/180;
           const x = cx + (R+14) * Math.cos(ang);
@@ -252,19 +272,11 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  // ★ 新增：本局战术画像（每座位 0~5）
-  const [roundStats, setRoundStats] = useState<
-    { coop:number; agg:number; cons:number; eff:number; rob:number }[] | null
-  >(null);
-
-  const prevRunningRef = useRef(false);
-  useEffect(() => {
-    if (running && !prevRunningRef.current) {
-      const base = props.startScore || 0;
-      setTotals([base, base, base]);
-    }
-    prevRunningRef.current = running;
-  }, [running, props.startScore]);
+  // ★ 仅累计画像（跨局）：支持 mean / ewma
+  const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
+  const [alpha, setAlpha] = useState<number>(0.35);
+  const [aggStats, setAggStats] = useState<Score5[] | null>(null);
+  const [aggCount, setAggCount] = useState<number>(0);
 
   useEffect(() => { props.onTotals?.(totals); }, [totals]);
   useEffect(() => { props.onLog?.(log); }, [log]);
@@ -279,11 +291,15 @@ function LivePanel(props: LiveProps) {
   const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
   const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
   const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
-  const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
-  const statsRef = useRef(roundStats); useEffect(()=>{ statsRef.current = roundStats; },[roundStats]);
+
+  // 累计画像相关 refs
+  const aggStatsRef = useRef(aggStats); useEffect(()=>{ aggStatsRef.current = aggStats; }, [aggStats]);
+  const aggCountRef = useRef(aggCount); useEffect(()=>{ aggCountRef.current = aggCount; }, [aggCount]);
+  const aggModeRef  = useRef(aggMode);  useEffect(()=>{ aggModeRef.current  = aggMode;  }, [aggMode]);
+  const alphaRef    = useRef(alpha);    useEffect(()=>{ alphaRef.current    = alpha;    }, [alpha]);
 
   const rewriteRoundLabel = (msg: string) => {
-    const n = Math.max(1, (winsRef.current || 0) + 1);
+    const n = Math.max(1, (finishedRef.current || 0) + 1);
     if (typeof msg !== 'string') return msg;
     let out = msg;
     out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
@@ -308,7 +324,10 @@ function LivePanel(props: LiveProps) {
     setMultiplier(1);
     setLog([]);
     setFinishedCount(0);
-    setRoundStats(null);
+
+    // ★ 开始新一轮连打时，累计画像清空（按你的需求也可以改为保留）
+    setAggStats(null);
+    setAggCount(0);
 
     controllerRef.current = new AbortController();
 
@@ -341,7 +360,7 @@ function LivePanel(props: LiveProps) {
       setLog([]);
       const specs = buildSeatSpecs();
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
-      const currentRound = Math.max(1, (winsRef.current || 0) + 1);
+      const currentRound = Math.max(1, (finishedRef.current || 0) + 1);
 
       setLog(l => [
         ...l,
@@ -395,7 +414,10 @@ function LivePanel(props: LiveProps) {
           let nextWinner = winnerRef.current as number | null;
           let nextDelta = deltaRef.current as [number, number, number] | null;
           let nextMultiplier = multiplierRef.current;
-          let nextStats = statsRef.current;
+
+          // ★ 新增：批次变量用于累计画像
+          let nextAggStats = aggStatsRef.current;
+          let nextAggCount = aggCountRef.current;
 
           for (const raw of batch) {
             const m: any = raw;
@@ -408,7 +430,6 @@ function LivePanel(props: LiveProps) {
                 nextWinner = null;
                 nextDelta = null;
                 nextMultiplier = 1;
-                nextStats = null; // 新局开始清空上一局画像
                 const handsRaw: string[][] = rh as string[][];
                 const decorated: string[][] = handsRaw.map(decorateHandCycle);
                 nextHands = decorated;
@@ -496,7 +517,6 @@ function LivePanel(props: LiveProps) {
                   ds[(1 - L + 3) % 3],
                   ds[(2 - L + 3) % 3],
                 ];
-
                 nextWinner     = m.winner;
                 nextMultiplier = m.multiplier;
                 nextDelta      = rot;
@@ -509,13 +529,11 @@ function LivePanel(props: LiveProps) {
                   nextTotals[1] + rot[1],
                   nextTotals[2] + rot[2],
                 ] as any;
-
                 nextFinished = nextFinished + 1;
-                winsRef.current = (winsRef.current || 0) + 1;
                 continue;
               }
 
-              // ★ 新增：后端统计事件（本局画像）
+              // ★ 仅消费 stats 事件用于累计画像（不渲染单局雷达）
               if (m.type === 'event' && m.kind === 'stats' && Array.isArray(m.perSeat)) {
                 const s3 = [0,1,2].map(i=>{
                   const rec = m.perSeat.find((x:any)=>x.seat===i);
@@ -527,9 +545,20 @@ function LivePanel(props: LiveProps) {
                     eff : Number(sc.eff  ?? 2.5),
                     rob : Number(sc.rob  ?? 2.5),
                   };
-                }) as {coop:number;agg:number;cons:number;eff:number;rob:number}[];
-                nextStats = s3;
+                }) as Score5[];
 
+                const mode  = aggModeRef.current;
+                const a     = alphaRef.current;
+
+                if (!nextAggStats) {
+                  nextAggStats = s3.map(x=>({ ...x }));
+                  nextAggCount = 1;
+                } else {
+                  nextAggStats = nextAggStats.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
+                  nextAggCount = nextAggCount + 1;
+                }
+
+                // 可选日志：保留本局结果文字
                 const msg = s3.map((v, i)=>`${['甲','乙','丙'][i]}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
                 nextLog = [...nextLog, `战术画像（本局）：${msg}`];
                 continue;
@@ -547,13 +576,15 @@ function LivePanel(props: LiveProps) {
           setHands(nextHands);
           setPlays(nextPlays);
           setTotals(nextTotals);
-          setFinishedCount(winsRef.current || nextFinished);
+          setFinishedCount(nextFinished);
           setLog(nextLog);
           setLandlord(nextLandlord);
           setWinner(nextWinner);
           setMultiplier(nextMultiplier);
           setDelta(nextDelta);
-          setRoundStats(nextStats || null);
+
+          setAggStats(nextAggStats || null);
+          setAggCount(nextAggCount || 0);
         }
       }
 
@@ -572,6 +603,7 @@ function LivePanel(props: LiveProps) {
           break;
         }
 
+        // 局间固定+随机间隔（1.0s~2.0s）
         await new Promise(r => setTimeout(r, 1000 + Math.floor(Math.random() * 1000)));
       }
     } catch (e: any) {
@@ -650,21 +682,51 @@ function LivePanel(props: LiveProps) {
         </div>
       </Section>
 
-      {/* ★ 新增：战术画像（本局） */}
-      <Section title="战术画像（本局，0~5）">
-        {roundStats
+      {/* ★ 仅显示：战术画像（累计，0~5） */}
+      <Section title="战术画像（累计，0~5）">
+        <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:8 }}>
+          <label>
+            汇总方式
+            <select
+              value={aggMode}
+              onChange={e=>setAggMode(e.target.value as 'mean'|'ewma')}
+              style={{ marginLeft:6 }}
+            >
+              <option value="ewma">指数加权（推荐）</option>
+              <option value="mean">简单平均</option>
+            </select>
+          </label>
+          {aggMode === 'ewma' && (
+            <label>
+              α（0.05–0.95）
+              <input
+                type="number" min={0.05} max={0.95} step={0.05}
+                value={alpha}
+                onChange={e=>setAlpha(Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35)))}
+                style={{ width:80, marginLeft:6 }}
+              />
+            </label>
+          )}
+          <div style={{ fontSize:12, color:'#6b7280' }}>
+            {aggMode==='ewma'
+              ? '越大越看重最近几局'
+              : `已累计 ${aggCount} 局`}
+          </div>
+        </div>
+
+        {aggStats
           ? (
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
               {[0,1,2].map(i=>(
                 <RadarChart
                   key={i}
-                  title={`${['甲','乙','丙'][i]}${landlord===i?'（地主）':'（农民）'}`}
-                  scores={roundStats[i]}
+                  title={`${['甲','乙','丙'][i]}（累计）`}
+                  scores={aggStats[i]}
                 />
               ))}
             </div>
           )
-          : <div style={{ opacity:0.6 }}>（等待本局结束生成画像）</div>
+          : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
         }
       </Section>
 
