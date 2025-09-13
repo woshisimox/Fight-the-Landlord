@@ -204,7 +204,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
   };
 }
 
-/* ====== 雷达图组件（仅累计显示，0~5） ====== */
+/* ====== 雷达图组件（累计，0~5） ====== */
 function RadarChart({ title, scores }:{
   title: string;
   scores: Score5;
@@ -272,14 +272,11 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  // ★ 仅累计画像（跨局）：支持 mean / ewma
+  // 累计画像（跨局）
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
   const [alpha, setAlpha] = useState<number>(0.35);
   const [aggStats, setAggStats] = useState<Score5[] | null>(null);
   const [aggCount, setAggCount] = useState<number>(0);
-
-  useEffect(() => { props.onTotals?.(totals); }, [totals]);
-  useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
@@ -315,6 +312,12 @@ function LivePanel(props: LiveProps) {
   const start = async () => {
     if (running) return;
 
+    // 如果未启用对局，直接拦截
+    if (!props.enabled) {
+      setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']);
+      return;
+    }
+
     setRunning(true);
     setLandlord(null);
     setHands([[], [], []]);
@@ -325,7 +328,7 @@ function LivePanel(props: LiveProps) {
     setLog([]);
     setFinishedCount(0);
 
-    // ★ 开始新一轮连打时，累计画像清空（按你的需求也可以改为保留）
+    // 新一轮连打时，累计画像清空（如需跨次保留，可注释掉）
     setAggStats(null);
     setAggCount(0);
 
@@ -415,7 +418,6 @@ function LivePanel(props: LiveProps) {
           let nextDelta = deltaRef.current as [number, number, number] | null;
           let nextMultiplier = multiplierRef.current;
 
-          // ★ 新增：批次变量用于累计画像
           let nextAggStats = aggStatsRef.current;
           let nextAggCount = aggCountRef.current;
 
@@ -533,7 +535,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // ★ 仅消费 stats 事件用于累计画像（不渲染单局雷达）
+              // 累计画像（消费后端 stats 事件）
               if (m.type === 'event' && m.kind === 'stats' && Array.isArray(m.perSeat)) {
                 const s3 = [0,1,2].map(i=>{
                   const rec = m.perSeat.find((x:any)=>x.seat===i);
@@ -682,7 +684,7 @@ function LivePanel(props: LiveProps) {
         </div>
       </Section>
 
-      {/* ★ 仅显示：战术画像（累计，0~5） */}
+      {/* 累计雷达图（仅显示累计） */}
       <Section title="战术画像（累计，0~5）">
         <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:8 }}>
           <label>
@@ -731,8 +733,10 @@ function LivePanel(props: LiveProps) {
       </Section>
 
       <div style={{ display:'flex', gap:8 }}>
-        <button onClick={start} disabled={running}
-          style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
+        <button onClick={start} disabled={running || !props.enabled}
+          style={{ padding:'8px 12px', borderRadius:8, background: (running || !props.enabled) ? '#999' : '#222', color:'#fff' }}>
+          开始
+        </button>
         <button onClick={stop} disabled={!running}
           style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
       </div>
@@ -740,31 +744,55 @@ function LivePanel(props: LiveProps) {
   );
 }
 
-function Home() {
-  const [enabled, setEnabled] = useState<boolean>(true);
-  const [rounds, setRounds] = useState<number>(10);
-  const [startScore, setStartScore] = useState<number>(100);
-  const [rob, setRob] = useState<boolean>(true);
-  const [four2, setFour2] = useState<'both'|'2singles'|'2pairs'>('both');
-  const [farmerCoop, setFarmerCoop] = useState<boolean>(true);
+/* ========= 默认值集中定义（用于清空恢复） ========= */
+const DEFAULTS = {
+  enabled: true,
+  rounds: 10,
+  startScore: 100,
+  rob: true,
+  four2: 'both' as Four2Policy,
+  farmerCoop: true,
+  seatDelayMs: [1000,1000,1000] as number[],
+  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
+  seatModels: ['gpt-4o-mini','gemini-1.5-flash','grok-2-latest'],
+  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as { openai?:string; gemini?:string; grok?:string; kimi?:string; qwen?:string; httpBase?:string; httpToken?:string; }[],
+};
 
-  const [seatDelayMs, setSeatDelayMs] = useState<number[]>([1000, 1000, 1000]);
+function Home() {
+  // 通过 resetKey 重新挂载 LivePanel，清空内部内存
+  const [resetKey, setResetKey] = useState<number>(0);
+
+  const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
+  const [rounds, setRounds] = useState<number>(DEFAULTS.rounds);
+  const [startScore, setStartScore] = useState<number>(DEFAULTS.startScore);
+  const [rob, setRob] = useState<boolean>(DEFAULTS.rob);
+  const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
+  const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
+
+  const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
   const setSeatDelay = (i:number, v:number|string) =>
     setSeatDelayMs(arr => { const n=[...arr]; n[i] = Math.max(0, Math.floor(Number(v) || 0)); return n; });
 
-  const [seats, setSeats] = useState<BotChoice[]>([
-    'built-in:greedy-max',
-    'built-in:greedy-min',
-    'built-in:random-legal',
-  ]);
-  const [seatModels, setSeatModels] = useState<string[]>(['gpt-4o-mini', 'gemini-1.5-flash', 'grok-2-latest']);
-  const [seatKeys, setSeatKeys] = useState<
-    { openai?:string; gemini?:string; grok?:string; kimi?:string; qwen?:string; httpBase?:string; httpToken?:string; }[]
-  >([
-    { openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }
-  ]);
+  const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
+  const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
+  const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
+
+  const doResetAll = () => {
+    setEnabled(DEFAULTS.enabled);
+    setRounds(DEFAULTS.rounds);
+    setStartScore(DEFAULTS.startScore);
+    setRob(DEFAULTS.rob);
+    setFour2(DEFAULTS.four2);
+    setFarmerCoop(DEFAULTS.farmerCoop);
+    setSeatDelayMs([...DEFAULTS.seatDelayMs]);
+    setSeats([...DEFAULTS.seats]);
+    setSeatModels([...DEFAULTS.seatModels]);
+    setSeatKeys(DEFAULTS.seatKeys.map(x=>({ ...x })));
+    setLiveLog([]);
+    setResetKey(k => k + 1); // 触发 LivePanel 重新挂载，清空内部状态
+  };
 
   return (
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
@@ -774,10 +802,25 @@ function Home() {
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12 }}>
-          <label>
-            启用对局
-            <div><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} /></div>
-          </label>
+          {/* 启用对局 + 清空 */}
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                启用对局
+                <input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} />
+              </label>
+              <button
+                onClick={doResetAll}
+                title="清空所有设置并重置运行内存为默认值"
+                style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >
+                清空
+              </button>
+            </div>
+            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>
+              关闭后不可开始/继续对局；再次勾选即可恢复。
+            </div>
+          </div>
 
           <label>
             局数
@@ -979,6 +1022,7 @@ function Home() {
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
         <LivePanel
+          key={resetKey}            // 清空时强制重新挂载
           rounds={rounds}
           startScore={startScore}
           seatDelayMs={seatDelayMs}
