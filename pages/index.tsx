@@ -950,13 +950,7 @@ function Home() {
         />
       </div>
 
-      <div style={{ marginTop:18 }}>
-        <Section title="运行日志">
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
-            {liveLog.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）</div> : liveLog.map((t, idx) => <LogLine key={idx} text={t} />)}
-          </div>
-        </Section>
-      </div>
+
     </div>
   );
 }
