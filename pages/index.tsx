@@ -949,8 +949,6 @@ function Home() {
           onLog={setLiveLog}
         />
       </div>
-
-
     </div>
   );
 }
