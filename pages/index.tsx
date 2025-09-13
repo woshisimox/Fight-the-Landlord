@@ -230,8 +230,6 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 };
 
 /* ==================== LivePanel（对局） ==================== */
-type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
-
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
 
