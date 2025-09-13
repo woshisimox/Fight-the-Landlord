@@ -18,22 +18,40 @@ type BotChoice =
 type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
 
 type StartPayload = {
-  seats: SeatSpec[];                     // 3 items
+  seats: SeatSpec[];
   seatDelayMs?: number[];
   rounds?: number;
   rob?: boolean;
   four2?: 'both' | '2singles' | '2pairs';
   stopBelowZero?: boolean;
   seatModels?: string[];
-  seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
+  seatKeys?: {
+    openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string;
+    httpBase?: string; httpToken?: string;
+  }[];
   clientTraceId?: string;
   farmerCoop?: boolean;
 };
 
-function writeLine(res: NextApiResponse, obj: any) {
-  res.write(JSON.stringify(obj) + '\n');
-}
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
+
+function writeLine(res: NextApiResponse, obj: any) {
+  (res as any).write(JSON.stringify(obj) + '\n');
+}
+
+function providerLabel(choice: BotChoice) {
+  switch (choice) {
+    case 'built-in:greedy-max': return 'GreedyMax';
+    case 'built-in:greedy-min': return 'GreedyMin';
+    case 'built-in:random-legal': return 'RandomLegal';
+    case 'ai:openai': return 'OpenAI';
+    case 'ai:gemini': return 'Gemini';
+    case 'ai:grok':  return 'Grok';
+    case 'ai:kimi':  return 'Kimi';
+    case 'ai:qwen':  return 'Qwen';
+    case 'http':     return 'HTTP';
+  }
+}
 
 function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any {
   switch (choice) {
@@ -50,7 +68,49 @@ function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any 
   }
 }
 
-/** 单局执行 + 防卡死 + 可靠收尾（缺省时合成 stats-lite，含“协作度”增强） */
+/** 给 bot 加“调用/完成”追踪与理由生成 */
+function traceWrap(choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any) {
+  const by = providerLabel(choice);
+  const model = (spec?.model || '').trim();
+  return async function traced(ctx:any) {
+    try {
+      ctx?.emit?.({ type:'event', kind:'bot-call', seat: ctx.seat, by, model, phase: ctx.phase || 'play', need: ctx.require?.type || null });
+    } catch {}
+    const t0 = Date.now();
+    let res: any;
+    let err: any = null;
+    try {
+      res = await bot(ctx);
+    } catch (e) {
+      err = e;
+    }
+    const tookMs = Date.now() - t0;
+
+    // 合成简明理由（若 bot 没给 reason）
+    let reason = res?.reason as (string|undefined);
+    if (!reason) {
+      const mv = res?.move;
+      const need = ctx?.require?.type;
+      const cards = Array.isArray(res?.cards) ? res.cards.join(' ') : '';
+      if (mv === 'pass') {
+        reason = need ? '无更优压牌，选择过' : '让牌/过牌';
+      } else if (mv === 'play') {
+        reason = need ? `跟出同型以压住（${need}）：${cards}` : `首攻选择：${cards}`;
+      }
+    }
+
+    try {
+      ctx?.emit?.({
+        type:'event', kind:'bot-done', seat: ctx.seat, by, model,
+        tookMs, reason, error: err ? String(err) : undefined
+      });
+    } catch {}
+    if (err) throw err;
+    return res;
+  };
+}
+
+/** 单局执行 + 防卡死 + stats-lite（含协作度 v2）兜底 + bot 追踪 */
 async function runOneRoundWithGuard(
   opts: { seats: any[], four2?: 'both'|'2singles'|'2pairs', delayMs?: number },
   res: NextApiResponse,
@@ -62,11 +122,9 @@ async function runOneRoundWithGuard(
   // —— 回放统计（含协作信号） ——
   type SeatRec = {
     pass:number; play:number; cards:number; bombs:number; rob:null|boolean;
-
-    // 协作度细分
-    helpKeepLeadByPass:number;   // 让牌保队友领出（队友牌面已领先，地主已过，我选择过）
-    harmOvertakeMate:number;     // 地主已过仍去抢队友牌面
-    saveMateVsLandlord:number;   // 队友少牌时，把地主的牌压住（保队友）
+    helpKeepLeadByPass:number;   // 队友领先且地主已过 -> 我过（让队友领）
+    harmOvertakeMate:number;     // 队友领先且地主已过 -> 我还出（抢队友面）
+    saveMateVsLandlord:number;   // 队友少牌而地主领先 -> 我压住地主
     saveWithBomb:number;         // 上一条用炸弹/火箭完成
   };
   const rec: SeatRec[] = [
@@ -75,16 +133,15 @@ async function runOneRoundWithGuard(
     { pass:0, play:0, cards:0, bombs:0, rob:null, helpKeepLeadByPass:0, harmOvertakeMate:0, saveMateVsLandlord:0, saveWithBomb:0 },
   ];
 
-  // trick 级别状态
   let evCount = 0;
   let trickNo = 0;
   let landlord = -1;
-  let leaderSeat = -1;             // 本轮首家（有出牌且非 pass 的第一位）
-  let currentWinnerSeat = -1;      // 本轮“当前牌面领先者”（最后一个非 pass 的人）
+  let leaderSeat = -1;
+  let currentWinnerSeat = -1;
   let passed = [false,false,false];
 
-  // 近似剩余牌张（用于“队友少牌”判断）
-  let rem = [17,17,17];            // 地主会在确定后改为 20
+  // 近似剩余张数
+  let rem = [17,17,17];
   const teammateOf = (s:number) => (landlord<0 || s===landlord) ? -1 : [0,1,2].filter(x=>x!==landlord && x!==s)[0];
 
   let lastSignature = '';
@@ -94,8 +151,7 @@ async function runOneRoundWithGuard(
 
   const iter: AsyncIterator<any> = (runOneGame as any)({ seats: opts.seats, four2: opts.four2, delayMs: opts.delayMs });
 
-  const emitStatsLite = (sourceTag = 'stats-lite/coop-v2') => {
-    // 基础三项：保守/效率/激进（与之前一致）
+  const emitStatsLite = (tag='stats-lite/coop-v2') => {
     const perSeatBasic = [0,1,2].map(i=>{
       const r = rec[i];
       const totalActs = r.pass + r.play || 1;
@@ -109,16 +165,14 @@ async function runOneRoundWithGuard(
       return { cons, eff, agg };
     });
 
-    // —— 协作度（只对农民位计分，地主恒中性） ——
     const coopPerSeat = [0,1,2].map(i=>{
-      if (i === landlord) return 2.5; // 地主不参与“配合”
+      if (i === landlord) return 2.5; // 地主位中性
       const r = rec[i];
-      const raw = (1.0 * r.helpKeepLeadByPass)   // 让牌保队友
-                + (2.0 * r.saveMateVsLandlord)   // 少牌救队友
-                + (0.5 * r.saveWithBomb)         // 炸弹救队友加成
-                - (1.5 * r.harmOvertakeMate);    // 抢队友牌面扣分
-      // 随局长动态缩放，保证不同局长可比性
-      const scale = 3 + trickNo * 0.30;          // 10~15 轮时，scale ≈ 6~7.5
+      const raw = (1.0 * r.helpKeepLeadByPass)
+                + (2.0 * r.saveMateVsLandlord)
+                + (0.5 * r.saveWithBomb)
+                - (1.5 * r.harmOvertakeMate);
+      const scale = 3 + trickNo * 0.30;
       const score = clamp(2.5 + (raw / scale) * 2.5);
       return +score.toFixed(2);
     });
@@ -130,11 +184,11 @@ async function runOneRoundWithGuard(
         agg : perSeatBasic[i].agg,
         cons: perSeatBasic[i].cons,
         eff : perSeatBasic[i].eff,
-        rob : (i===landlord) ? (rec[i].rob===false ? 1.5 : 5) : 2.5, // 仅地主位体现“抢”
+        rob : (i===landlord) ? (rec[i].rob===false ? 1.5 : 5) : 2.5
       }
     }));
 
-    writeLine(res, { type:'event', kind:'stats', source: sourceTag, perSeat });
+    writeLine(res, { type:'event', kind:'stats', source: tag, perSeat });
     seenStats = true;
   };
 
@@ -149,8 +203,7 @@ async function runOneRoundWithGuard(
     // —— 初始化/抢地主 —— //
     if (value?.kind === 'init' && typeof value?.landlord === 'number') {
       landlord = value.landlord;
-      rem = [17,17,17];
-      if (landlord>=0) rem[landlord] = 20; // 底牌 3 张
+      rem = [17,17,17]; if (landlord>=0) rem[landlord] = 20;
     }
     if (value?.kind === 'rob' && typeof value?.seat === 'number') {
       rec[value.seat].rob = !!value.rob;
@@ -174,7 +227,7 @@ async function runOneRoundWithGuard(
         rec[seat].pass++;
         passed[seat] = true;
 
-        // 协作：若“队友当前领先 && 地主已过”，则我选择过 = 让队友继续领出
+        // 协作：队友领先且地主已过 -> 我过（让队友领）
         if (landlord>=0 && seat!==landlord) {
           const mate = teammateOf(seat);
           if (mate>=0 && currentWinnerSeat === mate && passed[landlord]) {
@@ -187,44 +240,36 @@ async function runOneRoundWithGuard(
         rec[seat].cards += n;
         if (ctype === 'bomb' || ctype === 'rocket') rec[seat].bombs++;
 
-        // 协作信号（仅农民考虑）
         if (landlord>=0 && seat!==landlord) {
           const mate = teammateOf(seat);
           const mateLow = (mate>=0) ? (rem[mate] <= 3) : false;
 
-          // 1) 队友领先且地主已过——我仍然“出牌抢面”，记为伤害协作
+          // 队友领先且地主已过 -> 我还出（抢队友面）
           if (mate>=0 && currentWinnerSeat === mate && passed[landlord]) {
             rec[seat].harmOvertakeMate++;
           }
 
-          // 2) 地主当前领先，队友少牌（<=3），我把牌面压住视为“保队友”
+          // 地主领先且队友少牌 -> 我压住（保队友）
           if (currentWinnerSeat === landlord && mateLow) {
             rec[seat].saveMateVsLandlord++;
             if (ctype === 'bomb' || ctype === 'rocket') rec[seat].saveWithBomb++;
           }
         }
 
-        // 更新 trick 赢家与领出者
         if (leaderSeat === -1) leaderSeat = seat;
         currentWinnerSeat = seat;
-
-        // 近似剩余：减去出牌张数
         rem[seat] = Math.max(0, rem[seat] - n);
       }
     }
 
-    // —— 胜负/统计 —— //
     if (kind === 'win')   seenWin   = true;
     if (kind === 'stats') seenStats = true;
 
     // —— 防卡死 —— //
     const sig = JSON.stringify({
-      kind: value?.kind,
-      seat: value?.seat,
-      move: value?.move,
+      kind: value?.kind, seat: value?.seat, move: value?.move,
       require: value?.require?.type || value?.comboType || null,
-      leader: value?.leader,
-      trick: trickNo
+      leader: value?.leader, trick: trickNo
     });
     if (sig === lastSignature) repeated++; else repeated = 0;
     lastSignature = sig;
@@ -238,7 +283,6 @@ async function runOneRoundWithGuard(
     }
   }
 
-  // 正常收尾：若没收到 stats，就合成一份（含协作度）
   if (!seenStats) emitStatsLite('stats-lite/coop-v2');
   writeLine(res, { type:'event', kind:'round-end', round: roundNo, seenWin, seenStats:true });
 
@@ -254,7 +298,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
 
-  // keep-alive 心跳
+  // keep-alive
   let __lastWrite = Date.now();
   const writeKA = (obj:any)=>{ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); };
   const __ka = setInterval(()=>{ try{
@@ -269,7 +313,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const four2 = body.four2 || 'both';
     const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
 
-    const seatBots = (body.seats || []).slice(0,3).map((s, i) => asBot(s.choice, s));
+    // 原始 bot
+    const baseBots = (body.seats || []).slice(0,3).map((s, i) => asBot(s.choice, s));
+    // 包上 trace（保证 bot-call / bot-done）
+    const seatBots = baseBots.map((bot, i) => traceWrap(body.seats[i]?.choice as BotChoice, body.seats[i], bot));
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
@@ -277,6 +324,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
       writeLine(res, { type:'event', kind:'round-start', round });
 
+      // per-seat 延迟（避免阻塞）
       const delayedSeats = seatBots.map((bot, idx) => async (ctx:any) => {
         const ms = delays[idx] || 0;
         if (ms) await new Promise(r => setTimeout(r, ms));
