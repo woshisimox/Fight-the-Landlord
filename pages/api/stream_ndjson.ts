@@ -88,6 +88,47 @@ function extractReason(raw: any): string | undefined {
   } catch { return undefined; }
 }
 
+// 将 built-in 策略的动作，转成一句可读理由（不依赖引擎内部细节）
+function labelOf(choice: BotChoice) {
+  switch (choice) {
+    case 'built-in:greedy-max': return 'GreedyMax';
+    case 'built-in:greedy-min': return 'GreedyMin';
+    case 'built-in:random-legal': return 'RandomLegal';
+    default: return 'built-in';
+  }
+}
+function makeBuiltInReason(choice: BotChoice, ctx: any, out: any): string {
+  const strat = labelOf(choice);
+  const need  = ctx?.require?.type || ctx?.require?.kind || null;
+  const isPass =
+    out === 'pass' || out?.move === 'pass' || out?.type === 'pass';
+
+  const cards =
+    Array.isArray(out?.cards) ? out.cards :
+    Array.isArray(out) ? out : null;
+
+  const cnt = Array.isArray(cards) ? cards.length : 0;
+
+  // 估计余牌数量（尽量容错）
+  const seat = (typeof ctx?.seat === 'number') ? ctx.seat : undefined;
+  const handSize =
+    (Array.isArray(ctx?.hand) && ctx.hand.length) ||
+    (Array.isArray(ctx?.hands) && typeof seat === 'number' && Array.isArray(ctx.hands[seat]) && ctx.hands[seat].length) ||
+    undefined;
+
+  const bias =
+    choice === 'built-in:greedy-max' ? '倾向出大牌' :
+    choice === 'built-in:greedy-min' ? '倾向出小牌' :
+    '随机合法';
+
+  if (isPass) {
+    return `内置:${strat}｜${need ? `无法压牌(${need})` : '策略选择过'}｜${bias}${handSize!=null?`｜余牌${handSize}`:''}`;
+  } else {
+    const mode = need ? '跟牌' : '主动出牌';
+    return `内置:${strat}｜${mode}｜${cnt?`${cnt}张`:''}${handSize!=null?`｜余牌${handSize}`:''}｜${bias}`;
+  }
+}
+
 // 单局 runner + 防卡死 + rob-eval 注入；返回“座位顺序”的本局增量
 async function runOneRoundWithGuard(
   opts: {
@@ -212,11 +253,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // 构建 bot 列表与元信息
     const seatBots = (body.seats || []).slice(0,3).map((s) => asBot(s.choice, s));
-    const seatMeta = (body.seats || []).slice(0,3);
+    const seatMeta  = (body.seats || []).slice(0,3);
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
-    // 服务端累计总分：仅用于“<0 停赛”；初始为 startScore
+    // 服务端累计总分（仅用于“<0 停赛”）；初始为 startScore
     let scores: [number,number,number] = [startScore, startScore, startScore];
 
     for (let round = 1; round <= rounds; round++) {
@@ -239,14 +280,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const out = await bot(ctx);
           const tookMs = Date.now() - t0;
 
-          const reason = extractReason(out);
-          writeLine(res, { type:'event', kind:'bot-done', seat: idx, by, model, tookMs, ...(reason ? { reason } : {}) });
+          // 先从返回值里提取（兼容 AI bot 已自带的 reason）
+          let reason = extractReason(out);
+          // 若是内建策略且还没有 reason，则自动生成一条可读理由
+          if (!reason && meta?.choice && meta.choice.startsWith('built-in')) {
+            try { reason = makeBuiltInReason(meta.choice as BotChoice, ctx, out); } catch {}
+          }
 
+          writeLine(res, { type:'event', kind:'bot-done', seat: idx, by, model, tookMs, ...(reason ? { reason } : {}) });
           return out;
         };
       });
 
-      const { rotatedDelta } = await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, seatMeta }, res, round);
+      const { rotatedDelta } = await runOneRoundWithGuard(
+        { seats: delayedSeats, four2, delayMs: 0, seatMeta },
+        res,
+        round
+      );
 
       // 服务端累计并判停
       if (rotatedDelta) {
