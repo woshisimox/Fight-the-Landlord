@@ -1,4 +1,5 @@
-// pages/api/stream_ndjson.ts (hardened, anti-stall + stopBelowZero + rob-eval)
+// pages/api/stream_ndjson.ts
+// hardened anti-stall + rob-eval + bot-call/done + stopBelowZero(服务端累计)
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
@@ -29,8 +30,8 @@ type StartPayload = {
   rounds?: number;
   rob?: boolean;
   four2?: 'both' | '2singles' | '2pairs';
-  stopBelowZero?: boolean;               // NEW: 可控（默认 true）
-  startScore?: number;                   // NEW: 用于服务端累计
+  stopBelowZero?: boolean;               // 默认 true
+  startScore?: number;                   // 服务端累计的起始分
   seatModels?: string[];
   seatKeys?: {
     openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string;
@@ -39,7 +40,7 @@ type StartPayload = {
 };
 
 function writeLine(res: NextApiResponse, obj: any) {
-  (res as any).write(JSON.stringify(obj) + '\n');
+  try { (res as any).write(JSON.stringify(obj) + '\n'); } catch {}
 }
 
 function providerOf(choice?: BotChoice): string {
@@ -58,26 +59,26 @@ function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any 
     case 'ai:openai': return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
     case 'ai:gemini': return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-flash' });
     case 'ai:grok':   return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
-    case 'ai:kimi':   return KimiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'moonshot-v1-8k' });
+    case 'ai:kimi':   return KimiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'kimi-k2-0905-preview' });
     case 'ai:qwen':   return QwenBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'qwen-plus' });
     case 'http':      return HttpBot({ base: (spec?.baseUrl||'').replace(/\/$/,''), token: spec?.token || '' });
     default:          return GreedyMax;
   }
 }
 
-// Hardened single-round runner with stall guard
+// 单局 runner + 防卡死 + rob-eval 注入；返回“座位顺序”的本局增量
 async function runOneRoundWithGuard(
   opts: {
     seats: any[];
     four2?: 'both'|'2singles'|'2pairs';
     delayMs?: number;
-    seatMeta?: SeatSpec[];        // for rob-eval
+    seatMeta?: SeatSpec[];        // for rob-eval & bot-call/done
   },
   res: NextApiResponse,
   roundNo: number
 ): Promise<{ rotatedDelta: [number,number,number] | null }> {
-  const MAX_EVENTS = 4000;              // safety ceiling: total events per round
-  const MAX_REPEATED_HEARTBEAT = 200;   // safety ceiling: consecutive 'pass/pass/reset' style
+  const MAX_EVENTS = 4000;              // 每局事件上限
+  const MAX_REPEATED_HEARTBEAT = 200;   // 重复心跳上限
   const iter: AsyncIterator<any> = (runOneGame as any)({ seats: opts.seats, four2: opts.four2, delayMs: opts.delayMs });
 
   let evCount = 0;
@@ -87,7 +88,6 @@ async function runOneRoundWithGuard(
   let repeated = 0;
   let rotatedDelta: [number,number,number] | null = null;
 
-  // 小工具：将“相对地主顺序”的 ds 旋转为“座位顺序”
   const rotateByLandlord = (ds: number[], L: number): [number,number,number] => {
     const a = (idx:number) => ds[(idx - L + 3) % 3] || 0;
     return [a(0), a(1), a(2)];
@@ -98,10 +98,9 @@ async function runOneRoundWithGuard(
     if (done) break;
     evCount++;
 
-    // forward downstream
     writeLine(res, value);
 
-    // rob-eval 注入（用于前端确认 provider / model）
+    // rob-eval 注入：用于前端确认 provider / model
     if (value?.type === 'event' && value?.kind === 'rob' && typeof value?.seat === 'number') {
       const seat: number = value.seat | 0;
       const spec = (opts.seatMeta && opts.seatMeta[seat]) ? opts.seatMeta[seat] : undefined;
@@ -109,7 +108,7 @@ async function runOneRoundWithGuard(
         type: 'event',
         kind: 'rob-eval',
         seat,
-        score: value?.rob ? 1 : 0,   // 伪分数；如需真实分数可改为引擎侧发
+        score: value?.rob ? 1 : 0,   // 伪分数；如需真实可由引擎侧输出
         threshold: 0,
         features: {
           by: providerOf(spec?.choice),
@@ -130,7 +129,6 @@ async function runOneRoundWithGuard(
     // 记录 win 的 rotatedDelta，供服务端累计
     if (value?.type === 'event' && value?.kind === 'win') {
       const ds = Array.isArray(value?.deltaScores) ? value.deltaScores as number[] : [0,0,0];
-      // 按“相对地主顺序”解释为 [L, L+1, L+2]，旋转到座位顺序
       rotatedDelta = rotateByLandlord(ds, Math.max(0, landlord));
     }
 
@@ -149,16 +147,13 @@ async function runOneRoundWithGuard(
 
     if (evCount > MAX_EVENTS || repeated > MAX_REPEATED_HEARTBEAT) {
       writeLine(res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束（判地主胜）。`});
-      // Gracefully close the generator if possible
       try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
 
-      // 生成“相对地主顺序”的合成胜利 ds，并旋转计入
       const winner = landlord >= 0 ? landlord : 0;
       const dsRel = (winner === landlord) ? [+2, -1, -1] : [-2, +1, +1]; // 相对地主顺序
       const rot = rotateByLandlord(dsRel, Math.max(0, landlord));
       rotatedDelta = rot;
 
-      // 下发合成 win（deltaScores 保持“相对地主顺序”）
       writeLine(res, { type:'event', kind:'win', winner, multiplier: 1, deltaScores: dsRel });
       return { rotatedDelta };
     }
@@ -177,7 +172,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Connection', 'keep-alive');
 
   let __lastWrite = Date.now();
-  function writeLineKA(obj:any){ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); }
+  const writeLineKA = (obj:any) => { try{ (res as any).write(JSON.stringify(obj)+'\n'); __lastWrite = Date.now(); }catch{} };
   const __ka = setInterval(()=>{ try{
     if((res as any).writableEnded){ clearInterval(__ka as any); return; }
     if(Date.now()-__lastWrite>2500){ writeLineKA({ type:'ka', ts: new Date().toISOString() }); }
@@ -193,28 +188,42 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const startScore = Number(body.startScore ?? 0) || 0;
     const stopBelowZero = body.stopBelowZero ?? true;  // 默认开启“<0 停赛”
 
-    // build bots
+    // 构建 bot 列表与元信息
     const seatBots = (body.seats || []).slice(0,3).map((s) => asBot(s.choice, s));
-    const seatMeta = (body.seats || []).slice(0,3); // 用于 rob-eval 的元信息
+    const seatMeta = (body.seats || []).slice(0,3);
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
-    // 服务端累计总分，仅用于“<0 停赛”判定；初始为 startScore
+    // 服务端累计总分，仅用于“<0 停赛”；初始为 startScore
     let scores: [number,number,number] = [startScore, startScore, startScore];
 
     for (let round = 1; round <= rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
 
-      // wrap seats with per-seat delay
-      const delayedSeats = seatBots.map((bot, idx) => async (ctx:any) => {
-        const ms = delays[idx] || 0;
-        if (ms) await new Promise(r => setTimeout(r, ms));
-        return bot(ctx);
+      // 包裹 seats：每家延时 + bot-call/done 埋点
+      const delayedSeats = seatBots.map((bot, idx) => {
+        const meta = seatMeta[idx];
+        return async (ctx:any) => {
+          const ms = delays[idx] || 0;
+          if (ms) await new Promise(r => setTimeout(r, ms));
+
+          const by = providerOf(meta?.choice);
+          const model = meta?.model || '';
+          const phase = ctx?.phase || (ctx?.require ? 'play' : undefined) || 'unknown';
+          const need  = (ctx?.require && (ctx?.require.type || ctx?.require.kind)) || null;
+
+          writeLine(res, { type:'event', kind:'bot-call', seat: idx, by, model, phase, need });
+          const t0 = Date.now();
+          const out = await bot(ctx);
+          const tookMs = Date.now() - t0;
+          writeLine(res, { type:'event', kind:'bot-done', seat: idx, by, model, tookMs });
+          return out;
+        };
       });
 
       const { rotatedDelta } = await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, seatMeta }, res, round);
 
-      // 将“座位顺序”的本局增量累加到服务端分数，并判断是否 < 0
+      // 服务端累计并判停
       if (rotatedDelta) {
         scores = [
           scores[0] + rotatedDelta[0],
@@ -225,15 +234,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (stopBelowZero && (scores[0] < 0 || scores[1] < 0 || scores[2] < 0)) {
         writeLine(res, { type:'log', message:`某方积分 < 0，提前终止。当前总分（座位顺序）：${scores.join(' / ')}` });
-        break;  // 停止后续局数
+        break;
       }
 
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
 
-    try{ clearInterval(__ka as any);}catch{}; res.end();
+    try{ clearInterval(__ka as any);}catch{}; try{ (res as any).end(); }catch{}
   } catch (e: any) {
     writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
-    try { try{ clearInterval(__ka as any);}catch{}; res.end(); } catch {}
+    try{ clearInterval(__ka as any);}catch{}; try{ (res as any).end(); }catch{}
   }
 }
