@@ -1,0 +1,1 @@
+export function extractFirstJsonObject(text:string){try{return JSON.parse(text)}catch{}const s=text.indexOf('{');const e=text.lastIndexOf('}');if(s>=0&&e>s){try{return JSON.parse(text.slice(s,e+1))}catch{}}return null;} export function nonEmptyReason(r?:string,p?:string){const s=(r??'').trim();return s||((p?p:'AI')+' 已调用');}
