@@ -159,7 +159,6 @@ function defaultModelFor(choice: BotChoice): string {
   }
 }
 
-// 若 provider 与输入模型不匹配，则返回空串（用于 UI 与请求时回退到默认）
 function normalizeModelForProvider(choice: BotChoice, input: string): string {
   const m = (input || '').trim();
   if (!m) return '';
@@ -234,7 +233,6 @@ function LivePanel(props: LiveProps) {
   const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
   const winsRef = useRef(0); useEffect(() => { winsRef.current = finishedCount; }, [finishedCount]);
 
-  // 改写日志中的“第 1 局 / 开始第 1 局 ...”为真实局号
   const rewriteRoundLabel = (msg: string) => {
     const n = Math.max(1, (winsRef.current || 0) + 1);
     if (typeof msg !== 'string') return msg;
@@ -264,7 +262,6 @@ function LivePanel(props: LiveProps) {
 
     controllerRef.current = new AbortController();
 
-    // 组装 SeatSpec[]，并按 provider 归一化模型（不匹配时回退到默认）
     const buildSeatSpecs = (): any[] => {
       return props.seats.slice(0,3).map((choice, i) => {
         const normalized = normalizeModelForProvider(choice, props.seatModels[i] || '');
@@ -284,7 +281,7 @@ function LivePanel(props: LiveProps) {
           case 'http':
             return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
           default:
-            return { choice }; // 内置策略
+            return { choice };
         }
       });
     };
@@ -297,16 +294,13 @@ function LivePanel(props: LiveProps) {
         return `${seatName}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
       }).join(', ');
 
-    // 每次只打一局；后端流结束→下一次再发请求
     const playOneGame = async (_gameIndex: number) => {
-      // 只显示当前局：清空日志
       setLog([]);
 
       const specs = buildSeatSpecs();
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
       const currentRound = Math.max(1, (winsRef.current || 0) + 1);
 
-      // 前端自检日志：明确显示 provider 与模型（不含任何 key）
       setLog(l => [
         ...l,
         `【前端】开始第 ${currentRound} 局 | 座位: ${seatSummaryText(specs)} | trace=${traceId}`
@@ -322,9 +316,9 @@ function LivePanel(props: LiveProps) {
           enabled: props.enabled,
           rob: props.rob,
           four2: props.four2,
-          seats: specs,                 // SeatSpec[]
+          seats: specs,
           clientTraceId: traceId,
-          stopBelowZero: true,          // 让后端在单请求内也判停
+          stopBelowZero: true,
         }),
         signal: controllerRef.current!.signal,
       });
@@ -379,7 +373,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              /* ✅ 新增：显示每次 AI 调用（开始） */
+              // AI 调用开始
               if (m.type === 'event' && m.kind === 'bot-call') {
                 const seatName = ['甲','乙','丙'][m.seat];
                 nextLog = [
@@ -389,17 +383,18 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              /* ✅ 新增：显示每次 AI 调用（完成）与耗时 */
+              // AI 调用完成 + 耗时 + 理由（如果返回）
               if (m.type === 'event' && m.kind === 'bot-done') {
                 const seatName = ['甲','乙','丙'][m.seat];
                 nextLog = [
                   ...nextLog,
-                  `AI完成｜${seatName}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`
+                  `AI完成｜${seatName}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
+                  ...(m.reason ? [`AI理由｜${seatName}｜${m.by}${m.model ? `(${m.model})` : ''}：${m.reason}`] : []),
                 ];
                 continue;
               }
 
-              /* 已有：显示抢地主评估 rob-eval */
+              // 抢地主评估
               if (m.type === 'event' && m.kind === 'rob-eval') {
                 const seatName = ['甲', '乙', '丙'][m.seat];
                 const featText = (() => {
@@ -455,10 +450,8 @@ function LivePanel(props: LiveProps) {
               }
 
               if (m.type === 'event' && m.kind === 'win') {
-                // ★★★ 关键修复：m.deltaScores 是“相对地主顺序”[L, (L+1)%3, (L+2)%3]
-                const L = (nextLandlord ?? 0) as number; // 本局地主座位
+                const L = (nextLandlord ?? 0) as number;
                 const ds = Array.isArray(m.deltaScores) ? m.deltaScores as [number,number,number] : [0,0,0];
-                // 旋转到“座位顺序”：seat i 对应 ds[(i - L + 3) % 3]
                 const rot: [number,number,number] = [
                   ds[(0 - L + 3) % 3],
                   ds[(1 - L + 3) % 3],
@@ -467,7 +460,7 @@ function LivePanel(props: LiveProps) {
 
                 nextWinner     = m.winner;
                 nextMultiplier = m.multiplier;
-                nextDelta      = rot; // 展示按座位顺序
+                nextDelta      = rot;
                 nextLog = [
                   ...nextLog,
                   `胜者：${['甲','乙','丙'][m.winner]}，倍数 x${m.multiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${['甲','乙','丙'][L]}`
@@ -492,7 +485,6 @@ function LivePanel(props: LiveProps) {
             }
           }
 
-          // 批量提交一次，避免频繁 setState
           setHands(nextHands);
           setPlays(nextPlays);
           setTotals(nextTotals);
@@ -513,7 +505,6 @@ function LivePanel(props: LiveProps) {
         if (controllerRef.current?.signal.aborted) break;
         await playOneGame(i);
 
-        // 每局后若发现有负分，则终止“连打”
         const hasNegative =
           Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
         if (hasNegative) {
@@ -521,7 +512,6 @@ function LivePanel(props: LiveProps) {
           break;
         }
 
-        // 局间等待：固定 1000ms + 随机 <1000ms（可按需调整/删除）
         await new Promise(r => setTimeout(r, 1000 + Math.floor(Math.random() * 1000)));
       }
     } catch (e: any) {
@@ -544,14 +534,12 @@ function LivePanel(props: LiveProps) {
 
   return (
     <div>
-      {/* 剩余局数徽标 */}
       <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
         <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, lineHeight:1.2, userSelect:'none', background:'#fff' }}>
           剩余局数：{remainingGames}
         </span>
       </div>
 
-      {/* 积分（总分） */}
       <Section title="积分（总分）">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           {[0,1,2].map(i=>(
@@ -614,7 +602,6 @@ function LivePanel(props: LiveProps) {
   );
 }
 
-/* ==================== 页面（布局：对局设置 → 对局 → 运行日志） ==================== */
 function Home() {
   const [enabled, setEnabled] = useState<boolean>(true);
   const [rounds, setRounds] = useState<number>(10);
@@ -644,7 +631,6 @@ function Home() {
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Bot Arena</h1>
 
-      {/* 1) 对局设置 */}
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
 
@@ -685,7 +671,6 @@ function Home() {
           </label>
         </div>
 
-        {/* 每家 AI 设置（独立） */}
         <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
           <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
 
@@ -723,7 +708,6 @@ function Home() {
                 {seats[i].startsWith('ai:') && (
                   <label style={{ display:'block', marginBottom:6 }}>
                     模型（可选）
-                    {/* 若 provider 与模型不匹配，此处显示为空，只露出占位符 */}
                     <input
                       type="text"
                       value={normalizeModelForProvider(seats[i], seatModels[i])}
@@ -740,7 +724,6 @@ function Home() {
                   </label>
                 )}
 
-                {/* 各家 key/端点（不显示/不记录具体值到日志） */}
                 {seats[i] === 'ai:openai' && (
                   <label style={{ display:'block', marginBottom:6 }}>
                     OpenAI API Key
@@ -827,7 +810,6 @@ function Home() {
             ))}
           </div>
 
-          {/* 每家出牌最小间隔（独立） */}
           <div style={{ marginTop:12 }}>
             <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)</div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
@@ -850,7 +832,6 @@ function Home() {
         </div>
       </div>
 
-      {/* 2) 对局（设置下面、运行日志上面） */}
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
         <LivePanel
@@ -867,7 +848,6 @@ function Home() {
         />
       </div>
 
-      {/* 3) 运行日志（页面底部） */}
       <div style={{ marginTop:18 }}>
         <Section title="运行日志">
           <div style={{
