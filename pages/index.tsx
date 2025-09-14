@@ -9,6 +9,8 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
   | 'http';
 
+type RobStrategy = 'hand' | 'ev-risk';
+
 type LiveProps = {
   rounds: number;
   startScore: number;
@@ -23,6 +25,7 @@ type LiveProps = {
     httpBase?: string; httpToken?: string;
   }[];
   farmerCoop: boolean;
+  robStrategy: RobStrategy;
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
 };
@@ -229,6 +232,26 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   return out;
 };
 
+/* ====== 风险感知：根据总分与剩余局数给出每座位的风险系数与模式 ====== */
+type RiskMode = 'aggressive'|'neutral'|'conservative';
+function computeRisk(myIdx:number, totals:[number,number,number], roundsLeft:number) {
+  const me = totals[myIdx], leader = Math.max(...totals);
+  const gap = leader - me;                                   // >0 我落后
+  const perRound = Math.max(1, Math.abs(gap) / Math.max(1, roundsLeft));
+  const lambda0 = 0.30;                                      // 基准风险系数
+  const scale = Math.tanh(perRound / 3);                     // 0~1
+  const lambda = gap > 0 ? lambda0*(1 - 0.7*scale)           // 落后 → 更激进（λ↓）
+                         : lambda0*(1 + 0.7*scale);          // 领先 → 更保守（λ↑）
+  const mode:RiskMode = gap > 0 ? (scale>0.5?'aggressive':'neutral')
+                                : (scale>0.5?'conservative':'neutral');
+  return { lambda, mode, gap, perRound };
+}
+function buildPolicyHints(totals:[number,number,number], roundsLeft:number) {
+  const lambda = [0,1,2].map(i => computeRisk(i, totals, roundsLeft).lambda);
+  const mode   = [0,1,2].map(i => computeRisk(i, totals, roundsLeft).mode);
+  return { lambda, mode, roundsLeft, totals };
+}
+
 /* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
@@ -319,6 +342,17 @@ function LivePanel(props: LiveProps) {
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
+      // === 仅当选择 EV+风险 时，生成并传入风险提示 ===
+      const roundsLeftNow = Math.max(0, (props.rounds || 1) - finishedRef.current);
+      const policy = props.robStrategy === 'ev-risk'
+        ? buildPolicyHints(totalsRef.current as [number,number,number], roundsLeftNow)
+        : undefined;
+      if (policy) {
+        setLog(l => [...l, `【前端】风险提示｜${
+          [0,1,2].map(i => seatName(i)+':'+policy.mode[i]).join(' / ')
+        }｜λ=${policy.lambda.map(x=>x.toFixed(2)).join('/')}`]);
+      }
+
       const r = await fetch('/api/stream_ndjson', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -333,6 +367,9 @@ function LivePanel(props: LiveProps) {
           clientTraceId: traceId,
           stopBelowZero: true,
           farmerCoop: props.farmerCoop,
+          robStrategy: props.robStrategy,                       // ← 新增
+          scoreContext: policy ? { totals: totalsRef.current, roundsLeft: roundsLeftNow } : undefined,
+          policyHints: policy || undefined,
         }),
         signal: controllerRef.current!.signal,
       });
@@ -377,7 +414,7 @@ function LivePanel(props: LiveProps) {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
               }
-              // ⚠️ 修复点：round-end 不再自增 finished，避免与 win 重复计数
+              // ⚠️ round-end 不增加 finishedCount（win 事件里计）
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}｜seenWin=${!!m.seenWin}｜seenStats=${!!m.seenStats}`];
                 continue;
@@ -398,7 +435,7 @@ function LivePanel(props: LiveProps) {
               }
 
               if (m.type === 'event' && m.kind === 'bot-call') {
-                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
+                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'play'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
               }
 
@@ -700,6 +737,7 @@ const DEFAULTS = {
   seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
   seatModels: ['gpt-4o-mini','gemini-1.5-flash','grok-2-latest'],
   seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
+  robStrategy: 'hand' as RobStrategy,
 };
 
 function Home() {
@@ -716,6 +754,7 @@ function Home() {
   const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
   const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
+  const [robStrategy, setRobStrategy] = useState<RobStrategy>(DEFAULTS.robStrategy);
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
 
@@ -724,6 +763,7 @@ function Home() {
     setRob(DEFAULTS.rob); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
     setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
+    setRobStrategy(DEFAULTS.robStrategy);
     setLiveLog([]); setResetKey(k => k + 1);
   };
 
@@ -768,6 +808,14 @@ function Home() {
               <option value="both">都可</option>
               <option value="2singles">两张单牌</option>
               <option value="2pairs">两对</option>
+            </select>
+          </label>
+
+          {/* 新增：抢地主策略 */}
+          <label>抢地主策略
+            <select value={robStrategy} onChange={e=>setRobStrategy(e.target.value as RobStrategy)} style={{ width:'100%' }}>
+              <option value="hand">仅看手牌</option>
+              <option value="ev-risk">EV + 风险惩罚</option>
             </select>
           </label>
         </div>
@@ -947,6 +995,7 @@ function Home() {
           seatModels={seatModels}
           seatKeys={seatKeys}
           farmerCoop={farmerCoop}
+          robStrategy={robStrategy}
           onLog={setLiveLog}
         />
       </div>
