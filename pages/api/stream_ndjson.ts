@@ -1,14 +1,16 @@
 // /pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-// === 如果你已有引擎与各类 Bot，这些 import 保留 ===
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
-import { OpenAIBot } from '../../lib/bots/openai_bot';
-import { GeminiBot } from '../../lib/bots/gemini_bot';
-import { GrokBot } from '../../lib/bots/grok_bot';
-import { HttpBot } from '../../lib/bots/http_bot';
-import { KimiBot } from '../../lib/bots/kimi_bot';
-import { QwenBot } from '../../lib/bots/qwen_bot';
+// ===== 你原有引擎/Bot 的 import：保持不动（如有） =====
+import { runOneGame } from '../../lib/doudizhu/engine';
+// 若你有 Bot 适配，这些也照旧保留（没有就删掉这些行）
+// import { GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
+// import { OpenAIBot } from '../../lib/bots/openai_bot';
+// import { GeminiBot } from '../../lib/bots/gemini_bot';
+// import { GrokBot } from '../../lib/bots/grok_bot';
+// import { HttpBot } from '../../lib/bots/http_bot';
+// import { KimiBot } from '../../lib/bots/kimi_bot';
+// import { QwenBot } from '../../lib/bots/qwen_bot';
 
 // ===================== TrueSkill 轻量实现（内嵌，不依赖第三方） =====================
 type TS = { mu: number; sigma: number };
@@ -18,7 +20,7 @@ const TS_DEFAULT: TSParams = {
   MU0: 1000,
   SIG0: 1000 / 3,     // ≈ 333.33
   BETA: 1000 / 6,     // ≈ 166.67
-  TAU:  1000 / 300,   // ≈   3.33（很小的赛季漂移）
+  TAU:  1000 / 300,   // ≈   3.33（小漂移）
 };
 
 const SQRT2PI = Math.sqrt(2 * Math.PI);
@@ -99,7 +101,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
   const rounds: number = body.rounds ?? 1;
-  const debug: boolean = !!body.debug;
 
   // TrueSkill 跨局累积（若前端传来 tsSeats 则延续，否则按 1000/333 初始化）
   let tsSeats: TS[] = Array.isArray(body?.tsSeats)
@@ -114,28 +115,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let landlordWin: boolean | null = null;
     let lastDelta: [number, number, number] = [0,0,0];
 
-    // 开局提示
-    writeLine(res, { type: 'log', message: `—— 第 ${round} 局开始 ——` });
-
-    // === 调用你的引擎（做两种签名兼容） ===
+    // === 运行一局（做两种签名兜底） ===
     let iter: any;
-    try {
-      // 常见：runOneGame(options)
-      iter = (runOneGame as any)({ ...body });
-    } catch {
-      try {
-        // 备选：runOneGame(ctx, options)
-        iter = (runOneGame as any)(undefined, { ...body });
-      } catch (e2) {
-        writeLine(res, { type: 'error', message: `runOneGame 调用失败：${(e2 as Error)?.message || e2}` });
-        break;
-      }
-    }
+    try { iter = (runOneGame as any)({ ...body }); }
+    catch { iter = (runOneGame as any)(undefined, { ...body }); }
 
-    // === 事件循环：透传 + 抓取地主与胜负 ===
     try {
       for await (const ev of (iter as any)) {
-        // 原样透传
+        // 原样透传你引擎事件
         writeLine(res, ev);
 
         // 抓 landlordIdx（兼容不同字段）
@@ -154,10 +141,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // 结束判定 → 计算 TS
         if ((ev as any).type === 'end' || (ev as any).kind === 'end') {
           // 地主位兜底
-          if (landlordIdx < 0) {
-            if (typeof (ev as any).landlordIdx === 'number') landlordIdx = (ev as any).landlordIdx;
-          }
+          if (landlordIdx < 0 && typeof (ev as any).landlordIdx === 'number') landlordIdx = (ev as any).landlordIdx;
 
           // 胜负判定：优先看事件字段；否则看最后一次 deltaScores 在地主位的符号
           if (typeof (ev as any).landlordWin === 'boolean') landlordWin = (ev as any).landlordWin;
-          else if ((ev as any).winnerRole === 'landlord') landlordWin =
+          else if ((ev as any).winnerRole === 'landlord') landlordWin = true;
+          else if ((ev as any).winnerRole === 'farmers') landlordWin = false;
+          else if (landlordIdx >= 0) {
+            const ld = lastDelta[landlordIdx] || 0;
+            if (ld !== 0) landlordWin = ld > 0;
+          }
+
+          if (landlordIdx < 0 || landlordWin === null) {
+            writeLine(res, { type: 'warn', message: `第 ${round} 局无法判定地主/胜负，跳过 TrueSkill 更新` });
+          } else {
+            tsSeats = ddzUpdateTrueSkill(tsSeats, landlordIdx, landlordWin, TS_DEFAULT);
+            writeLine(res, {
+              type: 'ts',
+              round,
+              landlordIdx,
+              landlordWin,
+              seats: tsSeats.map(s => ({ mu: s.mu, sigma: s.sigma, rc: s.mu - 3 * s.sigma }))
+            });
+          }
+        }
+      }
+    } catch (e) {
+      writeLine(res, { type: 'error', message: `事件循环异常：${(e as Error)?.message || e}` });
+    }
+  }
+
+  try { res.end(); } catch {}
+}
