@@ -1,19 +1,6 @@
 // pages/index.tsx
 import React, { useEffect, useRef, useState } from 'react';
 
-/* =========================
-   [TS] Step 1: TrueSkill 类型 + 初值
-   ========================= */
-type TSSeat = { mu: number; sigma: number; rc?: number };
-const __initTS = (): TSSeat[] => {
-  const mu0 = 1000, sig0 = 1000/3;
-  return [
-    { mu: mu0, sigma: sig0, rc: mu0 - 3*sig0 },
-    { mu: mu0, sigma: sig0, rc: mu0 - 3*sig0 },
-    { mu: mu0, sigma: sig0, rc: mu0 - 3*sig0 },
-  ];
-};
-
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
@@ -242,7 +229,14 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   return out;
 };
 
-/* ==================== LivePanel（对局） ==================== */
+/* ===== TrueSkill 本地状态 ===== */
+type TSSeat = { mu:number; sigma:number; rc?:number };
+const __initTS = (): TSSeat[] => {
+  const mu0 = 1000, sig0 = 1000/3;
+  return [{mu:mu0,sigma:sig0},{mu:mu0,sigma:sig0},{mu:mu0,sigma:sig0}];
+};
+
+/* ==================== LivePanel ==================== */
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
 
@@ -258,15 +252,11 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  // 累计画像
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
   const [alpha, setAlpha] = useState<number>(0.35);
   const [aggStats, setAggStats] = useState<Score5[] | null>(null);
   const [aggCount, setAggCount] = useState<number>(0);
 
-  /* =========================
-     [TS] Step 2: TrueSkill 前端状态
-     ========================= */
   const [tsSeats, setTsSeats] = useState<TSSeat[]>(__initTS());
 
   useEffect(() => { props.onTotals?.(totals); }, [totals]);
@@ -329,8 +319,6 @@ function LivePanel(props: LiveProps) {
         return `${nm}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
       }).join(', ');
 
-    let labelRound = 0;
-
     const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
       setLog([]); lastReasonRef.current = [null, null, null];
       const specs = buildSeatSpecs();
@@ -347,14 +335,14 @@ function LivePanel(props: LiveProps) {
           enabled: props.enabled,
           rob: props.rob,
           four2: props.four2,
-          // ✅ 关键改动：把 seats / seatModels / seatKeys 正确传回后端
+          // 三并行数组传给后端（后端会做兼容映射）
           seats: props.seats,
           seatModels: props.seatModels,
           seatKeys: props.seatKeys,
           clientTraceId: traceId,
           stopBelowZero: true,
           farmerCoop: props.farmerCoop,
-          // [TS] Step 3: 请求体附带 tsSeats
+          // TrueSkill 初值传下去
           tsSeats: tsSeats.map(s => ({ mu: s.mu, sigma: s.sigma })),
         }),
         signal: controllerRef.current!.signal,
@@ -392,12 +380,15 @@ function LivePanel(props: LiveProps) {
           let nextMultiplier = multiplierRef.current;
           let nextAggStats = aggStatsRef.current;
           let nextAggCount = aggCountRef.current;
-          // [TS] Step 4: 批次内暂存 TS
           let nextTS: TSSeat[] | null = null;
 
           for (const raw of batch) {
             const m: any = raw;
             try {
+              if (m.type === 'debug' && m.phase === 'pre-run') {
+                nextLog = [...nextLog, `【后端】座位映射: ${JSON.stringify(m.seatsNorm)}`];
+                continue;
+              }
               if (m.type === 'event' && m.kind === 'round-start') {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -406,11 +397,8 @@ function LivePanel(props: LiveProps) {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}｜seenWin=${!!m.seenWin}｜seenStats=${!!m.seenStats}`];
                 continue;
               }
-
-              // [TS] 接收 TrueSkill 更新
               if (m.type === 'ts' && Array.isArray(m.seats)) {
-                nextTS = m.seats as TSSeat[];
-                // 不 return；继续处理其他事件
+                nextTS = m.seats;
               }
 
               const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
@@ -559,8 +547,6 @@ function LivePanel(props: LiveProps) {
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
-
-          // [TS] Step 4（续）：批次结束统一 set
           if (nextTS) setTsSeats(nextTS);
         }
       }
@@ -571,9 +557,7 @@ function LivePanel(props: LiveProps) {
     try {
       for (let i = 0; i < props.rounds; i++) {
         if (controllerRef.current?.signal.aborted) break;
-        const thisRound = i + 1;
-        await playOneGame(i, thisRound);
-
+        await playOneGame(i, i + 1);
         const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
         if (hasNegative) { setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']); break; }
         await new Promise(r => setTimeout(r, 1000 + Math.floor(Math.random() * 1000)));
@@ -646,7 +630,6 @@ function LivePanel(props: LiveProps) {
         </div>
       </Section>
 
-      {/* 累计雷达图（仅显示累计） */}
       <Section title="战术画像（累计，0~5）">
         <RadarPanel aggStats={aggStats} aggCount={aggCount} aggMode={aggMode} alpha={alpha}
           onChangeMode={setAggMode} onChangeAlpha={setAlpha}/>
@@ -721,7 +704,7 @@ function RadarPanel({
   );
 }
 
-/* ========= 默认值（含“清空”按钮的重置） ========= */
+/* ========= 默认值 ========= */
 const DEFAULTS = {
   enabled: true,
   rounds: 10,
