@@ -1,18 +1,10 @@
 // /pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-// ===== 你原有引擎/Bot 的 import：保持不动（如有） =====
+// 你的引擎（保持路径与你项目一致）
 import { runOneGame } from '../../lib/doudizhu/engine';
-// 若你有 Bot 适配，这些也照旧保留（没有就删掉这些行）
-// import { GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
-// import { OpenAIBot } from '../../lib/bots/openai_bot';
-// import { GeminiBot } from '../../lib/bots/gemini_bot';
-// import { GrokBot } from '../../lib/bots/grok_bot';
-// import { HttpBot } from '../../lib/bots/http_bot';
-// import { KimiBot } from '../../lib/bots/kimi_bot';
-// import { QwenBot } from '../../lib/bots/qwen_bot';
 
-// ===================== TrueSkill 轻量实现（内嵌，不依赖第三方） =====================
+// ===================== TrueSkill 轻量实现 =====================
 type TS = { mu: number; sigma: number };
 type TSParams = { MU0: number; SIG0: number; BETA: number; TAU: number };
 
@@ -107,7 +99,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ? (body.tsSeats as any[]).map((x: any) => ({ mu: Number(x?.mu) || TS_DEFAULT.MU0, sigma: Number(x?.sigma) || TS_DEFAULT.SIG0 }))
     : [initialTS(), initialTS(), initialTS()];
 
-  // 把本次起始 TS 先发一条（可选）
+  // 本次起始 TS 先发一条
   writeLine(res, { type: 'ts', round: 0, seats: tsSeats.map(s => ({ mu: s.mu, sigma: s.sigma, rc: conservative(s.mu, s.sigma) })) });
 
   for (let round = 1; round <= rounds; round++) {
@@ -115,21 +107,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let landlordWin: boolean | null = null;
     let lastDelta: [number, number, number] = [0,0,0];
 
-    // === 运行一局（做两种签名兜底） ===
+    // 调用你的引擎（两种签名兜底）
     let iter: any;
     try { iter = (runOneGame as any)({ ...body }); }
     catch { iter = (runOneGame as any)(undefined, { ...body }); }
 
     try {
       for await (const ev of (iter as any)) {
-        // 原样透传你引擎事件
+        // 透传
         writeLine(res, ev);
 
-        // 抓 landlordIdx（兼容不同字段）
+        // 抓 landlordIdx
         if (landlordIdx < 0) {
           if (typeof (ev as any).landlordIdx === 'number') landlordIdx = (ev as any).landlordIdx;
           else if (typeof (ev as any).landlord === 'number') landlordIdx = (ev as any).landlord;
           else if ((ev as any).init && typeof (ev as any).init.landlordIdx === 'number') landlordIdx = (ev as any).init.landlordIdx;
+          else if ((ev as any).state && typeof (ev as any).state.landlord === 'number') landlordIdx = (ev as any).state.landlord;
         }
 
         // 记录 deltaScores（0 和本局分）
@@ -140,10 +133,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         // 结束判定 → 计算 TS
         if ((ev as any).type === 'end' || (ev as any).kind === 'end') {
-          // 地主位兜底
           if (landlordIdx < 0 && typeof (ev as any).landlordIdx === 'number') landlordIdx = (ev as any).landlordIdx;
 
-          // 胜负判定：优先看事件字段；否则看最后一次 deltaScores 在地主位的符号
           if (typeof (ev as any).landlordWin === 'boolean') landlordWin = (ev as any).landlordWin;
           else if ((ev as any).winnerRole === 'landlord') landlordWin = true;
           else if ((ev as any).winnerRole === 'farmers') landlordWin = false;
@@ -167,7 +158,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }
     } catch (e) {
-      writeLine(res, { type: 'error', message: `事件循环异常：${(e as Error)?.message || e}` });
+      const err = e as any;
+      writeLine(res, {
+        type: 'error',
+        message: `事件循环异常：${err?.message || err}`,
+        stack: String(err?.stack || '').split('\n').slice(0, 6).join(' ⏎ ')
+      });
     }
   }
 
