@@ -280,7 +280,7 @@ function LivePanel(props: LiveProps) {
     setLandlord(null); setHands([[], [], []]); setPlays([]);
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
-	setTotals([props.startScore || 0, props.startScore || 0, props.startScore || 0]);
+    setTotals([props.startScore || 0, props.startScore || 0, props.startScore || 0]);
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
@@ -377,8 +377,8 @@ function LivePanel(props: LiveProps) {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
               }
+              // ⚠️ 修复点：round-end 不再自增 finished，避免与 win 重复计数
               if (m.type === 'event' && m.kind === 'round-end') {
-                nextFinished = nextFinished + 1;
                 nextLog = [...nextLog, `【边界】round-end #${m.round}｜seenWin=${!!m.seenWin}｜seenStats=${!!m.seenStats}`];
                 continue;
               }
@@ -484,7 +484,7 @@ function LivePanel(props: LiveProps) {
                   `胜者：${seatName(m.winner)}，倍数 x${m.multiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
                 ];
                 nextTotals     = [ nextTotals[0] + rot[0], nextTotals[1] + rot[1], nextTotals[2] + rot[2] ] as any;
-                nextFinished   = nextFinished + 1;
+                nextFinished   = nextFinished + 1; // ✅ 仅在 win 事件计数
                 continue;
               }
 
