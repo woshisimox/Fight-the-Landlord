@@ -1,11 +1,14 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
+// ✅ 如果你的 API 文件在 pages/api/ 下，通常用这个相对路径：../../lib/doudizhu
+//    如果在 src/pages/api/ 下，请改为 ../../../lib/doudizhu
+import * as Arena from '../../lib/doudizhu';
 
 type Four2Policy = 'both' | '2singles' | '2pairs';
 
 // ============ 工具：输出一行 NDJSON ============
 function writeLine(res: NextApiResponse, obj: any) {
-  res.write(JSON.stringify(obj) + '\n');
+  try { res.write(JSON.stringify(obj) + '\n'); } catch {}
 }
 
 // ============ 关键修复：座位键名归一化 ============
@@ -43,27 +46,19 @@ function normalizeSeats(rawSeats: any[]): any[] {
   });
 }
 
-// ============ 动态加载引擎（避免编译期无法解析路径） ============
-type RunRoundFn = (opts: any) => Promise<void>;
+// ============ 兼容不同导出名：runRound / runOneGame / default ============
+const runAny: (opts: any) => Promise<void> = (
+  (Arena as any).runRound ||
+  (Arena as any).runOneGame ||
+  (Arena as any).run ||
+  (Arena as any).default
+);
 
-function loadRunRound(): RunRoundFn {
-  const tryPaths = [
-    process.env.ARENA_PATH || '',               // 允许用环境变量显式指定
-    '@/lib/arena', '@/server/arena', '@/lib/doudizhu',
-    '../../lib/arena', '../../server/arena', '../../lib/doudizhu',
-    '../../../lib/arena', '../../../server/arena', '../../../lib/doudizhu',
-  ].filter(Boolean);
-
-  for (const p of tryPaths) {
-    try {
-      // @ts-ignore
-      const mod = require(p);
-      if (mod?.runRound && typeof mod.runRound === 'function') return mod.runRound as RunRoundFn;
-    } catch (_) { /* ignore and try next */ }
-  }
+if (typeof runAny !== 'function') {
+  // 这会在启动时立刻暴露清晰错误（而不是等请求时）
   throw new Error(
-    '未能找到引擎的 runRound 导出。请在 pages/api/stream_ndjson.ts 里把导入路径改为你项目里实际的引擎模块，' +
-    '或设置环境变量 ARENA_PATH 指向正确的模块路径（例如 "@/lib/arena" 或 "../../lib/arena"）。'
+    'lib/doudizhu 未导出可调用的引擎函数。请确保导出 runRound / runOneGame / default 之一。' +
+    '如果你的项目在 src/pages/api 下，请把导入路径从 ../../lib/doudizhu 改为 ../../../lib/doudizhu。'
   );
 }
 
@@ -100,10 +95,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ]});
     writeLine(res, { type:'debug', phase:'rules', four2 });
 
-    const runRound = loadRunRound();
-
     const runWith = async (rule: Four2Policy) => {
-      await runRound({
+      await runAny({
         rounds,
         startScore,
         seatDelayMs,
@@ -120,24 +113,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     try {
       await runWith(four2 as Four2Policy);
-    } catch (e) {
+    } catch (e: any) {
       writeLine(res, { type:'warn', message:'检测到规则实现表调用异常，尝试回退 four2=2singles' });
       writeLine(res, { type:'debug', phase:'rules', four2:'2singles' });
       try {
         await runWith('2singles');
-      } catch (e2) {
-        writeLine(res, { type:'error', message:'回退 2singles 仍异常：' + (e2 as any)?.message });
+      } catch (e2: any) {
+        writeLine(res, { type:'error', message:'回退 2singles 仍异常：' + (e2?.message || e2) });
         writeLine(res, { type:'warn', message:'继续回退 four2=2pairs' });
         writeLine(res, { type:'debug', phase:'rules', four2:'2pairs' });
         try {
           await runWith('2pairs');
-        } catch (e3) {
-          writeLine(res, { type:'error', message:'回退 2pairs 仍异常：' + (e3 as any)?.message });
+        } catch (e3: any) {
+          writeLine(res, { type:'error', message:'回退 2pairs 仍异常：' + (e3?.message || e3) });
         }
       }
     }
 
-    res.end();
+    try { res.end(); } catch {}
   } catch (err: any) {
     writeLine(res, { type:'error', message:`事件循环异常：${err?.message || err}`, stack: err?.stack });
     try { res.end(); } catch {}
