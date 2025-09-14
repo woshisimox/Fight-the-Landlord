@@ -126,8 +126,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       farmerCoop = true, // 保留给前端
     } = (req.body || {});
 
+    //const seatChoices = normalizeSeats(seats);
+   // const bots = seatChoices.map(pickBot);
     const seatChoices = normalizeSeats(seats);
-    const bots = seatChoices.map(pickBot);
+const bots = seatChoices.map((ch, i) => {
+  const f = pickBot(ch);
+  (f as any).$name = ch; // ← 给引擎识别是谁
+  return f;
+});
+
 
     // TrueSkill 初始化（全 1000/333）
     const ratings: Rating[] = [
