@@ -275,7 +275,7 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  // —— TrueSkill（新增） —— //
+  // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
   const tsRef = useRef(tsArr); useEffect(()=>{ tsRef.current=tsArr; }, [tsArr]);
   const tsCr = (r:Rating)=> (r.mu - 3*r.sigma);
@@ -306,6 +306,10 @@ function LivePanel(props: LiveProps) {
   const alphaRef    = useRef(alpha);    useEffect(()=>{ alphaRef.current    = alpha;    }, [alpha]);
 
   const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
+
+  // 新增：每局观测标记 —— 是否收到 win、是否收到 stats
+  const seenWinRef   = useRef<boolean>(false);
+  const seenStatsRef = useRef<boolean>(false);
 
   const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
 
@@ -351,13 +355,15 @@ function LivePanel(props: LiveProps) {
         return `${nm}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
       }).join(', ');
 
-    let labelRound = 0;
-
     const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
       setLog([]); lastReasonRef.current = [null, null, null];
       const specs = buildSeatSpecs();
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
+
+      // 新一局：重置标记
+      seenWinRef.current = false;
+      seenStatsRef.current = false;
 
       const r = await fetch('/api/stream_ndjson', {
         method: 'POST',
@@ -417,9 +423,27 @@ function LivePanel(props: LiveProps) {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
               }
-              // round-end 仅作日志，不影响局数
+              // ✅ 兜底：round-end 也算一局（若本局没收到 win）
               if (m.type === 'event' && m.kind === 'round-end') {
-                nextLog = [...nextLog, `【边界】round-end #${m.round}｜seenWin=${!!m.seenWin}｜seenStats=${!!m.seenStats}`];
+                nextLog = [...nextLog, `【边界】round-end #${m.round}｜seenWin=${seenWinRef.current}｜seenStats=${seenStatsRef.current}`];
+
+                if (!seenStatsRef.current) {
+                  // 补一个中性评分，确保雷达图可见
+                  const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
+                  const mode  = aggModeRef.current;
+                  const a     = alphaRef.current;
+                  if (!nextAggStats) {
+                    nextAggStats = [neutral, neutral, neutral];
+                    nextAggCount = 1;
+                  } else {
+                    nextAggStats = nextAggStats.map(prev => mergeScore(prev, neutral, mode, nextAggCount, a));
+                    nextAggCount = nextAggCount + 1;
+                  }
+                }
+
+                if (!seenWinRef.current) {
+                  nextFinished = nextFinished + 1;
+                }
                 continue;
               }
 
@@ -434,8 +458,9 @@ function LivePanel(props: LiveProps) {
                 nextLandlord = lord;
                 nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?'}为地主`];
 
-                // —— TS：局前记录（仅日志展示） —— //
+                // —— TS：局前（日志展示） —— //
                 const ts0 = tsRef.current;
+                const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
                 nextLog = [
                   ...nextLog,
                   `TS(局前)：甲 μ=${fmt2(ts0[0].mu)} σ=${fmt2(ts0[0].sigma)}｜乙 μ=${fmt2(ts0[1].mu)} σ=${fmt2(ts0[1].sigma)}｜丙 μ=${fmt2(ts0[2].mu)} σ=${fmt2(ts0[2].sigma)}`
@@ -517,6 +542,8 @@ function LivePanel(props: LiveProps) {
               }
 
               if (m.type === 'event' && m.kind === 'win') {
+                seenWinRef.current = true;
+
                 const L = (nextLandlord ?? 0) as number;
                 const ds = Array.isArray(m.deltaScores) ? m.deltaScores as [number,number,number] : [0,0,0];
                 const rot: [number,number,number] = [
@@ -532,7 +559,7 @@ function LivePanel(props: LiveProps) {
                   `胜者：${seatName(m.winner)}，倍数 x${m.multiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
                 ];
                 nextTotals     = [ nextTotals[0] + rot[0], nextTotals[1] + rot[1], nextTotals[2] + rot[2] ] as any;
-                nextFinished   = nextFinished + 1; // ✅ 仅在 win 事件计数
+                nextFinished   = nextFinished + 1; // ✅ 确认一局
 
                 // —— TS：局后更新 —— //
                 const updated = tsRef.current.map(r=>({ ...r }));
@@ -541,14 +568,31 @@ function LivePanel(props: LiveProps) {
                 else                 tsUpdateTwoTeams(updated, farmers, [L]);
                 setTsArr(updated);
 
+                const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
                 nextLog = [
                   ...nextLog,
                   `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`
                 ];
+
+                // 如果本局没收到 stats，补一条中性评分，保证雷达图累计
+                if (!seenStatsRef.current) {
+                  const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
+                  const mode  = aggModeRef.current;
+                  const a     = alphaRef.current;
+                  if (!nextAggStats) {
+                    nextAggStats = [neutral, neutral, neutral];
+                    nextAggCount = 1;
+                  } else {
+                    nextAggStats = nextAggStats.map(prev => mergeScore(prev, neutral, mode, nextAggCount, a));
+                    nextAggCount = nextAggCount + 1;
+                  }
+                }
                 continue;
               }
 
               if (m.type === 'event' && m.kind === 'stats' && Array.isArray(m.perSeat)) {
+                seenStatsRef.current = true;
+
                 const s3 = [0,1,2].map(i=>{
                   const rec = m.perSeat.find((x:any)=>x.seat===i);
                   const sc = rec?.scaled || {};
@@ -623,7 +667,7 @@ function LivePanel(props: LiveProps) {
         </span>
       </div>
 
-      {/* ========= 新增：TrueSkill（实时） ========= */}
+      {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           {[0,1,2].map(i=>(
@@ -653,6 +697,18 @@ function LivePanel(props: LiveProps) {
             </div>
           ))}
         </div>
+      </Section>
+
+      {/* ======= 位置：积分下面、手牌上面 ======= */}
+      <Section title="战术画像（累计，0~5）">
+        <RadarPanel
+          aggStats={aggStats}
+          aggCount={aggCount}
+          aggMode={aggMode}
+          alpha={alpha}
+          onChangeMode={setAggMode}
+          onChangeAlpha={setAlpha}
+        />
       </Section>
 
       <Section title="手牌">
@@ -692,12 +748,6 @@ function LivePanel(props: LiveProps) {
             <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div>
           </div>
         </div>
-      </Section>
-
-      {/* 累计雷达图（仅显示累计） */}
-      <Section title="战术画像（累计，0~5）">
-        <RadarPanel aggStats={aggStats} aggCount={aggCount} aggMode={aggMode} alpha={alpha}
-          onChangeMode={setAggMode} onChangeAlpha={setAlpha}/>
       </Section>
 
       <div style={{ display:'flex', gap:8 }}>
