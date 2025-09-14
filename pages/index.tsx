@@ -446,7 +446,6 @@ function LivePanel(props: LiveProps) {
             try {
               // -------- TS 帧（后端主动提供） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
-                // 后端直接给出 μ/σ
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
                 setTsArr(incoming);
 
@@ -552,6 +551,8 @@ function LivePanel(props: LiveProps) {
                 const ds = (Array.isArray(m.deltaScores) ? m.deltaScores
                           : Array.isArray(m.delta) ? m.delta
                           : [0,0,0]) as [number,number,number];
+
+                // 将“以地主为基准”的增减分旋转成“按座位顺序”的展示
                 const rot: [number,number,number] = [
                   ds[(0 - L + 3) % 3],
                   ds[(1 - L + 3) % 3],
@@ -560,11 +561,44 @@ function LivePanel(props: LiveProps) {
                 nextWinner     = m.winner ?? nextWinner ?? null;
                 nextMultiplier = m.multiplier ?? nextMultiplier ?? 1;
                 nextDelta      = rot;
-                nextTotals     = [ nextTotals[0] + rot[0], nextTotals[1] + rot[1], nextTotals[2] + rot[2] ] as any;
+                nextTotals     = [
+                  nextTotals[0] + rot[0],
+                  nextTotals[1] + rot[1],
+                  nextTotals[2] + rot[2]
+                ] as any;
+
+                // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
+                if (nextWinner == null) {
+                  const landlordDelta = ds[0] ?? 0;
+                  if (landlordDelta > 0) nextWinner = L;
+                  else if (landlordDelta < 0) {
+                    // 农民胜：任选一个农民作为代表胜者用于展示（不影响 TS 团队更新）
+                    const farmer = [0,1,2].find(x => x !== L)!;
+                    nextWinner = farmer;
+                  }
+                }
 
                 // 标记一局结束 & 雷达图兜底
-                const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
-                nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
+                {
+                  const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
+                  nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
+                }
+
+                // ✅ TrueSkill：局后更新（后端没推 ts(after-round) 时也能更新）
+                {
+                  const updated = tsRef.current.map(r => ({ ...r }));
+                  const farmers = [0,1,2].filter(s => s !== L);
+                  const landlordDelta = ds[0] ?? 0;
+                  const landlordWin = (nextWinner === L) || (landlordDelta > 0);
+                  if (landlordWin) tsUpdateTwoTeams(updated, [L], farmers);
+                  else             tsUpdateTwoTeams(updated, farmers, [L]);
+
+                  setTsArr(updated);
+                  nextLog = [
+                    ...nextLog,
+                    `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`
+                  ];
+                }
 
                 nextLog = [
                   ...nextLog,
