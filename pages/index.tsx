@@ -156,22 +156,6 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 
-/* 🔧 关键修复：把内置 bot 选择转成引擎认可的驼峰键名 */
-function engineKeyFor(choice: BotChoice): string {
-  switch (choice) {
-    case 'built-in:greedy-max':   return 'builtin.greedyMax';
-    case 'built-in:greedy-min':   return 'builtin.greedyMin';
-    case 'built-in:random-legal': return 'builtin.randomLegal';
-    case 'ai:openai': return 'ai.openai';
-    case 'ai:gemini': return 'ai.gemini';
-    case 'ai:grok':   return 'ai.grok';
-    case 'ai:kimi':   return 'ai.kimi';
-    case 'ai:qwen':   return 'ai.qwen';
-    case 'http':      return 'http';
-    default:          return String(choice);
-  }
-}
-
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
@@ -307,17 +291,14 @@ function LivePanel(props: LiveProps) {
         const normalized = normalizeModelForProvider(choice, props.seatModels[i] || '');
         const model = normalized || defaultModelFor(choice);
         const keys = props.seatKeys[i] || {};
-        // 🔧 关键：这里把 choice 变成引擎可识别的驼峰键
-        const engineKey = engineKeyFor(choice);
-
         switch (choice) {
-          case 'ai:openai': return { choice: engineKey, model, apiKey: keys.openai || '' };
-          case 'ai:gemini': return { choice: engineKey, model, apiKey: keys.gemini || '' };
-          case 'ai:grok':   return { choice: engineKey, model, apiKey: keys.grok || '' };
-          case 'ai:kimi':   return { choice: engineKey, model, apiKey: keys.kimi || '' };
-          case 'ai:qwen':   return { choice: engineKey, model, apiKey: keys.qwen || '' };
-          case 'http':      return { choice: engineKey, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
-          default:          return { choice: engineKey }; // 内置 bot: builtin.greedyMax / builtin.greedyMin / builtin.randomLegal
+          case 'ai:openai': return { choice, model, apiKey: keys.openai || '' };
+          case 'ai:gemini': return { choice, model, apiKey: keys.gemini || '' };
+          case 'ai:grok':   return { choice, model, apiKey: keys.grok || '' };
+          case 'ai:kimi':   return { choice, model, apiKey: keys.kimi || '' };
+          case 'ai:qwen':   return { choice, model, apiKey: keys.qwen || '' };
+          case 'http':      return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
+          default:          return { choice };
         }
       });
     };
@@ -325,13 +306,9 @@ function LivePanel(props: LiveProps) {
     const seatSummaryText = (specs: any[]) =>
       specs.map((s, i) => {
         const nm = seatName(i);
-        if (String(s.choice).startsWith('builtin.')) {
-          if (s.choice === 'builtin.greedyMax') return `${nm}=Greedy Max`;
-          if (s.choice === 'builtin.greedyMin') return `${nm}=Greedy Min`;
-          if (s.choice === 'builtin.randomLegal') return `${nm}=Random Legal`;
-        }
+        if (s.choice.startsWith('built-in')) return `${nm}=${choiceLabel(s.choice as BotChoice)}`;
         if (s.choice === 'http') return `${nm}=HTTP(${s.baseUrl ? 'custom' : 'default'})`;
-        return `${nm}=${(s.choice||'').split('.').pop()||'AI'}(${s.model || 'default'})`;
+        return `${nm}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
       }).join(', ');
 
     let labelRound = 0;
