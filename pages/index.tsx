@@ -223,7 +223,7 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
   out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
   out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-  out = out.replace(/开始连打\s*\d+\\s*局\(/g,  `开始第 ${n} 局(`);
+  out = out.replace(/开始连打\s*\d+\\s*局\(/g,  `开始第 ${n} 屺(`);
   out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
   out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
   return out;
@@ -244,6 +244,14 @@ function LivePanel(props: LiveProps) {
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
+
+  // ===== TrueSkill + 本局计分（新增） =====
+  const [tsRatings, setTsRatings] = useState<{mu:number;sigma:number;cr:number}[]>([
+    { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
+    { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
+    { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
+  ]);
+  const [currRoundScore, setCurrRoundScore] = useState<[number,number,number]>([0,0,0]);
 
   // 累计画像
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
@@ -283,6 +291,12 @@ function LivePanel(props: LiveProps) {
     setTotals([props.startScore || 0, props.startScore || 0, props.startScore || 0]);
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
+    setTsRatings([
+      { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
+      { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
+      { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
+    ]);
+    setCurrRoundScore([0,0,0]);
 
     controllerRef.current = new AbortController();
 
@@ -373,8 +387,16 @@ function LivePanel(props: LiveProps) {
           for (const raw of batch) {
             const m: any = raw;
             try {
+              // ===== TrueSkill 事件（新增）=====
+              if (m.type === 'ts') {
+                if (Array.isArray(m.ratings)) setTsRatings(m.ratings);
+                if (m.where === 'before-round') setCurrRoundScore([0,0,0]);
+                continue;
+              }
+
               if (m.type === 'event' && m.kind === 'round-start') {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
+                setCurrRoundScore([0,0,0]); // 同步清零
                 continue;
               }
               // ⚠️ 修复点：round-end 不再自增 finished，避免与 win 重复计数
@@ -479,6 +501,7 @@ function LivePanel(props: LiveProps) {
                 nextWinner     = m.winner;
                 nextMultiplier = m.multiplier;
                 nextDelta      = rot;
+                setCurrRoundScore(rot); // ===== 本局计分（新增）
                 nextLog = [
                   ...nextLog,
                   `胜者：${seatName(m.winner)}，倍数 x${m.multiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
@@ -569,6 +592,25 @@ function LivePanel(props: LiveProps) {
             <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
               <div><SeatTitle i={i}/></div>
               <div style={{ fontSize:24, fontWeight:800 }}>{totals[i]}</div>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* ===== TrueSkill（实时） & 本局计分（新增） ===== */}
+      <Section title="TrueSkill（实时） & 本局计分">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                <div><SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>本局：{currRoundScore[i] ?? 0}</div>
+              </div>
+              <div style={{ fontSize:13, lineHeight:1.6 }}>
+                <div>μ：{tsRatings[i]?.mu?.toFixed(2)}</div>
+                <div>σ：{tsRatings[i]?.sigma?.toFixed(2)}</div>
+                <div>μ − 3σ：{tsRatings[i]?.cr?.toFixed(2)}</div>
+              </div>
             </div>
           ))}
         </div>
