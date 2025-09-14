@@ -156,6 +156,22 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 
+/* 🔧 关键修复：把内置 bot 选择转成引擎认可的驼峰键名 */
+function engineKeyFor(choice: BotChoice): string {
+  switch (choice) {
+    case 'built-in:greedy-max':   return 'builtin.greedyMax';
+    case 'built-in:greedy-min':   return 'builtin.greedyMin';
+    case 'built-in:random-legal': return 'builtin.randomLegal';
+    case 'ai:openai': return 'ai.openai';
+    case 'ai:gemini': return 'ai.gemini';
+    case 'ai:grok':   return 'ai.grok';
+    case 'ai:kimi':   return 'ai.kimi';
+    case 'ai:qwen':   return 'ai.qwen';
+    case 'http':      return 'http';
+    default:          return String(choice);
+  }
+}
+
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
@@ -229,14 +245,7 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   return out;
 };
 
-/* ===== TrueSkill 本地状态 ===== */
-type TSSeat = { mu:number; sigma:number; rc?:number };
-const __initTS = (): TSSeat[] => {
-  const mu0 = 1000, sig0 = 1000/3;
-  return [{mu:mu0,sigma:sig0},{mu:mu0,sigma:sig0},{mu:mu0,sigma:sig0}];
-};
-
-/* ==================== LivePanel ==================== */
+/* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
 
@@ -252,12 +261,11 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
+  // 累计画像
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
   const [alpha, setAlpha] = useState<number>(0.35);
   const [aggStats, setAggStats] = useState<Score5[] | null>(null);
   const [aggCount, setAggCount] = useState<number>(0);
-
-  const [tsSeats, setTsSeats] = useState<TSSeat[]>(__initTS());
 
   useEffect(() => { props.onTotals?.(totals); }, [totals]);
   useEffect(() => { props.onLog?.(log); }, [log]);
@@ -294,14 +302,45 @@ function LivePanel(props: LiveProps) {
 
     controllerRef.current = new AbortController();
 
-    const seatSummaryText = (seats:string[], models:string[]) =>
-      seats.map((s, i) => `${seatName(i)}=${s}${models[i] ? `(${models[i]})` : ''}`).join(', ');
+    const buildSeatSpecs = (): any[] => {
+      return props.seats.slice(0,3).map((choice, i) => {
+        const normalized = normalizeModelForProvider(choice, props.seatModels[i] || '');
+        const model = normalized || defaultModelFor(choice);
+        const keys = props.seatKeys[i] || {};
+        // 🔧 关键：这里把 choice 变成引擎可识别的驼峰键
+        const engineKey = engineKeyFor(choice);
+
+        switch (choice) {
+          case 'ai:openai': return { choice: engineKey, model, apiKey: keys.openai || '' };
+          case 'ai:gemini': return { choice: engineKey, model, apiKey: keys.gemini || '' };
+          case 'ai:grok':   return { choice: engineKey, model, apiKey: keys.grok || '' };
+          case 'ai:kimi':   return { choice: engineKey, model, apiKey: keys.kimi || '' };
+          case 'ai:qwen':   return { choice: engineKey, model, apiKey: keys.qwen || '' };
+          case 'http':      return { choice: engineKey, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
+          default:          return { choice: engineKey }; // 内置 bot: builtin.greedyMax / builtin.greedyMin / builtin.randomLegal
+        }
+      });
+    };
+
+    const seatSummaryText = (specs: any[]) =>
+      specs.map((s, i) => {
+        const nm = seatName(i);
+        if (String(s.choice).startsWith('builtin.')) {
+          if (s.choice === 'builtin.greedyMax') return `${nm}=Greedy Max`;
+          if (s.choice === 'builtin.greedyMin') return `${nm}=Greedy Min`;
+          if (s.choice === 'builtin.randomLegal') return `${nm}=Random Legal`;
+        }
+        if (s.choice === 'http') return `${nm}=HTTP(${s.baseUrl ? 'custom' : 'default'})`;
+        return `${nm}=${(s.choice||'').split('.').pop()||'AI'}(${s.model || 'default'})`;
+      }).join(', ');
+
+    let labelRound = 0;
 
     const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
       setLog([]); lastReasonRef.current = [null, null, null];
-
+      const specs = buildSeatSpecs();
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
-      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(props.seats as any, props.seatModels)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
+      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       const r = await fetch('/api/stream_ndjson', {
         method: 'POST',
@@ -313,13 +352,10 @@ function LivePanel(props: LiveProps) {
           enabled: props.enabled,
           rob: props.rob,
           four2: props.four2,
-          seats: props.seats,
-          seatModels: props.seatModels,
-          seatKeys: props.seatKeys,
+          seats: specs,
           clientTraceId: traceId,
           stopBelowZero: true,
           farmerCoop: props.farmerCoop,
-          tsSeats: tsSeats.map(s => ({ mu: s.mu, sigma: s.sigma })),
         }),
         signal: controllerRef.current!.signal,
       });
@@ -356,37 +392,18 @@ function LivePanel(props: LiveProps) {
           let nextMultiplier = multiplierRef.current;
           let nextAggStats = aggStatsRef.current;
           let nextAggCount = aggCountRef.current;
-          let nextTS: TSSeat[] | null = null;
 
           for (const raw of batch) {
             const m: any = raw;
             try {
-              // 新增：直接展示后端的 warn/error/debug
-              if (m.type === 'warn' && m.message) {
-                nextLog = [...nextLog, `【后端WARN】${m.message}`];
-                continue;
-              }
-              if (m.type === 'error' && m.message) {
-                nextLog = [...nextLog, `【后端ERROR】${m.message}`];
-                if (m.stack) nextLog = [...nextLog, `stack: ${m.stack}`];
-                continue;
-              }
-              if (m.type === 'debug') {
-                const extra = m.four2 ? ` | four2=${m.four2}` : '';
-                nextLog = [...nextLog, `【后端】debug:${m.phase || ''}${extra}`];
-                continue;
-              }
-
               if (m.type === 'event' && m.kind === 'round-start') {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
               }
+              // ⚠️ 修复点：round-end 不再自增 finished，避免与 win 重复计数
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}｜seenWin=${!!m.seenWin}｜seenStats=${!!m.seenStats}`];
                 continue;
-              }
-              if (m.type === 'ts' && Array.isArray(m.seats)) {
-                nextTS = m.seats;
               }
 
               const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
@@ -490,7 +507,7 @@ function LivePanel(props: LiveProps) {
                   `胜者：${seatName(m.winner)}，倍数 x${m.multiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
                 ];
                 nextTotals     = [ nextTotals[0] + rot[0], nextTotals[1] + rot[1], nextTotals[2] + rot[2] ] as any;
-                nextFinished   = nextFinished + 1;
+                nextFinished   = nextFinished + 1; // ✅ 仅在 win 事件计数
                 continue;
               }
 
@@ -535,7 +552,6 @@ function LivePanel(props: LiveProps) {
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
-          if (nextTS) setTsSeats(nextTS);
         }
       }
 
@@ -545,7 +561,9 @@ function LivePanel(props: LiveProps) {
     try {
       for (let i = 0; i < props.rounds; i++) {
         if (controllerRef.current?.signal.aborted) break;
-        await playOneGame(i, i + 1);
+        const thisRound = i + 1;
+        await playOneGame(i, thisRound);
+
         const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
         if (hasNegative) { setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']); break; }
         await new Promise(r => setTimeout(r, 1000 + Math.floor(Math.random() * 1000)));
@@ -618,6 +636,7 @@ function LivePanel(props: LiveProps) {
         </div>
       </Section>
 
+      {/* 累计雷达图（仅显示累计） */}
       <Section title="战术画像（累计，0~5）">
         <RadarPanel aggStats={aggStats} aggCount={aggCount} aggMode={aggMode} alpha={alpha}
           onChangeMode={setAggMode} onChangeAlpha={setAlpha}/>
@@ -692,7 +711,7 @@ function RadarPanel({
   );
 }
 
-/* ========= 默认值 ========= */
+/* ========= 默认值（含“清空”按钮的重置） ========= */
 const DEFAULTS = {
   enabled: true,
   rounds: 10,
