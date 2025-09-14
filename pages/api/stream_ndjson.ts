@@ -1,17 +1,33 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
+// ---- Next API config：务必使用 Node（默认），并允许长连接/大响应 ----
+export const config = {
+  api: {
+    responseLimit: false,
+    bodyParser: { sizeLimit: '1mb' },
+    externalResolver: true,
+  },
+};
+
 // ---------- NDJSON helpers ----------
 function writeHead(res: NextApiResponse) {
-  res.writeHead(200, {
-    'Content-Type': 'application/x-ndjson; charset=utf-8',
-    'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
-    Connection: 'keep-alive',
-    'Transfer-Encoding': 'chunked',
-  });
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-store, max-age=0, must-revalidate');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Transfer-Encoding', 'chunked');
+  res.setHeader('X-Accel-Buffering', 'no');          // nginx/proxy: 禁用缓冲
+  res.setHeader('Content-Encoding', 'identity');     // 禁用 gzip 等，避免合并
+  // 一些平台需要先 flush headers 才真正进入流式模式
+  (res as any).flushHeaders?.();
 }
+
 function writeLine(res: NextApiResponse, obj: any) {
-  try { res.write(JSON.stringify(obj) + '\n'); } catch {}
+  try {
+    res.write(JSON.stringify(obj) + '\n');
+    // 有些运行时提供 res.flush()（spdy/express），可尽量调用
+    (res as any).flush?.();
+  } catch {}
 }
 
 // ---------- Lightweight TrueSkill (2-team, win/lose) ----------
@@ -43,11 +59,13 @@ const TS = {
   },
 };
 
-// ---------- Dynamic engine / bots loader (runtime require to avoid build errors) ----------
-function loadEngine() {
-  try { return require('../../lib/engine'); } catch {}
-  try { return require('../../lib/doudizhu/engine'); } catch {}
+// ---------- 动态加载引擎/外部 AI 适配器（避免路径差异编译失败） ----------
+function tryLoad(path: string) {
+  try { const m = require(path); (m as any).__path = path; return m; } catch {}
   return null;
+}
+function loadEngine() {
+  return tryLoad('../../lib/engine') || tryLoad('../../lib/doudizhu/engine');
 }
 function loadBots() {
   const out:any = {};
@@ -62,31 +80,24 @@ function loadBots() {
 
 type SeatSpec = { choice:string; model?:string; apiKey?:string; baseUrl?:string; token?:string };
 
-// ---------- Bot factory ----------
-function chooseBot(engine:any, bots:any, spec:SeatSpec): any /* BotFunc */ {
-  const fallback = engine?.GreedyMax || engine?.RandomLegal || (async ()=>({ move:'pass' }));
+function chooseBot(engine:any, bots:any, spec:SeatSpec): any {
+  const fallback = engine?.GreedyMax || engine?.RandomLegal || (async ()=>({ move:'pass', reason:'fallback' }));
   if (!spec || !spec.choice) return fallback;
   const c = spec.choice as string;
   if (c === 'built-in:greedy-max') return engine?.GreedyMax || fallback;
   if (c === 'built-in:greedy-min') return engine?.GreedyMin || fallback;
   if (c === 'built-in:random-legal') return engine?.RandomLegal || fallback;
 
-  // External AI (if adapters exist), else fallback but仍输出理由方便前端日志
   const wrap = (impl:any, label:string) => {
     if (impl) return impl({ apiKey: spec.apiKey, base: spec.baseUrl, url: spec.baseUrl, token: spec.token, model: spec.model });
-    const name = label;
-    return async (ctx:any) => {
-      return { move:'pass', reason:`外部AI(${name})未接入后端，已回退内置（GreedyMax）` };
-    };
+    return async () => ({ move:'pass', reason:`外部AI(${label})未接入后端，已回退内置（GreedyMax）` });
   };
-
   if (c === 'ai:openai') return wrap(bots?.OpenAIBot, 'openai');
   if (c === 'ai:gemini') return wrap(bots?.GeminiBot, 'gemini');
   if (c === 'ai:grok')   return wrap(bots?.GrokBot,   'grok');
   if (c === 'ai:kimi')   return wrap(bots?.KimiBot,   'kimi');
   if (c === 'ai:qwen')   return wrap(bots?.QwenBot,   'qwen');
   if (c === 'http')      return wrap(bots?.HttpBot,   'http');
-
   return fallback;
 }
 
@@ -102,58 +113,68 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     four2 = 'both',
     seats = [],
     clientTraceId = '',
-    stopBelowZero = false,
     farmerCoop = true,
   } = (req.body || {});
 
   if (!enabled) { res.status(200).json({ ok:true, message:'disabled' }); return; }
 
+  writeHead(res);
+  // 心跳：防止中间层因静默关闭连接
+  const hb = setInterval(() => writeLine(res, { type:'ping', t: Date.now() }), 15000);
+  res.on('close', () => { clearInterval(hb); try{res.end();}catch{}; });
+
+  // 立刻吐出一条 server 日志，验证流已建立
+  writeLine(res, { type:'log', message:`[server] stream open | trace=${clientTraceId || '-'} ` });
+
   const engine = loadEngine();
-  if (!engine || !engine.runOneGame) {
-    res.status(500).json({ error:'engine_not_found', detail:'lib/engine or lib/doudizhu/engine with runOneGame() required' });
+  if (!engine || typeof engine.runOneGame !== 'function') {
+    writeLine(res, { type:'log', message:'[server] engine_not_found: 需要 lib/engine 或 lib/doudizhu/engine 提供 runOneGame()' });
+    try { res.end(); } catch {}
     return;
   }
+  writeLine(res, { type:'log', message:`[server] engine loaded from ${(engine as any).__path || 'unknown-path'}` });
+
   const botsLib = loadBots();
 
-  writeHead(res);
-
-  // ----- TrueSkill ratings across (server lifetime of this request) -----
+  // TrueSkill ratings across this API session
   let ts: Rating[] = [TS.defaultRating(), TS.defaultRating(), TS.defaultRating()];
   const tsSnapshot = () => ts.map(r => ({ mu:+r.mu.toFixed(2), sigma:+r.sigma.toFixed(2), cr:+TS.conservative(r).toFixed(2) }));
   const sendTS = (where:'before-round'|'after-round', round:number) => writeLine(res, { type:'ts', where, round, ratings: tsSnapshot() });
 
   for (let round = 1; round <= Number(rounds)||1; round++) {
-    // Build bots per seat
-    const seatSpecs:SeatSpec[] = (Array.isArray(seats)?seats:[]).slice(0,3);
-    const botFuncs:any[] = [0,1,2].map(i => chooseBot(engine, botsLib, seatSpecs[i] || { choice:'built-in:greedy-max' }));
-
-    // Per-round state we need for TS
     let landlordIdx = 0;
     let landlordWon: boolean | null = null;
 
-    // Inform client to reset per-round score panel
+    // 构建 seat bots
+    const seatSpecs:SeatSpec[] = (Array.isArray(seats)?seats:[]).slice(0,3);
+    const botFuncs:any[] = [0,1,2].map(i => chooseBot(engine, botsLib, seatSpecs[i] || { choice:'built-in:greedy-max' }));
+
+    // 先把“开局”相关的两条吐出去，前端应立即看到
     sendTS('before-round', round);
-
-    // Run single game
-    const iter = engine.runOneGame({
-      seats: botFuncs,
-      rob, four2, farmerCoop,
-      seatDelayMs, startScore,
-    });
-
     writeLine(res, { type:'event', kind:'round-start', round });
+
+    // 运行单局
+    let iter:any;
+    try {
+      iter = engine.runOneGame({
+        seats: botFuncs,
+        rob, four2, farmerCoop,
+        seatDelayMs, startScore,
+      });
+    } catch (e:any) {
+      writeLine(res, { type:'log', message:`[server] runOneGame() 抛错：${e?.message || e}` });
+      continue; // 进入下一局
+    }
 
     try {
       for await (const ev of iter as any) {
-        // Observe landlord index and outcome
+        // 监听地主索引/胜负
         if ((ev?.type === 'landlord' || ev?.type === 'rob:done') && typeof ev.landlordIdx === 'number') {
           landlordIdx = ev.landlordIdx;
         }
         if ((ev?.type === 'settle' || ev?.type === 'end' || ev?.type === 'result') && typeof ev.landlordWin === 'boolean') {
           landlordWon = !!ev.landlordWin;
         }
-
-        // If engine emits win with deltaScores, infer landlordWon as fallback
         if (ev?.type === 'event' && ev?.kind === 'win' && Array.isArray(ev.deltaScores)) {
           const ds = ev.deltaScores as number[];
           const a = landlordIdx;
@@ -161,15 +182,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const ld = ds[a]||0; const fm = (ds[farmers[0]]||0)+(ds[farmers[1]]||0);
           landlordWon = ld > fm;
         }
-
-        // Proxy event as-is (hands, play, bot-call/done, stats, log, etc.)
+        // 事件透传
         writeLine(res, ev);
       }
     } catch (e:any) {
-      writeLine(res, { type:'log', message:`[server] error: ${e?.message||e}` });
+      writeLine(res, { type:'log', message:`[server] iterator error: ${e?.message || e}` });
     }
 
-    // Update TrueSkill after round
+    // TrueSkill 更新
     try {
       const a = landlordIdx, b=(a+1)%3, c=(a+2)%3;
       const L = [ts[a]]; const F = [ts[b], ts[c]];
@@ -180,10 +200,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const { winners, losers } = TS.rate2Teams(F, L);
         ts[a]=losers[0]; ts[b]=winners[0]; ts[c]=winners[1];
       }
-    } catch {}
+    } catch (e:any) {
+      writeLine(res, { type:'log', message:`[server] TS update error: ${e?.message || e}` });
+    }
+
     writeLine(res, { type:'event', kind:'round-end', round, seenWin: landlordWon!=null, seenStats:false });
     sendTS('after-round', round);
   }
 
-  try { res.end(); } catch {}
+  try { clearInterval(hb); res.end(); } catch {}
 }
