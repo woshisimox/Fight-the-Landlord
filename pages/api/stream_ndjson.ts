@@ -1,21 +1,17 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-// ！！把这行替换成你项目真实的引擎导入路径（保持你原来的）
-// 常见：'@/lib/arena' / '@/server/arena' / '@/lib/doudizhu'
-import { runRound } from '@/lib/arena'; // ⬅️ 示例
-
 type Four2Policy = 'both' | '2singles' | '2pairs';
 
+// ============ 工具：输出一行 NDJSON ============
 function writeLine(res: NextApiResponse, obj: any) {
   res.write(JSON.stringify(obj) + '\n');
 }
 
-/** 把任意别名统一成引擎认可的驼峰键名 */
+// ============ 关键修复：座位键名归一化 ============
 function normalizeSeatChoice(x: string): string {
   const s = String(x || '').trim().toLowerCase();
 
-  // 内置 bots
   if ([
     'built-in:greedy-max','builtin:greedy-max','builtin.greedy-max','builtin.greedy.max',
     'greedy-max','greedymax','builtin.greedymax'
@@ -31,25 +27,44 @@ function normalizeSeatChoice(x: string): string {
     'random','builtin.random','builtin.randomlegal','randomlegal'
   ].includes(s)) return 'builtin.randomLegal';
 
-  // AI / HTTP
   if (s.startsWith('ai:openai')) return 'ai.openai';
   if (s.startsWith('ai:gemini')) return 'ai.gemini';
   if (s.startsWith('ai:grok'))   return 'ai.grok';
   if (s.startsWith('ai:kimi'))   return 'ai.kimi';
   if (s.startsWith('ai:qwen'))   return 'ai.qwen';
   if (s === 'http')              return 'http';
-
-  // 已经是驼峰或其它：原样返回
   return x;
 }
-
-/** 规整 seats：把 choice 收敛，保留其余参数（model、apiKey 等） */
 function normalizeSeats(rawSeats: any[]): any[] {
   return (rawSeats || []).slice(0, 3).map((s: any) => {
     const choice = normalizeSeatChoice(s?.choice ?? s);
     if (typeof s === 'string') return { choice };
     return { ...s, choice };
   });
+}
+
+// ============ 动态加载引擎（避免编译期无法解析路径） ============
+type RunRoundFn = (opts: any) => Promise<void>;
+
+function loadRunRound(): RunRoundFn {
+  const tryPaths = [
+    process.env.ARENA_PATH || '',               // 允许用环境变量显式指定
+    '@/lib/arena', '@/server/arena', '@/lib/doudizhu',
+    '../../lib/arena', '../../server/arena', '../../lib/doudizhu',
+    '../../../lib/arena', '../../../server/arena', '../../../lib/doudizhu',
+  ].filter(Boolean);
+
+  for (const p of tryPaths) {
+    try {
+      // @ts-ignore
+      const mod = require(p);
+      if (mod?.runRound && typeof mod.runRound === 'function') return mod.runRound as RunRoundFn;
+    } catch (_) { /* ignore and try next */ }
+  }
+  throw new Error(
+    '未能找到引擎的 runRound 导出。请在 pages/api/stream_ndjson.ts 里把导入路径改为你项目里实际的引擎模块，' +
+    '或设置环境变量 ARENA_PATH 指向正确的模块路径（例如 "@/lib/arena" 或 "../../lib/arena"）。'
+  );
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -77,14 +92,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     } = (req.body || {});
 
     const seatsNorm = normalizeSeats(seats);
-
-    writeLine(res, { type:'debug', phase:'pre-run', seatsNorm: seatsNorm.map(s=>s.choice) });
+    writeLine(res, { type:'debug', phase:'pre-run', seatsNorm: seatsNorm.map((s:any)=>s.choice) });
     writeLine(res, { type:'ts', round: 0, seats: [
       { mu: 1000, sigma: 1000/3, rc: 0 },
       { mu: 1000, sigma: 1000/3, rc: 0 },
       { mu: 1000, sigma: 1000/3, rc: 0 },
     ]});
     writeLine(res, { type:'debug', phase:'rules', four2 });
+
+    const runRound = loadRunRound();
 
     const runWith = async (rule: Four2Policy) => {
       await runRound({
@@ -94,7 +110,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         enabled,
         rob,
         four2: rule,
-        seats: seatsNorm,
+        seats: seatsNorm,           // ★ 使用归一化后的 seats
         clientTraceId,
         stopBelowZero,
         farmerCoop,
@@ -102,7 +118,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     };
 
-    // 先试用户配置的规则；若实现表出错则尝试回退
     try {
       await runWith(four2 as Four2Policy);
     } catch (e) {
