@@ -1,7 +1,7 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-/* ========= 入参与类型 ========= */
+/* ========== 入参与类型 ========== */
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type SeatSpec =
   | { choice: 'built-in:greedy-max' | 'built-in:greedy-min' | 'built-in:random-legal' }
@@ -15,15 +15,19 @@ type Body = {
   enabled?: boolean;
   rob?: boolean;
   four2?: Four2Policy;
-  seats: SeatSpec[];
+  seats?: SeatSpec[];
   clientTraceId?: string;
+  smoke?: boolean;
 };
 
 type Ndjson = Record<string, any>;
 
-/* ========= 基础工具 ========= */
+/* ========== 基础工具 ========== */
 function write(res: NextApiResponse, obj: Ndjson) {
   res.write(JSON.stringify(obj) + '\n');
+}
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 function tryLoadEngine() {
   try {
@@ -39,21 +43,29 @@ function tryLoadEngine() {
   return null;
 }
 
-/* ========= TrueSkill（1v2 两队） ========= */
+/* ========== TrueSkill（1v2 两队） ========== */
 type Rating = { mu: number; sigma: number };
 const TS_DEFAULT: Rating = { mu: 25, sigma: 25 / 3 };
 const TS_BETA = 25 / 6;
 const TS_TAU = 25 / 300;
 const SQRT2 = Math.sqrt(2);
-function erf(x: number) { const s = Math.sign(x); const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911; const t=1/(1+p*Math.abs(x)); const y=1-(((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t)*Math.exp(-x*x); return s*y; }
-function phi(x: number) { return Math.exp(-0.5*x*x)/Math.sqrt(2*Math.PI); }
-function Phi(x: number) { return 0.5*(1+erf(x/SQRT2)); }
-function V_exceeds(t: number) { const d=Math.max(1e-12,Phi(t)); return phi(t)/d; }
-function W_exceeds(t: number) { const v=V_exceeds(t); return v*(v+t); }
+function erf(x: number) {
+  const s = Math.sign(x);
+  const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+  const t = 1 / (1 + p * Math.abs(x));
+  const y = 1 - (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t) * Math.exp(-x * x);
+  return s * y;
+}
+function phi(x: number) { return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI); }
+function Phi(x: number) { return 0.5 * (1 + erf(x / SQRT2)); }
+function V_exceeds(t: number) { const d = Math.max(1e-12, Phi(t)); return phi(t) / d; }
+function W_exceeds(t: number) { const v = V_exceeds(t); return v * (v + t); }
 function tsUpdateTwoTeams(r: Rating[], teamA: number[], teamB: number[]) {
   const varA = teamA.reduce((s,i)=>s+r[i].sigma**2,0), varB = teamB.reduce((s,i)=>s+r[i].sigma**2,0);
-  const muA = teamA.reduce((s,i)=>s+r[i].mu,0),     muB = teamB.reduce((s,i)=>s+r[i].mu,0);
-  const c2 = varA + varB + 2*TS_BETA*TS_BETA, c = Math.sqrt(c2), t = (muA-muB)/c;
+  const muA  = teamA.reduce((s,i)=>s+r[i].mu,0),     muB  = teamB.reduce((s,i)=>s+r[i].mu,0);
+  const c2   = varA + varB + 2*TS_BETA*TS_BETA;
+  const c    = Math.sqrt(c2);
+  const t    = (muA - muB) / c;
   const v = V_exceeds(t), w = W_exceeds(t);
   for (const i of teamA) { const sig2=r[i].sigma**2; const mult=sig2/c, mult2=sig2/c2;
     r[i].mu += mult*v; r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + TS_TAU*TS_TAU); }
@@ -61,7 +73,7 @@ function tsUpdateTwoTeams(r: Rating[], teamA: number[], teamB: number[]) {
     r[i].mu -= mult*v; r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + TS_TAU*TS_TAU); }
 }
 
-/* ========= 启发式（理由生成） ========= */
+/* ========== 启发式（理由） ========== */
 const SUITS = ['♠','♥','♦','♣'];
 function rankKey(card: string): string {
   if (!card) return '';
@@ -136,96 +148,141 @@ function buildPlayReason(move:'play'|'pass', cards:string[]|undefined, comboType
   }
 }
 
-/* ========= API 入口 ========= */
+/* ========== API 入口 ========== */
 export const config = { api: { bodyParser: { sizeLimit: '1mb' } } };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method Not Allowed' }); }
-
-  const body: Body = (req.body || {}) as Body;
-  const {
-    rounds = 1, seats = [], enabled = true, rob = true, four2 = 'both', startScore = 0,
-    clientTraceId = Math.random().toString(36).slice(2),
-  } = body;
-
+  // —— 1) 立刻写首包，设置长连与分块 —— //
+  const q = req.query || {};
+  const nowId = (Math.random().toString(36).slice(2));
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.status(200);
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Transfer-Encoding', 'chunked');
+  (res.socket as any)?.setTimeout?.(0);
+  (res.socket as any)?.setNoDelay?.(true);
 
-  write(res, { type: 'log', message: `[server] stream open | trace=${clientTraceId}` });
-  if (!enabled) { write(res, { type: 'log', message: '[server] disabled' }); return res.end(); }
+  write(res, { type: 'log', message: `[server] stream enter | method=${req.method} trace=${nowId}` });
+
+  // 简易心跳，避免代理层超时
+  const hb = setInterval(() => {
+    try { write(res, { type: 'ping', t: Date.now() }); } catch {}
+  }, 10000);
+  res.on('close', () => clearInterval(hb));
+
+  // —— 2) 解析参数（GET/POST 兼容） —— //
+  let body: Body = {} as any;
+  if (req.method === 'POST') {
+    body = (req.body || {}) as Body;
+  } else {
+    // 允许 GET 用于 smoke 调试
+    body = {
+      rounds: q.rounds ? Number(q.rounds) : 1,
+      enabled: q.enabled !== '0',
+      rob: q.rob !== '0',
+      four2: (q.four2 as Four2Policy) || 'both',
+      seats: [],
+      clientTraceId: (q.trace as string) || nowId,
+      smoke: q.smoke === '1',
+    };
+  }
+
+  const {
+    rounds = 1,
+    seats = [],
+    enabled = true,
+    rob = true,
+    four2 = 'both',
+    startScore = 0,
+    clientTraceId = nowId,
+    smoke = false,
+  } = body;
+
+  write(res, { type: 'log', message: `[server] parsed body | smoke=${!!smoke} rounds=${rounds} seats.len=${seats?.length ?? -1}` });
+
+  // —— 3) SMOKE 模式：只验证前端能否收到流 —— //
+  if (smoke) {
+    for (let i = 1; i <= 5; i++) {
+      write(res, { type: 'log', message: `[smoke] step ${i}/5` });
+      await sleep(250);
+    }
+    write(res, { type: 'event', kind: 'round-end', round: 0, smoke: true });
+    res.end();
+    return;
+  }
+
+  if (!enabled) {
+    write(res, { type: 'log', message: '[server] disabled' });
+    res.end();
+    return;
+  }
 
   const engine = tryLoadEngine();
   if (!engine?.runOneGame) {
     write(res, { type: 'log', message: '[server] engine_not_found: 需要 lib/engine 或 lib/doudizhu/engine 提供 runOneGame()' });
-    return res.end();
+    res.end();
+    return;
   }
 
-  // 基本健壮性日志
-  write(res, { type: 'log', message: `[server] seats.shape len=${Array.isArray(seats)?seats.length:-1} sample=${JSON.stringify(seats?.[0] ?? null)}` });
-
   // TrueSkill 初始化
-  const tsRatings: Rating[] = [{...TS_DEFAULT}, {...TS_DEFAULT}, {...TS_DEFAULT}];
+  const tsRatings: Rating[] = [{ mu: 25, sigma: 25/3 }, { mu: 25, sigma: 25/3 }, { mu: 25, sigma: 25/3 }];
 
   let finished = 0;
   const MAX_EVENTS_PER_ROUND = 20000;
 
   while (finished < rounds) {
-    // —— 单局上下文 —— //
+    // 局上下文
     let landlord: number | null = null;
     let multiplier = 1;
     let hands: string[][] = [[], [], []];
     const count = [0, 0, 0];
     let trick: TrickCtx = { leaderSeat: null, lastSeat: null, lastComboType: null, lastCards: null };
 
-    // 局前 TrueSkill
-    write(res, { type: 'ts', where: 'before-round', round: finished + 1,
-      ratings: tsRatings.map(r => ({ mu: r.mu, sigma: r.sigma, cr: r.mu - 3 * r.sigma })) });
+    // 局前 TS
+    write(res, {
+      type: 'ts', where: 'before-round', round: finished + 1,
+      ratings: tsRatings.map(r => ({ mu: r.mu, sigma: r.sigma, cr: r.mu - 3*r.sigma })),
+    });
 
-    // 只传引擎支持的字段
+    // 仅传引擎认识的字段
     const opts: any = { seats, rob, four2, startScore };
-    write(res, { type: 'log', message: `[server] runOneGame starting with opts keys=${Object.keys(opts).join(',')}` });
+    write(res, { type: 'log', message: `[server] runOneGame start | keys=${Object.keys(opts).join(',')}` });
 
     let iter: any;
     try {
       iter = engine.runOneGame(opts);
-      // 迭代器形态诊断
-      const hasAsync = iter && typeof iter[Symbol.asyncIterator] === 'function';
-      const hasSync  = iter && typeof iter[Symbol.iterator] === 'function';
-      write(res, { type: 'log', message: `[server] runOneGame iterable async=${!!hasAsync} sync=${!!hasSync}` });
-      if (!hasAsync && !hasSync) {
-        write(res, { type: 'log', message: '[server] runOneGame returned non-iterable, 终止本局' });
+      const asyncish = !!(iter && typeof iter[Symbol.asyncIterator] === 'function');
+      const syncish  = !!(iter && typeof iter[Symbol.iterator] === 'function');
+      write(res, { type: 'log', message: `[server] iterable | async=${asyncish} sync=${syncish}` });
+      if (!asyncish && !syncish) {
+        write(res, { type: 'log', message: '[server] non-iterable from engine, abort this round' });
         break;
       }
     } catch (e: any) {
-      write(res, { type: 'log', message: `[server] runOneGame error: ${e?.stack || e?.message || e}` });
+      write(res, { type: 'log', message: `[server] runOneGame throw: ${e?.stack || e?.message || e}` });
       break;
     }
 
+    let sawAnyEvent = false;
     let eventCount = 0;
-    let sawMeaningful = false;
 
     try {
-      // 同时兼容同步/异步迭代器
-      const asyncIter: AsyncIterable<any> =
-        (iter && typeof iter[Symbol.asyncIterator] === 'function')
-          ? iter
-          : (async function*(){ for (const x of iter as Iterable<any>) yield x; })();
+      const asyncIter: AsyncIterable<any> = (iter && typeof iter[Symbol.asyncIterator] === 'function')
+        ? iter
+        : (async function*(){ for (const x of iter as Iterable<any>) yield x; })();
 
       for await (const ev of asyncIter) {
         eventCount++;
         if (eventCount > MAX_EVENTS_PER_ROUND) {
-          write(res, { type: 'log', message: `[server] guard: too many events, cut off at ${MAX_EVENTS_PER_ROUND}` });
+          write(res, { type: 'log', message: `[server] guard cut at ${MAX_EVENTS_PER_ROUND}` });
           break;
         }
 
-        // 1) 原样透传
+        // 原样透传
         write(res, ev);
+        if (ev?.type === 'state' || ev?.type === 'event') sawAnyEvent = true;
 
-        // 标记“看到了引擎事件”
-        if (ev?.type === 'state' || ev?.type === 'event') sawMeaningful = true;
-
-        // 2) 维护上下文
+        // 维护上下文
         if (ev?.type === 'state' && (ev.kind === 'init' || ev.kind === 'reinit')) {
           landlord = typeof ev.landlord === 'number' ? ev.landlord : landlord;
           if (Array.isArray(ev.hands) && ev.hands.length === 3) {
@@ -240,7 +297,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           trick = { leaderSeat: null, lastSeat: null, lastComboType: null, lastCards: null };
         }
 
-        // 3) 抢/不抢 → 追加理由
+        // 抢/不抢 → 追加理由
         if (ev?.type === 'event' && ev.kind === 'rob') {
           const seat: number = ev.seat ?? -1;
           const reason = buildRobReason(seat, !!ev.rob, landlord, hands?.[seat]);
@@ -262,7 +319,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           });
         }
 
-        // 4) 出牌/过牌 → 追加理由
+        // 出牌/过牌 → 追加理由
         if (ev?.type === 'event' && ev.kind === 'play') {
           const seat: number = ev.seat ?? -1;
           const move: 'play' | 'pass' = ev.move;
@@ -311,7 +368,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           });
         }
 
-        // 5) 结算 → 更新 TrueSkill（局后推送一次）
+        // 结算 → 更新 TS
         if (ev?.type === 'event' && ev.kind === 'win') {
           const winSeat: number = ev.winner;
           if (typeof winSeat === 'number' && landlord != null) {
@@ -322,7 +379,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               type: 'ts',
               where: 'after-round',
               round: finished + 1,
-              ratings: tsRatings.map(r => ({ mu: r.mu, sigma: r.sigma, cr: r.mu - 3 * r.sigma })),
+              ratings: tsRatings.map(r => ({ mu: r.mu, sigma: r.sigma, cr: r.mu - 3*r.sigma })),
             });
           }
           finished += 1;
@@ -333,18 +390,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       write(res, { type: 'log', message: `[server] stream error: ${e?.stack || e?.message || e}` });
     }
 
-    // —— 只有真的看到事件才发 round-end，否则给出诊断日志 —— //
+    // 只有真的看到事件才发 round-end；否则给诊断日志
     if (finished > 0) {
       write(res, { type: 'event', kind: 'round-end', round: finished });
-    } else if (!sawMeaningful) {
-      write(res, {
-        type: 'log',
-        message: `[server] no_events_from_engine: 本局未收到任何引擎事件。可能原因：1) seats 不是引擎可识别的 Bot/配置；2) runOneGame 内部提前返回；3) 传参与引擎签名不匹配。`,
-        seats_shape: { len: Array.isArray(seats) ? seats.length : -1, sample: seats?.[0] ?? null },
-        opts_keys: Object.keys(opts),
-      });
     } else {
-      write(res, { type: 'event', kind: 'round-end', round: finished });
+      write(res, { type: 'log', message: `[server] warn: no events from engine in this round` });
     }
 
     if (finished >= rounds) break;
