@@ -15,7 +15,20 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
   | 'http';
 
+type RobStrategy = 'hand' | 'ev-risk';
+
 type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
+
+type PolicyHints = {
+  lambda: number[]; // 每座位的风险权重
+  mode: ('aggressive'|'neutral'|'conservative')[];
+  roundsLeft: number;
+  totals: [number,number,number];
+};
+type ScoreContext = {
+  totals: [number,number,number];
+  roundsLeft: number;
+};
 
 type StartPayload = {
   seats: SeatSpec[];
@@ -28,6 +41,9 @@ type StartPayload = {
   seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
   clientTraceId?: string;
   farmerCoop?: boolean;
+  robStrategy?: RobStrategy;
+  policyHints?: PolicyHints;   // 前端可选传入
+  scoreContext?: ScoreContext; // 前端可选传入
 };
 
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
@@ -93,6 +109,57 @@ function inferCandidateCount(ctx:any): number | undefined {
   return undefined;
 }
 
+/* ====== 风险感知 & EV ====== */
+function toWinProbFromEval(ev?: number) {
+  // 把 handEval(0~1附近)平滑映射到胜率；没有评估时给个中性先验
+  if (ev == null || Number.isNaN(ev)) return 0.52;
+  const z = (ev - 0.5) / 0.18;
+  const p = 0.55 + 0.10 * Math.tanh(z);
+  return Math.min(0.85, Math.max(0.35, p));
+}
+function backendComputeRisk(myIdx:number, totals:[number,number,number], roundsLeft:number) {
+  const me = totals[myIdx], leader = Math.max(...totals);
+  const gap = leader - me;                               // >0 我落后
+  const perRound = Math.max(1, Math.abs(gap)/Math.max(1,roundsLeft));
+  const lambda0 = 0.30;
+  const scale = Math.tanh(perRound / 3);
+  const lambda = gap>0 ? lambda0*(1-0.7*scale) : lambda0*(1+0.7*scale);
+  return { lambda, gap, perRound };
+}
+function shouldRobEV(args:{ stake:number; pLandlord:number; pOppLandlord:number; lambda:number }) {
+  const { stake, pLandlord:pL, pOppLandlord:pLo, lambda } = args;
+  const EV_L  = 2*stake*(2*pL - 1);
+  const Var_L = (2*stake)**2 * pL*(1-pL);
+  const EV_F  = stake*(1 - 2*pLo);
+  const Var_F = (stake)**2 * pLo*(1-pLo);
+  const U_L = EV_L - lambda*Var_L;
+  const U_F = EV_F - lambda*Var_F;
+  return U_L >= U_F;
+}
+function riskAwareRobOverride(
+  seatIdx:number, ctx:any, out:any, hints?:PolicyHints, score?:ScoreContext
+){
+  try{
+    // 避免覆盖“叫分制”的数值叫分
+    if (out && (typeof out.score==='number' || typeof (out as any).bid === 'number' || typeof (out as any).call === 'number')) {
+      return { out, applied:false, note:'' };
+    }
+    const totals = (score?.totals as [number,number,number]) ?? [0,0,0];
+    const roundsLeft = score?.roundsLeft ?? 1;
+    const lambda = hints?.lambda?.[seatIdx] ?? backendComputeRisk(seatIdx, totals, roundsLeft).lambda;
+    const handEval = (typeof out?.handEval === 'number' ? out.handEval : estimateHandEval(ctx?.hand));
+    const pL = toWinProbFromEval(handEval);
+    const pOpp = 0.55;   // 基线：别人当地主的胜率
+    const stake = 1;     // 抢地主阶段倍数未知，先用 1
+    const rob2 = shouldRobEV({ stake, pLandlord:pL, pOppLandlord:pOpp, lambda });
+    const prev = typeof out?.rob === 'boolean' ? out.rob : undefined;
+    const changed = (prev === undefined) || (prev !== rob2);
+    const reasonPatch = `[risk] pL=${pL.toFixed(2)} λ=${lambda.toFixed(2)} ⇒ ${rob2?'抢':'不抢'}`;
+    const patched = { ...(out||{}), rob: rob2, reason: out?.reason ? `${out.reason}｜${reasonPatch}` : reasonPatch, policy: (out?.policy||'risk-aware'), risk: lambda };
+    return { out: patched, applied: changed, note: reasonPatch };
+  }catch{ return { out, applied:false, note:'' }; }
+}
+
 /** 统一“理由 & 策略”构造（bot 若不给 reason，这里合成） */
 function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx:any, out:any) {
   const by = providerLabel(choice);
@@ -136,10 +203,14 @@ function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx
   return { reason, strategy };
 }
 
-/** bot 包装：发 bot-call/bot-done，并缓存 reason 以贴到 play/pass */
+/** bot 包装：发 bot-call/bot-done，并在抢地主阶段按策略可选覆盖 */
 function traceWrap(
   choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any, res: NextApiResponse,
-  onReason: (seat:number, text?:string)=>void
+  onReason: (seat:number, text?:string)=>void,
+  seatIndex: number,
+  hints?: PolicyHints,
+  score?: ScoreContext,
+  robStrategy: RobStrategy = 'hand'
 ) {
   const by = providerLabel(choice);
   const model = (spec?.model || '').trim();
@@ -149,6 +220,14 @@ function traceWrap(
     let out: any; let err: any = null;
     try { out = await bot(ctx); } catch (e) { err = e; }
     const tookMs = Date.now() - t0;
+
+    // —— 仅在“抢地主/叫地主”阶段，根据 robStrategy 进行覆盖 —— //
+    try {
+      if ((ctx?.phase === 'rob' || ctx?.phase === 'call' || ctx?.phase === 'bid') && robStrategy === 'ev-risk') {
+        const patched = riskAwareRobOverride(seatIndex, ctx, out, hints, score);
+        out = patched.out;
+      }
+    } catch {}
 
     const { reason, strategy } = buildReasonAndStrategy(choice, spec, ctx, out);
     onReason(ctx?.seat ?? -1, reason);
@@ -312,7 +391,7 @@ async function runOneRoundWithGuard(
     if (sig === lastSignature) repeated++; else repeated = 0;
     lastSignature = sig;
 
-    if (evCount > MAX_EVENTS || repeated > MAX_REPEATED_HEARTBEAT) {
+    if (evCount > 4000 || repeated > 200) {
       writeLine(res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束。`});
       emitFinalIfNeeded();
       try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
@@ -346,8 +425,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const seatSpecs = (body.seats || []).slice(0,3);
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
+    const policyHints = body.policyHints;
+    const scoreContext = body.scoreContext;
+    const robStrategy: RobStrategy = body.robStrategy || 'hand';
 
-    writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
+    writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}，rob=${body.rob?'on':'off'}，robStrategy=${robStrategy}）…` });
 
     for (let round = 1; round <= rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
@@ -356,7 +438,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const lastReason: (string|null)[] = [null, null, null];
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
 
-      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason));
+      const roundBots = baseBots.map((bot, i) =>
+        traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, i, policyHints, scoreContext, robStrategy)
+      );
 
       const delayedSeats = roundBots.map((bot, idx) => async (ctx:any) => {
         const ms = delays[idx] || 0; if (ms) await new Promise(r => setTimeout(r, ms));
