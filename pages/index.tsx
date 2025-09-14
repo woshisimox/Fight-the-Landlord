@@ -294,36 +294,14 @@ function LivePanel(props: LiveProps) {
 
     controllerRef.current = new AbortController();
 
-    const buildSeatSpecs = (): any[] => {
-      return props.seats.slice(0,3).map((choice, i) => {
-        const normalized = normalizeModelForProvider(choice, props.seatModels[i] || '');
-        const model = normalized || defaultModelFor(choice);
-        const keys = props.seatKeys[i] || {};
-        switch (choice) {
-          case 'ai:openai': return { choice, model, apiKey: keys.openai || '' };
-          case 'ai:gemini': return { choice, model, apiKey: keys.gemini || '' };
-          case 'ai:grok':   return { choice, model, apiKey: keys.grok || '' };
-          case 'ai:kimi':   return { choice, model, apiKey: keys.kimi || '' };
-          case 'ai:qwen':   return { choice, model, apiKey: keys.qwen || '' };
-          case 'http':      return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
-          default:          return { choice };
-        }
-      });
-    };
-
-    const seatSummaryText = (specs: any[]) =>
-      specs.map((s, i) => {
-        const nm = seatName(i);
-        if (s.choice.startsWith('built-in')) return `${nm}=${choiceLabel(s.choice as BotChoice)}`;
-        if (s.choice === 'http') return `${nm}=HTTP(${s.baseUrl ? 'custom' : 'default'})`;
-        return `${nm}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
-      }).join(', ');
+    const seatSummaryText = (seats:string[], models:string[]) =>
+      seats.map((s, i) => `${seatName(i)}=${s}${models[i] ? `(${models[i]})` : ''}`).join(', ');
 
     const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
       setLog([]); lastReasonRef.current = [null, null, null];
-      const specs = buildSeatSpecs();
+
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
-      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
+      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(props.seats as any, props.seatModels)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       const r = await fetch('/api/stream_ndjson', {
         method: 'POST',
@@ -335,14 +313,12 @@ function LivePanel(props: LiveProps) {
           enabled: props.enabled,
           rob: props.rob,
           four2: props.four2,
-          // 三并行数组传给后端（后端会做兼容映射）
           seats: props.seats,
           seatModels: props.seatModels,
           seatKeys: props.seatKeys,
           clientTraceId: traceId,
           stopBelowZero: true,
           farmerCoop: props.farmerCoop,
-          // TrueSkill 初值传下去
           tsSeats: tsSeats.map(s => ({ mu: s.mu, sigma: s.sigma })),
         }),
         signal: controllerRef.current!.signal,
@@ -385,10 +361,22 @@ function LivePanel(props: LiveProps) {
           for (const raw of batch) {
             const m: any = raw;
             try {
-              if (m.type === 'debug' && m.phase === 'pre-run') {
-                nextLog = [...nextLog, `【后端】座位映射: ${JSON.stringify(m.seatsNorm)}`];
+              // 新增：直接展示后端的 warn/error/debug
+              if (m.type === 'warn' && m.message) {
+                nextLog = [...nextLog, `【后端WARN】${m.message}`];
                 continue;
               }
+              if (m.type === 'error' && m.message) {
+                nextLog = [...nextLog, `【后端ERROR】${m.message}`];
+                if (m.stack) nextLog = [...nextLog, `stack: ${m.stack}`];
+                continue;
+              }
+              if (m.type === 'debug') {
+                const extra = m.four2 ? ` | four2=${m.four2}` : '';
+                nextLog = [...nextLog, `【后端】debug:${m.phase || ''}${extra}`];
+                continue;
+              }
+
               if (m.type === 'event' && m.kind === 'round-start') {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
