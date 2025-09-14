@@ -223,7 +223,7 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
   out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
   out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-  out = out.replace(/开始连打\s*\d+\\s*局\(/g,  `开始第 ${n} 屺(`);
+  out = out.replace(/开始连打\s*\d+\\s*局\(/g,  `开始第 ${n} 局(`);
   out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
   out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
   return out;
@@ -245,13 +245,13 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  // ===== TrueSkill + 本局计分（新增） =====
+  // ===== TrueSkill + “上局积分” =====
   const [tsRatings, setTsRatings] = useState<{mu:number;sigma:number;cr:number}[]>([
     { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
     { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
     { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
   ]);
-  const [currRoundScore, setCurrRoundScore] = useState<[number,number,number]>([0,0,0]);
+  const [lastRoundScore, setLastRoundScore] = useState<[number,number,number]>([0,0,0]);
 
   // 累计画像
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
@@ -296,7 +296,7 @@ function LivePanel(props: LiveProps) {
       { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
       { mu:25, sigma:25/3, cr: 25 - 3*(25/3) },
     ]);
-    setCurrRoundScore([0,0,0]);
+    setLastRoundScore([0,0,0]); // 仅开局时清零
 
     controllerRef.current = new AbortController();
 
@@ -387,19 +387,18 @@ function LivePanel(props: LiveProps) {
           for (const raw of batch) {
             const m: any = raw;
             try {
-              // ===== TrueSkill 事件（新增）=====
+              // ===== TrueSkill 事件 =====
               if (m.type === 'ts') {
                 if (Array.isArray(m.ratings)) setTsRatings(m.ratings);
-                if (m.where === 'before-round') setCurrRoundScore([0,0,0]);
+                // 不再在 before-round 清零 → “上局积分”保留
                 continue;
               }
 
               if (m.type === 'event' && m.kind === 'round-start') {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
-                setCurrRoundScore([0,0,0]); // 同步清零
+                // 不清零 lastRoundScore
                 continue;
               }
-              // ⚠️ 修复点：round-end 不再自增 finished，避免与 win 重复计数
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}｜seenWin=${!!m.seenWin}｜seenStats=${!!m.seenStats}`];
                 continue;
@@ -490,6 +489,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
+              // 结算（按座位顺序显示“上局积分”）
               if (m.type === 'event' && m.kind === 'win') {
                 const L = (nextLandlord ?? 0) as number;
                 const ds = Array.isArray(m.deltaScores) ? m.deltaScores as [number,number,number] : [0,0,0];
@@ -501,16 +501,17 @@ function LivePanel(props: LiveProps) {
                 nextWinner     = m.winner;
                 nextMultiplier = m.multiplier;
                 nextDelta      = rot;
-                setCurrRoundScore(rot); // ===== 本局计分（新增）
+                setLastRoundScore(rot); // ← 改成“上局积分”，不在新局清零
                 nextLog = [
                   ...nextLog,
                   `胜者：${seatName(m.winner)}，倍数 x${m.multiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
                 ];
                 nextTotals     = [ nextTotals[0] + rot[0], nextTotals[1] + rot[1], nextTotals[2] + rot[2] ] as any;
-                nextFinished   = nextFinished + 1; // ✅ 仅在 win 事件计数
+                nextFinished   = nextFinished + 1;
                 continue;
               }
 
+              // 后端提供的 stats（每局都会来）→ 累计到雷达图
               if (m.type === 'event' && m.kind === 'stats' && Array.isArray(m.perSeat)) {
                 const s3 = [0,1,2].map(i=>{
                   const rec = m.perSeat.find((x:any)=>x.seat===i);
@@ -537,6 +538,13 @@ function LivePanel(props: LiveProps) {
 
                 const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
                 nextLog = [...nextLog, `战术画像（本局）：${msg}（已累计 ${nextAggCount} 局）`];
+                continue;
+              }
+
+              // 潜在兼容：直接收到 deltaScores（按座位顺序）
+              if (m.type === 'deltaScores' && Array.isArray(m.deltaScores)) {
+                const ds = m.deltaScores as [number,number,number];
+                setLastRoundScore(ds);
                 continue;
               }
 
@@ -597,14 +605,14 @@ function LivePanel(props: LiveProps) {
         </div>
       </Section>
 
-      {/* ===== TrueSkill（实时） & 本局计分（新增） ===== */}
-      <Section title="TrueSkill（实时） & 本局计分">
+      {/* ===== TrueSkill（实时） & 上一局积分 ===== */}
+      <Section title="TrueSkill（实时） & 上一局积分">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           {[0,1,2].map(i=>(
             <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
               <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
                 <div><SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>本局：{currRoundScore[i] ?? 0}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>上局积分：{lastRoundScore[i] ?? 0}</div>
               </div>
               <div style={{ fontSize:13, lineHeight:1.6 }}>
                 <div>μ：{tsRatings[i]?.mu?.toFixed(2)}</div>
@@ -649,13 +657,12 @@ function LivePanel(props: LiveProps) {
             <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}</div>
           </div>
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>本局加减分</div>
+            <div>上局加减分</div>
             <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div>
           </div>
         </div>
       </Section>
 
-      {/* 累计雷达图（仅显示累计） */}
       <Section title="战术画像（累计，0~5）">
         <RadarPanel aggStats={aggStats} aggCount={aggCount} aggMode={aggMode} alpha={alpha}
           onChangeMode={setAggMode} onChangeAlpha={setAlpha}/>
@@ -730,7 +737,7 @@ function RadarPanel({
   );
 }
 
-/* ========= 默认值（含“清空”按钮的重置） ========= */
+/* ========= 默认值 ========= */
 const DEFAULTS = {
   enabled: true,
   rounds: 10,
@@ -964,7 +971,10 @@ function Home() {
                     <input
                       type="number" min={0} step={100}
                       value={ (seatDelayMs[i] ?? 0) }
-                      onChange={e=>setSeatDelay(i, e.target.value)}
+                      onChange={e=>{
+                        const v = Math.max(0, Number(e.target.value) || 0);
+                        setSeatDelayMs(arr => { const n=[...arr]; n[i]=v; return n; });
+                      }}
                       style={{ width:'100%' }}
                     />
                   </label>

@@ -1,6 +1,6 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-// ⚠️ 这里静态引入你的引擎（需要存在 /lib/engine.ts 并导出下列符号）
+// 如果你的引擎在 lib/doudizhu/engine，请改这里的导入路径
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/engine';
 
 export const config = {
@@ -17,8 +17,8 @@ function writeHead(res: NextApiResponse) {
   res.setHeader('Cache-Control', 'no-cache, no-store, max-age=0, must-revalidate');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Transfer-Encoding', 'chunked');
-  res.setHeader('X-Accel-Buffering', 'no');      // 禁用反代缓冲
-  res.setHeader('Content-Encoding', 'identity'); // 禁 gzip，避免合并
+  res.setHeader('X-Accel-Buffering', 'no');      // 禁用反代缓冲，便于流式
+  res.setHeader('Content-Encoding', 'identity'); // 禁压缩，避免合并
   (res as any).flushHeaders?.();
 }
 function writeLine(res: NextApiResponse, obj: any) {
@@ -54,7 +54,7 @@ const TS = {
   },
 };
 
-// ---------- 外部 AI 适配器（可选，用不到就自动回退） ----------
+// ---------- 外部 AI 适配器（可选） ----------
 function loadBots() {
   const out:any = {};
   try { out.OpenAIBot = require('../../lib/bots/openai_bot').OpenAIBot; } catch {}
@@ -88,20 +88,19 @@ function chooseBot(bots:any, spec:SeatSpec): any {
   return fallback;
 }
 
+// ---------- handler ----------
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') { res.status(405).end(); return; }
 
   const {
     rounds = 1,
-    // 下列参数可能来自前端；引擎不一定全用到
-    startScore = 0,
-    seatDelayMs = [0,0,0],
+    startScore = 0,                // 未用到（兼容前端传参）
+    seatDelayMs = [0,0,0],         // 前端可能传数组，这里统一为 delayMs
     enabled = true,
     rob = true,
     four2 = 'both',
     seats = [],
     clientTraceId = '',
-    farmerCoop = true,
   } = (req.body || {});
 
   if (!enabled) { res.status(200).json({ ok:true, message:'disabled' }); return; }
@@ -119,14 +118,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const tsSnapshot = () => ts.map(r => ({ mu:+r.mu.toFixed(2), sigma:+r.sigma.toFixed(2), cr:+TS.conservative(r).toFixed(2) }));
   const sendTS = (where:'before-round'|'after-round', round:number) => writeLine(res, { type:'ts', where, round, ratings: tsSnapshot() });
 
-  // 将 seatDelayMs:number[] 统一为 delayMs:number（引擎签名只接受单值）
+  // 将 seatDelayMs:number[] 统一为 delayMs:number
   const delayMsUnified =
     Array.isArray(seatDelayMs) ? Math.max(...seatDelayMs.map(n=>Number(n)||0))
     : (typeof seatDelayMs === 'number' ? seatDelayMs : 0);
 
+  // 简易构造每局 stats（占位：保证前端能累计）
+  const mk5 = (x:number)=>Math.max(0, Math.min(5, x));
+  function makePerSeatStats(landlordIdx:number, landlordWon:boolean|null, multiplier:number) {
+    const base = [0,1,2].map(i => ({
+      seat: i,
+      scaled: { coop: 2.5, agg: 2.5, cons: 2.5, eff: 2.5, rob: i===landlordIdx ? 3.0 : 2.2 }
+    }));
+    const bumpAgg = mk5(2.0 + 0.5 * (multiplier || 1));
+    const bumpEff = mk5(2.2 + 0.4 * (multiplier || 1));
+    if (landlordWon === true) {
+      base[landlordIdx].scaled.agg = bumpAgg;
+      base[landlordIdx].scaled.eff = bumpEff;
+    } else if (landlordWon === false) {
+      const f1 = (landlordIdx + 1) % 3, f2 = (landlordIdx + 2) % 3;
+      base[f1].scaled.agg = bumpAgg; base[f2].scaled.agg = bumpAgg;
+      base[f1].scaled.eff = bumpEff; base[f2].scaled.eff = bumpEff;
+    }
+    return base;
+  }
+
   for (let round = 1; round <= Number(rounds)||1; round++) {
     let landlordIdx = 0;
     let landlordWon: boolean | null = null;
+    let lastMultiplier = 1;
 
     const seatSpecs:SeatSpec[] = (Array.isArray(seats)?seats:[]).slice(0,3);
     const botFuncs:any[] = [0,1,2].map(i => chooseBot(botsLib, seatSpecs[i] || { choice:'built-in:greedy-max' }));
@@ -134,7 +154,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     sendTS('before-round', round);
     writeLine(res, { type:'event', kind:'round-start', round });
 
-    // ✅ 修正：严格遵循引擎签名，只传 { seats, delayMs?, rob?, four2? }
     const iter = runOneGame({
       seats: botFuncs,
       delayMs: delayMsUnified,
@@ -144,22 +163,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     try {
       for await (const ev of iter as any) {
+        // 记录地主/胜负/倍数
         if ((ev?.type === 'landlord' || ev?.type === 'rob:done') && typeof ev.landlordIdx === 'number') landlordIdx = ev.landlordIdx;
-        if ((ev?.type === 'settle' || ev?.type === 'end' || ev?.type === 'result') && typeof ev.landlordWin === 'boolean') landlordWon = !!ev.landlordWin;
-
-        if (ev?.type === 'event' && ev?.kind === 'win' && Array.isArray(ev.deltaScores)) {
-          const ds = ev.deltaScores as number[];
-          const a = landlordIdx, farmers = [(a+1)%3,(a+2)%3];
-          const ld = ds[a]||0, fm = (ds[farmers[0]]||0) + (ds[farmers[1]]||0);
-          landlordWon = ld > fm;
+        if (ev?.type === 'event' && ev?.kind === 'win') {
+          if (typeof ev.multiplier === 'number') lastMultiplier = ev.multiplier;
+          if (Array.isArray(ev.deltaScores)) {
+            const ds = ev.deltaScores as number[];
+            const a = landlordIdx, farmers = [(a+1)%3,(a+2)%3];
+            const ld = ds[a]||0, fm = (ds[farmers[0]]||0) + (ds[farmers[1]]||0);
+            landlordWon = ld > fm;
+          }
         }
-        writeLine(res, ev);
+        if ((ev?.type === 'settle' || ev?.type === 'end' || ev?.type === 'result') && typeof ev.landlordWin === 'boolean') {
+          landlordWon = !!ev.landlordWin;
+        }
+
+        writeLine(res, ev); // 透传一切事件
       }
     } catch (e:any) {
       writeLine(res, { type:'log', message:`[server] iterator error: ${e?.message || e}` });
     }
 
-    // TS 更新
+    // TrueSkill 更新
     try {
       const a = landlordIdx, b=(a+1)%3, c=(a+2)%3;
       const L = [ts[a]], F = [ts[b], ts[c]];
@@ -174,7 +199,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       writeLine(res, { type:'log', message:`[server] TS update error: ${e?.message || e}` });
     }
 
-    writeLine(res, { type:'event', kind:'round-end', round, seenWin: landlordWon!=null, seenStats:false });
+    // ✅ 每局结束：发一条简化版 stats，供前端雷达图累计
+    const perSeat = makePerSeatStats(landlordIdx, landlordWon, lastMultiplier);
+    writeLine(res, { type:'event', kind:'stats', perSeat });
+
+    writeLine(res, { type:'event', kind:'round-end', round, seenWin: landlordWon!=null, seenStats:true });
     sendTS('after-round', round);
   }
 
