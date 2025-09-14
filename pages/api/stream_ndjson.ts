@@ -1,6 +1,6 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-// ⬇️ ⬇️ 关键：静态导入你的引擎（需存在：/lib/engine.ts）
+// ⚠️ 这里静态引入你的引擎（需要存在 /lib/engine.ts 并导出下列符号）
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/engine';
 
 export const config = {
@@ -17,8 +17,8 @@ function writeHead(res: NextApiResponse) {
   res.setHeader('Cache-Control', 'no-cache, no-store, max-age=0, must-revalidate');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Transfer-Encoding', 'chunked');
-  res.setHeader('X-Accel-Buffering', 'no');      // 禁用反向代理缓冲
-  res.setHeader('Content-Encoding', 'identity'); // 禁止压缩，避免合并
+  res.setHeader('X-Accel-Buffering', 'no');      // 禁用反代缓冲
+  res.setHeader('Content-Encoding', 'identity'); // 禁 gzip，避免合并
   (res as any).flushHeaders?.();
 }
 function writeLine(res: NextApiResponse, obj: any) {
@@ -93,6 +93,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const {
     rounds = 1,
+    // 下列参数可能来自前端；引擎不一定全用到
     startScore = 0,
     seatDelayMs = [0,0,0],
     enabled = true,
@@ -111,18 +112,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   writeLine(res, { type:'log', message:`[server] stream open | trace=${clientTraceId || '-'}` });
 
-  // 静态导入已经保证存在 runOneGame；再兜底打印一次
-  if (typeof runOneGame !== 'function') {
-    writeLine(res, { type:'log', message:'[server] engine_missing_export: 需要导出 runOneGame()' });
-    try { res.end(); } catch {}
-    return;
-  }
   const botsLib = loadBots();
 
   // TrueSkill 状态
   let ts: Rating[] = [TS.defaultRating(), TS.defaultRating(), TS.defaultRating()];
   const tsSnapshot = () => ts.map(r => ({ mu:+r.mu.toFixed(2), sigma:+r.sigma.toFixed(2), cr:+TS.conservative(r).toFixed(2) }));
   const sendTS = (where:'before-round'|'after-round', round:number) => writeLine(res, { type:'ts', where, round, ratings: tsSnapshot() });
+
+  // 将 seatDelayMs:number[] 统一为 delayMs:number（引擎签名只接受单值）
+  const delayMsUnified =
+    Array.isArray(seatDelayMs) ? Math.max(...seatDelayMs.map(n=>Number(n)||0))
+    : (typeof seatDelayMs === 'number' ? seatDelayMs : 0);
 
   for (let round = 1; round <= Number(rounds)||1; round++) {
     let landlordIdx = 0;
@@ -134,10 +134,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     sendTS('before-round', round);
     writeLine(res, { type:'event', kind:'round-start', round });
 
+    // ✅ 修正：严格遵循引擎签名，只传 { seats, delayMs?, rob?, four2? }
     const iter = runOneGame({
       seats: botFuncs,
-      rob, four2, farmerCoop,
-      seatDelayMs, startScore,
+      delayMs: delayMsUnified,
+      rob,
+      four2,
     });
 
     try {
