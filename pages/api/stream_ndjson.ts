@@ -1,7 +1,7 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-/* ========= 入参与类型（尽量精简） ========= */
+/* ========= 入参与类型 ========= */
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type SeatSpec =
   | { choice: 'built-in:greedy-max' | 'built-in:greedy-min' | 'built-in:random-legal' }
@@ -48,8 +48,8 @@ const SQRT2 = Math.sqrt(2);
 function erf(x: number) { const s = Math.sign(x); const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911; const t=1/(1+p*Math.abs(x)); const y=1-(((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t)*Math.exp(-x*x); return s*y; }
 function phi(x: number) { return Math.exp(-0.5*x*x)/Math.sqrt(2*Math.PI); }
 function Phi(x: number) { return 0.5*(1+erf(x/SQRT2)); }
-function V_exceeds(t: number) { const d = Math.max(1e-12, Phi(t)); return phi(t)/d; }
-function W_exceeds(t: number) { const v = V_exceeds(t); return v*(v+t); }
+function V_exceeds(t: number) { const d=Math.max(1e-12,Phi(t)); return phi(t)/d; }
+function W_exceeds(t: number) { const v=V_exceeds(t); return v*(v+t); }
 function tsUpdateTwoTeams(r: Rating[], teamA: number[], teamB: number[]) {
   const varA = teamA.reduce((s,i)=>s+r[i].sigma**2,0), varB = teamB.reduce((s,i)=>s+r[i].sigma**2,0);
   const muA = teamA.reduce((s,i)=>s+r[i].mu,0),     muB = teamB.reduce((s,i)=>s+r[i].mu,0);
@@ -156,13 +156,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!enabled) { write(res, { type: 'log', message: '[server] disabled' }); return res.end(); }
 
   const engine = tryLoadEngine();
-  if (!engine?.runOneGame) { write(res, { type: 'log', message: '[server] engine_not_found: 需要 lib/engine 或 lib/doudizhu/engine 提供 runOneGame()' }); return res.end(); }
+  if (!engine?.runOneGame) {
+    write(res, { type: 'log', message: '[server] engine_not_found: 需要 lib/engine 或 lib/doudizhu/engine 提供 runOneGame()' });
+    return res.end();
+  }
+
+  // 基本健壮性日志
+  write(res, { type: 'log', message: `[server] seats.shape len=${Array.isArray(seats)?seats.length:-1} sample=${JSON.stringify(seats?.[0] ?? null)}` });
 
   // TrueSkill 初始化
   const tsRatings: Rating[] = [{...TS_DEFAULT}, {...TS_DEFAULT}, {...TS_DEFAULT}];
 
   let finished = 0;
-  const MAX_EVENTS_PER_ROUND = 20000; // 防护：避免极端情况下长阻塞
+  const MAX_EVENTS_PER_ROUND = 20000;
 
   while (finished < rounds) {
     // —— 单局上下文 —— //
@@ -178,131 +184,169 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // 只传引擎支持的字段
     const opts: any = { seats, rob, four2, startScore };
+    write(res, { type: 'log', message: `[server] runOneGame starting with opts keys=${Object.keys(opts).join(',')}` });
 
     let iter: any;
-    try { iter = engine.runOneGame(opts); }
-    catch (e: any) { write(res, { type: 'log', message: `[server] runOneGame error: ${e?.message || e}` }); break; }
-
-    let eventCount = 0;
-
-    // 关键点：**不引入新的封装/转换**，直接消费引擎的（异步）迭代器
-    for await (const ev of iter as AsyncIterable<any>) {
-      eventCount++;
-      if (eventCount > MAX_EVENTS_PER_ROUND) {
-        write(res, { type: 'log', message: `[server] guard: too many events, cut off at ${MAX_EVENTS_PER_ROUND}` });
+    try {
+      iter = engine.runOneGame(opts);
+      // 迭代器形态诊断
+      const hasAsync = iter && typeof iter[Symbol.asyncIterator] === 'function';
+      const hasSync  = iter && typeof iter[Symbol.iterator] === 'function';
+      write(res, { type: 'log', message: `[server] runOneGame iterable async=${!!hasAsync} sync=${!!hasSync}` });
+      if (!hasAsync && !hasSync) {
+        write(res, { type: 'log', message: '[server] runOneGame returned non-iterable, 终止本局' });
         break;
       }
-
-      // 1) 原样透传
-      write(res, ev);
-
-      // 2) 维护上下文
-      if (ev?.type === 'state' && (ev.kind === 'init' || ev.kind === 'reinit')) {
-        landlord = typeof ev.landlord === 'number' ? ev.landlord : landlord;
-        if (Array.isArray(ev.hands) && ev.hands.length === 3) {
-          hands = [[...ev.hands[0]], [...ev.hands[1]], [...ev.hands[2]]];
-          count[0] = hands[0].length; count[1] = hands[1].length; count[2] = hands[2].length;
-        }
-      }
-      if (ev?.type === 'event' && ev.kind === 'multiplier' && typeof ev.multiplier === 'number') {
-        multiplier = ev.multiplier;
-      }
-      if (ev?.type === 'event' && ev.kind === 'trick-reset') {
-        trick = { leaderSeat: null, lastSeat: null, lastComboType: null, lastCards: null };
-      }
-
-      // 3) 抢/不抢 → 追加理由（紧跟原事件）
-      if (ev?.type === 'event' && ev.kind === 'rob') {
-        const seat: number = ev.seat ?? -1;
-        const reason = buildRobReason(seat, !!ev.rob, landlord, hands?.[seat]);
-        write(res, {
-          type: 'event',
-          kind: 'bot-done',
-          phase: 'rob',
-          seat,
-          by: 'server/heuristic',
-          model: '',
-          tookMs: 0,
-          reason,
-          strategy: {
-            phase: 'rob',
-            role: landlord == null ? 'unknown' : (seat === landlord ? 'landlord' : 'farmer'),
-            decision: ev.rob ? 'rob' : 'no-rob',
-            estimatedStrength: evalHandStrength(hands?.[seat]),
-          },
-        });
-      }
-
-      // 4) 出牌/过牌 → 追加理由（紧跟原事件）
-      if (ev?.type === 'event' && ev.kind === 'play') {
-        const seat: number = ev.seat ?? -1;
-        const move: 'play' | 'pass' = ev.move;
-        const comboType: string | undefined = ev.comboType;
-        const cards: string[] | undefined = ev.cards;
-
-        const before = count[seat] || (hands[seat]?.length ?? 0);
-        let after = before;
-        if (move === 'play' && Array.isArray(cards)) {
-          const h = hands[seat] ?? [];
-          for (const c of cards) removeOneCardFromHand(h, c);
-          hands[seat] = h;
-          after = h.length;
-          count[seat] = after;
-        }
-
-        if (trick.leaderSeat === null) trick.leaderSeat = seat;
-        if (move === 'play') {
-          trick.lastSeat = seat;
-          trick.lastComboType = comboType || trick.lastComboType;
-          trick.lastCards = cards || trick.lastCards;
-        }
-
-        const reason = buildPlayReason(move, cards, comboType, seat, landlord, multiplier, trick, before, after);
-
-        write(res, {
-          type: 'event',
-          kind: 'bot-done',
-          phase: trick.leaderSeat === seat && move === 'play' ? 'lead' : (trick.leaderSeat === null ? 'lead' : 'response'),
-          seat,
-          by: 'server/heuristic',
-          model: '',
-          tookMs: 0,
-          reason,
-          strategy: {
-            phase: trick.leaderSeat === seat && move === 'play' ? 'lead' : (trick.leaderSeat === null ? 'lead' : 'response'),
-            role: seat === landlord ? 'landlord' : 'farmer',
-            vs: trick.lastSeat == null ? 'none' : (isTeammate(trick.lastSeat, seat, landlord) ? 'teammate' : 'opponent'),
-            need: trick.lastComboType || null,
-            comboType: comboType || (move === 'pass' ? 'none' : 'unknown'),
-            cards,
-            beforeCount: before,
-            afterCount: after,
-            multiplier,
-          },
-        });
-      }
-
-      // 5) 结算 → 更新 TrueSkill（局后推送一次）
-      if (ev?.type === 'event' && ev.kind === 'win') {
-        const winSeat: number = ev.winner;
-        if (typeof winSeat === 'number' && landlord != null) {
-          const farmers = [0,1,2].filter(s => s !== landlord);
-          if (winSeat === landlord) tsUpdateTwoTeams(tsRatings, [landlord], farmers);
-          else tsUpdateTwoTeams(tsRatings, farmers, [landlord]);
-          write(res, {
-            type: 'ts',
-            where: 'after-round',
-            round: finished + 1,
-            ratings: tsRatings.map(r => ({ mu: r.mu, sigma: r.sigma, cr: r.mu - 3 * r.sigma })),
-          });
-        }
-        finished += 1;
-        if (finished >= rounds) break;
-      }
+    } catch (e: any) {
+      write(res, { type: 'log', message: `[server] runOneGame error: ${e?.stack || e?.message || e}` });
+      break;
     }
 
-    // 6) 保险：补一个 round-end（无论上面 for-await 如何退出）
-    write(res, { type: 'event', kind: 'round-end', round: finished });
+    let eventCount = 0;
+    let sawMeaningful = false;
+
+    try {
+      // 同时兼容同步/异步迭代器
+      const asyncIter: AsyncIterable<any> =
+        (iter && typeof iter[Symbol.asyncIterator] === 'function')
+          ? iter
+          : (async function*(){ for (const x of iter as Iterable<any>) yield x; })();
+
+      for await (const ev of asyncIter) {
+        eventCount++;
+        if (eventCount > MAX_EVENTS_PER_ROUND) {
+          write(res, { type: 'log', message: `[server] guard: too many events, cut off at ${MAX_EVENTS_PER_ROUND}` });
+          break;
+        }
+
+        // 1) 原样透传
+        write(res, ev);
+
+        // 标记“看到了引擎事件”
+        if (ev?.type === 'state' || ev?.type === 'event') sawMeaningful = true;
+
+        // 2) 维护上下文
+        if (ev?.type === 'state' && (ev.kind === 'init' || ev.kind === 'reinit')) {
+          landlord = typeof ev.landlord === 'number' ? ev.landlord : landlord;
+          if (Array.isArray(ev.hands) && ev.hands.length === 3) {
+            hands = [[...ev.hands[0]], [...ev.hands[1]], [...ev.hands[2]]];
+            count[0] = hands[0].length; count[1] = hands[1].length; count[2] = hands[2].length;
+          }
+        }
+        if (ev?.type === 'event' && ev.kind === 'multiplier' && typeof ev.multiplier === 'number') {
+          multiplier = ev.multiplier;
+        }
+        if (ev?.type === 'event' && ev.kind === 'trick-reset') {
+          trick = { leaderSeat: null, lastSeat: null, lastComboType: null, lastCards: null };
+        }
+
+        // 3) 抢/不抢 → 追加理由
+        if (ev?.type === 'event' && ev.kind === 'rob') {
+          const seat: number = ev.seat ?? -1;
+          const reason = buildRobReason(seat, !!ev.rob, landlord, hands?.[seat]);
+          write(res, {
+            type: 'event',
+            kind: 'bot-done',
+            phase: 'rob',
+            seat,
+            by: 'server/heuristic',
+            model: '',
+            tookMs: 0,
+            reason,
+            strategy: {
+              phase: 'rob',
+              role: landlord == null ? 'unknown' : (seat === landlord ? 'landlord' : 'farmer'),
+              decision: ev.rob ? 'rob' : 'no-rob',
+              estimatedStrength: evalHandStrength(hands?.[seat]),
+            },
+          });
+        }
+
+        // 4) 出牌/过牌 → 追加理由
+        if (ev?.type === 'event' && ev.kind === 'play') {
+          const seat: number = ev.seat ?? -1;
+          const move: 'play' | 'pass' = ev.move;
+          const comboType: string | undefined = ev.comboType;
+          const cards: string[] | undefined = ev.cards;
+
+          const before = count[seat] || (hands[seat]?.length ?? 0);
+          let after = before;
+          if (move === 'play' && Array.isArray(cards)) {
+            const h = hands[seat] ?? [];
+            for (const c of cards) removeOneCardFromHand(h, c);
+            hands[seat] = h;
+            after = h.length;
+            count[seat] = after;
+          }
+
+          if (trick.leaderSeat === null) trick.leaderSeat = seat;
+          if (move === 'play') {
+            trick.lastSeat = seat;
+            trick.lastComboType = comboType || trick.lastComboType;
+            trick.lastCards = cards || trick.lastCards;
+          }
+
+          const reason = buildPlayReason(move, cards, comboType, seat, landlord, multiplier, trick, before, after);
+
+          write(res, {
+            type: 'event',
+            kind: 'bot-done',
+            phase: trick.leaderSeat === seat && move === 'play' ? 'lead' : (trick.leaderSeat === null ? 'lead' : 'response'),
+            seat,
+            by: 'server/heuristic',
+            model: '',
+            tookMs: 0,
+            reason,
+            strategy: {
+              phase: trick.leaderSeat === seat && move === 'play' ? 'lead' : (trick.leaderSeat === null ? 'lead' : 'response'),
+              role: seat === landlord ? 'landlord' : 'farmer',
+              vs: trick.lastSeat == null ? 'none' : (isTeammate(trick.lastSeat, seat, landlord) ? 'teammate' : 'opponent'),
+              need: trick.lastComboType || null,
+              comboType: comboType || (move === 'pass' ? 'none' : 'unknown'),
+              cards,
+              beforeCount: before,
+              afterCount: after,
+              multiplier,
+            },
+          });
+        }
+
+        // 5) 结算 → 更新 TrueSkill（局后推送一次）
+        if (ev?.type === 'event' && ev.kind === 'win') {
+          const winSeat: number = ev.winner;
+          if (typeof winSeat === 'number' && landlord != null) {
+            const farmers = [0,1,2].filter(s => s !== landlord);
+            if (winSeat === landlord) tsUpdateTwoTeams(tsRatings, [landlord], farmers);
+            else tsUpdateTwoTeams(tsRatings, farmers, [landlord]);
+            write(res, {
+              type: 'ts',
+              where: 'after-round',
+              round: finished + 1,
+              ratings: tsRatings.map(r => ({ mu: r.mu, sigma: r.sigma, cr: r.mu - 3 * r.sigma })),
+            });
+          }
+          finished += 1;
+          if (finished >= rounds) break;
+        }
+      }
+    } catch (e: any) {
+      write(res, { type: 'log', message: `[server] stream error: ${e?.stack || e?.message || e}` });
+    }
+
+    // —— 只有真的看到事件才发 round-end，否则给出诊断日志 —— //
+    if (finished > 0) {
+      write(res, { type: 'event', kind: 'round-end', round: finished });
+    } else if (!sawMeaningful) {
+      write(res, {
+        type: 'log',
+        message: `[server] no_events_from_engine: 本局未收到任何引擎事件。可能原因：1) seats 不是引擎可识别的 Bot/配置；2) runOneGame 内部提前返回；3) 传参与引擎签名不匹配。`,
+        seats_shape: { len: Array.isArray(seats) ? seats.length : -1, sample: seats?.[0] ?? null },
+        opts_keys: Object.keys(opts),
+      });
+    } else {
+      write(res, { type: 'event', kind: 'round-end', round: finished });
+    }
+
     if (finished >= rounds) break;
   }
 
