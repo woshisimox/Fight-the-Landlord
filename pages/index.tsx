@@ -277,7 +277,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
   };
 }
 function RadarChart({ title, scores }:{ title: string; scores: Score5; }) {
-  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
+  const vals = [scores.coop, scores.agg, scores.cons, scores.rob, scores.eff]; // 画法，不影响显示文字
   const size = 180, R = 70, cx = size/2, cy = size/2;
   const pts = vals.map((v, i)=>{
     const ang = (-90 + i*(360/5)) * Math.PI/180;
@@ -1246,9 +1246,40 @@ function Home() {
             </div>
           </div>
 
+          {/* === 新增：当前三家记录簿先验（按甲乙丙三列、每列 L/F 两行） === */}
+          <div style={{ marginTop:10 }}>
+            <div style={{ fontSize:12, color:'#374151', marginBottom:6 }}>当前三家记录簿先验（按角色）</div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>{
+                const id = normalizeSeatId(seats[i], seatModels[i], seatKeys[i]);
+                const entry = tsBook[id];
+                const rL = entry?.L || TS_DEFAULT;
+                const rF = entry?.F || TS_DEFAULT;
+                const CR = (r:Rating)=> (r.mu - 3*r.sigma);
+                return (
+                  <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+                    <div style={{ fontWeight:700, marginBottom:6 }}>{['甲','乙','丙'][i]}</div>
+                    <div style={{ fontSize:13, color:'#374151', lineHeight:1.65 }}>
+                      <div><span style={{ width:70, display:'inline-block' }}>L（地主）</span>
+                        μ：<b>{rL.mu.toFixed(2)}</b>　σ：<b>{rL.sigma.toFixed(2)}</b>　CR：<b>{CR(rL).toFixed(2)}</b>
+                      </div>
+                      <div><span style={{ width:70, display:'inline-block' }}>F（农民）</span>
+                        μ：<b>{rF.mu.toFixed(2)}</b>　σ：<b>{rF.sigma.toFixed(2)}</b>　CR：<b>{CR(rF).toFixed(2)}</b>
+                      </div>
+                    </div>
+                    <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>
+                      {entry ? <span>来源：{entry.label}</span> : <span>未记录，用默认先验</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 全部条目（滚动） */}
           {Object.keys(tsBook).length>0 && (
-            <div style={{ marginTop:8, border:'1px dashed #eee', borderRadius:8, padding:10, maxHeight:220, overflow:'auto', background:'#fafafa' }}>
-              <div style={{ fontSize:12, color:'#374151', marginBottom:6 }}>已维护 {Object.keys(tsBook).length} 个参赛体：</div>
+            <div style={{ marginTop:10, border:'1px dashed #eee', borderRadius:8, padding:10, maxHeight:220, overflow:'auto', background:'#fafafa' }}>
+              <div style={{ fontSize:12, color:'#374151', marginBottom:6 }}>记录簿条目（全部 {Object.keys(tsBook).length} 个）：</div>
               {Object.entries(tsBook).map(([id, e])=>(
                 <div key={id} style={{ fontSize:12, color:'#4b5563', padding:'2px 0' }}>
                   <b>{e.label}</b> <span style={{ opacity:0.7 }}>（{id}）</span> ｜ L μ={e.L.mu.toFixed(2)} σ={e.L.sigma.toFixed(2)}（{e.L.games||0}）｜ F μ={e.F.mu.toFixed(2)} σ={e.F.sigma.toFixed(2)}（{e.F.games||0}）｜ 总分CR={Number(e.overallCR||0).toFixed(2)}
