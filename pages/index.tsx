@@ -39,6 +39,64 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
   }
 }
 
+/* ========= TrueSkill 记录簿（导入/导出） ========= */
+type Role = 'L'|'F';
+type TSBookEntry = {
+  label: string;
+  L: Rating & { games?: number };
+  F: Rating & { games?: number };
+  overallCR?: number;           // 展示/导出使用，更新时不作为先验来源
+  updatedAt?: string;
+};
+type TSBook = Record<string, TSBookEntry>;
+
+// 目前支持的“参赛体”模板（含默认模型）
+const SUPPORTED_DEFAULT_IDS = [
+  'built-in:greedy-max',
+  'built-in:greedy-min',
+  'built-in:random-legal',
+  'ai:openai:gpt-4o-mini',
+  'ai:gemini:gemini-1.5-flash',
+  'ai:grok:grok-2',
+  'ai:kimi:kimi-k2-0905-preview',
+  'ai:qwen:qwen-plus',
+  'http:default',
+];
+
+function labelForId(id:string): string {
+  if (id.startsWith('built-in:')) {
+    const m = id.split(':')[1];
+    if (m === 'greedy-max') return 'Greedy Max';
+    if (m === 'greedy-min') return 'Greedy Min';
+    if (m === 'random-legal') return 'Random Legal';
+    return id;
+  }
+  if (id.startsWith('ai:')) {
+    const [_, prov, model] = id.split(':');
+    const name = prov==='openai'?'OpenAI':prov==='gemini'?'Gemini':prov==='grok'?'Grok':prov==='kimi'?'Kimi':prov==='qwen'?'Qwen':prov;
+    return `${name}(${model})`;
+  }
+  if (id.startsWith('http:')) {
+    return 'HTTP(' + id.slice(5) + ')';
+  }
+  return id;
+}
+function makeEmptyEntry(label:string): TSBookEntry {
+  return {
+    label,
+    L: { ...TS_DEFAULT, games:0 },
+    F: { ...TS_DEFAULT, games:0 },
+    overallCR: 0,
+    updatedAt: new Date().toISOString(),
+  };
+}
+function computeOverall(entry: TSBookEntry): number {
+  const crL = entry.L.mu - 3*entry.L.sigma;
+  const crF = entry.F.mu - 3*entry.F.sigma;
+  return 0.5*crL + 0.5*crF;
+}
+
+/* ====== UI 及牌面渲染（与你现有代码一致） ====== */
 type LiveProps = {
   rounds: number;
   startScore: number;
@@ -55,6 +113,10 @@ type LiveProps = {
   farmerCoop: boolean;
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
+
+  // ★ 新增：获取/更新全局 TrueSkill 记录簿（用作导入先验与赛后写回）
+  getTSRating?: (id:string, role:Role) => Rating | null;
+  onTSApply?: (updates: {id:string; role:Role; rating: Rating}[], meta:{landlord:number; farmerIdxs:number[]; seatIds:string[]; round:number}) => void;
 };
 
 function SeatTitle({ i }: { i:number }) {
@@ -307,11 +369,28 @@ function LivePanel(props: LiveProps) {
 
   const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
 
+  // —— 新增：当前局的“参赛体 ID 列表”，用于把 TS 更新写回“记录簿” —— //
+  const seatIdsRef = useRef<string[]>([]);
+
   // 每局观测标记 —— 是否已计结束、是否收到 stats
   const roundFinishedRef = useRef<boolean>(false);
   const seenStatsRef     = useRef<boolean>(false);
 
   const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
+
+  // 规范化参赛体 ID：built-in 直接用 choice；AI 则 provider+model；HTTP 则 base
+  const idFromSpec = (s:any): string => {
+    if (s.choice === 'http') {
+      const base = (s.baseUrl || 'default').trim().toLowerCase();
+      return `http:${base||'default'}`;
+    }
+    if (String(s.choice||'').startsWith('ai:')) {
+      const choice = String(s.choice||'').toLowerCase(); // ai:openai / ai:gemini ...
+      const model  = (s.model || '').trim() || defaultModelFor(s.choice as BotChoice);
+      return `${choice}:${model.toLowerCase()}`;
+    }
+    return String(s.choice||'');
+  };
 
   const start = async () => {
     if (running) return;
@@ -325,7 +404,7 @@ function LivePanel(props: LiveProps) {
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
-    // TrueSkill：每次“开始”重置
+    // TrueSkill：每次“开始”重置 UI 实时值（具体先验在发牌后按角色再载入）
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
 
     controllerRef.current = new AbortController();
@@ -389,6 +468,9 @@ function LivePanel(props: LiveProps) {
       // 新一局：重置标记
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
+
+      // 记录本局参赛体 ID 列表
+      seatIdsRef.current = specs.map(idFromSpec);
 
       const r = await fetch('/api/stream_ndjson', {
         method: 'POST',
@@ -482,6 +564,18 @@ function LivePanel(props: LiveProps) {
                 nextLandlord = lord;
                 nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?'}为地主`];
                 lastReasonRef.current = [null, null, null];
+
+                // ★ 关键：按角色从“记录簿”里载入 μ,σ 作为本局先验
+                if (lord != null && props.getTSRating) {
+                  const ids = seatIdsRef.current;
+                  const initR: Rating[] = [0,1,2].map(i=>{
+                    const role: Role = (i===lord)?'L':'F';
+                    return props.getTSRating!(ids[i], role) || TS_DEFAULT;
+                  });
+                  setTsArr(initR);
+                  nextLog = [...nextLog, `【TS】已按记录簿载入本局先验（L/F 分角色）`];
+                }
+
                 continue;
               }
 
@@ -567,12 +661,10 @@ function LivePanel(props: LiveProps) {
                   nextTotals[2] + rot[2]
                 ] as any;
 
-                // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
                 if (nextWinner == null) {
                   const landlordDelta = ds[0] ?? 0;
                   if (landlordDelta > 0) nextWinner = L;
                   else if (landlordDelta < 0) {
-                    // 农民胜：任选一个农民作为代表胜者用于展示（不影响 TS 团队更新）
                     const farmer = [0,1,2].find(x => x !== L)!;
                     nextWinner = farmer;
                   }
@@ -584,22 +676,30 @@ function LivePanel(props: LiveProps) {
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 }
 
-                // ✅ TrueSkill：局后更新（后端没推 ts(after-round) 时也能更新）
-                {
-                  const updated = tsRef.current.map(r => ({ ...r }));
-                  const farmers = [0,1,2].filter(s => s !== L);
-                  const landlordDelta = ds[0] ?? 0;
-                  const landlordWin = (nextWinner === L) || (landlordDelta > 0);
-                  if (landlordWin) tsUpdateTwoTeams(updated, [L], farmers);
-                  else             tsUpdateTwoTeams(updated, farmers, [L]);
+                // ✅ TrueSkill：局后更新（UI 实时）
+                const updated = tsRef.current.map(r => ({ ...r }));
+                const farmers = [0,1,2].filter(s => s !== L);
+                const landlordDelta = ds[0] ?? 0;
+                const landlordWin = (nextWinner === L) || (landlordDelta > 0);
+                if (landlordWin) tsUpdateTwoTeams(updated, [L], farmers);
+                else             tsUpdateTwoTeams(updated, farmers, [L]);
+                setTsArr(updated);
 
-                  setTsArr(updated);
-                  nextLog = [
-                    ...nextLog,
-                    `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`
+                // ★ 写回“记录簿”：按参赛体 ID + 角色分别更新
+                if (props.onTSApply) {
+                  const ids = seatIdsRef.current;
+                  const ups = [
+                    { id: ids[L], role:'L' as Role, rating: updated[L] },
+                    { id: ids[farmers[0]], role:'F' as Role, rating: updated[farmers[0]] },
+                    { id: ids[farmers[1]], role:'F' as Role, rating: updated[farmers[1]] },
                   ];
+                  props.onTSApply(ups, { landlord:L, farmerIdxs:farmers, seatIds:ids, round:labelRoundNo });
                 }
 
+                nextLog = [
+                  ...nextLog,
+                  `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`
+                ];
                 nextLog = [
                   ...nextLog,
                   `胜者：${nextWinner == null ? '—' : seatName(nextWinner)}，倍数 x${nextMultiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
@@ -870,6 +970,103 @@ function Home() {
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
 
+  /* ===== TrueSkill 记录簿（导入/导出 & 赛后写回） ===== */
+  const [tsBook, setTsBook] = useState<TSBook>({}); // 初始为空，用户可一键“生成模板”
+  const upsertEntry = (id:string) => {
+    setTsBook(prev=>{
+      if (prev[id]) return prev;
+      const label = labelForId(id);
+      return { ...prev, [id]: makeEmptyEntry(label) };
+    });
+  };
+  const getTSRating = (id:string, role:Role): Rating | null => {
+    const rec = tsBook[id];
+    if (!rec) return null;
+    return role==='L' ? { mu: rec.L.mu, sigma: rec.L.sigma } : { mu: rec.F.mu, sigma: rec.F.sigma };
+  };
+  const onTSApply = (updates: {id:string; role:Role; rating: Rating}[]) => {
+    setTsBook(prev=>{
+      const next: TSBook = { ...prev };
+      const nowISO = new Date().toISOString();
+      for (const u of updates) {
+        if (!next[u.id]) next[u.id] = makeEmptyEntry(labelForId(u.id));
+        if (u.role === 'L') {
+          next[u.id].L = { ...next[u.id].L, mu: u.rating.mu, sigma: u.rating.sigma, games:(next[u.id].L.games||0)+1 };
+        } else {
+          next[u.id].F = { ...next[u.id].F, mu: u.rating.mu, sigma: u.rating.sigma, games:(next[u.id].F.games||0)+1 };
+        }
+        next[u.id].overallCR = computeOverall(next[u.id]);
+        next[u.id].updatedAt = nowISO;
+      }
+      return next;
+    });
+  };
+
+  // 统一的 ID 规范（与 LivePanel 内部一致）
+  const normalizeSeatId = (choice: BotChoice, modelRaw: string, keys:any): string => {
+    if (choice === 'http') {
+      const base = (keys?.httpBase || 'default').trim().toLowerCase();
+      return `http:${base||'default'}`;
+    }
+    if (String(choice).startsWith('ai:')) {
+      const model = (normalizeModelForProvider(choice, modelRaw) || defaultModelFor(choice)).toLowerCase();
+      return `${String(choice).toLowerCase()}:${model}`;
+    }
+    return String(choice);
+  };
+
+  const makeTemplate = () => {
+    const entries: TSBook = {};
+    for (const id of SUPPORTED_DEFAULT_IDS) {
+      entries[id] = makeEmptyEntry(labelForId(id));
+      entries[id].overallCR = computeOverall(entries[id]);
+    }
+    setTsBook(entries);
+  };
+  const downloadJSON = (obj:any, filename:string) => {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+  const onDownloadTS = () => {
+    const payload = {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      params: { mu0: 25, sigma0: 25/3, beta: TS_BETA, tau: TS_TAU, drawProbability: 0 },
+      entries: tsBook,
+    };
+    downloadJSON(payload, `trueskill_book_${Date.now()}.json`);
+  };
+  const onUploadTS = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const obj = JSON.parse(String(reader.result||'{}'));
+        if (obj && obj.entries && typeof obj.entries === 'object') {
+          const ent: TSBook = obj.entries;
+          // 轻量校验
+          const cleaned: TSBook = {};
+          Object.entries(ent).forEach(([id, e])=>{
+            if (!e || typeof e !== 'object') return;
+            const label = e.label || labelForId(id);
+            const L = e.L && typeof e.L.mu==='number' && typeof e.L.sigma==='number' ? { mu:e.L.mu, sigma:e.L.sigma, games:e.L.games||0 } : { ...TS_DEFAULT, games:0 };
+            const F = e.F && typeof e.F.mu==='number' && typeof e.F.sigma==='number' ? { mu:e.F.mu, sigma:e.F.sigma, games:e.F.games||0 } : { ...TS_DEFAULT, games:0 };
+            cleaned[id] = { label, L, F, overallCR: 0, updatedAt: e.updatedAt || new Date().toISOString() };
+            cleaned[id].overallCR = computeOverall(cleaned[id]);
+          });
+          setTsBook(cleaned);
+        } else {
+          alert('文件格式不正确：缺少 entries 字段');
+        }
+      } catch (err:any) {
+        alert('无法解析 JSON：' + (err?.message||String(err)));
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
     setRob(DEFAULTS.rob); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
@@ -923,6 +1120,38 @@ function Home() {
           </label>
         </div>
 
+        {/* ===== TrueSkill 记录（导入/导出） ===== */}
+        <div style={{ marginTop:12, borderTop:'1px dashed #eee', paddingTop:12 }}>
+          <div style={{ fontWeight:700, marginBottom:6 }}>TrueSkill 记录（导入 / 导出）</div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
+            <button onClick={makeTemplate} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+              生成模板（含内置与 AI 默认）
+            </button>
+            <label style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff', cursor:'pointer' }}>
+              导入 JSON
+              <input type="file" accept="application/json" style={{ display:'none' }}
+                onChange={e=>{ const f=e.target.files?.[0]; if (f) onUploadTS(f); e.currentTarget.value=''; }} />
+            </label>
+            <button onClick={onDownloadTS} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+              下载当前记录
+            </button>
+            <div style={{ fontSize:12, color:'#6b7280' }}>
+              说明：导入后将作为下一次比赛的先验；每局结束会把对应参赛体的 L/F 两套 TrueSkill 写回到记录中，并计算总分（CR_total）。
+            </div>
+          </div>
+          {/* 小表：展示已维护的参赛体条目（可选） */}
+          {Object.keys(tsBook).length>0 && (
+            <div style={{ marginTop:8, border:'1px dashed #eee', borderRadius:8, padding:10, maxHeight:220, overflow:'auto', background:'#fafafa' }}>
+              <div style={{ fontSize:12, color:'#374151', marginBottom:6 }}>已维护 {Object.keys(tsBook).length} 个参赛体：</div>
+              {Object.entries(tsBook).map(([id, e])=>(
+                <div key={id} style={{ fontSize:12, color:'#4b5563', padding:'2px 0' }}>
+                  <b>{e.label}</b> <span style={{ opacity:0.7 }}>（{id}）</span> ｜ L μ={e.L.mu.toFixed(2)} σ={e.L.sigma.toFixed(2)}（{e.L.games||0}）｜ F μ={e.F.mu.toFixed(2)} σ={e.F.sigma.toFixed(2)}（{e.F.games||0}）｜ 总分CR={Number(e.overallCR||0).toFixed(2)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
           <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
 
@@ -938,6 +1167,9 @@ function Home() {
                     onChange={e=>{
                       const v = e.target.value as BotChoice;
                       setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
+                      // 确保有对应 ID 的条目（便于赛后写回）
+                      const id = normalizeSeatId(v, seatModels[i], seatKeys[i]);
+                      upsertEntry(id);
                     }}
                     style={{ width:'100%' }}
                   >
@@ -967,6 +1199,8 @@ function Home() {
                       onChange={e=>{
                         const v = e.target.value;
                         setSeatModels(arr => { const n=[...arr]; n[i] = v; return n; });
+                        const id = normalizeSeatId(seats[i], v, seatKeys[i]);
+                        upsertEntry(id);
                       }}
                       style={{ width:'100%' }}
                     />
@@ -1044,6 +1278,8 @@ function Home() {
                         onChange={e=>{
                           const v = e.target.value;
                           setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpBase:v }; return n; });
+                          const id = normalizeSeatId(seats[i], seatModels[i], { ...seatKeys[i], httpBase: v });
+                          upsertEntry(id);
                         }}
                         style={{ width:'100%' }} />
                     </label>
@@ -1099,6 +1335,10 @@ function Home() {
           seatKeys={seatKeys}
           farmerCoop={farmerCoop}
           onLog={setLiveLog}
+
+          // 将记录簿读写能力传给对局组件
+          getTSRating={(id,role)=>getTSRating(id,role)}
+          onTSApply={(ups)=>onTSApply(ups)}
         />
       </div>
     </div>
