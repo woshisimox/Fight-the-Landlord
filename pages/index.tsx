@@ -121,7 +121,7 @@ type LiveProps = {
   getTSRating?: (id:string, role:Role) => Rating | null;
   onTSApply?: (updates: {id:string; role:Role; rating: Rating}[], meta:{landlord:number; farmerIdxs:number[]; seatIds:string[]; round:number}) => void;
 
-  // ★ 新增：向父组件暴露一个“刷新先验”的函数，用于导入后手动刷新
+  // 暴露一个“刷新先验”的函数给父组件（导入后手动刷新）
   exposeRefresh?: (fn: ()=>void) => void;
 };
 
@@ -323,7 +323,7 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
   out = out.replace(/开始连打\s*\d+\\s*局\(/g,  `开始第 ${n} 局(`);
   out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
-  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
+  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
   return out;
 };
 
@@ -401,19 +401,34 @@ function LivePanel(props: LiveProps) {
     return String(s.choice||'');
   };
 
-  // ★ 向父组件暴露“刷新先验”的函数
+  // ★ 刷新先验：支持“未发牌预览(F口径)”和“已发牌按真实角色(L/F)”
   const refreshTSFromBook = () => {
-    const lord = landlordRef.current;
-    if (lord == null) {
-      setLog(l => [...l, '【TS】尚未确定地主，无法载入先验；请等发牌后或开始新局。']);
-      return;
-    }
     if (!props.getTSRating) {
       setLog(l => [...l, '【TS】未配置记录簿读取函数 getTSRating。']);
       return;
     }
+    const lord = landlordRef.current;
+
+    if (lord == null) {
+      // ① 未发牌：按当前三家选择生成 ID，临时以“农民(F)”口径载入预览
+      const preSpecs = props.seats.slice(0,3).map((choice, i) => {
+        const normalized = normalizeModelForProvider(choice, props.seatModels[i] || '');
+        const model = normalized || defaultModelFor(choice);
+        const keys = props.seatKeys[i] || {};
+        return choice === 'http'
+          ? { choice, baseUrl: keys.httpBase || '' }
+          : { choice, model };
+      });
+      const ids = preSpecs.map(idFromSpec);
+      const initR: Rating[] = [0,1,2].map(i => props.getTSRating!(ids[i], 'F') || TS_DEFAULT);
+      setTsArr(initR);
+      setLog(l => [...l, '【TS】手动刷新先验（预览）：尚未确定地主，按农民(F)口径载入。']);
+      return;
+    }
+
+    // ② 已发牌：按真实角色(L/F)精确载入
     const ids = seatIdsRef.current;
-    const initR: Rating[] = [0,1,2].map(i=>{
+    const initR: Rating[] = [0,1,2].map(i => {
       const role: Role = (i===lord)?'L':'F';
       return props.getTSRating!(ids[i], role) || TS_DEFAULT;
     });
@@ -907,15 +922,15 @@ function LivePanel(props: LiveProps) {
 
       <Section title="结果">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+          <div style={{ border:'1px solid '#eee', borderRadius:8, padding:10 }}>
             <div>倍数</div>
             <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
           </div>
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+          <div style={{ border:'1px solid '#eee', borderRadius:8, padding:10 }}>
             <div>胜者</div>
             <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}</div>
           </div>
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+          <div style={{ border:'1px solid '#eee', borderRadius:8, padding:10 }}>
             <div>本局加减分</div>
             <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div>
           </div>
@@ -1122,7 +1137,7 @@ function Home() {
     reader.readAsText(file);
   };
 
-  // ★ LivePanel 暴露的“刷新先验”函数引用
+  // LivePanel 暴露的“刷新先验”函数引用
   const refreshTSFromBookRef = useRef<null | (()=>void)>(null);
 
   const doResetAll = () => {
@@ -1191,11 +1206,10 @@ function Home() {
                 onChange={e=>{ const f=e.target.files?.[0]; if (f) onUploadTS(f); e.currentTarget.value=''; }} />
             </label>
 
-            {/* ★ 新增按钮：与“导入 JSON”并排 */}
+            {/* 新增按钮：与“导入 JSON”并排 */}
             <button
               onClick={()=>{
                 if (refreshTSFromBookRef.current) refreshTSFromBookRef.current();
-                else alert('请在对局开始并确定地主后再使用刷新先验。');
               }}
               style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
             >
@@ -1410,7 +1424,7 @@ function Home() {
           getTSRating={(id,role)=>getTSRating(id,role)}
           onTSApply={(ups)=>onTSApply(ups)}
 
-          // ★ 接收子组件暴露的“刷新先验”函数
+          // 接收子组件暴露的“刷新先验”函数
           exposeRefresh={(fn)=>{ refreshTSFromBookRef.current = fn; }}
         />
       </div>
