@@ -120,6 +120,9 @@ type LiveProps = {
   // TrueSkill 记录簿读写
   getTSRating?: (id:string, role:Role) => Rating | null;
   onTSApply?: (updates: {id:string; role:Role; rating: Rating}[], meta:{landlord:number; farmerIdxs:number[]; seatIds:string[]; round:number}) => void;
+
+  // ★ 新增：向父组件暴露一个“刷新先验”的函数，用于导入后手动刷新
+  exposeRefresh?: (fn: ()=>void) => void;
 };
 
 function SeatTitle({ i }: { i:number }) {
@@ -320,7 +323,7 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
   out = out.replace(/开始连打\s*\d+\\s*局\(/g,  `开始第 ${n} 局(`);
   out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
-  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
+  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
   return out;
 };
 
@@ -372,7 +375,7 @@ function LivePanel(props: LiveProps) {
 
   const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
 
-  // ★ 本局是否已从记录簿载入过 TS 先验（用于屏蔽后端 before-round 覆盖）
+  // 本局是否已从记录簿载入过 TS 先验（用于屏蔽后端 before-round 覆盖）
   const appliedTSFromBookRef = useRef(false);
 
   // 本局参赛体 ID 列表（用于把 TS 更新写回记录簿）
@@ -397,6 +400,34 @@ function LivePanel(props: LiveProps) {
     }
     return String(s.choice||'');
   };
+
+  // ★ 向父组件暴露“刷新先验”的函数
+  const refreshTSFromBook = () => {
+    const lord = landlordRef.current;
+    if (lord == null) {
+      setLog(l => [...l, '【TS】尚未确定地主，无法载入先验；请等发牌后或开始新局。']);
+      return;
+    }
+    if (!props.getTSRating) {
+      setLog(l => [...l, '【TS】未配置记录簿读取函数 getTSRating。']);
+      return;
+    }
+    const ids = seatIdsRef.current;
+    const initR: Rating[] = [0,1,2].map(i=>{
+      const role: Role = (i===lord)?'L':'F';
+      return props.getTSRating!(ids[i], role) || TS_DEFAULT;
+    });
+    setTsArr(initR);
+    appliedTSFromBookRef.current = true;
+
+    const hitFlags = [0,1,2].map(i=>{
+      const role: Role = (i===lord)?'L':'F';
+      return props.getTSRating!(ids[i], role) ? '命中' : '默认';
+    });
+    setLog(l => [...l, `【TS】手动刷新先验：` +
+      `${['甲','乙','丙'].map((n,i)=>`${n}(${i===lord?'L':'F'}):${hitFlags[i]}`).join(' ｜ ')}`]);
+  };
+  useEffect(()=>{ props.exposeRefresh?.(refreshTSFromBook); }, [props.exposeRefresh]);
 
   const start = async () => {
     if (running) return;
@@ -672,7 +703,7 @@ function LivePanel(props: LiveProps) {
                   ds[(1 - L + 3) % 3],
                   ds[(2 - L + 3) % 3],
                 ];
-                nextWinner     = m.winner ?? nextWinner ?? null;
+                let nextWinnerLocal = m.winner ?? nextWinner ?? null;
                 nextMultiplier = m.multiplier ?? nextMultiplier ?? 1;
                 nextDelta      = rot;
                 nextTotals     = [
@@ -681,14 +712,15 @@ function LivePanel(props: LiveProps) {
                   nextTotals[2] + rot[2]
                 ] as any;
 
-                if (nextWinner == null) {
+                if (nextWinnerLocal == null) {
                   const landlordDelta = ds[0] ?? 0;
-                  if (landlordDelta > 0) nextWinner = L;
+                  if (landlordDelta > 0) nextWinnerLocal = L;
                   else if (landlordDelta < 0) {
                     const farmer = [0,1,2].find(x => x !== L)!;
-                    nextWinner = farmer;
+                    nextWinnerLocal = farmer;
                   }
                 }
+                nextWinner = nextWinnerLocal;
 
                 // 标记一局结束 & 雷达图兜底
                 {
@@ -700,7 +732,7 @@ function LivePanel(props: LiveProps) {
                 const updated = tsRef.current.map(r => ({ ...r }));
                 const farmers = [0,1,2].filter(s => s !== L);
                 const landlordDelta = ds[0] ?? 0;
-                const landlordWin = (nextWinner === L) || (landlordDelta > 0);
+                const landlordWin = (nextWinnerLocal === L) || (landlordDelta > 0);
                 if (landlordWin) tsUpdateTwoTeams(updated, [L], farmers);
                 else             tsUpdateTwoTeams(updated, farmers, [L]);
                 setTsArr(updated);
@@ -722,7 +754,7 @@ function LivePanel(props: LiveProps) {
                 ];
                 nextLog = [
                   ...nextLog,
-                  `胜者：${nextWinner == null ? '—' : seatName(nextWinner)}，倍数 x${nextMultiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
+                  `胜者：${nextWinnerLocal == null ? '—' : seatName(nextWinnerLocal)}，倍数 x${nextMultiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
                 ];
                 continue;
               }
@@ -1090,6 +1122,9 @@ function Home() {
     reader.readAsText(file);
   };
 
+  // ★ LivePanel 暴露的“刷新先验”函数引用
+  const refreshTSFromBookRef = useRef<null | (()=>void)>(null);
+
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
     setRob(DEFAULTS.rob); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
@@ -1155,6 +1190,18 @@ function Home() {
               <input type="file" accept="application/json" style={{ display:'none' }}
                 onChange={e=>{ const f=e.target.files?.[0]; if (f) onUploadTS(f); e.currentTarget.value=''; }} />
             </label>
+
+            {/* ★ 新增按钮：与“导入 JSON”并排 */}
+            <button
+              onClick={()=>{
+                if (refreshTSFromBookRef.current) refreshTSFromBookRef.current();
+                else alert('请在对局开始并确定地主后再使用刷新先验。');
+              }}
+              style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+            >
+              刷新先验（从记录簿）
+            </button>
+
             <button onClick={onDownloadTS} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
               下载当前记录
             </button>
@@ -1362,6 +1409,9 @@ function Home() {
           // 将记录簿读写能力传给对局组件
           getTSRating={(id,role)=>getTSRating(id,role)}
           onTSApply={(ups)=>onTSApply(ups)}
+
+          // ★ 接收子组件暴露的“刷新先验”函数
+          exposeRefresh={(fn)=>{ refreshTSFromBookRef.current = fn; }}
         />
       </div>
     </div>
