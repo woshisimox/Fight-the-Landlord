@@ -99,7 +99,7 @@ function computeOverall(entry: TSBookEntry): number {
   return 0.5*crL + 0.5*crF;
 }
 
-/* ====== UI 及牌面渲染（与你现有布局一致） ====== */
+/* ====== UI 及牌面渲染 ====== */
 type LiveProps = {
   rounds: number;
   startScore: number;
@@ -387,14 +387,14 @@ function LivePanel(props: LiveProps) {
 
   const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
 
-  // 规范化参赛体 ID：built-in 直接用 choice；AI 则 provider+model；HTTP 则 base
+  // 规范化参赛体 ID
   const idFromSpec = (s:any): string => {
     if (s.choice === 'http') {
       const base = (s.baseUrl || 'default').trim().toLowerCase();
       return `http:${base||'default'}`;
     }
     if (String(s.choice||'').startsWith('ai:')) {
-      const choice = String(s.choice||'').toLowerCase(); // ai:openai / ai:gemini ...
+      const choice = String(s.choice||'').toLowerCase();
       const model  = (s.model || '').trim() || defaultModelFor(s.choice as BotChoice);
       return `${choice}:${model.toLowerCase()}`;
     }
@@ -456,7 +456,7 @@ function LivePanel(props: LiveProps) {
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
-    // TrueSkill：每次“开始”重置 UI 实时值（具体先验在发牌后按角色再载入）
+    // TrueSkill：每次“开始”重置 UI 实时值
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
 
     controllerRef.current = new AbortController();
@@ -492,7 +492,6 @@ function LivePanel(props: LiveProps) {
       nextAggCount: number
     ) => {
       if (!roundFinishedRef.current) {
-        // 若本局未收到 stats，补一条中性评分，保证雷达图可见
         if (!seenStatsRef.current) {
           const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
           const mode = aggModeRef.current;
@@ -579,10 +578,8 @@ function LivePanel(props: LiveProps) {
           for (const raw of batch) {
             const m: any = raw;
             try {
-              // -------- TS 帧（后端可能推送） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
-                // 若我们已经从记录簿载入过先验，则忽略 before-round 覆盖
                 if (m.where === 'before-round' && appliedTSFromBookRef.current) {
                   nextLog = [...nextLog, `【TS】忽略后端 before-round 覆盖（已用导入先验）`];
                 } else {
@@ -599,7 +596,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 轮廓事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -611,7 +607,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 初始发牌/地主 --------
               const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
               const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
               if (hasHands) {
@@ -623,7 +618,6 @@ function LivePanel(props: LiveProps) {
                 nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?'}为地主`];
                 lastReasonRef.current = [null, null, null];
 
-                // ★ 关键：按角色从“记录簿”里载入 μ,σ 作为本局先验（精确匹配）
                 if (lord != null && props.getTSRating) {
                   const ids = seatIdsRef.current;
                   const initR: Rating[] = [0,1,2].map(i=>{
@@ -645,7 +639,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
                 nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
@@ -660,20 +653,17 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'rob') {
                 nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
                 continue;
               }
 
-              // -------- 起新墩 --------
               if (m.type === 'event' && m.kind === 'trick-reset') {
                 nextLog = [...nextLog, '一轮结束，重新起牌'];
                 nextPlays = [];
                 continue;
               }
 
-              // -------- 出/过 --------
               if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
@@ -702,7 +692,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 结算（多种别名兼容） --------
               const isWinLike =
                 (m.type === 'event' && (m.kind === 'win' || m.kind === 'result' || m.kind === 'game-over' || m.kind === 'game_end')) ||
                 (m.type === 'result') || (m.type === 'game-over') || (m.type === 'game_end');
@@ -712,7 +701,6 @@ function LivePanel(props: LiveProps) {
                           : Array.isArray(m.delta) ? m.delta
                           : [0,0,0]) as [number,number,number];
 
-                // 将“以地主为基准”的增减分旋转成“按座位顺序”的展示
                 const rot: [number,number,number] = [
                   ds[(0 - L + 3) % 3],
                   ds[(1 - L + 3) % 3],
@@ -737,13 +725,11 @@ function LivePanel(props: LiveProps) {
                 }
                 nextWinner = nextWinnerLocal;
 
-                // 标记一局结束 & 雷达图兜底
                 {
                   const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 }
 
-                // ✅ TrueSkill：局后更新（UI 实时）
                 const updated = tsRef.current.map(r => ({ ...r }));
                 const farmers = [0,1,2].filter(s => s !== L);
                 const landlordDelta = ds[0] ?? 0;
@@ -752,7 +738,6 @@ function LivePanel(props: LiveProps) {
                 else             tsUpdateTwoTeams(updated, farmers, [L]);
                 setTsArr(updated);
 
-                // ★ 写回“记录簿”：按参赛体 ID + 角色分别更新
                 if (props.onTSApply) {
                   const ids = seatIdsRef.current;
                   const ups = [
@@ -774,7 +759,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 画像统计（两种形态） --------
               const isStatsTop = (m.type === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               const isStatsEvt = (m.type === 'event' && m.kind === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               if (isStatsTop || isStatsEvt) {
@@ -808,7 +792,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 文本日志 --------
               if (m.type === 'log' && typeof m.message === 'string') {
                 nextLog = [...nextLog, rewrite(m.message)];
                 continue;
@@ -827,7 +810,7 @@ function LivePanel(props: LiveProps) {
       setLog(l => [...l, `—— 本局流结束 ——`]);
     };
 
-    try {
+  try {
       for (let i = 0; i < props.rounds; i++) {
         if (controllerRef.current?.signal.aborted) break;
         const thisRound = i + 1;
@@ -922,15 +905,15 @@ function LivePanel(props: LiveProps) {
 
       <Section title="结果">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          <div style={{ border:'1px solid '#eee', borderRadius:8, padding:10 }}>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
             <div>倍数</div>
             <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
           </div>
-          <div style={{ border:'1px solid '#eee', borderRadius:8, padding:10 }}>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
             <div>胜者</div>
             <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}</div>
           </div>
-          <div style={{ border:'1px solid '#eee', borderRadius:8, padding:10 }}>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
             <div>本局加减分</div>
             <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div>
           </div>
@@ -1038,7 +1021,7 @@ function Home() {
   const [liveLog, setLiveLog] = useState<string[]>([]);
 
   /* ===== TrueSkill 记录簿（导入/导出 & 赛后写回） ===== */
-  const [tsBook, setTsBook] = useState<TSBook>({}); // 初始为空，用户可一键“生成模板”
+  const [tsBook, setTsBook] = useState<TSBook>({});
   const upsertEntry = (id:string) => {
     setTsBook(prev=>{
       if (prev[id]) return prev;
@@ -1047,7 +1030,6 @@ function Home() {
     });
   };
 
-  // 精确匹配：只有完全相同的 id 才返回先验；否则返回 null
   const getTSRating = (id:string, role:Role): Rating | null => {
     const rec = tsBook[id];
     if (!rec) return null;
@@ -1072,7 +1054,6 @@ function Home() {
     });
   };
 
-  // 统一的 ID 规范（与 LivePanel 内部一致）
   const normalizeSeatId = (choice: BotChoice, modelRaw: string, keys:any): string => {
     if (choice === 'http') {
       const base = (keys?.httpBase || 'default').trim().toLowerCase();
@@ -1116,7 +1097,6 @@ function Home() {
         const obj = JSON.parse(String(reader.result||'{}'));
         if (obj && obj.entries && typeof obj.entries === 'object') {
           const ent: TSBook = obj.entries;
-          // 轻量校验
           const cleaned: TSBook = {};
           Object.entries(ent).forEach(([id, e])=>{
             if (!e || typeof e !== 'object') return;
@@ -1137,7 +1117,6 @@ function Home() {
     reader.readAsText(file);
   };
 
-  // LivePanel 暴露的“刷新先验”函数引用
   const refreshTSFromBookRef = useRef<null | (()=>void)>(null);
 
   const doResetAll = () => {
@@ -1206,7 +1185,7 @@ function Home() {
                 onChange={e=>{ const f=e.target.files?.[0]; if (f) onUploadTS(f); e.currentTarget.value=''; }} />
             </label>
 
-            {/* 新增按钮：与“导入 JSON”并排 */}
+            {/* 与“导入 JSON”并排的刷新按钮 */}
             <button
               onClick={()=>{
                 if (refreshTSFromBookRef.current) refreshTSFromBookRef.current();
@@ -1223,7 +1202,6 @@ function Home() {
               说明：导入后将作为下一次比赛的先验；每局结束会把对应参赛体的 L/F 两套 TrueSkill 写回到记录中，并计算总分（CR_total）。
             </div>
           </div>
-          {/* 小表：展示已维护的参赛体条目（可选） */}
           {Object.keys(tsBook).length>0 && (
             <div style={{ marginTop:8, border:'1px dashed #eee', borderRadius:8, padding:10, maxHeight:220, overflow:'auto', background:'#fafafa' }}>
               <div style={{ fontSize:12, color:'#374151', marginBottom:6 }}>已维护 {Object.keys(tsBook).length} 个参赛体：</div>
@@ -1251,7 +1229,6 @@ function Home() {
                     onChange={e=>{
                       const v = e.target.value as BotChoice;
                       setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
-                      // 确保有对应 ID 的条目（便于赛后写回）
                       const id = normalizeSeatId(v, seatModels[i], seatKeys[i]);
                       upsertEntry(id);
                     }}
@@ -1419,12 +1396,8 @@ function Home() {
           seatKeys={seatKeys}
           farmerCoop={farmerCoop}
           onLog={setLiveLog}
-
-          // 将记录簿读写能力传给对局组件
           getTSRating={(id,role)=>getTSRating(id,role)}
           onTSApply={(ups)=>onTSApply(ups)}
-
-          // 接收子组件暴露的“刷新先验”函数
           exposeRefresh={(fn)=>{ refreshTSFromBookRef.current = fn; }}
         />
       </div>
