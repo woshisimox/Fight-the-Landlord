@@ -254,65 +254,6 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 
-/* ====== 雷达图累计（0~5） ====== */
-type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
-function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
-  if (mode === 'mean') {
-    const c = Math.max(0, count);
-    return {
-      coop: (prev.coop*c + curr.coop)/(c+1),
-      agg:  (prev.agg *c + curr.agg )/(c+1),
-      cons: (prev.cons*c + curr.cons)/(c+1),
-      eff:  (prev.eff *c + curr.eff )/(c+1),
-      rob:  (prev.rob *c + curr.rob )/(c+1),
-    };
-  }
-  const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
-  return {
-    coop: a*curr.coop + (1-a)*prev.coop,
-    agg:  a*curr.agg  + (1-a)*prev.agg,
-    cons: a*curr.cons + (1-a)*prev.cons,
-    eff:  a*curr.eff  + (1-a)*prev.eff,
-    rob:  a*curr.rob  + (1-a)*prev.rob,
-  };
-}
-function RadarChart({ title, scores }:{ title: string; scores: Score5; }) {
-  const vals = [scores.coop, scores.agg, scores.cons, scores.rob, scores.eff]; // 画法，不影响显示文字
-  const size = 180, R = 70, cx = size/2, cy = size/2;
-  const pts = vals.map((v, i)=>{
-    const ang = (-90 + i*(360/5)) * Math.PI/180;
-    const r = (Math.max(0, Math.min(5, v)) / 5) * R;
-    return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
-  }).join(' ');
-  return (
-    <div style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
-      <div style={{ fontWeight:700, marginBottom:6 }}>{title}</div>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {[1,2,3,4,5].map(k=>{
-          const r = (k/5)*R;
-          const polygon = Array.from({length:5}, (_,i)=>{
-            const ang = (-90 + i*(360/5)) * Math.PI/180;
-            return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
-          }).join(' ');
-          return <polygon key={k} points={polygon} fill="none" stroke="#e5e7eb"/>;
-        })}
-        {Array.from({length:5}, (_,i)=>{
-          const ang = (-90 + i*(360/5)) * Math.PI/180;
-          return <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang)} y2={cy + R * Math.sin(ang)} stroke="#e5e7eb"/>;
-        })}
-        <polygon points={pts} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
-        {(['配合','激进','保守','效率','抢地主']).map((lab, i)=>{
-          const ang = (-90 + i*(360/5)) * Math.PI/180;
-          return <text key={i} x={cx + (R+14) * Math.cos(ang)} y={cy + (R+14) * Math.sin(ang)} fontSize="12" textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
-        })}
-      </svg>
-      <div style={{ fontSize:12, color:'#6b7280' }}>
-        分数（0~5）：Coop {scores.coop} / Agg {scores.agg} / Cons {scores.cons} / Eff {scores.eff} / Rob {scores.rob}
-      </div>
-    </div>
-  );
-}
-
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
 const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   if (typeof msg !== 'string') return msg;
@@ -326,6 +267,45 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
   return out;
 };
+
+/* ====== 宽容的“胜负识别 + 结果提取”工具（新增） ====== */
+const lc = (s:any)=> String(s ?? '').toLowerCase();
+
+/** 判断一条消息是否像“本局结果/胜负” */
+function isWinLikeMsg(m:any){
+  const T = lc(m?.type), K = lc(m?.kind);
+  const finals = new Set([
+    'win','result','game-over','game_end','gameover','final','end','summary','scores','done'
+  ]);
+  return finals.has(T) || finals.has(K);
+}
+
+/** 从一条“结果”消息里尽量抠出赢家、地主、倍数和三家的当局得分增量 */
+function extractOutcome(m:any){
+  const winner =
+    m.winner ?? m.result?.winner ?? m.final?.winner ?? null;
+
+  const landlord =
+    m.landlord ?? m.result?.landlord ?? m.final?.landlord ?? null;
+
+  const mult =
+    m.multiplier ?? m.times ?? m.beiShu ?? m.beishu ?? m.x ?? 1;
+
+  // 可能的三家增量字段
+  const candidates = [
+    m.deltaScores, m.delta, m.score_delta, m.scoresDelta,
+    m.result?.delta, m.result?.deltaScores, m.final?.deltaScores,
+    m.scores
+  ];
+  let ds:any = candidates.find(x=>Array.isArray(x) && x.length===3) || null;
+
+  // 兼容：如果只给了“结束总分”和“上一总分”
+  if (!ds && Array.isArray(m.rawScores) && Array.isArray(m.prevScores)
+      && m.rawScores.length===3 && m.prevScores.length===3) {
+    ds = m.rawScores.map((v:number,i:number)=>v - m.prevScores[i]);
+  }
+  return { winner, landlord, mult, ds };
+}
 
 /* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
@@ -690,105 +670,67 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              const isWinLike =
-                (m.type === 'event' && (m.kind === 'win' || m.kind === 'result' || m.kind === 'game-over' || m.kind === 'game_end')) ||
-                (m.type === 'result') || (m.type === 'game-over') || (m.type === 'game_end');
-              if (isWinLike) {
-                const L = (nextLandlord ?? 0) as number;
-                const ds = (Array.isArray(m.deltaScores) ? m.deltaScores
-                          : Array.isArray(m.delta) ? m.delta
-                          : [0,0,0]) as [number,number,number];
+              /* ========== 宽容识别：结果 / 胜负（替换原来的分支） ========== */
+              if (isWinLikeMsg(m)) {
+                const {winner:win0, landlord:land0, mult, ds} = extractOutcome(m);
 
-                const rot: [number,number,number] = [
-                  ds[(0 - L + 3) % 3],
-                  ds[(1 - L + 3) % 3],
-                  ds[(2 - L + 3) % 3],
-                ];
-                let nextWinnerLocal = m.winner ?? nextWinner ?? null;
-                nextMultiplier = m.multiplier ?? nextMultiplier ?? 1;
-                nextDelta      = rot;
-                nextTotals     = [
-                  nextTotals[0] + rot[0],
-                  nextTotals[1] + rot[1],
-                  nextTotals[2] + rot[2]
-                ] as any;
+                // 确认地主
+                let L = (nextLandlord ?? land0 ?? 0) as number;
+                nextLandlord = (nextLandlord ?? land0 ?? null);
 
-                if (nextWinnerLocal == null) {
+                // 旋转到“按座位(甲乙丙)”的增量
+                let rot:[number,number,number] = [0,0,0];
+                if (Array.isArray(ds) && ds.length===3) {
+                  rot = [
+                    ds[(0 - L + 3) % 3],
+                    ds[(1 - L + 3) % 3],
+                    ds[(2 - L + 3) % 3],
+                  ] as [number,number,number];
+
+                  nextDelta = rot;
+                  nextTotals = [
+                    nextTotals[0] + rot[0],
+                    nextTotals[1] + rot[1],
+                    nextTotals[2] + rot[2]
+                  ] as any;
+                }
+
+                // 赢家：缺失则看地主增量
+                let nextWinnerLocal = (win0 ?? nextWinner ?? null) as number | null;
+                if (nextWinnerLocal == null && Array.isArray(ds)) {
                   const landlordDelta = ds[0] ?? 0;
                   if (landlordDelta > 0) nextWinnerLocal = L;
-                  else if (landlordDelta < 0) {
-                    const farmer = [0,1,2].find(x => x !== L)!;
-                    nextWinnerLocal = farmer;
-                  }
+                  else if (landlordDelta < 0) nextWinnerLocal = [0,1,2].find(x=>x!==L)!;
                 }
                 nextWinner = nextWinnerLocal;
+                nextMultiplier = mult ?? nextMultiplier ?? 1;
 
-                {
-                  const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
-                  nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
+                // 标记完成（并给雷达图兜底）
+                const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
+                nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
+
+                // TrueSkill：需要知道 L 与增量
+                if (nextLandlord!=null && Array.isArray(ds) && ds.length===3) {
+                  const updated = tsRef.current.map(r => ({ ...r }));
+                  const farmers = [0,1,2].filter(s => s !== L);
+                  const landlordWin = (nextWinnerLocal === L) || ((ds[0]??0) > 0);
+                  if (landlordWin) tsUpdateTwoTeams(updated, [L], farmers);
+                  else             tsUpdateTwoTeams(updated, farmers, [L]);
+                  setTsArr(updated);
+
+                  // 回写记录簿
+                  if (props.onTSApply) {
+                    const ids = seatIdsRef.current;
+                    const ups = [
+                      { id: ids[L], role:'L' as Role, rating: updated[L] },
+                      { id: ids[farmers[0]], role:'F' as Role, rating: updated[farmers[0]] },
+                      { id: ids[farmers[1]], role:'F' as Role, rating: updated[farmers[1]] },
+                    ];
+                    props.onTSApply(ups, { landlord:L, farmerIdxs:farmers, seatIds:ids, round:labelRoundNo });
+                  }
                 }
 
-                // UI 实时：更新当前角色的 TS
-                const updated = tsRef.current.map(r => ({ ...r }));
-                const farmers = [0,1,2].filter(s => s !== L);
-                const landlordDelta = ds[0] ?? 0;
-                const landlordWin = (nextWinnerLocal === L) || (landlordDelta > 0);
-                if (landlordWin) tsUpdateTwoTeams(updated, [L], farmers);
-                else             tsUpdateTwoTeams(updated, farmers, [L]);
-                setTsArr(updated);
-
-                // 写回记录簿
-                if (props.onTSApply) {
-                  const ids = seatIdsRef.current;
-                  const ups = [
-                    { id: ids[L], role:'L' as Role, rating: updated[L] },
-                    { id: ids[farmers[0]], role:'F' as Role, rating: updated[farmers[0]] },
-                    { id: ids[farmers[1]], role:'F' as Role, rating: updated[farmers[1]] },
-                  ];
-                  props.onTSApply(ups, { landlord:L, farmerIdxs:farmers, seatIds:ids, round:labelRoundNo });
-                }
-
-                nextLog = [
-                  ...nextLog,
-                  `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`
-                ];
-                nextLog = [
-                  ...nextLog,
-                  `胜者：${nextWinnerLocal == null ? '—' : seatName(nextWinnerLocal)}，倍数 x${nextMultiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
-                ];
-                continue;
-              }
-
-              const isStatsTop = (m.type === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
-              const isStatsEvt = (m.type === 'event' && m.kind === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
-              if (isStatsTop || isStatsEvt) {
-                seenStatsRef.current = true;
-                const arr = (m.perSeat ?? m.seats) as any[];
-                const s3 = [0,1,2].map(i=>{
-                  const rec = arr.find((x:any)=>x.seat===i || x.index===i);
-                  const sc = rec?.scaled || rec?.score || {};
-                  return {
-                    coop: Number(sc.coop ?? 2.5),
-                    agg : Number(sc.agg  ?? 2.5),
-                    cons: Number(sc.cons ?? 2.5),
-                    eff : Number(sc.eff  ?? 2.5),
-                    rob : Number(sc.rob  ?? 2.5),
-                  };
-                }) as Score5[];
-
-                const mode  = aggModeRef.current;
-                const a     = alphaRef.current;
-
-                if (!nextAggStats) {
-                  nextAggStats = s3.map(x=>({ ...x }));
-                  nextAggCount = 1;
-                } else {
-                  nextAggStats = nextAggStats.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
-                  nextAggCount = nextAggCount + 1;
-                }
-
-                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
-                nextLog = [...nextLog, `战术画像（本局）：${msg}（已累计 ${nextAggCount} 局）`];
+                nextLog = [...nextLog, `【TS】finalize：L=${nextLandlord ?? '-'} Winner=${nextWinner ?? '-'} x${nextMultiplier}`];
                 continue;
               }
 
@@ -805,6 +747,18 @@ function LivePanel(props: LiveProps) {
           setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
         }
+      }
+
+      // —— 流结束兜底：若未收到任何胜负/结束类消息，也推进一局（TS 保持不变） —— //
+      if (!roundFinishedRef.current) {
+        let nf = finishedRef.current;
+        let na = aggStatsRef.current;
+        let nc = aggCountRef.current;
+        const res = markRoundFinishedIfNeeded(nf, na, nc);
+        setFinishedCount(res.nextFinished);
+        setAggStats(res.nextAggStats || null);
+        setAggCount(res.nextAggCount);
+        setLog(l => [...l, '【前端】兜底：流结束但未收到 win/result，已计为完成一局（TS 保持不变）。']);
       }
 
       setLog(l => [...l, `—— 本局流结束 ——`]);
@@ -976,6 +930,64 @@ function LivePanel(props: LiveProps) {
   );
 }
 
+/* ====== 雷达图累计（0~5） ====== */
+type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
+function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
+  if (mode === 'mean') {
+    const c = Math.max(0, count);
+    return {
+      coop: (prev.coop*c + curr.coop)/(c+1),
+      agg:  (prev.agg *c + curr.agg )/(c+1),
+      cons: (prev.cons*c + curr.cons)/(c+1),
+      eff:  (prev.eff *c + curr.eff )/(c+1),
+      rob:  (prev.rob *c + curr.rob )/(c+1),
+    };
+  }
+  const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
+  return {
+    coop: a*curr.coop + (1-a)*prev.coop,
+    agg:  a*curr.agg  + (1-a)*prev.agg,
+    cons: a*curr.cons + (1-a)*prev.cons,
+    eff:  a*curr.eff  + (1-a)*prev.eff,
+    rob:  a*curr.rob  + (1-a)*prev.rob,
+  };
+}
+function RadarChart({ title, scores }:{ title: string; scores: Score5; }) {
+  const vals = [scores.coop, scores.agg, scores.cons, scores.rob, scores.eff];
+  const size = 180, R = 70, cx = size/2, cy = size/2;
+  const pts = vals.map((v, i)=>{
+    const ang = (-90 + i*(360/5)) * Math.PI/180;
+    const r = (Math.max(0, Math.min(5, v)) / 5) * R;
+    return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
+  }).join(' ');
+  return (
+    <div style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
+      <div style={{ fontWeight:700, marginBottom:6 }}>{title}</div>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {[1,2,3,4,5].map(k=>{
+          const r = (k/5)*R;
+          const polygon = Array.from({length:5}, (_,i)=>{
+            const ang = (-90 + i*(360/5)) * Math.PI/180;
+            return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
+          }).join(' ');
+          return <polygon key={k} points={polygon} fill="none" stroke="#e5e7eb"/>;
+        })}
+        {Array.from({length:5}, (_,i)=>{
+          const ang = (-90 + i*(360/5)) * Math.PI/180;
+          return <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang)} y2={cy + R * Math.sin(ang)} stroke="#e5e7eb"/>;
+        })}
+        <polygon points={pts} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
+        {(['配合','激进','保守','效率','抢地主']).map((lab, i)=>{
+          const ang = (-90 + i*(360/5)) * Math.PI/180;
+          return <text key={i} x={cx + (R+14) * Math.cos(ang)} y={cy + (R+14) * Math.sin(ang)} fontSize="12" textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
+        })}
+      </svg>
+      <div style={{ fontSize:12, color:'#6b7280' }}>
+        分数（0~5）：Coop {scores.coop} / Agg {scores.agg} / Cons {scores.cons} / Eff {scores.eff} / Rob {scores.rob}
+      </div>
+    </div>
+  );
+}
 function RadarPanel({
   aggStats, aggCount, aggMode, alpha,
   onChangeMode, onChangeAlpha,
@@ -1246,7 +1258,7 @@ function Home() {
             </div>
           </div>
 
-          {/* === 新增：当前三家记录簿先验（按甲乙丙三列、每列 L/F 两行） === */}
+          {/* === 当前三家记录簿先验（甲/乙/丙三列，L/F 两行） === */}
           <div style={{ marginTop:10 }}>
             <div style={{ fontSize:12, color:'#374151', marginBottom:6 }}>当前三家记录簿先验（按角色）</div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
