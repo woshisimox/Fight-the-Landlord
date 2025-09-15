@@ -13,13 +13,17 @@ type BotChoice =
 type Rating = { mu:number; sigma:number };
 const TS_DEFAULT: Rating = { mu:25, sigma:25/3 };
 const TS_BETA = 25/6;
-const TS_TAU  = 25/300;
+const TS_TAU  = 25/300;           // 轻度动态因子，赛季内可保留
 const SQRT2 = Math.sqrt(2);
+
+// 误差函数近似
 function erf(x:number){ const s=Math.sign(x); const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911; const t=1/(1+p*Math.abs(x)); const y=1-(((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t)*Math.exp(-x*x); return s*y; }
 function phi(x:number){ return Math.exp(-0.5*x*x)/Math.sqrt(2*Math.PI); }
 function Phi(x:number){ return 0.5*(1+erf(x/SQRT2)); }
 function V_exceeds(t:number){ const d=Math.max(1e-12,Phi(t)); return phi(t)/d; }
 function W_exceeds(t:number){ const v=V_exceeds(t); return v*(v+t); }
+
+// TrueSkill 团队A(胜) vs 团队B(负) 更新
 function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
   const varA = teamA.reduce((s,i)=>s+r[i].sigma**2,0), varB = teamB.reduce((s,i)=>s+r[i].sigma**2,0);
   const muA  = teamA.reduce((s,i)=>s+r[i].mu,0),     muB  = teamB.reduce((s,i)=>s+r[i].mu,0);
@@ -58,6 +62,7 @@ const SUPPORTED_DEFAULT_IDS = [
   'ai:openai:gpt-4o-mini',
   'ai:gemini:gemini-1.5-flash',
   'ai:grok:grok-2',
+  'ai:grok:grok-2-latest',
   'ai:kimi:kimi-k2-0905-preview',
   'ai:qwen:qwen-plus',
   'http:default',
@@ -76,9 +81,7 @@ function labelForId(id:string): string {
     const name = prov==='openai'?'OpenAI':prov==='gemini'?'Gemini':prov==='grok'?'Grok':prov==='kimi'?'Kimi':prov==='qwen'?'Qwen':prov;
     return `${name}(${model})`;
   }
-  if (id.startsWith('http:')) {
-    return 'HTTP(' + id.slice(5) + ')';
-  }
+  if (id.startsWith('http:')) return 'HTTP(' + id.slice(5) + ')';
   return id;
 }
 function makeEmptyEntry(label:string): TSBookEntry {
@@ -96,7 +99,7 @@ function computeOverall(entry: TSBookEntry): number {
   return 0.5*crL + 0.5*crF;
 }
 
-/* ====== UI 及牌面渲染（与你现有代码一致） ====== */
+/* ====== UI 及牌面渲染（与你现有布局一致） ====== */
 type LiveProps = {
   rounds: number;
   startScore: number;
@@ -114,7 +117,7 @@ type LiveProps = {
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
 
-  // ★ 新增：获取/更新全局 TrueSkill 记录簿（用作导入先验与赛后写回）
+  // TrueSkill 记录簿读写
   getTSRating?: (id:string, role:Role) => Rating | null;
   onTSApply?: (updates: {id:string; role:Role; rating: Rating}[], meta:{landlord:number; farmerIdxs:number[]; seatIds:string[]; round:number}) => void;
 };
@@ -216,7 +219,7 @@ function defaultModelFor(choice: BotChoice): string {
   switch (choice) {
     case 'ai:openai': return 'gpt-4o-mini';
     case 'ai:gemini': return 'gemini-1.5-flash';
-    case 'ai:grok':  return 'grok-2';
+    case 'ai:grok':  return 'grok-2-latest';
     case 'ai:kimi':  return 'kimi-k2-0905-preview';
     case 'ai:qwen':  return 'qwen-plus';
     default: return '';
@@ -369,7 +372,10 @@ function LivePanel(props: LiveProps) {
 
   const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
 
-  // —— 新增：当前局的“参赛体 ID 列表”，用于把 TS 更新写回“记录簿” —— //
+  // ★ 本局是否已从记录簿载入过 TS 先验（用于屏蔽后端 before-round 覆盖）
+  const appliedTSFromBookRef = useRef(false);
+
+  // 本局参赛体 ID 列表（用于把 TS 更新写回记录簿）
   const seatIdsRef = useRef<string[]>([]);
 
   // 每局观测标记 —— 是否已计结束、是否收到 stats
@@ -468,6 +474,7 @@ function LivePanel(props: LiveProps) {
       // 新一局：重置标记
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
+      appliedTSFromBookRef.current = false;
 
       // 记录本局参赛体 ID 列表
       seatIdsRef.current = specs.map(idFromSpec);
@@ -526,10 +533,15 @@ function LivePanel(props: LiveProps) {
           for (const raw of batch) {
             const m: any = raw;
             try {
-              // -------- TS 帧（后端主动提供） --------
+              // -------- TS 帧（后端可能推送） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
-                setTsArr(incoming);
+                // 若我们已经从记录簿载入过先验，则忽略 before-round 覆盖
+                if (m.where === 'before-round' && appliedTSFromBookRef.current) {
+                  nextLog = [...nextLog, `【TS】忽略后端 before-round 覆盖（已用导入先验）`];
+                } else {
+                  setTsArr(incoming);
+                }
 
                 if (m.where === 'after-round') {
                   const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
@@ -565,7 +577,7 @@ function LivePanel(props: LiveProps) {
                 nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?'}为地主`];
                 lastReasonRef.current = [null, null, null];
 
-                // ★ 关键：按角色从“记录簿”里载入 μ,σ 作为本局先验
+                // ★ 关键：按角色从“记录簿”里载入 μ,σ 作为本局先验（精确匹配）
                 if (lord != null && props.getTSRating) {
                   const ids = seatIdsRef.current;
                   const initR: Rating[] = [0,1,2].map(i=>{
@@ -573,7 +585,15 @@ function LivePanel(props: LiveProps) {
                     return props.getTSRating!(ids[i], role) || TS_DEFAULT;
                   });
                   setTsArr(initR);
-                  nextLog = [...nextLog, `【TS】已按记录簿载入本局先验（L/F 分角色）`];
+                  appliedTSFromBookRef.current = true;
+                  const hitFlags = [0,1,2].map(i=>{
+                    const role: Role = (i===lord)?'L':'F';
+                    return props.getTSRating!(ids[i], role) ? '命中' : '默认';
+                  });
+                  nextLog = [...nextLog,
+                    `【TS】载入先验（精确匹配）：` +
+                    `${['甲','乙','丙'].map((n,i)=>`${n}(${i===lord?'L':'F'}):${hitFlags[i]}`).join(' ｜ ')}`
+                  ];
                 }
 
                 continue;
@@ -979,11 +999,14 @@ function Home() {
       return { ...prev, [id]: makeEmptyEntry(label) };
     });
   };
+
+  // 精确匹配：只有完全相同的 id 才返回先验；否则返回 null
   const getTSRating = (id:string, role:Role): Rating | null => {
     const rec = tsBook[id];
     if (!rec) return null;
     return role==='L' ? { mu: rec.L.mu, sigma: rec.L.sigma } : { mu: rec.F.mu, sigma: rec.F.sigma };
   };
+
   const onTSApply = (updates: {id:string; role:Role; rating: Rating}[]) => {
     setTsBook(prev=>{
       const next: TSBook = { ...prev };
