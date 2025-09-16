@@ -321,30 +321,8 @@ function LivePanel(props: LiveProps) {
 
   const seatIdentity = (i:number) => {
     const choice = props.seats[i];
-    // 模型名称（按提供方标准化）；HTTP 还要把 base 拼进去，保证“同一 AI 不同版本”被区分
-    const normalizeModelForProvider = (choice: BotChoice, input: string): string => {
-      const m = (input || '').trim(); if (!m) return '';
-      const low = m.toLowerCase();
-      switch (choice) {
-        case 'ai:kimi':   return /^kimi[-\w]*/.test(low) ? m : '';
-        case 'ai:openai': return /^(gpt-|o[34]|text-|omni)/.test(low) ? m : '';
-        case 'ai:gemini': return /^gemini[-\w.]*/.test(low) ? m : '';
-        case 'ai:grok':   return /^grok[-\w.]*/.test(low) ? m : '';
-        case 'ai:qwen':   return /^qwen[-\w.]*/.test(low) ? m : '';
-        default: return '';
-      }
-    };
-    const defaultModelFor = (choice: BotChoice): string => {
-      switch (choice) {
-        case 'ai:openai': return 'gpt-4o-mini';
-        case 'ai:gemini': return 'gemini-1.5-flash';
-        case 'ai:grok':  return 'grok-2';
-        case 'ai:kimi':  return 'kimi-k2-0905-preview';
-        case 'ai:qwen':  return 'qwen-plus';
-        default: return '';
-      }
-    };
-    const model = normalizeModelForProvider(choice, (props.seatModels[i] || '')) || defaultModelFor(choice);
+    // 用全局的 normalizeModelForProvider/defaultModelFor
+    const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
     return `${choice}|${model}|${base}`; // 身份锚定：内置/AI + 模型/版本 + HTTP Base
   };
@@ -365,6 +343,20 @@ function LivePanel(props: LiveProps) {
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
     setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
+  };
+
+  // NEW: 按角色应用（若已知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
+  const applyTsFromStoreByRole = (lord: number | null, why: string) => {
+    const ids = [0,1,2].map(seatIdentity);
+    const init = [0,1,2].map(i => {
+      const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
+      return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
+    });
+    setTsArr(init);
+    setLog(l => [...l,
+      `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
+      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
+    ]);
   };
 
   const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
@@ -434,7 +426,10 @@ function LivePanel(props: LiveProps) {
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
 
-  const handleRefreshApply = () => applyTsFromStore('手动刷新');
+  // 刷新：改为按“当前地主身份”应用
+  const handleRefreshApply = () => {
+    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+  };
 
   // 累计画像
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
@@ -481,7 +476,7 @@ function LivePanel(props: LiveProps) {
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
-    // TrueSkill：每次“开始”时应用存档（若存在）
+    // TrueSkill：每次“开始”时先应用 overall（此时尚未知地主）
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
     try { applyTsFromStore('比赛开始前'); } catch {}
 
@@ -633,9 +628,14 @@ function LivePanel(props: LiveProps) {
                 nextPlays = []; nextWinner = null; nextDelta = null; nextMultiplier = 1;
                 const decorated: string[][] = (rh as string[][]).map(decorateHandCycle);
                 nextHands = decorated;
+
                 const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
                 nextLandlord = lord;
                 nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?'}为地主`];
+
+                // NEW: 一旦确认地主，按角色（地主/农民）应用存档
+                try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
+
                 lastReasonRef.current = [null, null, null];
                 continue;
               }
