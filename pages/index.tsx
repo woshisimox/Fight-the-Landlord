@@ -9,7 +9,7 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
   | 'http';
 
-/* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
+/* ========= TrueSkill（1v2：地主 vs 两农民，前端轻量实现） ========= */
 type Rating = { mu:number; sigma:number };
 const TS_DEFAULT: Rating = { mu:25, sigma:25/3 };
 const TS_BETA = 25/6;
@@ -39,11 +39,7 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
   }
 }
 
-/* ========= PageRank 计分 =========
-   - 维护 3×3 有向图 W（赢家 -> 输家），边权=当局倍数；
-   - 农民胜：两名农民分别指向地主；地主胜：地主指向两名农民；
-   - 幂迭代 d=0.85、40 轮，得到 pr（和为 1）。
-*/
+/* ========= PageRank（赢家→输家，边权=倍数，d=0.85） ========= */
 type PRState = { W:number[][]; pr:number[]; rounds:number };
 const prZero = (): PRState => ({ W:[[0,0,0],[0,0,0],[0,0,0]], pr:[1/3,1/3,1/3], rounds:0 });
 function computePageRank(W:number[][], d=0.85, iters=40): number[] {
@@ -94,7 +90,7 @@ const emptyTsStore = (): TsStore => ({ schema:'ddz-trueskill@1', updatedAt:new D
 const readTsStore  = (): TsStore => { try{ const raw=localStorage.getItem(TS_STORE_KEY); if(!raw) return emptyTsStore(); const j=JSON.parse(raw); if(j?.schema&&j?.players) return j as TsStore; }catch{} return emptyTsStore(); };
 const writeTsStore = (s: TsStore) => { try{ s.updatedAt=new Date().toISOString(); localStorage.setItem(TS_STORE_KEY, JSON.stringify(s)); }catch{} };
 
-/* ===== PageRank 本地存档（新增，独立于 TS） ===== */
+/* ===== PageRank 本地存档（独立） ===== */
 type PrStoreEntry = { id:string; pr?: number|null };
 type PrStore = { schema:'ddz-pagerank@1'; updatedAt:string; players:Record<string, PrStoreEntry> };
 const PR_STORE_KEY = 'ddz_pr_store_v1';
@@ -292,7 +288,7 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  /* —— 新增：可多选显示 —— */
+  /* —— 显示开关：TS/PR 可多选 —— */
   const [showTS, setShowTS] = useState<boolean>(true);
   const [showPR, setShowPR] = useState<boolean>(true);
 
@@ -310,7 +306,7 @@ function LivePanel(props: LiveProps) {
   useEffect(()=>{ try { tsStoreRef.current = readTsStore(); } catch {} }, []);
   const tsFileRef = useRef<HTMLInputElement|null>(null);
 
-  // ===== PR 存档（新增） =====
+  // ===== PR 存档 =====
   const prStoreRef = useRef<PrStore>(emptyPrStore());
   useEffect(()=>{ try { prStoreRef.current = readPrStore(); } catch {} }, []);
   const prFileRef = useRef<HTMLInputElement|null>(null);
@@ -398,7 +394,7 @@ function LivePanel(props: LiveProps) {
   };
   const handleTsRefresh = () => { applyTsFromStoreByRole(landlordRef.current, '手动刷新'); };
 
-  /* ===== PR: 从存档解析/应用/写回（独立） ===== */
+  /* ===== PR: 存档/应用/写回（独立） ===== */
   const applyPrFromStore = (why:string) => {
     const ids = [0,1,2].map(seatIdentity);
     const pr = ids.map(id => {
@@ -481,11 +477,10 @@ function LivePanel(props: LiveProps) {
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
-    // TrueSkill：开始时先应用 overall（未知地主）
+    // TS：开赛先按 overall 应用
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
     try { applyTsFromStore('比赛开始前'); } catch {}
-
-    // PageRank：清零
+    // PR：清零
     setPrState(prZero());
 
     controllerRef.current = new AbortController();
@@ -685,7 +680,7 @@ function LivePanel(props: LiveProps) {
                 }
                 nextWinner = nextWinnerLocal;
 
-                // —— TrueSkill：更新 & 存档 —— //
+                // —— TS 更新 & 存档 —— //
                 {
                   const updated = tsRef.current.map(r => ({ ...r }));
                   const farmers = [0,1,2].filter(s => s !== L);
@@ -696,7 +691,7 @@ function LivePanel(props: LiveProps) {
                   nextLog = [...nextLog, `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`];
                 }
 
-                // —— PageRank：赢家→输家（权=倍数） —— //
+                // —— PR 累加 & 迭代 —— //
                 {
                   const W = curPR.W.map(row => row.slice());
                   const mlt = Math.max(1, Number(nextMultiplier) || 1);
@@ -779,24 +774,11 @@ function LivePanel(props: LiveProps) {
         </span>
       </div>
 
-      {/* ========= TrueSkill + PageRank（可多选显示） ========= */}
-      <Section title="TrueSkill（实时）">
-        <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:8 }}>
-          {/* TS 控件 */}
-          <input ref={tsFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleTsUpload} />
-          <button onClick={()=>tsFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
-          <button onClick={handleTsSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
-          <button onClick={handleTsRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
-
-          {/* PR 独立控件 */}
-          <input ref={prFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handlePrUpload} />
-          <span style={{ marginLeft:6, color:'#6b7280' }}>｜</span>
-          <button onClick={()=>prFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>PR上传</button>
-          <button onClick={handlePrSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>PR存档</button>
-          <button onClick={handlePrRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>PR刷新</button>
-
-          {/* 多选显示 */}
-          <div style={{ marginLeft:8, fontSize:12 }}>
+      {/* ========= 重命名为：排名 ========= */}
+      <Section title="排名">
+        {/* 全局显示开关（可多选） */}
+        <div style={{ display:'flex', gap:12, alignItems:'center', flexWrap:'wrap', marginBottom:10 }}>
+          <div style={{ fontSize:12 }}>
             显示：
             <label style={{ marginLeft:6 }}>
               <input type="checkbox" checked={showTS} onChange={e=>setShowTS(e.target.checked)} /> TrueSkill
@@ -805,52 +787,77 @@ function LivePanel(props: LiveProps) {
               <input type="checkbox" checked={showPR} onChange={e=>setShowPR(e.target.checked)} /> PageRank
             </label>
           </div>
-
-          <div style={{ fontSize:12, color:'#6b7280', marginLeft:6 }}>按“内置/AI+模型/版本(+HTTP Base)”识别，TS 区分地主/农民；PR 为整体分数。</div>
+          <div style={{ fontSize:12, color:'#6b7280' }}>TS 区分地主/农民；PR 为整体分数。</div>
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          {[0,1,2].map(i=>{
-            const stored = getStoredForSeat(i);
-            const usingRole: 'overall'|'landlord'|'farmer' = landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
-            return (
-              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                  <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
-                </div>
+        {/* —— TS 框 —— */}
+        {showTS && (
+          <div style={{ border:'1px solid #bfdbfe', background:'#eff6ff', borderRadius:12, padding:12, marginBottom:12 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+              <div style={{ fontWeight:800, color:'#1d4ed8' }}>TrueSkill</div>
+              <input ref={tsFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleTsUpload} />
+              <button onClick={()=>tsFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #93c5fd', borderRadius:8, background:'#fff' }}>上传</button>
+              <button onClick={handleTsSave} style={{ padding:'4px 10px', border:'1px solid #93c5fd', borderRadius:8, background:'#fff' }}>存档</button>
+              <button onClick={handleTsRefresh} style={{ padding:'4px 10px', border:'1px solid #93c5fd', borderRadius:8, background:'#fff' }}>刷新</button>
+              <div style={{ fontSize:12, color:'#2563eb' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，区分地主/农民。</div>
+            </div>
 
-                {showTS && (
-                  <>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>{
+                const stored = getStoredForSeat(i);
+                const usingRole: 'overall'|'landlord'|'farmer' = landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
+                return (
+                  <div key={i} style={{ border:'1px solid #dbeafe', borderRadius:8, padding:10, background:'#fff' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                      <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+                    </div>
                     <div style={{ fontSize:13, color:'#374151' }}>
                       <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
                       <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
                       <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
                     </div>
-                    <div style={{ borderTop:'1px dashed #eee', marginTop:8, paddingTop:8 }}>
-                      <div style={{ fontSize:12, marginBottom:6 }}>
-                        当前使用：<b>{usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}</b>
-                      </div>
+                    <div style={{ borderTop:'1px dashed #e5e7eb', marginTop:8, paddingTop:8 }}>
+                      <div style={{ fontSize:12, marginBottom:6 }}>当前使用：<b>{usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}</b></div>
                       <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12, color:'#374151' }}>
                         <div><div style={{ fontWeight:600, opacity:0.8 }}>总体</div><div>{tsMuSigStr(stored.overall)}</div></div>
                         <div><div style={{ fontWeight:600, opacity:0.8 }}>地主</div><div>{tsMuSigStr(stored.landlord)}</div></div>
                         <div><div style={{ fontWeight:600, opacity:0.8 }}>农民</div><div>{tsMuSigStr(stored.farmer)}</div></div>
                       </div>
                     </div>
-                  </>
-                )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
-                {showPR && (
-                  <div style={{ fontSize:13, color:'#374151', marginTop: showTS ? 10 : 0 }}>
+        {/* —— PR 框 —— */}
+        {showPR && (
+          <div style={{ border:'1px solid #bbf7d0', background:'#ecfdf5', borderRadius:12, padding:12 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+              <div style={{ fontWeight:800, color:'#059669' }}>PageRank</div>
+              <input ref={prFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handlePrUpload} />
+              <button onClick={()=>prFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #86efac', borderRadius:8, background:'#fff' }}>上传</button>
+              <button onClick={handlePrSave} style={{ padding:'4px 10px', border:'1px solid #86efac', borderRadius:8, background:'#fff' }}>存档</button>
+              <button onClick={handlePrRefresh} style={{ padding:'4px 10px', border:'1px solid #86efac', borderRadius:8, background:'#fff' }}>刷新</button>
+              <div style={{ fontSize:12, color:'#047857' }}>PR 为整体分数（赢家→输家，边权=倍数）。</div>
+            </div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>(
+                <div key={i} style={{ border:'1px solid #dcfce7', borderRadius:8, padding:10, background:'#fff' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                    <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+                  </div>
+                  <div style={{ fontSize:13, color:'#064e3b' }}>
                     <div>PR：<b>{(prState.pr[i]*100).toFixed(2)}%</b></div>
                     <div>排名：<b>#{prRankIndex(i)}</b></div>
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
-          说明：CR 为置信下界（越高越稳）；PR 边权=倍数，赢家→输家累计；每局结算后自动更新（也兼容后端推送 TS）。</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </Section>
 
       <Section title="积分（总分）">
