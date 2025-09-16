@@ -39,6 +39,37 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
   }
 }
 
+/* ===== 新增：TrueSkill 存档（按身份 + 角色区分） ===== */
+type TsRole = 'landlord'|'farmer';
+type TsStoreEntry = {
+  id: string;
+  label?: string;
+  overall?: Rating | null;
+  roles?: { landlord?: Rating | null; farmer?: Rating | null };
+  meta?: { choice?: string; model?: string; httpBase?: string };
+};
+type TsStore = {
+  schema: 'ddz-trueskill@1';
+  updatedAt: string;
+  players: Record<string, TsStoreEntry>;
+};
+const TS_STORE_KEY = 'ddz_ts_store_v1';
+const ensureRating = (x:any): Rating => {
+  const mu = Number(x?.mu), sigma = Number(x?.sigma);
+  if (Number.isFinite(mu) && Number.isFinite(sigma)) return { mu, sigma };
+  return { ...TS_DEFAULT };
+};
+const emptyStore = (): TsStore => ({ schema:'ddz-trueskill@1', updatedAt:new Date().toISOString(), players:{} });
+const readStore = (): TsStore => {
+  try { const raw = localStorage.getItem(TS_STORE_KEY); if (!raw) return emptyStore();
+    const j = JSON.parse(raw); if (j?.schema && j?.players) return j as TsStore;
+  } catch {}
+  return emptyStore();
+};
+const writeStore = (s: TsStore) => {
+  try { s.updatedAt = new Date().toISOString(); localStorage.setItem(TS_STORE_KEY, JSON.stringify(s)); } catch {}
+};
+
 type LiveProps = {
   rounds: number;
   startScore: number;
@@ -280,6 +311,105 @@ function LivePanel(props: LiveProps) {
   const tsRef = useRef(tsArr); useEffect(()=>{ tsRef.current=tsArr; }, [tsArr]);
   const tsCr = (r:Rating)=> (r.mu - 3*r.sigma);
 
+  // —— 新增：TS 存档（读/写/应用） —— //
+  const tsStoreRef = useRef<TsStore>(emptyStore());
+  useEffect(()=>{ tsStoreRef.current = readStore(); }, []);
+  const fileRef = useRef<HTMLInputElement|null>(null);
+
+  const seatIdentity = (i:number) => {
+    const choice = props.seats[i];
+    const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
+    const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
+    // 身份锚定：choice | model | base（base 仅 HTTP 有意义）
+    return `${choice}|${model}|${base}`;
+  };
+  const resolveRatingForIdentity = (id:string, role?:TsRole): Rating | null => {
+    const p = tsStoreRef.current.players[id]; if (!p) return null;
+    if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
+    if (p.overall) return ensureRating(p.overall);
+    const L = p.roles?.landlord, F = p.roles?.farmer;
+    if (L && F) return { mu:(L.mu+F.mu)/2, sigma:(L.sigma+F.sigma)/2 };
+    if (L) return ensureRating(L);
+    if (F) return ensureRating(F);
+    return null;
+  };
+  const applyTsFromStore = (why:string) => {
+    const ids = [0,1,2].map(seatIdentity);
+    const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
+    setTsArr(init);
+    setLog(l => [...l, `【TS】已从存档应用（${why}）：${init.map((r,i)=>`${seatName(i)} μ=${fmt2(r.mu)} σ=${fmt2(r.sigma)}`).join(' | ')}`]);
+  };
+  const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
+    const ids = [0,1,2].map(seatIdentity);
+    for (let i=0;i<3;i++){
+      const id = ids[i];
+      const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{}, meta:{} };
+      entry.overall = { ...updated[i] };
+      const role: TsRole = (i===landlordIndex) ? 'landlord' : 'farmer';
+      entry.roles = entry.roles || {};
+      entry.roles[role] = { ...updated[i] };
+      const choice = props.seats[i];
+      const model  = normalizeModelForProvider(choice, props.seatModels[i]||'') || defaultModelFor(choice);
+      const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
+      entry.meta = { choice, model, ...(base ? { httpBase: base } : {}) };
+      tsStoreRef.current.players[id] = entry;
+    }
+    writeStore(tsStoreRef.current);
+  };
+  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    try {
+      const text = await f.text();
+      const j = JSON.parse(text);
+      const store: TsStore = emptyStore();
+
+      // 兼容几种简单结构
+      if (Array.isArray(j?.players)) {
+        for (const p of j.players) {
+          const id = p.id || p.identity || p.key; if (!id) continue;
+          store.players[id] = {
+            id,
+            overall: p.overall || p.rating || null,
+            roles: { landlord: p.roles?.landlord ?? p.landlord ?? p.L ?? null,
+                     farmer:   p.roles?.farmer   ?? p.farmer   ?? p.F ?? null },
+            meta: p.meta || {}
+          };
+        }
+      } else if (j?.players && typeof j.players === 'object') {
+        store.players = j.players;
+      } else if (Array.isArray(j)) {
+        for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p; }
+      } else {
+        // 单人存档 { id, overall, roles }
+        if (j?.id) store.players[j.id] = j;
+      }
+
+      tsStoreRef.current = store; writeStore(store);
+      setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
+    } catch (err:any) {
+      setLog(l => [...l, `【TS】上传解析失败：${err?.message || err}`]);
+    } finally {
+      e.target.value = '';
+    }
+  };
+  const handleSaveArchive = () => {
+    // 保存前把当前三位的 overall 写入（角色化在每局后已自动写）
+    const ids = [0,1,2].map(seatIdentity);
+    ids.forEach((id,i)=>{
+      const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
+      entry.overall = { ...tsRef.current[i] };
+      tsStoreRef.current.players[id] = entry;
+    });
+    writeStore(tsStoreRef.current);
+
+    const blob = new Blob([JSON.stringify(tsStoreRef.current, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'trueskill_store.json'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+    setLog(l => [...l, '【TS】已导出当前存档。']);
+  };
+  const handleRefreshApply = () => applyTsFromStore('手动刷新');
+
   // 累计画像
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
   const [alpha, setAlpha] = useState<number>(0.35);
@@ -325,8 +455,9 @@ function LivePanel(props: LiveProps) {
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
-    // TrueSkill：每次“开始”重置
+    // TrueSkill：先重置为默认，再尝试从存档应用（比赛前可先上传/刷新）
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
+    try { applyTsFromStore('比赛开始前'); } catch {}
 
     controllerRef.current = new AbortController();
 
@@ -594,6 +725,9 @@ function LivePanel(props: LiveProps) {
                   else             tsUpdateTwoTeams(updated, farmers, [L]);
 
                   setTsArr(updated);
+                  // 写入存档：区分角色（landlord / farmer）
+                  updateStoreAfterRound(updated, L);
+
                   nextLog = [
                     ...nextLog,
                     `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`
@@ -690,6 +824,21 @@ function LivePanel(props: LiveProps) {
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
+        {/* —— 新增：上传 / 存档 / 刷新 —— */}
+        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
+          <input ref={fileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleUploadFile} />
+          <button onClick={()=>fileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+            上传
+          </button>
+          <button onClick={handleSaveArchive} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+            存档
+          </button>
+          <button onClick={handleRefreshApply} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+            刷新
+          </button>
+          <div style={{ fontSize:12, color:'#6b7280' }}>按身份匹配（内置/AI+模型/版本），支持“地主/农民”分档。</div>
+        </div>
+
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           {[0,1,2].map(i=>(
             <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
