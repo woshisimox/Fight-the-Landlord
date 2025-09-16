@@ -1125,8 +1125,8 @@ function LivePanel(props: LiveProps) {
           ))}
         </div>
         <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
-          说明：PR 基于“失败者→胜者”图；阻尼 d={{prStoreRef.current.params.damping}}，锚点为 Greedy Min（teleport），
-          并对锚点添加 ε={{prStoreRef.current.params.epsilon}} 的均匀出链；
+          说明：PR 基于“失败者→胜者”图；阻尼 d={prStoreRef.current.params.damping}，锚点为 Greedy Min（teleport），
+          并对锚点添加 ε={prStoreRef.current.params.epsilon} 的均匀出链；
           为体现绝对提升，显示“PR积分 = r × 边数总量”。
         </div>
       </Section>
