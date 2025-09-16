@@ -321,7 +321,6 @@ function LivePanel(props: LiveProps) {
 
   const seatIdentity = (i:number) => {
     const choice = props.seats[i];
-    // 用全局的 normalizeModelForProvider/defaultModelFor
     const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
     return `${choice}|${model}|${base}`; // 身份锚定：内置/AI + 模型/版本 + HTTP Base
@@ -426,9 +425,23 @@ function LivePanel(props: LiveProps) {
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
 
-  // 刷新：改为按“当前地主身份”应用
+  // 刷新：按“当前地主身份”应用
   const handleRefreshApply = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+  };
+
+  // —— 用于“区分显示”的帮助函数 —— //
+  const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
+  const fmtOrDash = (x:number|undefined|null)=> (x==null ? '—' : fmt2(x));
+  const muSig = (r: Rating | null | undefined) => r ? `μ ${fmt2(r.mu)}｜σ ${fmt2(r.sigma)}` : '—';
+  const getStoredForSeat = (i:number) => {
+    const id = seatIdentity(i);
+    const p = tsStoreRef.current.players[id];
+    return {
+      overall: p?.overall ? ensureRating(p.overall) : null,
+      landlord: p?.roles?.landlord ? ensureRating(p.roles.landlord) : null,
+      farmer: p?.roles?.farmer ? ensureRating(p.roles.farmer) : null,
+    };
   };
 
   // 累计画像
@@ -461,8 +474,6 @@ function LivePanel(props: LiveProps) {
   // 每局观测标记 —— 是否已计结束、是否收到 stats
   const roundFinishedRef = useRef<boolean>(false);
   const seenStatsRef     = useRef<boolean>(false);
-
-  const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
 
   const start = async () => {
     if (running) return;
@@ -847,7 +858,7 @@ function LivePanel(props: LiveProps) {
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
-        {/* 新增：上传 / 存档 / 刷新（不改动其它 UI） */}
+        {/* 上传 / 存档 / 刷新 */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
           <input ref={fileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleUploadFile} />
           <button onClick={()=>fileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
@@ -857,18 +868,46 @@ function LivePanel(props: LiveProps) {
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          {[0,1,2].map(i=>(
-            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+          {[0,1,2].map(i=>{
+            const stored = getStoredForSeat(i);
+            const usingRole: 'overall'|'landlord'|'farmer' =
+              landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
+            return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                  <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+                </div>
+                <div style={{ fontSize:13, color:'#374151' }}>
+                  <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
+                  <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
+                  <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
+                </div>
+
+                {/* 新增：区分显示总体/地主/农民三档，并标注当前使用 */}
+                <div style={{ borderTop:'1px dashed #eee', marginTop:8, paddingTop:8 }}>
+                  <div style={{ fontSize:12, marginBottom:6 }}>
+                    当前使用：<b>
+                      {usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}
+                    </b>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12, color:'#374151' }}>
+                    <div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>总体</div>
+                      <div>{muSig(stored.overall)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>地主</div>
+                      <div>{muSig(stored.landlord)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>农民</div>
+                      <div>{muSig(stored.farmer)}</div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div style={{ fontSize:13, color:'#374151' }}>
-                <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
-                <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
-                <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
           说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。</div>
@@ -1081,7 +1120,7 @@ function Home() {
           </label>
 
           <label>4带2 规则
-            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
+            <select value={四2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
               <option value="both">都可</option>
               <option value="2singles">两张单牌</option>
               <option value="2pairs">两对</option>
