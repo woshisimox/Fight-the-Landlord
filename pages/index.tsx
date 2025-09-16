@@ -323,7 +323,7 @@ function LivePanel(props: LiveProps) {
     const choice = props.seats[i];
     const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
-    return `${choice}|${model}|${base}`; // 身份锚定：内置/AI + 模型/版本 + HTTP Base
+    return `${choice}|${model}|${base}`;
   };
 
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
@@ -344,7 +344,7 @@ function LivePanel(props: LiveProps) {
     setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
   };
 
-  // NEW: 按角色应用（若已知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
+  // NEW: 按角色应用
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
     const ids = [0,1,2].map(seatIdentity);
     const init = [0,1,2].map(i => {
@@ -383,7 +383,7 @@ function LivePanel(props: LiveProps) {
       const j = JSON.parse(text);
       const store: TsStore = emptyStore();
 
-      // 兼容多种模板：数组 / {players:{}} / 单人
+      // 兼容多种模板
       if (Array.isArray(j?.players)) {
         for (const p of j.players) {
           const id = p.id || p.identity || p.key; if (!id) continue;
@@ -425,14 +425,13 @@ function LivePanel(props: LiveProps) {
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
 
-  // 刷新：按“当前地主身份”应用
+  // 刷新：按当前地主身份应用
   const handleRefreshApply = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
   };
 
   // —— 用于“区分显示”的帮助函数 —— //
   const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
-  const fmtOrDash = (x:number|undefined|null)=> (x==null ? '—' : fmt2(x));
   const muSig = (r: Rating | null | undefined) => r ? `μ ${fmt2(r.mu)}｜σ ${fmt2(r.sigma)}` : '—';
   const getStoredForSeat = (i:number) => {
     const id = seatIdentity(i);
@@ -471,7 +470,7 @@ function LivePanel(props: LiveProps) {
 
   const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
 
-  // 每局观测标记 —— 是否已计结束、是否收到 stats
+  // 每局观测标记
   const roundFinishedRef = useRef<boolean>(false);
   const seenStatsRef     = useRef<boolean>(false);
 
@@ -487,7 +486,7 @@ function LivePanel(props: LiveProps) {
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
-    // TrueSkill：每次“开始”时先应用 overall（此时尚未知地主）
+    // TrueSkill：开始时先应用 overall（未知地主）
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
     try { applyTsFromStore('比赛开始前'); } catch {}
 
@@ -605,7 +604,7 @@ function LivePanel(props: LiveProps) {
           for (const raw of batch) {
             const m: any = raw;
             try {
-              // -------- TS 帧（后端主动提供） --------
+              // -------- TS 帧 --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
                 setTsArr(incoming);
@@ -620,7 +619,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 轮廓事件边界 --------
+              // -------- 事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -644,14 +643,14 @@ function LivePanel(props: LiveProps) {
                 nextLandlord = lord;
                 nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?'}为地主`];
 
-                // NEW: 一旦确认地主，按角色（地主/农民）应用存档
+                // 一旦确认地主，按角色应用存档
                 try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
 
                 lastReasonRef.current = [null, null, null];
                 continue;
               }
 
-              // -------- AI 过程日志 --------
+              // -------- AI 调用 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
                 nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
@@ -708,7 +707,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 结算（多种别名兼容） --------
+              // -------- 结算 --------
               const isWinLike =
                 (m.type === 'event' && (m.kind === 'win' || m.kind === 'result' || m.kind === 'game-over' || m.kind === 'game_end')) ||
                 (m.type === 'result') || (m.type === 'game-over') || (m.type === 'game_end');
@@ -718,7 +717,7 @@ function LivePanel(props: LiveProps) {
                           : Array.isArray(m.delta) ? m.delta
                           : [0,0,0]) as [number,number,number];
 
-                // 将“以地主为基准”的增减分旋转成“按座位顺序”的展示
+                // 旋转成按座位顺序
                 const rot: [number,number,number] = [
                   ds[(0 - L + 3) % 3],
                   ds[(1 - L + 3) % 3],
@@ -733,7 +732,7 @@ function LivePanel(props: LiveProps) {
                   nextTotals[2] + rot[2]
                 ] as any;
 
-                // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
+                // winner 兜底
                 if (nextWinnerLocal == null) {
                   const landlordDelta = ds[0] ?? 0;
                   if (landlordDelta > 0) nextWinnerLocal = L;
@@ -744,13 +743,13 @@ function LivePanel(props: LiveProps) {
                 }
                 nextWinner = nextWinnerLocal;
 
-                // 标记一局结束 & 雷达图兜底
+                // 标记结束
                 {
                   const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 }
 
-                // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
+                // TrueSkill 更新 + 写入分档
                 {
                   const updated = tsRef.current.map(r => ({ ...r }));
                   const farmers = [0,1,2].filter(s => s !== L);
@@ -775,7 +774,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 画像统计（两种形态） --------
+              // -------- 画像统计 --------
               const isStatsTop = (m.type === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               const isStatsEvt = (m.type === 'event' && m.kind === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               if (isStatsTop || isStatsEvt) {
@@ -883,7 +882,7 @@ function LivePanel(props: LiveProps) {
                   <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
                 </div>
 
-                {/* 新增：区分显示总体/地主/农民三档，并标注当前使用 */}
+                {/* 区分显示总体/地主/农民三档，并标注当前使用 */}
                 <div style={{ borderTop:'1px dashed #eee', marginTop:8, paddingTop:8 }}>
                   <div style={{ fontSize:12, marginBottom:6 }}>
                     当前使用：<b>
@@ -1120,7 +1119,7 @@ function Home() {
           </label>
 
           <label>4带2 规则
-            <select value={四2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
+            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
               <option value="both">都可</option>
               <option value="2singles">两张单牌</option>
               <option value="2pairs">两对</option>
