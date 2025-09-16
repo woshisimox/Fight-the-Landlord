@@ -39,17 +39,25 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
   }
 }
 
-/* ===== 新增：TrueSkill 存档（按身份 + 角色区分） ===== */
+/* ===== TrueSkill 本地存档（新增） ===== */
 type TsRole = 'landlord'|'farmer';
 type TsStoreEntry = {
-  id: string;
+  id: string;                 // 身份（详见 seatIdentity）
   label?: string;
-  overall?: Rating | null;
-  roles?: { landlord?: Rating | null; farmer?: Rating | null };
+  overall?: Rating | null;    // 总体
+  roles?: {                   // 角色分档
+    landlord?: Rating | null;
+    farmer?: Rating | null;
+  };
   meta?: { choice?: string; model?: string; httpBase?: string };
 };
-type TsStore = { schema: 'ddz-trueskill@1'; updatedAt: string; players: Record<string, TsStoreEntry>; };
+type TsStore = {
+  schema: 'ddz-trueskill@1';
+  updatedAt: string;
+  players: Record<string, TsStoreEntry>;
+};
 const TS_STORE_KEY = 'ddz_ts_store_v1';
+
 const ensureRating = (x:any): Rating => {
   const mu = Number(x?.mu), sigma = Number(x?.sigma);
   if (Number.isFinite(mu) && Number.isFinite(sigma)) return { mu, sigma };
@@ -62,10 +70,9 @@ const readStore = (): TsStore => {
   } catch {}
   return emptyStore();
 };
-const writeStore = (s: TsStore) => {
-  try { s.updatedAt = new Date().toISOString(); localStorage.setItem(TS_STORE_KEY, JSON.stringify(s)); } catch {}
-};
+const writeStore = (s: TsStore) => { try { s.updatedAt=new Date().toISOString(); localStorage.setItem(TS_STORE_KEY, JSON.stringify(s)); } catch {} };
 
+/* ====== 其它 UI/逻辑 ====== */
 type LiveProps = {
   rounds: number;
   startScore: number;
@@ -307,17 +314,41 @@ function LivePanel(props: LiveProps) {
   const tsRef = useRef(tsArr); useEffect(()=>{ tsRef.current=tsArr; }, [tsArr]);
   const tsCr = (r:Rating)=> (r.mu - 3*r.sigma);
 
-  // —— 新增：TS 存档（读/写/应用） —— //
+  // ===== 新增：TS 存档（读/写/应用） =====
   const tsStoreRef = useRef<TsStore>(emptyStore());
   useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
 
   const seatIdentity = (i:number) => {
     const choice = props.seats[i];
-    const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
+    // 模型名称（按提供方标准化）；HTTP 还要把 base 拼进去，保证“同一 AI 不同版本”被区分
+    const normalizeModelForProvider = (choice: BotChoice, input: string): string => {
+      const m = (input || '').trim(); if (!m) return '';
+      const low = m.toLowerCase();
+      switch (choice) {
+        case 'ai:kimi':   return /^kimi[-\w]*/.test(low) ? m : '';
+        case 'ai:openai': return /^(gpt-|o[34]|text-|omni)/.test(low) ? m : '';
+        case 'ai:gemini': return /^gemini[-\w.]*/.test(low) ? m : '';
+        case 'ai:grok':   return /^grok[-\w.]*/.test(low) ? m : '';
+        case 'ai:qwen':   return /^qwen[-\w.]*/.test(low) ? m : '';
+        default: return '';
+      }
+    };
+    const defaultModelFor = (choice: BotChoice): string => {
+      switch (choice) {
+        case 'ai:openai': return 'gpt-4o-mini';
+        case 'ai:gemini': return 'gemini-1.5-flash';
+        case 'ai:grok':  return 'grok-2';
+        case 'ai:kimi':  return 'kimi-k2-0905-preview';
+        case 'ai:qwen':  return 'qwen-plus';
+        default: return '';
+      }
+    };
+    const model = normalizeModelForProvider(choice, (props.seatModels[i] || '')) || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
     return `${choice}|${model}|${base}`; // 身份锚定：内置/AI + 模型/版本 + HTTP Base
   };
+
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
     const p = tsStoreRef.current.players[id]; if (!p) return null;
     if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
@@ -328,12 +359,14 @@ function LivePanel(props: LiveProps) {
     if (F) return ensureRating(F);
     return null;
   };
+
   const applyTsFromStore = (why:string) => {
     const ids = [0,1,2].map(seatIdentity);
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
     setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
   };
+
   const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
     const ids = [0,1,2].map(seatIdentity);
     for (let i=0;i<3;i++){
@@ -344,13 +377,14 @@ function LivePanel(props: LiveProps) {
       entry.roles = entry.roles || {};
       entry.roles[role] = { ...updated[i] };
       const choice = props.seats[i];
-      const model  = normalizeModelForProvider(choice, props.seatModels[i]||'') || defaultModelFor(choice);
+      const model  = (props.seatModels[i] || '').trim();
       const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
-      entry.meta = { choice, model, ...(base ? { httpBase: base } : {}) };
+      entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
       tsStoreRef.current.players[id] = entry;
     }
     writeStore(tsStoreRef.current);
   };
+
   const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]; if (!f) return;
     try {
@@ -358,6 +392,7 @@ function LivePanel(props: LiveProps) {
       const j = JSON.parse(text);
       const store: TsStore = emptyStore();
 
+      // 兼容多种模板：数组 / {players:{}} / 单人
       if (Array.isArray(j?.players)) {
         for (const p of j.players) {
           const id = p.id || p.identity || p.key; if (!id) continue;
@@ -374,7 +409,7 @@ function LivePanel(props: LiveProps) {
       } else if (Array.isArray(j)) {
         for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p; }
       } else {
-        if (j?.id) store.players[j.id] = j; // 兼容单人结构
+        if (j?.id) store.players[j.id] = j;
       }
 
       tsStoreRef.current = store; writeStore(store);
@@ -383,6 +418,7 @@ function LivePanel(props: LiveProps) {
       setLog(l => [...l, `【TS】上传解析失败：${err?.message || err}`]);
     } finally { e.target.value = ''; }
   };
+
   const handleSaveArchive = () => {
     const ids = [0,1,2].map(seatIdentity);
     ids.forEach((id,i)=>{
@@ -394,9 +430,10 @@ function LivePanel(props: LiveProps) {
     const blob = new Blob([JSON.stringify(tsStoreRef.current, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'trueskill_store.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+    setTimeout(()=>URL.revokeObjectURL(url), 1200);
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
+
   const handleRefreshApply = () => applyTsFromStore('手动刷新');
 
   // 累计画像
@@ -444,7 +481,7 @@ function LivePanel(props: LiveProps) {
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
-    // TrueSkill：每次“开始”重置后尝试从存档应用
+    // TrueSkill：每次“开始”时应用存档（若存在）
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
     try { applyTsFromStore('比赛开始前'); } catch {}
 
@@ -481,7 +518,6 @@ function LivePanel(props: LiveProps) {
       nextAggCount: number
     ) => {
       if (!roundFinishedRef.current) {
-        // 若本局未收到 stats，补一条中性评分，保证雷达图可见
         if (!seenStatsRef.current) {
           const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
           const mode = aggModeRef.current;
@@ -506,7 +542,6 @@ function LivePanel(props: LiveProps) {
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
-      // 新一局：重置标记
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
 
@@ -678,7 +713,7 @@ function LivePanel(props: LiveProps) {
                   ds[(1 - L + 3) % 3],
                   ds[(2 - L + 3) % 3],
                 ];
-                nextWinner     = m.winner ?? nextWinner ?? null;
+                let nextWinnerLocal     = m.winner ?? nextWinner ?? null;
                 nextMultiplier = m.multiplier ?? nextMultiplier ?? 1;
                 nextDelta      = rot;
                 nextTotals     = [
@@ -688,15 +723,15 @@ function LivePanel(props: LiveProps) {
                 ] as any;
 
                 // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
-                if (nextWinner == null) {
+                if (nextWinnerLocal == null) {
                   const landlordDelta = ds[0] ?? 0;
-                  if (landlordDelta > 0) nextWinner = L;
+                  if (landlordDelta > 0) nextWinnerLocal = L;
                   else if (landlordDelta < 0) {
-                    // 农民胜：任选一个农民作为代表胜者用于展示（不影响 TS 团队更新）
                     const farmer = [0,1,2].find(x => x !== L)!;
-                    nextWinner = farmer;
+                    nextWinnerLocal = farmer;
                   }
                 }
+                nextWinner = nextWinnerLocal;
 
                 // 标记一局结束 & 雷达图兜底
                 {
@@ -704,7 +739,7 @@ function LivePanel(props: LiveProps) {
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 }
 
-                // ✅ TrueSkill：局后更新（后端没推 ts(after-round) 时也能更新）
+                // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
                 {
                   const updated = tsRef.current.map(r => ({ ...r }));
                   const farmers = [0,1,2].filter(s => s !== L);
@@ -714,7 +749,6 @@ function LivePanel(props: LiveProps) {
                   else             tsUpdateTwoTeams(updated, farmers, [L]);
 
                   setTsArr(updated);
-                  // 写入存档：区分角色（landlord / farmer）
                   updateStoreAfterRound(updated, L);
 
                   nextLog = [
@@ -813,13 +847,13 @@ function LivePanel(props: LiveProps) {
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
-        {/* —— 新增：上传 / 存档 / 刷新 —— */}
+        {/* 新增：上传 / 存档 / 刷新（不改动其它 UI） */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
           <input ref={fileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleUploadFile} />
           <button onClick={()=>fileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
           <button onClick={handleSaveArchive} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
           <button onClick={handleRefreshApply} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
-          <div style={{ fontSize:12, color:'#6b7280' }}>按身份匹配（内置/AI+模型/版本），支持“地主/农民”分档。</div>
+          <div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
@@ -829,9 +863,9 @@ function LivePanel(props: LiveProps) {
                 <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
               </div>
               <div style={{ fontSize:13, color:'#374151' }}>
-                <div>μ：<b>{(Math.round(tsArr[i].mu*100)/100).toFixed(2)}</b></div>
-                <div>σ：<b>{(Math.round(tsArr[i].sigma*100)/100).toFixed(2)}</b></div>
-                <div>CR = μ − 3σ：<b>{(Math.round((tsArr[i].mu - 3*tsArr[i].sigma)*100)/100).toFixed(2)}</b></div>
+                <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
+                <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
+                <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
               </div>
             </div>
           ))}
@@ -851,14 +885,15 @@ function LivePanel(props: LiveProps) {
         </div>
       </Section>
 
+      {/* ======= 积分下面、手牌上面：雷达图 ======= */}
       <Section title="战术画像（累计，0~5）">
         <RadarPanel
           aggStats={aggStats}
           aggCount={aggCount}
           aggMode={aggMode}
           alpha={alpha}
-          onChangeMode={(m)=>setAggMode(m)}
-          onChangeAlpha={(v)=>setAlpha(v)}
+          onChangeMode={setAggMode}
+          onChangeAlpha={setAlpha}
         />
       </Section>
 
@@ -1093,7 +1128,7 @@ function Home() {
                     模型（可选）
                     <input
                       type="text"
-                      value={normalizeModelForProvider(seats[i], seatModels[i])}
+                      value={seatModels[i]}
                       placeholder={defaultModelFor(seats[i])}
                       onChange={e=>{
                         const v = e.target.value;
