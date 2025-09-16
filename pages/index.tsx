@@ -39,44 +39,38 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
   }
 }
 
-/* ========= PageRank 计分（新增） =========
-   - 我们维护一张 3×3 的有向图 W（赢家 -> 输家），边权=当局倍数（m）。
-   - 农民胜：两名农民都各自指向地主；地主胜：地主指向两名农民。
-   - 每次结算后用 d=0.85 做幂迭代 40 轮，输出 PR ∈ [0,1]、和为 1。
+/* ========= PageRank 计分 =========
+   - 维护 3×3 有向图 W（赢家 -> 输家），边权=当局倍数；
+   - 农民胜：两名农民分别指向地主；地主胜：地主指向两名农民；
+   - 幂迭代 d=0.85、40 轮，得到 pr（和为 1）。
 */
 type PRState = { W:number[][]; pr:number[]; rounds:number };
 const prZero = (): PRState => ({ W:[[0,0,0],[0,0,0],[0,0,0]], pr:[1/3,1/3,1/3], rounds:0 });
-
 function computePageRank(W:number[][], d=0.85, iters=40): number[] {
   const n = 3;
-  const v = Array(n).fill(1/n);
   const out = Array(n).fill(0);
   for (let i=0;i<n;i++){ let s=0; for (let j=0;j<n;j++) s += W[i][j]; out[i]=s; }
-  let cur = v.slice();
+  let cur = Array(n).fill(1/n);
   for (let k=0;k<iters;k++){
     const nxt = Array(n).fill((1-d)/n);
     for (let i=0;i<n;i++){
       if (out[i] > 0){
         for (let j=0;j<n;j++){
-          if (W[i][j] > 0){
-            nxt[j] += d * cur[i] * (W[i][j] / out[i]);
-          }
+          const w=W[i][j]; if (w<=0) continue;
+          nxt[j] += d * cur[i] * (w/out[i]);
         }
-      } else {
-        // 沉默节点：均匀外链
-        for (let j=0;j<n;j++){
-          nxt[j] += d * cur[i] / n;
-        }
+      }else{
+        for (let j=0;j<n;j++) nxt[j] += d * cur[i] / n;
       }
     }
-    const sum = nxt.reduce((a,b)=>a+b,0) || 1;
-    for (let j=0;j<n;j++) nxt[j] /= sum;
+    const s = nxt.reduce((a,b)=>a+b,0) || 1;
+    for (let j=0;j<n;j++) nxt[j] /= s;
     cur = nxt;
   }
   return cur;
 }
 
-/* ===== TrueSkill 本地存档（之前的功能保留） ===== */
+/* ===== TrueSkill 本地存档（与以往相同） ===== */
 type TsRole = 'landlord'|'farmer';
 type TsStoreEntry = {
   id: string;
@@ -91,20 +85,22 @@ type TsStore = {
   players: Record<string, TsStoreEntry>;
 };
 const TS_STORE_KEY = 'ddz_ts_store_v1';
-
 const ensureRating = (x:any): Rating => {
   const mu = Number(x?.mu), sigma = Number(x?.sigma);
   if (Number.isFinite(mu) && Number.isFinite(sigma)) return { mu, sigma };
   return { ...TS_DEFAULT };
 };
-const emptyStore = (): TsStore => ({ schema:'ddz-trueskill@1', updatedAt:new Date().toISOString(), players:{} });
-const readStore = (): TsStore => {
-  try { const raw = localStorage.getItem(TS_STORE_KEY); if (!raw) return emptyStore();
-    const j = JSON.parse(raw); if (j?.schema && j?.players) return j as TsStore;
-  } catch {}
-  return emptyStore();
-};
-const writeStore = (s: TsStore) => { try { s.updatedAt=new Date().toISOString(); localStorage.setItem(TS_STORE_KEY, JSON.stringify(s)); } catch {} };
+const emptyTsStore = (): TsStore => ({ schema:'ddz-trueskill@1', updatedAt:new Date().toISOString(), players:{} });
+const readTsStore  = (): TsStore => { try{ const raw=localStorage.getItem(TS_STORE_KEY); if(!raw) return emptyTsStore(); const j=JSON.parse(raw); if(j?.schema&&j?.players) return j as TsStore; }catch{} return emptyTsStore(); };
+const writeTsStore = (s: TsStore) => { try{ s.updatedAt=new Date().toISOString(); localStorage.setItem(TS_STORE_KEY, JSON.stringify(s)); }catch{} };
+
+/* ===== PageRank 本地存档（新增，独立于 TS） ===== */
+type PrStoreEntry = { id:string; pr?: number|null };
+type PrStore = { schema:'ddz-pagerank@1'; updatedAt:string; players:Record<string, PrStoreEntry> };
+const PR_STORE_KEY = 'ddz_pr_store_v1';
+const emptyPrStore = ():PrStore => ({ schema:'ddz-pagerank@1', updatedAt:new Date().toISOString(), players:{} });
+const readPrStore  = ():PrStore => { try{ const raw=localStorage.getItem(PR_STORE_KEY); if(!raw) return emptyPrStore(); const j=JSON.parse(raw); if(j?.schema&&j?.players) return j as PrStore; }catch{} return emptyPrStore(); };
+const writePrStore = (s:PrStore) => { try{ s.updatedAt=new Date().toISOString(); localStorage.setItem(PR_STORE_KEY, JSON.stringify(s)); }catch{} };
 
 /* ====== 其它 UI/逻辑 ====== */
 type LiveProps = {
@@ -122,9 +118,7 @@ type LiveProps = {
   onLog?: (lines: string[]) => void;
 };
 
-function SeatTitle({ i }: { i:number }) {
-  return <span style={{ fontWeight:700 }}>{['甲','乙','丙'][i]}</span>;
-}
+function SeatTitle({ i }: { i:number }) { return <span style={{ fontWeight:700 }}>{['甲','乙','丙'][i]}</span>; }
 
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
@@ -178,15 +172,9 @@ function Card({ label }: { label:string }) {
 }
 function Hand({ cards }: { cards: string[] }) {
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>（空）</span>;
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-      {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
-    </div>
-  );
+  return <div style={{ display:'flex', flexWrap:'wrap' }}>{cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}</div>;
 }
-function PlayRow({ seat, move, cards, reason }:{
-  seat:number; move:'play'|'pass'; cards?:string[]; reason?:string
-}) {
+function PlayRow({ seat, move, cards, reason }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string }) {
   return (
     <div style={{ display:'flex', gap:8, alignItems:'center', padding:'6px 0' }}>
       <div style={{ width:32, textAlign:'right', opacity:0.8 }}>{seatName(seat)}</div>
@@ -199,19 +187,10 @@ function PlayRow({ seat, move, cards, reason }:{
   );
 }
 function LogLine({ text }: { text:string }) {
-  return (
-    <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', fontSize:12, color:'#555', padding:'2px 0' }}>
-      {text}
-    </div>
-  );
+  return <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', fontSize:12, color:'#555', padding:'2px 0' }}>{text}</div>;
 }
 function Section({ title, children }:{title:string; children:React.ReactNode}) {
-  return (
-    <div style={{ marginBottom:16 }}>
-      <div style={{ fontWeight:700, marginBottom:8 }}>{title}</div>
-      <div>{children}</div>
-    </div>
-  );
+  return (<div style={{ marginBottom:16 }}><div style={{ fontWeight:700, marginBottom:8 }}>{title}</div><div>{children}</div></div>);
 }
 
 /* ====== 模型预设/校验 ====== */
@@ -256,56 +235,29 @@ type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
   if (mode === 'mean') {
     const c = Math.max(0, count);
-    return {
-      coop: (prev.coop*c + curr.coop)/(c+1),
-      agg:  (prev.agg *c + curr.agg )/(c+1),
-      cons: (prev.cons*c + curr.cons)/(c+1),
-      eff:  (prev.eff *c + curr.eff )/(c+1),
-      rob:  (prev.rob *c + curr.rob )/(c+1),
-    };
+    return { coop:(prev.coop*c+curr.coop)/(c+1), agg:(prev.agg*c+curr.agg)/(c+1), cons:(prev.cons*c+curr.cons)/(c+1), eff:(prev.eff*c+curr.eff)/(c+1), rob:(prev.rob*c+curr.rob)/(c+1) };
   }
   const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
-  return {
-    coop: a*curr.coop + (1-a)*prev.coop,
-    agg:  a*curr.agg  + (1-a)*prev.agg,
-    cons: a*curr.cons + (1-a)*prev.cons,
-    eff:  a*curr.eff  + (1-a)*prev.eff,
-    rob:  a*curr.rob  + (1-a)*prev.rob,
-  };
+  return { coop:a*curr.coop+(1-a)*prev.coop, agg:a*curr.agg+(1-a)*prev.agg, cons:a*curr.cons+(1-a)*prev.cons, eff:a*curr.eff+(1-a)*prev.eff, rob:a*curr.rob+(1-a)*prev.rob };
 }
 function RadarChart({ title, scores }:{ title: string; scores: Score5; }) {
   const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
   const size = 180, R = 70, cx = size/2, cy = size/2;
-  const pts = vals.map((v, i)=>{
-    const ang = (-90 + i*(360/5)) * Math.PI/180;
-    const r = (Math.max(0, Math.min(5, v)) / 5) * R;
-    return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
-  }).join(' ');
+  const pts = vals.map((v, i)=>{ const ang=(-90+i*(360/5))*Math.PI/180; const r=(Math.max(0,Math.min(5,v))/5)*R; return `${cx+r*Math.cos(ang)},${cy+r*Math.sin(ang)}`; }).join(' ');
   return (
     <div style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
       <div style={{ fontWeight:700, marginBottom:6 }}>{title}</div>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         {[1,2,3,4,5].map(k=>{
-          const r = (k/5)*R;
-          const polygon = Array.from({length:5}, (_,i)=>{
-            const ang = (-90 + i*(360/5)) * Math.PI/180;
-            return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
-          }).join(' ');
+          const r=(k/5)*R;
+          const polygon = Array.from({length:5},(_,i)=>{ const ang=(-90+i*(360/5))*Math.PI/180; return `${cx+r*Math.cos(ang)},${cy+r*Math.sin(ang)}`; }).join(' ');
           return <polygon key={k} points={polygon} fill="none" stroke="#e5e7eb"/>;
         })}
-        {Array.from({length:5}, (_,i)=>{
-          const ang = (-90 + i*(360/5)) * Math.PI/180;
-          return <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang)} y2={cy + R * Math.sin(ang)} stroke="#e5e7eb"/>;
-        })}
+        {Array.from({length:5},(_,i)=>{ const ang=(-90+i*(360/5))*Math.PI/180; return <line key={i} x1={cx} y1={cy} x2={cx+R*Math.cos(ang)} y2={cy+R*Math.sin(ang)} stroke="#e5e7eb"/>; })}
         <polygon points={pts} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
-        {(['配合','激进','保守','效率','抢地主']).map((lab, i)=>{
-          const ang = (-90 + i*(360/5)) * Math.PI/180;
-          return <text key={i} x={cx + (R+14) * Math.cos(ang)} y={cy + (R+14) * Math.sin(ang)} fontSize="12" textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
-        })}
+        {(['配合','激进','保守','效率','抢地主']).map((lab, i)=>{ const ang=(-90+i*(360/5))*Math.PI/180; return <text key={i} x={cx+(R+14)*Math.cos(ang)} y={cy+(R+14)*Math.sin(ang)} fontSize="12" textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>; })}
       </svg>
-      <div style={{ fontSize:12, color:'#6b7280' }}>
-        分数（0~5）：Coop {scores.coop} / Agg {scores.agg} / Cons {scores.cons} / Eff {scores.eff} / Rob {scores.rob}
-      </div>
+      <div style={{ fontSize:12, color:'#6b7280' }}>分数（0~5）：Coop {scores.coop} / Agg {scores.agg} / Cons {scores.cons} / Eff {scores.eff} / Rob {scores.rob}</div>
     </div>
   );
 }
@@ -340,8 +292,9 @@ function LivePanel(props: LiveProps) {
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
 
-  /* —— 评分算法选择：TrueSkill / PageRank —— */
-  const [scoreAlgo, setScoreAlgo] = useState<'ts'|'pr'>('ts');
+  /* —— 新增：可多选显示 —— */
+  const [showTS, setShowTS] = useState<boolean>(true);
+  const [showPR, setShowPR] = useState<boolean>(true);
 
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -352,10 +305,15 @@ function LivePanel(props: LiveProps) {
   const [prState, setPrState] = useState<PRState>(prZero());
   const prRef = useRef(prState); useEffect(()=>{ prRef.current = prState; }, [prState]);
 
-  // ===== TS 存档（读/写/应用） =====
-  const tsStoreRef = useRef<TsStore>(emptyStore());
-  useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
-  const fileRef = useRef<HTMLInputElement|null>(null);
+  // ===== TS 存档 =====
+  const tsStoreRef = useRef<TsStore>(emptyTsStore());
+  useEffect(()=>{ try { tsStoreRef.current = readTsStore(); } catch {} }, []);
+  const tsFileRef = useRef<HTMLInputElement|null>(null);
+
+  // ===== PR 存档（新增） =====
+  const prStoreRef = useRef<PrStore>(emptyPrStore());
+  useEffect(()=>{ try { prStoreRef.current = readPrStore(); } catch {} }, []);
+  const prFileRef = useRef<HTMLInputElement|null>(null);
 
   const seatIdentity = (i:number) => {
     const choice = props.seats[i];
@@ -364,6 +322,7 @@ function LivePanel(props: LiveProps) {
     return `${choice}|${model}|${base}`;
   };
 
+  /* ===== TS: 从存档解析/应用/写回 ===== */
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
     const p = tsStoreRef.current.players[id]; if (!p) return null;
     if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
@@ -374,14 +333,12 @@ function LivePanel(props: LiveProps) {
     if (F) return ensureRating(F);
     return null;
   };
-
   const applyTsFromStore = (why:string) => {
     const ids = [0,1,2].map(seatIdentity);
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
-    setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
+    setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${r.mu.toFixed(2)} σ=${r.sigma.toFixed(2)}`).join(' | ')]);
   };
-
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
     const ids = [0,1,2].map(seatIdentity);
     const init = [0,1,2].map(i => {
@@ -389,13 +346,9 @@ function LivePanel(props: LiveProps) {
       return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
     });
     setTsArr(init);
-    setLog(l => [...l,
-      `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
-      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
-    ]);
+    setLog(l => [...l, `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）`]);
   };
-
-  const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
+  const updateTsStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
     const ids = [0,1,2].map(seatIdentity);
     for (let i=0;i<3;i++){
       const id = ids[i];
@@ -410,71 +363,80 @@ function LivePanel(props: LiveProps) {
       entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
       tsStoreRef.current.players[id] = entry;
     }
-    writeStore(tsStoreRef.current);
+    writeTsStore(tsStoreRef.current);
   };
-
-  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]; if (!f) return;
     try {
-      const text = await f.text();
-      const j = JSON.parse(text);
-      const store: TsStore = emptyStore();
-
+      const text = await f.text(); const j = JSON.parse(text);
+      const store: TsStore = emptyTsStore();
       if (Array.isArray(j?.players)) {
         for (const p of j.players) {
           const id = p.id || p.identity || p.key; if (!id) continue;
           store.players[id] = {
             id,
             overall: p.overall || p.rating || null,
-            roles: { landlord: p.roles?.landlord ?? p.landlord ?? p.L ?? null,
-                     farmer:   p.roles?.farmer   ?? p.farmer   ?? p.F ?? null },
+            roles: { landlord: p.roles?.landlord ?? p.landlord ?? p.L ?? null, farmer: p.roles?.farmer ?? p.farmer ?? p.F ?? null },
             meta: p.meta || {}
           };
         }
-      } else if (j?.players && typeof j.players === 'object') {
-        store.players = j.players;
-      } else if (Array.isArray(j)) {
-        for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p; }
-      } else {
-        if (j?.id) store.players[j.id] = j;
-      }
-
-      tsStoreRef.current = store; writeStore(store);
-      setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
-    } catch (err:any) {
-      setLog(l => [...l, `【TS】上传解析失败：${err?.message || err}`]);
-    } finally { e.target.value = ''; }
+      } else if (j?.players && typeof j.players === 'object') store.players = j.players;
+      else if (Array.isArray(j)) { for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p; } }
+      else if (j?.id) store.players[j.id] = j;
+      tsStoreRef.current = store; writeTsStore(store);
+      setLog(l => [...l, `【TS】已上传存档（${Object.keys(store.players).length}）`]);
+    } catch (err:any) { setLog(l => [...l, `【TS】上传解析失败：${err?.message || err}`]); }
+    finally { e.target.value = ''; }
   };
-
-  const handleSaveArchive = () => {
+  const handleTsSave = () => {
     const ids = [0,1,2].map(seatIdentity);
-    ids.forEach((id,i)=>{
-      const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
-      entry.overall = { ...tsRef.current[i] };
-      tsStoreRef.current.players[id] = entry;
-    });
-    writeStore(tsStoreRef.current);
+    ids.forEach((id,i)=>{ const e:TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} }; e.overall = { ...tsRef.current[i] }; tsStoreRef.current.players[id] = e; });
+    writeTsStore(tsStoreRef.current);
     const blob = new Blob([JSON.stringify(tsStoreRef.current, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'trueskill_store.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1200);
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'trueskill_store.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(url), 1200);
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
+  const handleTsRefresh = () => { applyTsFromStoreByRole(landlordRef.current, '手动刷新'); };
 
-  const handleRefreshApply = () => {
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+  /* ===== PR: 从存档解析/应用/写回（独立） ===== */
+  const applyPrFromStore = (why:string) => {
+    const ids = [0,1,2].map(seatIdentity);
+    const pr = ids.map(id => {
+      const p = prStoreRef.current.players[id]; const v = Number(p?.pr); return Number.isFinite(v) ? v : (1/3);
+    });
+    const sum = pr.reduce((a,b)=>a+b,0) || 1; const norm = pr.map(v=>v/sum);
+    setPrState(ps => ({ ...ps, pr: norm }));
+    setLog(l => [...l, `【PR】已从存档应用（${why}）：` + norm.map((v,i)=>`${['甲','乙','丙'][i]}=${(v*100).toFixed(2)}%`).join(' | ')]);
   };
+  const handlePrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    try{
+      const text = await f.text(); const j = JSON.parse(text);
+      const store:PrStore = emptyPrStore();
+      if (j?.players && typeof j.players==='object') store.players = j.players;
+      else if (Array.isArray(j)) for (const p of j){ const id=p.id||p.identity; if(!id) continue; store.players[id] = { id, pr: Number(p.pr) }; }
+      prStoreRef.current = store; writePrStore(store);
+      setLog(l => [...l, `【PR】已上传存档（${Object.keys(store.players).length}）`]);
+    }catch(err:any){ setLog(l => [...l, `【PR】上传解析失败：${err?.message||err}`]); }
+    finally{ e.target.value=''; }
+  };
+  const handlePrSave = () => {
+    const ids = [0,1,2].map(seatIdentity);
+    ids.forEach((id,i)=>{ prStoreRef.current.players[id] = { id, pr: prRef.current.pr[i] }; });
+    writePrStore(prStoreRef.current);
+    const blob = new Blob([JSON.stringify(prStoreRef.current, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='pagerank_store.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);
+    setLog(l => [...l, '【PR】已导出当前存档。']);
+  };
+  const handlePrRefresh = () => { applyPrFromStore('手动刷新'); };
 
+  // 展示辅助
   const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
   const tsMuSigStr = (r: Rating | null | undefined) => r ? `μ ${fmt2(r.mu)}｜σ ${fmt2(r.sigma)}` : '—';
   const getStoredForSeat = (i:number) => {
     const id = seatIdentity(i);
     const p = tsStoreRef.current.players[id];
-    return {
-      overall: p?.overall ? ensureRating(p.overall) : null,
-      landlord: p?.roles?.landlord ? ensureRating(p.roles.landlord) : null,
-      farmer: p?.roles?.farmer ? ensureRating(p.roles.farmer) : null,
-    };
+    return { overall: p?.overall ? ensureRating(p.overall) : null, landlord: p?.roles?.landlord ? ensureRating(p.roles.landlord) : null, farmer: p?.roles?.farmer ? ensureRating(p.roles.farmer) : null };
   };
 
   // 累计画像
@@ -561,15 +523,9 @@ function LivePanel(props: LiveProps) {
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
           const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
-          const mode = aggModeRef.current;
-          const a    = alphaRef.current;
-          if (!nextAggStats) {
-            nextAggStats = [neutral, neutral, neutral];
-            nextAggCount = 1;
-          } else {
-            nextAggStats = nextAggStats.map(prev => mergeScore(prev, neutral, mode, nextAggCount, a));
-            nextAggCount = nextAggCount + 1;
-          }
+          const mode = aggModeRef.current, a = alphaRef.current;
+          if (!nextAggStats) { nextAggStats=[neutral,neutral,neutral]; nextAggCount=1; }
+          else { nextAggStats = nextAggStats.map(prev => mergeScore(prev, neutral, mode, nextAggCount, a)); nextAggCount = nextAggCount + 1; }
         }
         roundFinishedRef.current = true;
         nextFinished = nextFinished + 1;
@@ -620,8 +576,7 @@ function LivePanel(props: LiveProps) {
         while ((idx = buf.indexOf('\n')) >= 0) {
           const line = buf.slice(0, idx).trim();
           buf = buf.slice(idx + 1);
-          if (!line) continue;
-          try { batch.push(JSON.parse(line)); } catch {}
+          if (!line) continue; try { batch.push(JSON.parse(line)); } catch {}
         }
 
         if (batch.length) {
@@ -645,27 +600,15 @@ function LivePanel(props: LiveProps) {
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
                 setTsArr(incoming);
-
                 if (m.where === 'after-round') {
                   const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                   nextLog = [...nextLog, `【TS】after-round 已更新 μ/σ`];
-                } else if (m.where === 'before-round') {
-                  nextLog = [...nextLog, `【TS】before-round μ/σ 准备就绪`];
-                }
+                } else if (m.where === 'before-round') nextLog = [...nextLog, `【TS】before-round μ/σ 准备就绪`];
                 continue;
               }
-
-              if (m.type === 'event' && m.kind === 'round-start') {
-                nextLog = [...nextLog, `【边界】round-start #${m.round}`];
-                continue;
-              }
-              if (m.type === 'event' && m.kind === 'round-end') {
-                nextLog = [...nextLog, `【边界】round-end #${m.round}`];
-                const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
-                nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
-                continue;
-              }
+              if (m.type === 'event' && m.kind === 'round-start') { nextLog = [...nextLog, `【边界】round-start #${m.round}`]; continue; }
+              if (m.type === 'event' && m.kind === 'round-end') { nextLog = [...nextLog, `【边界】round-end #${m.round}`]; const r = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount); nextFinished=r.nextFinished; nextAggStats=r.nextAggStats; nextAggCount=r.nextAggCount; continue; }
 
               const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
               const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
@@ -679,7 +622,6 @@ function LivePanel(props: LiveProps) {
                 nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?'}为地主`];
 
                 try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
-
                 lastReasonRef.current = [null, null, null];
                 continue;
               }
@@ -689,25 +631,12 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
-                nextLog = [
-                  ...nextLog,
-                  `AI完成｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
-                  ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
-                ];
+                nextLog = [...nextLog, `AI完成｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`, ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : [])];
                 lastReasonRef.current[m.seat] = m.reason || null;
                 continue;
               }
-
-              if (m.type === 'event' && m.kind === 'rob') {
-                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
-                continue;
-              }
-
-              if (m.type === 'event' && m.kind === 'trick-reset') {
-                nextLog = [...nextLog, '一轮结束，重新起牌'];
-                nextPlays = [];
-                continue;
-              }
+              if (m.type === 'event' && m.kind === 'rob') { nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`]; continue; }
+              if (m.type === 'event' && m.kind === 'trick-reset') { nextLog = [...nextLog, '一轮结束，重新起牌']; nextPlays = []; continue; }
 
               if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
@@ -723,8 +652,7 @@ function LivePanel(props: LiveProps) {
                   for (const rawCard of cards) {
                     const options = candDecorations(rawCard);
                     const chosen = options.find((d: string) => nh[seat].includes(d)) || options[0];
-                    const k = nh[seat].indexOf(chosen);
-                    if (k >= 0) nh[seat].splice(k, 1);
+                    const k = nh[seat].indexOf(chosen); if (k >= 0) nh[seat].splice(k, 1);
                     pretty.push(chosen);
                   }
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
@@ -742,31 +670,18 @@ function LivePanel(props: LiveProps) {
                 (m.type === 'result') || (m.type === 'game-over') || (m.type === 'game_end');
               if (isWinLike) {
                 const L = (nextLandlord ?? 0) as number;
-                const ds = (Array.isArray(m.deltaScores) ? m.deltaScores
-                          : Array.isArray(m.delta) ? m.delta
-                          : [0,0,0]) as [number,number,number];
+                const ds = (Array.isArray(m.deltaScores) ? m.deltaScores : Array.isArray(m.delta) ? m.delta : [0,0,0]) as [number,number,number];
 
-                const rot: [number,number,number] = [
-                  ds[(0 - L + 3) % 3],
-                  ds[(1 - L + 3) % 3],
-                  ds[(2 - L + 3) % 3],
-                ];
-                let nextWinnerLocal     = m.winner ?? nextWinner ?? null;
+                const rot: [number,number,number] = [ ds[(0 - L + 3) % 3], ds[(1 - L + 3) % 3], ds[(2 - L + 3) % 3] ];
+                let nextWinnerLocal = m.winner ?? nextWinner ?? null;
                 nextMultiplier = m.multiplier ?? nextMultiplier ?? 1;
-                nextDelta      = rot;
-                nextTotals     = [
-                  nextTotals[0] + rot[0],
-                  nextTotals[1] + rot[1],
-                  nextTotals[2] + rot[2]
-                ] as any;
+                nextDelta = rot;
+                nextTotals = [ nextTotals[0] + rot[0], nextTotals[1] + rot[1], nextTotals[2] + rot[2] ] as any;
 
                 if (nextWinnerLocal == null) {
                   const landlordDelta = ds[0] ?? 0;
                   if (landlordDelta > 0) nextWinnerLocal = L;
-                  else if (landlordDelta < 0) {
-                    const farmer = [0,1,2].find(x => x !== L)!;
-                    nextWinnerLocal = farmer;
-                  }
+                  else if (landlordDelta < 0) nextWinnerLocal = [0,1,2].find(x => x !== L)!;
                 }
                 nextWinner = nextWinnerLocal;
 
@@ -777,17 +692,11 @@ function LivePanel(props: LiveProps) {
                   const landlordWin = (nextWinner === L) || ((ds[0] ?? 0) > 0);
                   if (landlordWin) tsUpdateTwoTeams(updated, [L], farmers);
                   else             tsUpdateTwoTeams(updated, farmers, [L]);
-
-                  setTsArr(updated);
-                  updateStoreAfterRound(updated, L);
-
-                  nextLog = [
-                    ...nextLog,
-                    `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`
-                  ];
+                  setTsArr(updated); updateTsStoreAfterRound(updated, L);
+                  nextLog = [...nextLog, `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`];
                 }
 
-                // —— PageRank：赢家->输家 边权 = 倍数 —— //
+                // —— PageRank：赢家→输家（权=倍数） —— //
                 {
                   const W = curPR.W.map(row => row.slice());
                   const mlt = Math.max(1, Number(nextMultiplier) || 1);
@@ -804,10 +713,7 @@ function LivePanel(props: LiveProps) {
                 const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
 
-                nextLog = [
-                  ...nextLog,
-                  `胜者：${nextWinner == null ? '—' : seatName(nextWinner)}，倍数 x${nextMultiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
-                ];
+                nextLog = [...nextLog, `胜者：${nextWinner == null ? '—' : seatName(nextWinner)}，倍数 x${nextMultiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`];
                 continue;
               }
 
@@ -819,35 +725,19 @@ function LivePanel(props: LiveProps) {
                 const s3 = [0,1,2].map(i=>{
                   const rec = arr.find((x:any)=>x.seat===i || x.index===i);
                   const sc = rec?.scaled || rec?.score || {};
-                  return {
-                    coop: Number(sc.coop ?? 2.5),
-                    agg : Number(sc.agg  ?? 2.5),
-                    cons: Number(sc.cons ?? 2.5),
-                    eff : Number(sc.eff  ?? 2.5),
-                    rob : Number(sc.rob  ?? 2.5),
-                  };
+                  return { coop:Number(sc.coop ?? 2.5), agg:Number(sc.agg ?? 2.5), cons:Number(sc.cons ?? 2.5), eff:Number(sc.eff ?? 2.5), rob:Number(sc.rob ?? 2.5) };
                 }) as Score5[];
 
-                const mode  = aggModeRef.current;
-                const a     = alphaRef.current;
-
-                if (!nextAggStats) {
-                  nextAggStats = s3.map(x=>({ ...x }));
-                  nextAggCount = 1;
-                } else {
-                  nextAggStats = nextAggStats.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
-                  nextAggCount = nextAggCount + 1;
-                }
+                const mode=aggModeRef.current, a=alphaRef.current;
+                if (!nextAggStats) { nextAggStats = s3.map(x=>({ ...x })); nextAggCount = 1; }
+                else { nextAggStats = nextAggStats.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a)); nextAggCount = nextAggCount + 1; }
 
                 const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
                 nextLog = [...nextLog, `战术画像（本局）：${msg}（已累计 ${nextAggCount} 局）`];
                 continue;
               }
 
-              if (m.type === 'log' && typeof m.message === 'string') {
-                nextLog = [...nextLog, rewrite(m.message)];
-                continue;
-              }
+              if (m.type === 'log' && typeof m.message === 'string') { nextLog = [...nextLog, rewrite(m.message)]; continue; }
             } catch (e) { console.error('[ingest:batch]', e, raw); }
           }
 
@@ -867,7 +757,6 @@ function LivePanel(props: LiveProps) {
         if (controllerRef.current?.signal.aborted) break;
         const thisRound = i + 1;
         await playOneGame(i, thisRound);
-
         const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
         if (hasNegative) { setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']); break; }
         await new Promise(r => setTimeout(r, 800 + Math.floor(Math.random() * 600)));
@@ -879,14 +768,8 @@ function LivePanel(props: LiveProps) {
   };
 
   const stop = () => { controllerRef.current?.abort(); setRunning(false); };
-
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
-
-  // PageRank 展示辅助
-  const prRankIndex = (i:number) => {
-    const order = [0,1,2].sort((a,b)=> (prState.pr[b]-prState.pr[a]));
-    return order.indexOf(i) + 1; // 1..3
-  };
+  const prRankIndex = (i:number) => { const order=[0,1,2].sort((a,b)=>prState.pr[b]-prState.pr[a]); return order.indexOf(i)+1; };
 
   return (
     <div>
@@ -896,41 +779,47 @@ function LivePanel(props: LiveProps) {
         </span>
       </div>
 
-      {/* ========= TrueSkill（实时） + PageRank 选择 ========= */}
+      {/* ========= TrueSkill + PageRank（可多选显示） ========= */}
       <Section title="TrueSkill（实时）">
-        {/* 上传 / 存档 / 刷新 */}
-        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-          <input ref={fileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleUploadFile} />
-          <button onClick={()=>fileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
-          <button onClick={handleSaveArchive} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
-          <button onClick={handleRefreshApply} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
+        <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:8 }}>
+          {/* TS 控件 */}
+          <input ref={tsFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleTsUpload} />
+          <button onClick={()=>tsFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
+          <button onClick={handleTsSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+          <button onClick={handleTsRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
 
-          {/* 新增：计分算法切换（尽量轻量，不改其它 UI） */}
+          {/* PR 独立控件 */}
+          <input ref={prFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handlePrUpload} />
+          <span style={{ marginLeft:6, color:'#6b7280' }}>｜</span>
+          <button onClick={()=>prFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>PR上传</button>
+          <button onClick={handlePrSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>PR存档</button>
+          <button onClick={handlePrRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>PR刷新</button>
+
+          {/* 多选显示 */}
           <div style={{ marginLeft:8, fontSize:12 }}>
-            算法：
+            显示：
             <label style={{ marginLeft:6 }}>
-              <input type="radio" name="scoreAlgo" checked={scoreAlgo==='ts'} onChange={()=>setScoreAlgo('ts')} /> TrueSkill
+              <input type="checkbox" checked={showTS} onChange={e=>setShowTS(e.target.checked)} /> TrueSkill
             </label>
             <label style={{ marginLeft:10 }}>
-              <input type="radio" name="scoreAlgo" checked={scoreAlgo==='pr'} onChange={()=>setScoreAlgo('pr')} /> PageRank
+              <input type="checkbox" checked={showPR} onChange={e=>setShowPR(e.target.checked)} /> PageRank
             </label>
           </div>
 
-          <div style={{ fontSize:12, color:'#6b7280', marginLeft:8 }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
+          <div style={{ fontSize:12, color:'#6b7280', marginLeft:6 }}>按“内置/AI+模型/版本(+HTTP Base)”识别，TS 区分地主/农民；PR 为整体分数。</div>
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           {[0,1,2].map(i=>{
             const stored = getStoredForSeat(i);
-            const usingRole: 'overall'|'landlord'|'farmer' =
-              landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
+            const usingRole: 'overall'|'landlord'|'farmer' = landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
                   <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
                 </div>
 
-                {scoreAlgo === 'ts' ? (
+                {showTS && (
                   <>
                     <div style={{ fontSize:13, color:'#374151' }}>
                       <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
@@ -939,34 +828,21 @@ function LivePanel(props: LiveProps) {
                     </div>
                     <div style={{ borderTop:'1px dashed #eee', marginTop:8, paddingTop:8 }}>
                       <div style={{ fontSize:12, marginBottom:6 }}>
-                        当前使用：<b>
-                          {usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}
-                        </b>
+                        当前使用：<b>{usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}</b>
                       </div>
                       <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12, color:'#374151' }}>
-                        <div>
-                          <div style={{ fontWeight:600, opacity:0.8 }}>总体</div>
-                          <div>{tsMuSigStr(stored.overall)}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontWeight:600, opacity:0.8 }}>地主</div>
-                          <div>{tsMuSigStr(stored.landlord)}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontWeight:600, opacity:0.8 }}>农民</div>
-                          <div>{tsMuSigStr(stored.farmer)}</div>
-                        </div>
+                        <div><div style={{ fontWeight:600, opacity:0.8 }}>总体</div><div>{tsMuSigStr(stored.overall)}</div></div>
+                        <div><div style={{ fontWeight:600, opacity:0.8 }}>地主</div><div>{tsMuSigStr(stored.landlord)}</div></div>
+                        <div><div style={{ fontWeight:600, opacity:0.8 }}>农民</div><div>{tsMuSigStr(stored.farmer)}</div></div>
                       </div>
                     </div>
                   </>
-                ) : (
-                  // PageRank 展示（用同一位置，不改其它 UI）
-                  <div style={{ fontSize:13, color:'#374151' }}>
+                )}
+
+                {showPR && (
+                  <div style={{ fontSize:13, color:'#374151', marginTop: showTS ? 10 : 0 }}>
                     <div>PR：<b>{(prState.pr[i]*100).toFixed(2)}%</b></div>
                     <div>排名：<b>#{prRankIndex(i)}</b></div>
-                    <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
-                      边权 = 当局倍数；赢家→输家累计，d=0.85。
-                    </div>
                   </div>
                 )}
               </div>
@@ -974,7 +850,7 @@ function LivePanel(props: LiveProps) {
           })}
         </div>
         <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
-          说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。</div>
+          说明：CR 为置信下界（越高越稳）；PR 边权=倍数，赢家→输家累计；每局结算后自动更新（也兼容后端推送 TS）。</div>
       </Section>
 
       <Section title="积分（总分）">
@@ -989,14 +865,7 @@ function LivePanel(props: LiveProps) {
       </Section>
 
       <Section title="战术画像（累计，0~5）">
-        <RadarPanel
-          aggStats={aggStats}
-          aggCount={aggCount}
-          aggMode={aggMode}
-          alpha={alpha}
-          onChangeMode={setAggMode}
-          onChangeAlpha={setAlpha}
-        />
+        <RadarPanel aggStats={aggStats} aggCount={aggCount} aggMode={aggMode} alpha={alpha} onChangeMode={setAggMode} onChangeAlpha={setAlpha} />
       </Section>
 
       <Section title="手牌">
@@ -1014,27 +883,15 @@ function LivePanel(props: LiveProps) {
 
       <Section title="出牌">
         <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
-          {plays.length === 0
-            ? <div style={{ opacity:0.6 }}>（尚无出牌）</div>
-            : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)
-          }
+          {plays.length === 0 ? <div style={{ opacity:0.6 }}>（尚无出牌）</div> : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)}
         </div>
       </Section>
 
       <Section title="结果">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>倍数</div>
-            <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
-          </div>
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>胜者</div>
-            <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}</div>
-          </div>
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>本局加减分</div>
-            <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div>
-          </div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}><div>倍数</div><div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div></div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}><div>胜者</div><div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}</div></div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}><div>本局加减分</div><div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div></div>
         </div>
       </Section>
 
@@ -1054,53 +911,40 @@ function LivePanel(props: LiveProps) {
   );
 }
 
-function RadarPanel({
-  aggStats, aggCount, aggMode, alpha,
-  onChangeMode, onChangeAlpha,
-}:{ aggStats: Score5[] | null; aggCount: number; aggMode:'mean'|'ewma'; alpha:number;
-   onChangeMode:(m:'mean'|'ewma')=>void; onChangeAlpha:(a:number)=>void; }) {
+function RadarPanel({ aggStats, aggCount, aggMode, alpha, onChangeMode, onChangeAlpha }:{
+  aggStats: Score5[] | null; aggCount: number; aggMode:'mean'|'ewma'; alpha:number;
+  onChangeMode:(m:'mean'|'ewma')=>void; onChangeAlpha:(a:number)=>void;
+}) {
   const [mode, setMode] = useState<'mean'|'ewma'>(aggMode);
   const [a, setA] = useState<number>(alpha);
-
   useEffect(()=>{ setMode(aggMode); }, [aggMode]);
   useEffect(()=>{ setA(alpha); }, [alpha]);
 
   return (
     <>
       <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:8 }}>
-        <label>
-          汇总方式
+        <label>汇总方式
           <select value={mode} onChange={e=>{ const v=e.target.value as ('mean'|'ewma'); setMode(v); onChangeMode(v); }} style={{ marginLeft:6 }}>
             <option value="ewma">指数加权（推荐）</option>
             <option value="mean">简单平均</option>
           </select>
         </label>
         {mode === 'ewma' && (
-          <label>
-            α（0.05–0.95）
+          <label>α（0.05–0.95）
             <input type="number" min={0.05} max={0.95} step={0.05}
               value={a}
-              onChange={e=>{
-                const v = Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35));
-                setA(v); onChangeAlpha(v);
-              }}
+              onChange={e=>{ const v=Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35)); setA(v); onChangeAlpha(v); }}
               style={{ width:80, marginLeft:6 }}
             />
           </label>
         )}
-        <div style={{ fontSize:12, color:'#6b7280' }}>
-          {mode==='ewma' ? '越大越看重最近几局' : `已累计 ${aggCount} 局`}
-        </div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>{mode==='ewma' ? '越大越看重最近几局' : `已累计 ${aggCount} 局`}</div>
       </div>
 
       {aggStats
-        ? (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-            {[0,1,2].map(i=>(
-              <RadarChart key={i} title={`${['甲','乙','丙'][i]}（累计）`} scores={aggStats[i]} />
-            ))}
+        ? <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+            {[0,1,2].map(i=>(<RadarChart key={i} title={`${['甲','乙','丙'][i]}（累计）`} scores={aggStats[i]} />))}
           </div>
-        )
         : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
       }
     </>
@@ -1229,19 +1073,10 @@ function Home() {
                 {seats[i].startsWith('ai:') && (
                   <label style={{ display:'block', marginBottom:6 }}>
                     模型（可选）
-                    <input
-                      type="text"
-                      value={seatModels[i]}
-                      placeholder={defaultModelFor(seats[i])}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatModels(arr => { const n=[...arr]; n[i] = v; return n; });
-                      }}
-                      style={{ width:'100%' }}
-                    />
-                    <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
-                      留空则使用推荐：{defaultModelFor(seats[i])}
-                    </div>
+                    <input type="text" value={seatModels[i]} placeholder={defaultModelFor(seats[i])}
+                      onChange={e=>{ const v=e.target.value; setSeatModels(arr => { const n=[...arr]; n[i] = v; return n; }); }}
+                      style={{ width:'100%' }} />
+                    <div style={{ fontSize:12, color:'#777', marginTop:4 }}>留空则使用推荐：{defaultModelFor(seats[i])}</div>
                   </label>
                 )}
 
@@ -1249,80 +1084,54 @@ function Home() {
                   <label style={{ display:'block', marginBottom:6 }}>
                     OpenAI API Key
                     <input type="password" value={seatKeys[i]?.openai||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), openai:v }; return n; });
-                      }}
+                      onChange={e=>{ const v=e.target.value; setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), openai:v }; return n; }); }}
                       style={{ width:'100%' }} />
                   </label>
                 )}
-
                 {seats[i] === 'ai:gemini' && (
                   <label style={{ display:'block', marginBottom:6 }}>
                     Gemini API Key
                     <input type="password" value={seatKeys[i]?.gemini||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), gemini:v }; return n; });
-                      }}
+                      onChange={e=>{ const v=e.target.value; setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), gemini:v }; return n; }); }}
                       style={{ width:'100%' }} />
                   </label>
                 )}
-
                 {seats[i] === 'ai:grok' && (
                   <label style={{ display:'block', marginBottom:6 }}>
                     xAI (Grok) API Key
                     <input type="password" value={seatKeys[i]?.grok||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), grok:v }; return n; });
-                      }}
+                      onChange={e=>{ const v=e.target.value; setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), grok:v }; return n; }); }}
                       style={{ width:'100%' }} />
                   </label>
                 )}
-
                 {seats[i] === 'ai:kimi' && (
                   <label style={{ display:'block', marginBottom:6 }}>
                     Kimi API Key
                     <input type="password" value={seatKeys[i]?.kimi||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), kimi:v }; return n; });
-                      }}
+                      onChange={e=>{ const v=e.target.value; setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), kimi:v }; return n; }); }}
                       style={{ width:'100%' }} />
                   </label>
                 )}
-
                 {seats[i] === 'ai:qwen' && (
                   <label style={{ display:'block', marginBottom:6 }}>
                     Qwen API Key
                     <input type="password" value={seatKeys[i]?.qwen||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; });
-                      }}
+                      onChange={e=>{ const v=e.target.value; setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; }); }}
                       style={{ width:'100%' }} />
                   </label>
                 )}
-
                 {seats[i] === 'http' && (
                   <>
                     <label style={{ display:'block', marginBottom:6 }}>
                       HTTP Base / URL
                       <input type="text" value={seatKeys[i]?.httpBase||''}
-                        onChange={e=>{
-                          const v = e.target.value;
-                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpBase:v }; return n; });
-                        }}
+                        onChange={e=>{ const v=e.target.value; setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpBase:v }; return n; }); }}
                         style={{ width:'100%' }} />
                     </label>
                     <label style={{ display:'block', marginBottom:6 }}>
                       HTTP Token（可选）
                       <input type="password" value={seatKeys[i]?.httpToken||''}
-                        onChange={e=>{
-                          const v = e.target.value;
-                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpToken:v }; return n; });
-                        }}
+                        onChange={e=>{ const v=e.target.value; setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpToken:v }; return n; }); }}
                         style={{ width:'100%' }} />
                     </label>
                   </>
@@ -1339,15 +1148,8 @@ function Home() {
                   <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
                   <label style={{ display:'block' }}>
                     最小间隔 (ms)
-                    <input
-                      type="number" min={0} step={100}
-                      value={ (seatDelayMs[i] ?? 0) }
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatDelay(i, v);
-                      }}
-                      style={{ width:'100%' }}
-                    />
+                    <input type="number" min={0} step={100} value={(seatDelayMs[i] ?? 0)}
+                      onChange={e=>{ const v=e.target.value; setSeatDelay(i, v); }} style={{ width:'100%' }} />
                   </label>
                 </div>
               ))}
@@ -1358,20 +1160,9 @@ function Home() {
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
-        <LivePanel
-          key={resetKey}
-          rounds={rounds}
-          startScore={startScore}
-          seatDelayMs={seatDelayMs}
-          enabled={enabled}
-          rob={rob}
-          four2={four2}
-          seats={seats}
-          seatModels={seatModels}
-          seatKeys={seatKeys}
-          farmerCoop={farmerCoop}
-          onLog={setLiveLog}
-        />
+        <LivePanel key={resetKey} rounds={rounds} startScore={startScore} seatDelayMs={seatDelayMs}
+          enabled={enabled} rob={rob} four2={four2} seats={seats} seatModels={seatModels}
+          seatKeys={seatKeys} farmerCoop={farmerCoop} onLog={setLiveLog} />
       </div>
     </div>
   );
