@@ -379,8 +379,8 @@ function defaultModelFor(choice: BotChoice): string {
 }
 function normalizeModelForProvider(choice: BotChoice, input: string): string {
   const m = (input || '').trim();
-  const low = m.toLowerCase();
   if (!m) return '';
+  const low = m.toLowerCase();
   switch (choice) {
     case 'ai:kimi':
       return /^kimi[-\w]*/.test(low) ? m : '';
@@ -949,8 +949,6 @@ function LivePanel(props: LiveProps) {
         })
         .join(', ');
 
-    const rewrite = (n: number) => makeRewriteRoundLabel(n);
-
     const markRoundFinishedIfNeeded = (nextFinished: number, nextAggStats: Score5[] | null, nextAggCount: number) => {
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
@@ -1003,15 +1001,14 @@ function LivePanel(props: LiveProps) {
       const reader = r.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let buf = '';
-      const rewriteLine = rewrite(labelRoundNo);
+      const rewrite = makeRewriteRoundLabel(labelRoundNo);
 
       try {
         while (true) {
           const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
 
-          buf += decoder.decode(value || new Uint8Array(), { stream: !done });
-
-          // 解析完整行
           let idx: number;
           const batch: any[] = [];
           while ((idx = buf.indexOf('\n')) >= 0) {
@@ -1021,17 +1018,6 @@ function LivePanel(props: LiveProps) {
             try {
               batch.push(JSON.parse(line));
             } catch {}
-          }
-
-          // 流结束时冲刷尾块
-          if (done) {
-            const tail = buf.trim();
-            if (tail) {
-              try {
-                batch.push(JSON.parse(tail));
-              } catch {}
-            }
-            buf = '';
           }
 
           if (batch.length) {
@@ -1047,10 +1033,12 @@ function LivePanel(props: LiveProps) {
             let nextAggStats = aggStatsRef.current;
             let nextAggCount = aggCountRef.current;
 
+            let curPR = prRef.current;
+
             for (const raw of batch) {
               const m: any = raw;
               try {
-                // TS 注入
+                // TS 直接注入
                 if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                   const incoming: Rating[] = m.ratings.map((r: any) => ({ mu: Number(r.mu) || 25, sigma: Number(r.sigma) || 25 / 3 }));
                   setTsArr(incoming);
@@ -1180,11 +1168,6 @@ function LivePanel(props: LiveProps) {
                   }
                   nextWinner = nextWinnerLocal;
 
-                  // ✅ 显示层修正：无论末帧 play 是否丢失，赢家手牌在 UI 中清空
-                  if (nextWinner != null) {
-                    nextHands = nextHands.map((h, idx) => (idx === nextWinner ? [] : h));
-                  }
-
                   // —— TS 更新 & 存档 —— //
                   {
                     const updated = tsRef.current.map((r) => ({ ...r }));
@@ -1293,7 +1276,7 @@ function LivePanel(props: LiveProps) {
 
                 // 文本日志
                 if (m.type === 'log' && typeof m.message === 'string') {
-                  nextLog = [...nextLog, rewriteLine(m.message)];
+                  nextLog = [...nextLog, rewrite(m.message)];
                   continue;
                 }
               } catch (e) {
@@ -1313,13 +1296,10 @@ function LivePanel(props: LiveProps) {
             setAggStats(nextAggStats || null);
             setAggCount(nextAggCount || 0);
           }
-
-          if (done) break;
         }
       } finally {
-        // ✅ 兜底：仅在有进展时才补一次
-        const hadProgress = playsRef.current.length > 0 || winnerRef.current != null;
-        if (hadProgress) finalizeRoundIfMissing();
+        // 兜底：如果这一局还没被统计完成，这里补一次
+        finalizeRoundIfMissing();
       }
 
       setLog((l) => [...l, `—— 本局流结束 ——`]);
@@ -1693,195 +1673,6 @@ function Home() {
     setResetKey((k) => k + 1);
   };
 
-  const providerOptions: { value: BotChoice; label: string }[] = [
-    { value: 'built-in:greedy-max', label: '内置 · Greedy Max' },
-    { value: 'built-in:greedy-min', label: '内置 · Greedy Min' },
-    { value: 'built-in:random-legal', label: '内置 · Random Legal' },
-    { value: 'ai:openai', label: 'AI · OpenAI' },
-    { value: 'ai:gemini', label: 'AI · Gemini' },
-    { value: 'ai:grok', label: 'AI · Grok' },
-    { value: 'ai:kimi', label: 'AI · Kimi' },
-    { value: 'ai:qwen', label: 'AI · Qwen' },
-    { value: 'ai:deepseek', label: 'AI · DeepSeek' },
-    { value: 'http', label: 'HTTP · 自定义服务' },
-  ];
-
-  const renderSeatConfig = (i: number) => {
-    const choice = seats[i];
-    const model = seatModels[i] || '';
-    const keys = seatKeys[i] || {};
-
-    const updateChoice = (v: BotChoice) => {
-      setSeats((arr) => {
-        const n = [...arr];
-        n[i] = v;
-        return n;
-      });
-      // 如果换了提供方，清空模型名以免误用
-      setSeatModels((arr) => {
-        const n = [...arr];
-        n[i] = '';
-        return n;
-      });
-    };
-    const updateModel = (v: string) =>
-      setSeatModels((arr) => {
-        const n = [...arr];
-        n[i] = v;
-        return n;
-      });
-    const updateKeys = (patch: any) =>
-      setSeatKeys((arr: any[]) => {
-        const n = arr.map((x) => ({ ...x }));
-        n[i] = { ...(n[i] || {}), ...patch };
-        return n;
-      });
-
-    const needModelInput = choice !== 'http' && !choice.startsWith('built-in');
-    const needHttp = choice === 'http';
-    const needOpenAI = choice === 'ai:openai';
-    const needGemini = choice === 'ai:gemini';
-    const needGrok = choice === 'ai:grok';
-    const needKimi = choice === 'ai:kimi';
-    const needQwen = choice === 'ai:qwen';
-    const needDeepSeek = choice === 'ai:deepseek';
-
-    return (
-      <div key={i} style={{ border: '1px solid #eee', borderRadius: 10, padding: 10 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-          <div>
-            <SeatTitle i={i} /> 座位
-          </div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>延时（ms）：</div>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 10 }}>
-          <div>
-            <label>
-              算法/提供方
-              <select
-                value={choice}
-                onChange={(e) => updateChoice(e.target.value as BotChoice)}
-                style={{ width: '100%' }}
-              >
-                {providerOptions.map((op) => (
-                  <option key={op.value} value={op.value}>
-                    {op.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {needModelInput && (
-              <label style={{ display: 'block', marginTop: 8 }}>
-                模型
-                <input
-                  value={model}
-                  onChange={(e) => updateModel(e.target.value)}
-                  placeholder={defaultModelFor(choice) || '模型名'}
-                  style={{ width: '100%' }}
-                />
-              </label>
-            )}
-
-            {needOpenAI && (
-              <label style={{ display: 'block', marginTop: 8 }}>
-                OpenAI Key
-                <input
-                  value={keys.openai || ''}
-                  onChange={(e) => updateKeys({ openai: e.target.value })}
-                  style={{ width: '100%' }}
-                />
-              </label>
-            )}
-            {needGemini && (
-              <label style={{ display: 'block', marginTop: 8 }}>
-                Gemini Key
-                <input
-                  value={keys.gemini || ''}
-                  onChange={(e) => updateKeys({ gemini: e.target.value })}
-                  style={{ width: '100%' }}
-                />
-              </label>
-            )}
-            {needGrok && (
-              <label style={{ display: 'block', marginTop: 8 }}>
-                Grok Key
-                <input
-                  value={keys.grok || ''}
-                  onChange={(e) => updateKeys({ grok: e.target.value })}
-                  style={{ width: '100%' }}
-                />
-              </label>
-            )}
-            {needKimi && (
-              <label style={{ display: 'block', marginTop: 8 }}>
-                Kimi Key
-                <input
-                  value={keys.kimi || ''}
-                  onChange={(e) => updateKeys({ kimi: e.target.value })}
-                  style={{ width: '100%' }}
-                />
-              </label>
-            )}
-            {needQwen && (
-              <label style={{ display: 'block', marginTop: 8 }}>
-                Qwen Key
-                <input
-                  value={keys.qwen || ''}
-                  onChange={(e) => updateKeys({ qwen: e.target.value })}
-                  style={{ width: '100%' }}
-                />
-              </label>
-            )}
-            {needDeepSeek && (
-              <label style={{ display: 'block', marginTop: 8 }}>
-                DeepSeek Key
-                <input
-                  value={keys.deepseek || ''}
-                  onChange={(e) => updateKeys({ deepseek: e.target.value })}
-                  style={{ width: '100%' }}
-                />
-              </label>
-            )}
-            {needHttp && (
-              <>
-                <label style={{ display: 'block', marginTop: 8 }}>
-                  HTTP Base URL
-                  <input
-                    value={keys.httpBase || ''}
-                    onChange={(e) => updateKeys({ httpBase: e.target.value })}
-                    placeholder="https://your-bot/act"
-                    style={{ width: '100%' }}
-                  />
-                </label>
-                <label style={{ display: 'block', marginTop: 8 }}>
-                  HTTP Token
-                  <input
-                    value={keys.httpToken || ''}
-                    onChange={(e) => updateKeys({ httpToken: e.target.value })}
-                    style={{ width: '100%' }}
-                  />
-                </label>
-              </>
-            )}
-          </div>
-
-          <div>
-            <input
-              type="number"
-              min={0}
-              step={100}
-              value={seatDelayMs[i]}
-              onChange={(e) => setSeatDelay(i, e.target.value)}
-              style={{ width: '100%' }}
-            />
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>用于前后端一致的“思考时间”。</div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div style={{ maxWidth: 1080, margin: '24px auto', padding: '0 16px' }}>
       <h1 style={{ fontSize: 28, fontWeight: 900, margin: '6px 0 16px' }}>斗地主 · Bot Arena</h1>
@@ -1954,14 +1745,6 @@ function Home() {
               <option value="2pairs">两对</option>
             </select>
           </label>
-        </div>
-      </div>
-
-      {/* ✅ 玩家（座位）设置 —— 恢复/增强：算法选择 + 模型/Key + HTTP + 间隔时间 */}
-      <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 14, marginBottom: 16 }}>
-        <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>玩家（座位）设置</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-          {[0, 1, 2].map(renderSeatConfig)}
         </div>
       </div>
 
