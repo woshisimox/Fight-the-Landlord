@@ -3,7 +3,6 @@ export function DeepseekBot({ apiKey, model }: { apiKey?: string; model?: string
   const endpoint = 'https://api.deepseek.com/v1/chat/completions';
   const mdl = (model && String(model).trim()) || 'deepseek-chat';
 
-  // 统一 JSON 解析：容错提取 {"move":"play|pass","cards":[...],"reason":"..."}
   function parseOut(txt: string): any {
     try {
       const m = txt.match(/\{[\s\S]*\}/);
