@@ -1187,8 +1187,8 @@ function LivePanel(props: LiveProps) {
 
                   // —— PR：期望校正 + 时间衰减（相对 + 绝对） —— //
                   {
-                    const W = curPR.W.map((row) => row.map((v) => v * PR_DECAY));
-                    const reward = curPR.reward.map((x) => x * PR_DECAY);
+                    const W = prRef.current.W.map((row) => row.map((v) => v * PR_DECAY));
+                    const reward = prRef.current.reward.map((x) => x * PR_DECAY);
 
                     const relBefore = prRef.current.pr;
                     const mlt = Math.max(1, Number(nextMultiplier) || 1);
@@ -1209,9 +1209,9 @@ function LivePanel(props: LiveProps) {
                       }
 
                     const prRel = computePRRelative(W, PR_ALPHA, PR_ITERS);
-                    const abs = computePRAbsolute(W, reward, PR_ALPHA, PR_ITERS, curPR.abs);
+                    const abs = computePRAbsolute(W, reward, PR_ALPHA, PR_ITERS, prRef.current.abs);
 
-                    curPR = { W, pr: prRel, abs, reward, rounds: curPR.rounds + 1 };
+                    const curPR = { W, pr: prRel, abs, reward, rounds: prRef.current.rounds + 1 };
                     setPrState(curPR);
 
                     nextLog = [
@@ -1473,7 +1473,7 @@ function LivePanel(props: LiveProps) {
       <Section title="积分（总分）">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
           {[0, 1, 2].map((i) => (
-            <div key={i} style={{ border: '1px solid '#eee', borderRadius: 8, padding: 10 }}>
+            <div key={i} style={{ border: '1px solid #eee', borderRadius: 8, padding: 10 }}>
               <div>
                 <SeatTitle i={i} />
               </div>
