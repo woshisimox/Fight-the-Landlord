@@ -48,11 +48,7 @@ type TsStoreEntry = {
   roles?: { landlord?: Rating | null; farmer?: Rating | null };
   meta?: { choice?: string; model?: string; httpBase?: string };
 };
-type TsStore = {
-  schema: 'ddz-trueskill@1';
-  updatedAt: string;
-  players: Record<string, TsStoreEntry>;
-};
+type TsStore = { schema: 'ddz-trueskill@1'; updatedAt: string; players: Record<string, TsStoreEntry>; };
 const TS_STORE_KEY = 'ddz_ts_store_v1';
 const ensureRating = (x:any): Rating => {
   const mu = Number(x?.mu), sigma = Number(x?.sigma);
@@ -280,13 +276,13 @@ function RadarChart({ title, scores }:{ title: string; scores: Score5; }) {
 const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   if (typeof msg !== 'string') return msg;
   let out = msg;
-  out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
-  out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-  out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
-  out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-  out = out.replace(/开始连打\s*\d+\\s*局\(/g,  `开始第 ${n} 局(`);
-  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
-  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
+  out = out.replace(/第\\s*\\d+\\s*局开始/g, `第 ${n} 局开始`);
+  out = out.replace(/开始第\\s*\\d+\\s*局（/g, `开始第 ${n} 局（`);
+  out = out.replace(/开始第\\s*\\d+\\s*局\\(/g,  `开始第 ${n} 局(`);
+  out = out.replace(/开始连打\\s*\\d+\\s*局（/g, `开始第 ${n} 局（`);
+  out = out.replace(/开始连打\\s*\\d+\\\\s*局\\(/g,  `开始第 ${n} 局(`);
+  out = out.replace(/单局模式.*?(仅运行|运行)\\s*\\d+\\s*局（/g, `单局模式：开始第 ${n} 局（`);
+  out = out.replace(/单局模式.*?(仅运行|运行)\\s*\\d+\\s*局\\(/g,  `单局模式：开始第 ${n} 局(`);
   return out;
 };
 
@@ -313,17 +309,16 @@ function LivePanel(props: LiveProps) {
 
   // —— 新增：TS 存档（读/写/应用） —— //
   const tsStoreRef = useRef<TsStore>(emptyStore());
-  useEffect(()=>{ tsStoreRef.current = readStore(); }, []);
+  useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
 
   const seatIdentity = (i:number) => {
     const choice = props.seats[i];
     const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
-    // 身份锚定：choice | model | base（base 仅 HTTP 有意义）
-    return `${choice}|${model}|${base}`;
+    return `${choice}|${model}|${base}`; // 身份锚定：内置/AI + 模型/版本 + HTTP Base
   };
-  const resolveRatingForIdentity = (id:string, role?:TsRole): Rating | null => {
+  const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
     const p = tsStoreRef.current.players[id]; if (!p) return null;
     if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
     if (p.overall) return ensureRating(p.overall);
@@ -337,17 +332,17 @@ function LivePanel(props: LiveProps) {
     const ids = [0,1,2].map(seatIdentity);
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
-    setLog(l => [...l, `【TS】已从存档应用（${why}）：${init.map((r,i)=>`${seatName(i)} μ=${fmt2(r.mu)} σ=${fmt2(r.sigma)}`).join(' | ')}`]);
+    setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
   };
   const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
     const ids = [0,1,2].map(seatIdentity);
     for (let i=0;i<3;i++){
       const id = ids[i];
-      const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{}, meta:{} };
+      const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
       entry.overall = { ...updated[i] };
       const role: TsRole = (i===landlordIndex) ? 'landlord' : 'farmer';
       entry.roles = entry.roles || {};
-      entry.roles[role] = { ...updated[i] };
+      (entry.roles as any)[role] = { ...updated[i] };
       const choice = props.seats[i];
       const model  = normalizeModelForProvider(choice, props.seatModels[i]||'') || defaultModelFor(choice);
       const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
@@ -363,7 +358,6 @@ function LivePanel(props: LiveProps) {
       const j = JSON.parse(text);
       const store: TsStore = emptyStore();
 
-      // 兼容几种简单结构
       if (Array.isArray(j?.players)) {
         for (const p of j.players) {
           const id = p.id || p.identity || p.key; if (!id) continue;
@@ -380,20 +374,16 @@ function LivePanel(props: LiveProps) {
       } else if (Array.isArray(j)) {
         for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p; }
       } else {
-        // 单人存档 { id, overall, roles }
-        if (j?.id) store.players[j.id] = j;
+        if (j?.id) store.players[j.id] = j; // 兼容单人结构
       }
 
       tsStoreRef.current = store; writeStore(store);
       setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
     } catch (err:any) {
       setLog(l => [...l, `【TS】上传解析失败：${err?.message || err}`]);
-    } finally {
-      e.target.value = '';
-    }
+    } finally { e.target.value = ''; }
   };
   const handleSaveArchive = () => {
-    // 保存前把当前三位的 overall 写入（角色化在每局后已自动写）
     const ids = [0,1,2].map(seatIdentity);
     ids.forEach((id,i)=>{
       const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
@@ -401,7 +391,6 @@ function LivePanel(props: LiveProps) {
       tsStoreRef.current.players[id] = entry;
     });
     writeStore(tsStoreRef.current);
-
     const blob = new Blob([JSON.stringify(tsStoreRef.current, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'trueskill_store.json'; a.click();
@@ -455,7 +444,7 @@ function LivePanel(props: LiveProps) {
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
-    // TrueSkill：先重置为默认，再尝试从存档应用（比赛前可先上传/刷新）
+    // TrueSkill：每次“开始”重置
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
     try { applyTsFromStore('比赛开始前'); } catch {}
 
@@ -492,7 +481,6 @@ function LivePanel(props: LiveProps) {
       nextAggCount: number
     ) => {
       if (!roundFinishedRef.current) {
-        // 若本局未收到 stats，补一条中性评分，保证雷达图可见
         if (!seenStatsRef.current) {
           const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
           const mode = aggModeRef.current;
@@ -517,7 +505,6 @@ function LivePanel(props: LiveProps) {
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
-      // 新一局：重置标记
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
 
@@ -552,7 +539,7 @@ function LivePanel(props: LiveProps) {
 
         let idx: number;
         const batch: any[] = [];
-        while ((idx = buf.indexOf('\n')) >= 0) {
+        while ((idx = buf.indexOf('\\n')) >= 0) {
           const line = buf.slice(0, idx).trim();
           buf = buf.slice(idx + 1);
           if (!line) continue;
@@ -575,7 +562,6 @@ function LivePanel(props: LiveProps) {
           for (const raw of batch) {
             const m: any = raw;
             try {
-              // -------- TS 帧（后端主动提供） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
                 setTsArr(incoming);
@@ -590,7 +576,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 轮廓事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -602,7 +587,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 初始发牌/地主 --------
               const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
               const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
               if (hasHands) {
@@ -616,7 +600,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
                 nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
@@ -631,20 +614,17 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'rob') {
                 nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
                 continue;
               }
 
-              // -------- 起新墩 --------
               if (m.type === 'event' && m.kind === 'trick-reset') {
                 nextLog = [...nextLog, '一轮结束，重新起牌'];
                 nextPlays = [];
                 continue;
               }
 
-              // -------- 出/过 --------
               if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
@@ -673,7 +653,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 结算（多种别名兼容） --------
               const isWinLike =
                 (m.type === 'event' && (m.kind === 'win' || m.kind === 'result' || m.kind === 'game-over' || m.kind === 'game_end')) ||
                 (m.type === 'result') || (m.type === 'game-over') || (m.type === 'game_end');
@@ -683,7 +662,6 @@ function LivePanel(props: LiveProps) {
                           : Array.isArray(m.delta) ? m.delta
                           : [0,0,0]) as [number,number,number];
 
-                // 将“以地主为基准”的增减分旋转成“按座位顺序”的展示
                 const rot: [number,number,number] = [
                   ds[(0 - L + 3) % 3],
                   ds[(1 - L + 3) % 3],
@@ -698,24 +676,20 @@ function LivePanel(props: LiveProps) {
                   nextTotals[2] + rot[2]
                 ] as any;
 
-                // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
                 if (nextWinner == null) {
                   const landlordDelta = ds[0] ?? 0;
                   if (landlordDelta > 0) nextWinner = L;
                   else if (landlordDelta < 0) {
-                    // 农民胜：任选一个农民作为代表胜者用于展示（不影响 TS 团队更新）
                     const farmer = [0,1,2].find(x => x !== L)!;
                     nextWinner = farmer;
                   }
                 }
 
-                // 标记一局结束 & 雷达图兜底
                 {
                   const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 }
 
-                // ✅ TrueSkill：局后更新（后端没推 ts(after-round) 时也能更新）
                 {
                   const updated = tsRef.current.map(r => ({ ...r }));
                   const farmers = [0,1,2].filter(s => s !== L);
@@ -725,7 +699,6 @@ function LivePanel(props: LiveProps) {
                   else             tsUpdateTwoTeams(updated, farmers, [L]);
 
                   setTsArr(updated);
-                  // 写入存档：区分角色（landlord / farmer）
                   updateStoreAfterRound(updated, L);
 
                   nextLog = [
@@ -741,7 +714,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 画像统计（两种形态） --------
               const isStatsTop = (m.type === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               const isStatsEvt = (m.type === 'event' && m.kind === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               if (isStatsTop || isStatsEvt) {
@@ -775,7 +747,6 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 文本日志 --------
               if (m.type === 'log' && typeof m.message === 'string') {
                 nextLog = [...nextLog, rewrite(m.message)];
                 continue;
@@ -827,15 +798,9 @@ function LivePanel(props: LiveProps) {
         {/* —— 新增：上传 / 存档 / 刷新 —— */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
           <input ref={fileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleUploadFile} />
-          <button onClick={()=>fileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
-            上传
-          </button>
-          <button onClick={handleSaveArchive} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
-            存档
-          </button>
-          <button onClick={handleRefreshApply} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
-            刷新
-          </button>
+          <button onClick={()=>fileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
+          <button onClick={handleSaveArchive} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+          <button onClick={handleRefreshApply} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
           <div style={{ fontSize:12, color:'#6b7280' }}>按身份匹配（内置/AI+模型/版本），支持“地主/农民”分档。</div>
         </div>
 
@@ -846,9 +811,9 @@ function LivePanel(props: LiveProps) {
                 <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
               </div>
               <div style={{ fontSize:13, color:'#374151' }}>
-                <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
-                <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
-                <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
+                <div>μ：<b>{(Math.round(tsArr[i].mu*100)/100).toFixed(2)}</b></div>
+                <div>σ：<b>{(Math.round(tsArr[i].sigma*100)/100).toFixed(2)}</b></div>
+                <div>CR = μ − 3σ：<b>{(Math.round((tsArr[i].mu - 3*tsArr[i].sigma)*100)/100).toFixed(2)}</b></div>
               </div>
             </div>
           ))}
@@ -868,15 +833,14 @@ function LivePanel(props: LiveProps) {
         </div>
       </Section>
 
-      {/* ======= 积分下面、手牌上面：雷达图 ======= */}
       <Section title="战术画像（累计，0~5）">
         <RadarPanel
           aggStats={aggStats}
           aggCount={aggCount}
           aggMode={aggMode}
           alpha={alpha}
-          onChangeMode={setAggMode}
-          onChangeAlpha={setAlpha}
+          onChangeMode={(m)=>setAggMode(m)}
+          onChangeAlpha={(v)=>setAlpha(v)}
         />
       </Section>
 
