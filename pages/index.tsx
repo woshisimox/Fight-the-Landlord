@@ -276,13 +276,13 @@ function RadarChart({ title, scores }:{ title: string; scores: Score5; }) {
 const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   if (typeof msg !== 'string') return msg;
   let out = msg;
-  out = out.replace(/第\\s*\\d+\\s*局开始/g, `第 ${n} 局开始`);
-  out = out.replace(/开始第\\s*\\d+\\s*局（/g, `开始第 ${n} 局（`);
-  out = out.replace(/开始第\\s*\\d+\\s*局\\(/g,  `开始第 ${n} 局(`);
-  out = out.replace(/开始连打\\s*\\d+\\s*局（/g, `开始第 ${n} 局（`);
-  out = out.replace(/开始连打\\s*\\d+\\\\s*局\\(/g,  `开始第 ${n} 局(`);
-  out = out.replace(/单局模式.*?(仅运行|运行)\\s*\\d+\\s*局（/g, `单局模式：开始第 ${n} 局（`);
-  out = out.replace(/单局模式.*?(仅运行|运行)\\s*\\d+\\s*局\\(/g,  `单局模式：开始第 ${n} 局(`);
+  out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
+  out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
+  out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
+  out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
+  out = out.replace(/开始连打\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
+  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
+  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
   return out;
 };
 
@@ -342,7 +342,7 @@ function LivePanel(props: LiveProps) {
       entry.overall = { ...updated[i] };
       const role: TsRole = (i===landlordIndex) ? 'landlord' : 'farmer';
       entry.roles = entry.roles || {};
-      (entry.roles as any)[role] = { ...updated[i] };
+      entry.roles[role] = { ...updated[i] };
       const choice = props.seats[i];
       const model  = normalizeModelForProvider(choice, props.seatModels[i]||'') || defaultModelFor(choice);
       const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
@@ -444,7 +444,7 @@ function LivePanel(props: LiveProps) {
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
-    // TrueSkill：每次“开始”重置
+    // TrueSkill：每次“开始”重置后尝试从存档应用
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
     try { applyTsFromStore('比赛开始前'); } catch {}
 
@@ -481,6 +481,7 @@ function LivePanel(props: LiveProps) {
       nextAggCount: number
     ) => {
       if (!roundFinishedRef.current) {
+        // 若本局未收到 stats，补一条中性评分，保证雷达图可见
         if (!seenStatsRef.current) {
           const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
           const mode = aggModeRef.current;
@@ -505,6 +506,7 @@ function LivePanel(props: LiveProps) {
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
+      // 新一局：重置标记
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
 
@@ -539,7 +541,7 @@ function LivePanel(props: LiveProps) {
 
         let idx: number;
         const batch: any[] = [];
-        while ((idx = buf.indexOf('\\n')) >= 0) {
+        while ((idx = buf.indexOf('\n')) >= 0) {
           const line = buf.slice(0, idx).trim();
           buf = buf.slice(idx + 1);
           if (!line) continue;
@@ -562,6 +564,7 @@ function LivePanel(props: LiveProps) {
           for (const raw of batch) {
             const m: any = raw;
             try {
+              // -------- TS 帧（后端主动提供） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
                 setTsArr(incoming);
@@ -576,6 +579,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
+              // -------- 轮廓事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -587,6 +591,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
+              // -------- 初始发牌/地主 --------
               const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
               const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
               if (hasHands) {
@@ -600,6 +605,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
+              // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
                 nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
@@ -614,17 +620,20 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
+              // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'rob') {
                 nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
                 continue;
               }
 
+              // -------- 起新墩 --------
               if (m.type === 'event' && m.kind === 'trick-reset') {
                 nextLog = [...nextLog, '一轮结束，重新起牌'];
                 nextPlays = [];
                 continue;
               }
 
+              // -------- 出/过 --------
               if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
@@ -653,6 +662,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
+              // -------- 结算（多种别名兼容） --------
               const isWinLike =
                 (m.type === 'event' && (m.kind === 'win' || m.kind === 'result' || m.kind === 'game-over' || m.kind === 'game_end')) ||
                 (m.type === 'result') || (m.type === 'game-over') || (m.type === 'game_end');
@@ -662,6 +672,7 @@ function LivePanel(props: LiveProps) {
                           : Array.isArray(m.delta) ? m.delta
                           : [0,0,0]) as [number,number,number];
 
+                // 将“以地主为基准”的增减分旋转成“按座位顺序”的展示
                 const rot: [number,number,number] = [
                   ds[(0 - L + 3) % 3],
                   ds[(1 - L + 3) % 3],
@@ -676,20 +687,24 @@ function LivePanel(props: LiveProps) {
                   nextTotals[2] + rot[2]
                 ] as any;
 
+                // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
                 if (nextWinner == null) {
                   const landlordDelta = ds[0] ?? 0;
                   if (landlordDelta > 0) nextWinner = L;
                   else if (landlordDelta < 0) {
+                    // 农民胜：任选一个农民作为代表胜者用于展示（不影响 TS 团队更新）
                     const farmer = [0,1,2].find(x => x !== L)!;
                     nextWinner = farmer;
                   }
                 }
 
+                // 标记一局结束 & 雷达图兜底
                 {
                   const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 }
 
+                // ✅ TrueSkill：局后更新（后端没推 ts(after-round) 时也能更新）
                 {
                   const updated = tsRef.current.map(r => ({ ...r }));
                   const farmers = [0,1,2].filter(s => s !== L);
@@ -699,6 +714,7 @@ function LivePanel(props: LiveProps) {
                   else             tsUpdateTwoTeams(updated, farmers, [L]);
 
                   setTsArr(updated);
+                  // 写入存档：区分角色（landlord / farmer）
                   updateStoreAfterRound(updated, L);
 
                   nextLog = [
@@ -714,6 +730,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
+              // -------- 画像统计（两种形态） --------
               const isStatsTop = (m.type === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               const isStatsEvt = (m.type === 'event' && m.kind === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               if (isStatsTop || isStatsEvt) {
@@ -747,6 +764,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
+              // -------- 文本日志 --------
               if (m.type === 'log' && typeof m.message === 'string') {
                 nextLog = [...nextLog, rewrite(m.message)];
                 continue;
