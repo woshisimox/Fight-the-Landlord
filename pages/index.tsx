@@ -956,7 +956,7 @@ function LivePanel(props: LiveProps) {
                   const losers  = (landlordDelta > 0) ? [0,1,2].filter(x=>x!==L) : [L];
                   prUpdateAfterRound(winners as number[], losers as number[]);
                 }
-                nextLog = [                nextLog = [
+                nextLog = [
                   ...nextLog,
                   `胜者：${nextWinner == null ? '—' : seatName(nextWinner)}，倍数 x${nextMultiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
                 ];
