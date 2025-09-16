@@ -12,6 +12,7 @@ type BotChoice =
   | 'ai:grok'
   | 'ai:kimi'
   | 'ai:qwen'
+  | 'ai:deepseek'
   | 'http';
 
 /* ===================== TrueSkill 实现 ===================== */
@@ -79,11 +80,11 @@ function tsUpdateTwoTeams(r: Rating[], teamA: number[], teamB: number[]) {
 
 /* ===================== PageRank（相对 + 绝对） ===================== */
 type PRState = {
-  W: number[][];     // 累计胜负图（赢家->输家）的边权
-  pr: number[];      // 相对 PR（归一化，和=1）
-  abs: number[];     // 绝对 PR（Katz 风格，不归一化，上不封顶）
-  reward: number[];  // 累计奖励（时间衰减后）
-  rounds: number;    // 已统计局数
+  W: number[][];
+  pr: number[];
+  abs: number[];
+  reward: number[];
+  rounds: number;
 };
 const prZero = (): PRState => ({
   W: [
@@ -98,11 +99,11 @@ const prZero = (): PRState => ({
 });
 
 // PR 参数
-const PR_ALPHA = 0.85; // 传递系数
-const PR_ITERS = 40;   // 迭代步数
-const PR_DECAY = 0.98; // 每局时间衰减
+const PR_ALPHA = 0.85;
+const PR_ITERS = 40;
+const PR_DECAY = 0.98;
 
-/** 相对 PR（归一化），用于排名 */
+/** 相对 PR（归一化） */
 function computePRRelative(W: number[][], d = PR_ALPHA, iters = PR_ITERS) {
   const n = 3;
   const out = Array(n).fill(0);
@@ -130,7 +131,7 @@ function computePRRelative(W: number[][], d = PR_ALPHA, iters = PR_ITERS) {
   }
   return cur;
 }
-/** 绝对 PR（Katz 风格，不归一化，上不封顶） */
+/** 绝对 PR（Katz 风格，不归一化，体现超预期进步） */
 function computePRAbsolute(
   W: number[][],
   reward: number[],
@@ -370,6 +371,8 @@ function defaultModelFor(choice: BotChoice): string {
       return 'kimi-k2-0905-preview';
     case 'ai:qwen':
       return 'qwen-plus';
+    case 'ai:deepseek':
+      return 'deepseek-chat';
     default:
       return '';
   }
@@ -389,6 +392,8 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
       return /^grok[-\w.]*/.test(low) ? m : '';
     case 'ai:qwen':
       return /^qwen[-\w.]*/.test(low) ? m : '';
+    case 'ai:deepseek':
+      return /^deepseek[-\w.]*/.test(low) ? m : '';
     default:
       return '';
   }
@@ -411,6 +416,8 @@ function choiceLabel(choice: BotChoice): string {
       return 'Kimi';
     case 'ai:qwen':
       return 'Qwen';
+    case 'ai:deepseek':
+      return 'DeepSeek';
     case 'http':
       return 'HTTP';
   }
@@ -508,7 +515,16 @@ type LiveProps = {
   four2: Four2Policy;
   seats: BotChoice[];
   seatModels: string[];
-  seatKeys: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string }[];
+  seatKeys: {
+    openai?: string;
+    gemini?: string;
+    grok?: string;
+    kimi?: string;
+    qwen?: string;
+    deepseek?: string;
+    httpBase?: string;
+    httpToken?: string;
+  }[];
   farmerCoop: boolean;
   onTotals?: (totals: [number, number, number]) => void;
   onLog?: (lines: string[]) => void;
@@ -913,6 +929,8 @@ function LivePanel(props: LiveProps) {
             return { choice, model, apiKey: keys.kimi || '' };
           case 'ai:qwen':
             return { choice, model, apiKey: keys.qwen || '' };
+          case 'ai:deepseek':
+            return { choice, model, apiKey: keys.deepseek || '' };
           case 'http':
             return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
           default:
@@ -1169,11 +1187,10 @@ function LivePanel(props: LiveProps) {
 
                   // —— PR：期望校正 + 时间衰减（相对 + 绝对） —— //
                   {
-                    // 历史时间衰减
                     const W = curPR.W.map((row) => row.map((v) => v * PR_DECAY));
                     const reward = curPR.reward.map((x) => x * PR_DECAY);
 
-                    const relBefore = prRef.current.pr; // 用局前相对 PR 估计期望
+                    const relBefore = prRef.current.pr;
                     const mlt = Math.max(1, Number(nextMultiplier) || 1);
                     const Lwin = nextWinner === L;
                     const winners = Lwin ? [L] : [0, 1, 2].filter((x) => x !== L);
@@ -1188,7 +1205,7 @@ function LivePanel(props: LiveProps) {
                         reward[wi] += gainWin;
                         reward[lj] -= lossLos;
 
-                        W[wi][lj] += mlt; // 胜负图（相对 PR 用）
+                        W[wi][lj] += mlt;
                       }
 
                     const prRel = computePRRelative(W, PR_ALPHA, PR_ITERS);
@@ -1456,7 +1473,7 @@ function LivePanel(props: LiveProps) {
       <Section title="积分（总分）">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
           {[0, 1, 2].map((i) => (
-            <div key={i} style={{ border: '1px solid #eee', borderRadius: 8, padding: 10 }}>
+            <div key={i} style={{ border: '1px solid '#eee', borderRadius: 8, padding: 10 }}>
               <div>
                 <SeatTitle i={i} />
               </div>
@@ -1612,7 +1629,11 @@ const DEFAULTS = {
   seatDelayMs: [1000, 1000, 1000] as number[],
   seats: ['built-in:greedy-max', 'built-in:greedy-min', 'built-in:random-legal'] as BotChoice[],
   seatModels: ['', '', ''],
-  seatKeys: [{ openai: '' }, { gemini: '' }, { httpBase: '', httpToken: '' }] as any[],
+  seatKeys: [
+    { openai: '', deepseek: '' },
+    { gemini: '', httpBase: '', httpToken: '' },
+    { kimi: '', qwen: '' },
+  ] as any[],
 };
 
 function Home() {
@@ -1746,6 +1767,7 @@ function Home() {
                       <option value="ai:grok">Grok</option>
                       <option value="ai:kimi">Kimi</option>
                       <option value="ai:qwen">Qwen</option>
+                      <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
                     </optgroup>
                   </select>
@@ -1857,6 +1879,24 @@ function Home() {
                             setSeatKeys((arr) => {
                               const n = [...arr];
                               n[i] = { ...(n[i] || {}), qwen: v };
+                              return n;
+                            });
+                          }}
+                          style={{ width: '100%' }}
+                        />
+                      </label>
+                    )}
+                    {seats[i] === 'ai:deepseek' && (
+                      <label style={{ display: 'block', marginBottom: 6 }}>
+                        DeepSeek API Key
+                        <input
+                          type="password"
+                          value={seatKeys[i]?.deepseek || ''}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setSeatKeys((arr) => {
+                              const n = [...arr];
+                              n[i] = { ...(n[i] || {}), deepseek: v };
                               return n;
                             });
                           }}
