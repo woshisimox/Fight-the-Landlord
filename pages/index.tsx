@@ -379,8 +379,8 @@ function defaultModelFor(choice: BotChoice): string {
 }
 function normalizeModelForProvider(choice: BotChoice, input: string): string {
   const m = (input || '').trim();
-  if (!m) return '';
   const low = m.toLowerCase();
+  if (!m) return '';
   switch (choice) {
     case 'ai:kimi':
       return /^kimi[-\w]*/.test(low) ? m : '';
@@ -1006,9 +1006,11 @@ function LivePanel(props: LiveProps) {
       try {
         while (true) {
           const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
 
+          // 将本次 chunk 解码进入缓冲（最后一帧也先解码）
+          buf += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+          // 解析完整行
           let idx: number;
           const batch: any[] = [];
           while ((idx = buf.indexOf('\n')) >= 0) {
@@ -1018,6 +1020,17 @@ function LivePanel(props: LiveProps) {
             try {
               batch.push(JSON.parse(line));
             } catch {}
+          }
+
+          // 如果流结束，冲刷尾块（可能是最后一条未换行 JSON）
+          if (done) {
+            const tail = buf.trim();
+            if (tail) {
+              try {
+                batch.push(JSON.parse(tail));
+              } catch {}
+            }
+            buf = '';
           }
 
           if (batch.length) {
@@ -1168,6 +1181,11 @@ function LivePanel(props: LiveProps) {
                   }
                   nextWinner = nextWinnerLocal;
 
+                  // ✅ 显示层修正：无论末帧 play 是否丢失，赢家手牌在 UI 中清空
+                  if (nextWinner != null) {
+                    nextHands = nextHands.map((h, idx) => (idx === nextWinner ? [] : h));
+                  }
+
                   // —— TS 更新 & 存档 —— //
                   {
                     const updated = tsRef.current.map((r) => ({ ...r }));
@@ -1296,10 +1314,13 @@ function LivePanel(props: LiveProps) {
             setAggStats(nextAggStats || null);
             setAggCount(nextAggCount || 0);
           }
+
+          if (done) break;
         }
       } finally {
-        // 兜底：如果这一局还没被统计完成，这里补一次
-        finalizeRoundIfMissing();
+        // ✅ 兜底：仅在有进展时才补一次
+        const hadProgress = playsRef.current.length > 0 || winnerRef.current != null;
+        if (hadProgress) finalizeRoundIfMissing();
       }
 
       setLog((l) => [...l, `—— 本局流结束 ——`]);
