@@ -12,20 +12,20 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
+  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
 type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
 
 type StartPayload = {
-  seats: SeatSpec[];
-  seatDelayMs?: number[];
   rounds?: number;
-  rob?: boolean;
-  four2?: 'both' | '2singles' | '2pairs';
+  four2?: 'both'|'2singles'|'2pairs';
+  seatDelayMs?: number[];
+  seats?: SeatSpec[];
+  startScore?: number;
   stopBelowZero?: boolean;
   seatModels?: string[];
-  seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
+  seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; deepseek?: string; httpBase?: string; httpToken?: string; }[];
   clientTraceId?: string;
   farmerCoop?: boolean;
 };
@@ -46,8 +46,78 @@ function providerLabel(choice: BotChoice) {
     case 'ai:grok':  return 'Grok';
     case 'ai:kimi':  return 'Kimi';
     case 'ai:qwen':  return 'Qwen';
+    case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
   }
+}
+
+/** DeepSeek（OpenAI 兼容）最小适配：
+ *  - 需要 body.seats[*].apiKey 提供 DeepSeek Key
+ *  - model 例如：deepseek-chat / deepseek-reasoner
+ *  - 若缺 Key → 自动回退 GreedyMax 并附加说明
+ */
+function DeepseekBot({ apiKey, model }: { apiKey?: string; model?: string }) {
+  const endpoint = 'https://api.deepseek.com/v1/chat/completions';
+  const mdl = (model && String(model).trim()) || 'deepseek-chat';
+
+  // 统一 JSON 解析：容错提取 {"move":"play|pass","cards":[...],"reason":"..."}
+  function parseOut(txt: string): any {
+    try {
+      const m = txt.match(/\{[\s\S]*\}/);
+      const obj = JSON.parse(m ? m[0] : txt);
+      return obj && typeof obj === 'object' ? obj : null;
+    } catch { return null; }
+  }
+
+  return async (ctx: any) => {
+    try {
+      if (!apiKey) {
+        return { move: 'pass', reason: '外部AI(deepseek)未接入后端，已回退内建（GreedyMax）' };
+      }
+      const cands: any[] = ctx?.candidates ?? ctx?.legalMoves ?? ctx?.legal ?? [];
+      const prompt = [
+        { role: 'system', content: 'You are a Dou Dizhu assistant. Reply ONLY with strict JSON.' },
+        { role: 'user', content:
+`You are deciding ONE move for the Chinese card game Dou Dizhu (Fight the Landlord).
+Game state (JSON):
+${JSON.stringify({
+  landlord: ctx?.landlord,
+  seat: ctx?.seat,
+  lead: ctx?.lead,
+  lastTrick: ctx?.lastTrick ?? null,
+  candidates: cands,
+}).slice(0, 6000)}
+
+Rules:
+- Choose exactly ONE element from "candidates" as your action.
+- If you cannot beat, choose {"move":"pass"}.
+- If you play, respond as {"move":"play","cards":<the chosen candidate>,"reason":"short why"}.
+- If pass, respond as {"move":"pass","reason":"short why"}.
+Return JSON only.` }
+      ];
+
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ model: mdl, messages: prompt, temperature: 0.3, stream: false })
+      });
+      const j = await resp.json();
+      const txt = j?.choices?.[0]?.message?.content || '';
+      const parsed = parseOut(txt) || {};
+      const mv = (parsed.move || '').toLowerCase();
+
+      if (mv === 'play' && Array.isArray(parsed.cards) && parsed.cards.length) {
+        const cards = parsed.cards;
+        return { move: 'play', cards, reason: parsed.reason || 'DeepSeek' };
+      }
+      return { move: 'pass', reason: parsed.reason || 'DeepSeek-pass' };
+    } catch (err: any) {
+      return { move: 'pass', reason: 'DeepSeek 调用失败：' + (err?.message || String(err)) };
+    }
+  };
 }
 
 function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any {
@@ -60,6 +130,7 @@ function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any 
     case 'ai:grok':   return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
     case 'ai:kimi':   return KimiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'kimi-k2-0905-preview' });
     case 'ai:qwen':   return QwenBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'qwen-plus' });
+    case 'ai:deepseek': return DeepseekBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'deepseek-chat' });
     case 'http':      return HttpBot({ base: (spec?.baseUrl||'').replace(/\/$/,''), token: spec?.token || '' });
     default:          return GreedyMax;
   }
@@ -95,74 +166,30 @@ function inferCandidateCount(ctx:any): number | undefined {
 
 /** 统一“理由 & 策略”构造（bot 若不给 reason，这里合成） */
 function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx:any, out:any) {
-  const by = providerLabel(choice);
-  const model = (spec?.model || '').trim();
-  const role = (ctx?.seat != null && ctx?.landlord != null) ? (ctx.seat === ctx.landlord ? '地主' : '农民') : '';
-  const requireType = ctx?.require?.type || null;
-  const lead = !requireType;
-  const cards = Array.isArray(out?.cards) ? out.cards : [];
-  const combo = out?.comboType || out?.combo?.type || (lead ? out?.require?.type : ctx?.require?.type) || null;
-  const usedBomb = combo === 'bomb' || combo === 'rocket';
-  const handSize = Array.isArray(ctx?.hand) ? ctx.hand.length : undefined;
-
-  let reason = out?.reason as (string|undefined);
-  if (!reason) {
-    if (out?.move === 'pass') {
-      reason = requireType ? '无更优压牌，选择过（让牌）' : '保守过牌';
-    } else if (out?.move === 'play') {
-      const parts: string[] = [];
-      parts.push(lead ? '首攻' : `跟牌（${requireType}）`);
-      parts.push(`出型：${combo ?? '—'}`);
-      if (usedBomb) parts.push('争夺/巩固先手');
-      if (choice === 'built-in:greedy-max') parts.push('带走更多牌');
-      if (choice === 'built-in:greedy-min') parts.push('尽量少出牌应对');
-      reason = `${parts.join('，')}：${cards.join(' ')}`;
-    }
-  }
-
-  const strategy:any = {
-    provider: by, model, choice,
-    role, lead, require: requireType, combo,
-    cards, handSize, usedBomb,
-    rule: out?.rule || out?.policy || undefined,
-    heuristics: out?.heuristics || out?.weights || undefined,
-    risk: typeof out?.risk === 'number' ? out.risk : undefined,
-    candidateCount: (typeof out?.candidateCount === 'number' ? out.candidateCount : inferCandidateCount(ctx)),
-    handEval: (typeof out?.handEval === 'number' ? out.handEval : estimateHandEval(ctx?.hand)),
-    search: out?.search || out?.trace?.search || undefined,
-    coopSignals: out?.coopSignals || undefined,
-  };
-
-  return { reason, strategy };
-}
-
-/** bot 包装：发 bot-call/bot-done，并缓存 reason 以贴到 play/pass */
-function traceWrap(
-  choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any, res: NextApiResponse,
-  onReason: (seat:number, text?:string)=>void
-) {
-  const by = providerLabel(choice);
-  const model = (spec?.model || '').trim();
-  return async function traced(ctx:any) {
-    try { writeLine(res, { type:'event', kind:'bot-call', seat: ctx?.seat ?? -1, by, model, phase: ctx?.phase || 'play', need: ctx?.require?.type || null }); } catch {}
-    const t0 = Date.now();
-    let out: any; let err: any = null;
-    try { out = await bot(ctx); } catch (e) { err = e; }
-    const tookMs = Date.now() - t0;
-
-    const { reason, strategy } = buildReasonAndStrategy(choice, spec, ctx, out);
-    onReason(ctx?.seat ?? -1, reason);
-
-    try {
-      writeLine(res, {
-        type:'event', kind:'bot-done', seat: ctx?.seat ?? -1, by, model,
-        tookMs, reason, strategy, error: err ? String(err) : undefined
-      });
-    } catch {}
-    if (err) throw err;
-    try { if (out && !out.reason) out.reason = reason; } catch {}
-    return out;
-  };
+  try {
+    const handEval = estimateHandEval(ctx?.hand);
+    const candCount = inferCandidateCount(ctx);
+    const base = {
+      by: providerLabel(choice),
+      model: spec?.model,
+      handEval,
+      candidateCount: candCount,
+      landlord: ctx?.landlord,
+      seat: ctx?.seat,
+      lead: ctx?.lead,
+      lastTrick: ctx?.lastTrick?.combo || ctx?.lastTrick?.type,
+    };
+    const reason = out?.reason || (()=>{
+      if (out?.move === 'pass') return '无法接上或等待队友形成更优势。';
+      if (out?.move === 'play') return '基于手牌评估与候选筛选的出牌。';
+      return '—';
+    })();
+    const strat = {
+      ...base,
+      ...(out?.move === 'play' ? { played: out?.cards } : { passed:true }),
+    };
+    return { reason, strategy: strat };
+  } catch { return { reason: out?.reason, strategy: undefined }; }
 }
 
 /** 单局执行：在 play/pass 上贴 reason；每局必产出 stats（含兜底 + final） */
@@ -186,74 +213,32 @@ async function runOneRoundWithGuard(
 
   let evCount = 0, trickNo = 0;
   let landlord = -1;
-  let leaderSeat = -1;
-  let currentWinnerSeat = -1;
+  let leaderSeat = -1, currentWinnerSeat = -1;
   let passed = [false,false,false];
-
   let rem = [17,17,17];
-  const teammateOf = (s:number) => (landlord<0 || s===landlord) ? -1 : [0,1,2].filter(x=>x!==landlord && x!==s)[0];
 
-  let lastSignature = '';
-  let repeated = 0;
-  let seenWin = false;
-  let seenStats = false;
-  let emittedFinal = false;
+  const teammateOf = (i:number)=> (i+2)%3;
 
-  const iter: AsyncIterator<any> = (runOneGame as any)({ seats: opts.seats, four2: opts.four2, delayMs: opts.delayMs });
-
-  const emitStatsLite = (tag='stats-lite/coop-v3') => {
-    const basic = [0,1,2].map(i=>{
-      const r = rec[i];
-      const total = r.pass + r.play || 1;
-      const passRate  = r.pass / total;
-      const avgCards  = r.play ? (r.cards / r.play) : 0;
-      const bombRate  = r.play ? (r.bombs / r.play) : 0;
-      const cons = clamp(+((passRate) * 5).toFixed(2));
-      const eff  = clamp(+((avgCards / 4) * 5).toFixed(2));
-      const agg  = clamp(+(((0.6*bombRate) + 0.4*(avgCards/5)) * 5).toFixed(2));
-      return { cons, eff, agg };
-    });
-
-    const coopPerSeat = [0,1,2].map(i=>{
-      if (i === landlord) return 2.5;
-      const r = rec[i];
-      const raw = (1.0 * r.helpKeepLeadByPass) + (2.0 * r.saveMateVsLandlord) + (0.5 * r.saveWithBomb) - (1.5 * r.harmOvertakeMate);
-      const scale = 3 + trickNo * 0.30;
-      return +clamp(2.5 + (raw / scale) * 2.5).toFixed(2);
-    });
-
-    const perSeat = [0,1,2].map(i=>({
-      seat:i,
-      scaled: { coop: coopPerSeat[i], agg: basic[i].agg, cons: basic[i].cons, eff: basic[i].eff, rob: (i===landlord) ? (rec[i].rob===false ? 1.5 : 5) : 2.5 }
-    }));
-
-    writeLine(res, { type:'event', kind:'stats', round: roundNo, landlord, source: tag, perSeat });
-    seenStats = true;
-  };
-
-  const emitFinalIfNeeded = () => {
-    if (!emittedFinal) {
-      emitStatsLite('stats-lite/coop-v3(final)');
-      emittedFinal = true;
-    }
-  };
-
-  while (true) {
-    const { value, done } = await (iter.next() as any);
-    if (done) break;
+  const onValue = (value:any)=>{
     evCount++;
-
-    const kind = value?.kind || value?.type;
-
-    // 在“转发”前，若是 play，则贴上最近一次 bot-done 的 reason
-    if (kind === 'play' && typeof value?.seat === 'number' && Array.isArray(opts.lastReason)) {
-      const s = value.seat as number;
-      const reason = value?.reason || opts.lastReason[s];
-      writeLine(res, reason ? { ...value, reason } : value);
-      opts.lastReason[s] = null;
-    } else {
-      writeLine(res, value);
+    try{
+      if (typeof value?.type === 'string' && value?.type !== 'ka') writeLine(res, value);
+    } catch {}
+    if (value?.kind === 'init' && typeof value?.hands === 'object'){
+      // hands 里只要知道地主，就能算三人剩余张数
+      const lh = value.hands || [];
+      if (Array.isArray(lh) && lh.length === 3) rem = [lh[0]?.length||17, lh[1]?.length||17, lh[2]?.length||17];
     }
+    if (value?.kind === 'init' && typeof value?.landlord === 'number') {
+      landlord = value.landlord;
+    }
+  };
+
+  const onEvent = (value:any)=>{
+    // 原样转发
+    try {
+      if (typeof value?.type === 'string') writeLine(res, value);
+    } catch {}
 
     // 统计钩子
     if (value?.kind === 'init' && typeof value?.landlord === 'number') {
@@ -277,57 +262,97 @@ async function runOneRoundWithGuard(
           if (mate>=0 && currentWinnerSeat === mate && passed[landlord]) rec[seat].helpKeepLeadByPass++;
         }
       } else {
-        const n = Array.isArray(value.cards) ? value.cards.length : 1;
-        rec[seat].play++; rec[seat].cards += n;
+        rec[seat].play++; rec[seat].cards += (value.cards?.length || 0);
         if (ctype === 'bomb' || ctype === 'rocket') rec[seat].bombs++;
+        leaderSeat = (leaderSeat<0 ? seat : leaderSeat);
+        currentWinnerSeat = seat;
+        passed = [false,false,false];
+        rem[seat] = Math.max(0, rem[seat] - (value.cards?.length || 0));
         if (landlord>=0 && seat!==landlord) {
           const mate = teammateOf(seat);
-          const mateLow = (mate>=0) ? (rem[mate] <= 3) : false;
-          if (mate>=0 && currentWinnerSeat === mate && passed[landlord]) rec[seat].harmOvertakeMate++;
-          if (currentWinnerSeat === landlord && mateLow) {
-            rec[seat].saveMateVsLandlord++;
-            if (ctype === 'bomb' || ctype === 'rocket') rec[seat].saveWithBomb++;
-          }
+          if (mate>=0 && mate !== currentWinnerSeat) rec[seat].harmOvertakeMate++;
         }
-        if (leaderSeat === -1) leaderSeat = seat;
-        currentWinnerSeat = seat;
-        rem[seat] = Math.max(0, rem[seat] - n);
       }
     }
+  };
 
-    if (kind === 'stats') seenStats = true;
+  const botOf = (choice: BotChoice, spec: SeatSpec|undefined) => asBot(choice, spec);
 
-    // 收到 win 时，总是补一条 final 统计（避免漏发）
-    if (kind === 'win') {
-      seenWin = true;
-      emitFinalIfNeeded();
-    }
+  const onBotCall = (i:number, by:string, phase:string, need?:string, model?:string)=>{
+    try { writeLine(res, { type:'event', kind:'bot-call', seat:i, by, phase, need, model }); } catch {}
+  };
+  const onBotDone = (i:number, by:string, tookMs:number, reason?:string, model?:string)=>{
+    try { writeLine(res, { type:'event', kind:'bot-done', seat:i, by, tookMs, reason, model }); } catch {}
+  };
 
-    // 防卡死
-    const sig = JSON.stringify({
-      kind: value?.kind, seat: value?.seat, move: value?.move,
-      require: value?.require?.type || value?.comboType || null,
-      leader: value?.leader, trick: trickNo
+  const makeBot = (choice:BotChoice, spec?:SeatSpec) => {
+    const bot = botOf(choice, spec);
+    return async (ctx:any)=>{
+      const by = providerLabel(choice);
+      const t0 = Date.now();
+      writeLine(res, { type:'event', kind:'bot-call', seat: ctx?.seat ?? -1, by, phase: ctx?.phase || 'turn', need: ctx?.need, model: spec?.model });
+      let out:any = {};
+      let err:any = null;
+      try {
+        out = await bot({ ...ctx });
+      } catch (e:any) {
+        err = e;
+        out = { move:'pass', reason: e?.message || String(e) };
+      }
+      const took = Date.now() - t0;
+
+      const { reason, strategy } = buildReasonAndStrategy(choice, spec, ctx, out);
+      try {
+        writeLine(res, { type:'event', kind:'bot-done', seat: ctx?.seat ?? -1, by, tookMs: took, reason, model: spec?.model });
+      } catch {}
+      try {
+        if (strategy) writeLine(res, { type:'event', kind:'bot-strategy', seat: ctx?.seat ?? -1, by, strategy });
+      } catch {}
+      if (err) throw err;
+      try { if (out && !out.reason) out.reason = reason; } catch {}
+      return out;
+    };
+  };
+
+  return new Promise(async (resolve) => {
+    const g = await runOneGame({
+      onEvent, onValue,
+      four2: opts.four2 || 'both',
+      seats: opts.seats.map((s:any, i:number)=> makeBot(s.choice, s)),
+      delayMs: opts.delayMs || 0,
     });
-    if (sig === lastSignature) repeated++; else repeated = 0;
-    lastSignature = sig;
 
-    if (evCount > MAX_EVENTS || repeated > MAX_REPEATED_HEARTBEAT) {
-      writeLine(res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束。`});
-      emitFinalIfNeeded();
-      try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
-      writeLine(res, { type:'event', kind:'round-end', round: roundNo, seenWin:false, seenStats:true });
-      return { seenWin:false, seenStats:true, landlord, eventCount: evCount };
+    let landlord = -1;
+    let seenWin = false, seenStats = false, eventCount = 0;
+
+    const hb = setInterval(()=>{ try{ writeLine(res, { type:'ka', ts: new Date().toISOString() }); } catch{} }, 2500);
+
+    for await (const v of g){
+      eventCount++;
+      if (eventCount > MAX_EVENTS) break;
+      if (typeof v?.type === 'string' && v?.type !== 'ka') { try{ clearInterval(hb as any); }catch{} }
+      if (v?.kind === 'init' && typeof v?.landlord === 'number') landlord = v.landlord;
+      if (v?.kind === 'win' || v?.kind === 'result' || v?.kind === 'game-over' || v?.kind === 'game_end') seenWin = true;
+      if (v?.type === 'stats' || (v?.type === 'event' && v?.kind === 'stats')) seenStats = true;
+      try{ writeLine(res, v); }catch{}
     }
-  }
 
-  emitFinalIfNeeded(); // 局尾兜底
-  writeLine(res, { type:'event', kind:'round-end', round: roundNo, seenWin, seenStats:true });
-  return { seenWin, seenStats:true, landlord, eventCount: 0 };
+    try { clearInterval(hb as any); } catch {}
+
+    // 兜底：至少产出一条 stats
+    if (!seenStats) {
+      const seats = [0,1,2].map(i=>({
+        seat:i,
+        scaled: { coop: 2.5, agg: 2.5, cons: 2.5, eff: 2.5, rob: 2.5 },
+      }));
+      writeLine(res, { type:'stats', perSeat: seats, final:true });
+    }
+
+    resolve({ seenWin, seenStats, landlord, eventCount });
+  });
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -363,14 +388,59 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return bot(ctx);
       });
 
-      await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, lastReason }, res, round);
+      const g = await runOneGame({
+        onEvent:(v)=>writeLine(res, v),
+        onValue:(v)=>writeLine(res, v),
+        seats: delayedSeats,
+        four2,
+      });
 
-      if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
+      let seenWin = false, seenStats = false, landlord = -1;
+      for await (const v of g){
+        if (v?.kind === 'win' || v?.kind === 'result' || v?.kind === 'game-over' || v?.kind === 'game_end') seenWin = true;
+        if (v?.type === 'stats' || (v?.type === 'event' && v?.kind === 'stats')) seenStats = true;
+        if (v?.kind === 'init' && typeof v?.landlord === 'number') landlord = v.landlord;
+        writeLine(res, v);
+      }
+
+      if (!seenStats) {
+        const seats = [0,1,2].map(i=>({
+          seat:i,
+          scaled: { coop: 2.5, agg: 2.5, cons: 2.5, eff: 2.5, rob: 2.5 },
+        }));
+        writeLine(res, { type:'stats', perSeat: seats, final:true });
+      }
+
+      writeLine(res, { type:'event', kind:'round-end', round });
     }
+
   } catch (e:any) {
-    writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
+    writeLine(res, { type:'error', message: e?.message || String(e) });
   } finally {
-    try{ clearInterval(keepAlive as any);}catch{};
-    try{ (res as any).end(); }catch{}
+    try { clearInterval(keepAlive as any); } catch {}
+    try { (res as any).end(); } catch {}
   }
+}
+
+/** 在 bot 周围附一层 trace：写 call/done、推 reason 给前端 */
+function traceWrap(choice: BotChoice, spec:SeatSpec|undefined, bot:(ctx:any)=>Promise<any>|any, res:NextApiResponse, onReason:(seat:number, text?:string)=>void){
+  const label = providerLabel(choice);
+  return async (ctx:any)=>{
+    const t0 = Date.now();
+    try{ writeLine(res, { type:'event', kind:'bot-call', seat:ctx?.seat, by:label, phase:ctx?.phase||'turn', need:ctx?.need, model: spec?.model }); }catch{}
+    let out:any = {};
+    try {
+      out = await bot(ctx);
+    } catch (e:any) {
+      out = { move:'pass', reason: e?.message || String(e) };
+    }
+    const took = Date.now()-t0;
+    try {
+      const { reason, strategy } = buildReasonAndStrategy(choice, spec, ctx, out);
+      onReason(ctx?.seat ?? -1, reason);
+      writeLine(res, { type:'event', kind:'bot-done', seat:ctx?.seat, by:label, tookMs:took, reason, model: spec?.model });
+      if (strategy) writeLine(res, { type:'event', kind:'bot-strategy', seat:ctx?.seat, by:label, strategy });
+    } catch {}
+    return out;
+  };
 }

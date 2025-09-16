@@ -6,7 +6,7 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
+  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
@@ -83,7 +83,7 @@ type LiveProps = {
   seats: BotChoice[];
   seatModels: string[];
   seatKeys: {
-    openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string;
+    openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; deepseek?: string;
     httpBase?: string; httpToken?: string;
   }[];
   farmerCoop: boolean;
@@ -191,6 +191,7 @@ function defaultModelFor(choice: BotChoice): string {
     case 'ai:grok':  return 'grok-2-latest';
     case 'ai:kimi':  return 'kimi-k2-0905-preview';
     case 'ai:qwen':  return 'qwen-plus';
+    case 'ai:deepseek': return 'deepseek-chat';
     default: return '';
   }
 }
@@ -198,11 +199,12 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
   const m = (input || '').trim(); if (!m) return '';
   const low = m.toLowerCase();
   switch (choice) {
-    case 'ai:kimi':   return /^kimi[-\w]*/.test(low) ? m : '';
-    case 'ai:openai': return /^(gpt-|o[34]|text-|omni)/.test(low) ? m : '';
-    case 'ai:gemini': return /^gemini[-\w.]*/.test(low) ? m : '';
-    case 'ai:grok':   return /^grok[-\w.]*/.test(low) ? m : '';
-    case 'ai:qwen':   return /^qwen[-\w.]*/.test(low) ? m : '';
+    case 'ai:kimi':     return /^kimi[-\w.]*/.test(low) ? m : '';
+    case 'ai:openai':   return /^(gpt-|o[34]|text-|omni)/.test(low) ? m : '';
+    case 'ai:gemini':   return /^gemini[-\w.]*/.test(low) ? m : '';
+    case 'ai:grok':     return /^grok[-\w.]*/.test(low) ? m : '';
+    case 'ai:qwen':     return /^qwen[-\w.]*/.test(low) ? m : '';
+    case 'ai:deepseek': return /^deepseek[-\w.]*/.test(low) ? m : '';
     default: return '';
   }
 }
@@ -216,6 +218,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:grok':  return 'Grok';
     case 'ai:kimi':  return 'Kimi';
     case 'ai:qwen':  return 'Qwen';
+    case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
   }
 }
@@ -503,6 +506,7 @@ function LivePanel(props: LiveProps) {
           case 'ai:grok':   return { choice, model, apiKey: keys.grok || '' };
           case 'ai:kimi':   return { choice, model, apiKey: keys.kimi || '' };
           case 'ai:qwen':   return { choice, model, apiKey: keys.qwen || '' };
+          case 'ai:deepseek': return { choice, model, apiKey: keys.deepseek || '' };
           case 'http':      return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
           default:          return { choice };
         }
@@ -1143,7 +1147,7 @@ function Home() {
                     onChange={e=>{
                       const v = e.target.value as BotChoice;
                       setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
-                      // 新增：切换提供商时，把当前输入框改成该提供商的推荐模型
+                      // 切换提供商时，把输入框改成该提供商的推荐模型
                       setSeatModels(arr => { const n=[...arr]; n[i] = defaultModelFor(v); return n; });
                     }}
                     style={{ width:'100%' }}
@@ -1159,6 +1163,7 @@ function Home() {
                       <option value="ai:grok">Grok</option>
                       <option value="ai:kimi">Kimi</option>
                       <option value="ai:qwen">Qwen</option>
+                      <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
                     </optgroup>
                   </select>
@@ -1238,6 +1243,18 @@ function Home() {
                       onChange={e=>{
                         const v = e.target.value;
                         setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; });
+                      }}
+                      style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:deepseek' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    DeepSeek API Key
+                    <input type="password" value={seatKeys[i]?.deepseek||''}
+                      onChange={e=>{
+                        const v = e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), deepseek:v }; return n; });
                       }}
                       style={{ width:'100%' }} />
                   </label>
