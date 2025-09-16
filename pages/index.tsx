@@ -430,15 +430,6 @@ function LivePanel(props: LiveProps) {
   const tsStoreRef = useRef<TsStore>(emptyStore());
   useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
-
-  // —— 每家身份（choice|model|base）唯一标识 ——
-  const seatIdentity = (i:number) => {
-    const choice = props.seats[i];
-    const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
-    const base  = (props.seatKeys?.[i]?.httpBase || '').replace(//+$/,'');
-    return `${choice}|${model||''}|${base||''}`;
-  };
-
   // ===== PageRank 存档（锚 Greedy Min） =====
   const prStoreRef = useRef<PrStore>(prRead());
   const prFileRef = useRef<HTMLInputElement|null>(null);
