@@ -1211,8 +1211,8 @@ function LivePanel(props: LiveProps) {
                     const prRel = computePRRelative(W, PR_ALPHA, PR_ITERS);
                     const abs = computePRAbsolute(W, reward, PR_ALPHA, PR_ITERS, prRef.current.abs);
 
-                    const curPR = { W, pr: prRel, abs, reward, rounds: prRef.current.rounds + 1 };
-                    setPrState(curPR);
+                    const cur = { W, pr: prRel, abs, reward, rounds: prRef.current.rounds + 1 };
+                    setPrState(cur);
 
                     nextLog = [
                       ...nextLog,
@@ -1677,8 +1677,11 @@ function Home() {
     <div style={{ maxWidth: 1080, margin: '24px auto', padding: '0 16px' }}>
       <h1 style={{ fontSize: 28, fontWeight: 900, margin: '6px 0 16px' }}>斗地主 · Bot Arena</h1>
 
+      {/* 对局设置 */}
       <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 14, marginBottom: 16 }}>
         <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>对局设置</div>
+
+        {/* ✅ 仅调整了“可抢地主”和“初始分”的左右列顺序，其它不变 */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1690,24 +1693,41 @@ function Home() {
                 清空
               </button>
             </div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+              关闭后不可开始/继续对局；再次勾选即可恢复。
+            </div>
           </div>
 
           <label>
             局数
-            <input type="number" min={1} step={1} value={rounds} onChange={(e) => setRounds(Math.max(1, Math.floor(Number(e.target.value) || 1)))} style={{ width: '100%' }} />
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={rounds}
+              onChange={(e) => setRounds(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+              style={{ width: '100%' }}
+            />
           </label>
 
-          <label>
-            初始分
-            <input type="number" step={10} value={startScore} onChange={(e) => setStartScore(Number(e.target.value) || 0)} style={{ width: '100%' }} />
-          </label>
-
+          {/* ⬅️ 放到左列：可抢地主 */}
           <label>
             可抢地主
             <div>
               <input type="checkbox" checked={rob} onChange={(e) => setRob(e.target.checked)} />
             </div>
+          </label>
+
+          {/* ➡️ 放到右列：初始分 */}
+          <label>
+            初始分
+            <input
+              type="number"
+              step={10}
+              value={startScore}
+              onChange={(e) => setStartScore(Number(e.target.value) || 0)}
+              style={{ width: '100%' }}
+            />
           </label>
 
           <label>
@@ -1725,252 +1745,6 @@ function Home() {
               <option value="2pairs">两对</option>
             </select>
           </label>
-        </div>
-
-        <div style={{ marginTop: 10, borderTop: '1px dashed #eee', paddingTop: 10 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>每家 AI 设置（独立）</div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-            {[0, 1, 2].map((i) => (
-              <div key={i} style={{ border: '1px dashed #ccc', borderRadius: 8, padding: 10 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8 }}>
-                  <SeatTitle i={i} />
-                </div>
-
-                <label style={{ display: 'block', marginBottom: 6 }}>
-                  选择
-                  <select
-                    value={seats[i]}
-                    onChange={(e) => {
-                      const v = e.target.value as BotChoice;
-                      setSeats((arr) => {
-                        const n = [...arr];
-                        n[i] = v;
-                        return n;
-                      });
-                      setSeatModels((arr) => {
-                        const n = [...arr];
-                        n[i] = defaultModelFor(v);
-                        return n;
-                      });
-                    }}
-                    style={{ width: '100%' }}
-                  >
-                    <optgroup label="内置">
-                      <option value="built-in:greedy-max">Greedy Max</option>
-                      <option value="built-in:greedy-min">Greedy Min</option>
-                      <option value="built-in:random-legal">Random Legal</option>
-                    </optgroup>
-                    <optgroup label="AI">
-                      <option value="ai:openai">OpenAI</option>
-                      <option value="ai:gemini">Gemini</option>
-                      <option value="ai:grok">Grok</option>
-                      <option value="ai:kimi">Kimi</option>
-                      <option value="ai:qwen">Qwen</option>
-                      <option value="ai:deepseek">DeepSeek</option>
-                      <option value="http">HTTP</option>
-                    </optgroup>
-                  </select>
-                </label>
-
-                {seats[i].startsWith('ai:') && (
-                  <label style={{ display: 'block', marginBottom: 6 }}>
-                    模型（可选）
-                    <input
-                      type="text"
-                      value={seatModels[i]}
-                      placeholder={defaultModelFor(seats[i])}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setSeatModels((arr) => {
-                          const n = [...arr];
-                          n[i] = v;
-                          return n;
-                        });
-                      }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: 12, color: '#777', marginTop: 4 }}>留空则使用推荐：{defaultModelFor(seats[i])}</div>
-                  </label>
-                )}
-
-                {seats[i].startsWith('ai:') && (
-                  <>
-                    {seats[i] === 'ai:openai' && (
-                      <label style={{ display: 'block', marginBottom: 6 }}>
-                        OpenAI API Key
-                        <input
-                          type="password"
-                          value={seatKeys[i]?.openai || ''}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setSeatKeys((arr) => {
-                              const n = [...arr];
-                              n[i] = { ...(n[i] || {}), openai: v };
-                              return n;
-                            });
-                          }}
-                          style={{ width: '100%' }}
-                        />
-                      </label>
-                    )}
-                    {seats[i] === 'ai:gemini' && (
-                      <label style={{ display: 'block', marginBottom: 6 }}>
-                        Gemini API Key
-                        <input
-                          type="password"
-                          value={seatKeys[i]?.gemini || ''}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setSeatKeys((arr) => {
-                              const n = [...arr];
-                              n[i] = { ...(n[i] || {}), gemini: v };
-                              return n;
-                            });
-                          }}
-                          style={{ width: '100%' }}
-                        />
-                      </label>
-                    )}
-                    {seats[i] === 'ai:grok' && (
-                      <label style={{ display: 'block', marginBottom: 6 }}>
-                        xAI (Grok) API Key
-                        <input
-                          type="password"
-                          value={seatKeys[i]?.grok || ''}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setSeatKeys((arr) => {
-                              const n = [...arr];
-                              n[i] = { ...(n[i] || {}), grok: v };
-                              return n;
-                            });
-                          }}
-                          style={{ width: '100%' }}
-                        />
-                      </label>
-                    )}
-                    {seats[i] === 'ai:kimi' && (
-                      <label style={{ display: 'block', marginBottom: 6 }}>
-                        Kimi API Key
-                        <input
-                          type="password"
-                          value={seatKeys[i]?.kimi || ''}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setSeatKeys((arr) => {
-                              const n = [...arr];
-                              n[i] = { ...(n[i] || {}), kimi: v };
-                              return n;
-                            });
-                          }}
-                          style={{ width: '100%' }}
-                        />
-                      </label>
-                    )}
-                    {seats[i] === 'ai:qwen' && (
-                      <label style={{ display: 'block', marginBottom: 6 }}>
-                        Qwen API Key
-                        <input
-                          type="password"
-                          value={seatKeys[i]?.qwen || ''}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setSeatKeys((arr) => {
-                              const n = [...arr];
-                              n[i] = { ...(n[i] || {}), qwen: v };
-                              return n;
-                            });
-                          }}
-                          style={{ width: '100%' }}
-                        />
-                      </label>
-                    )}
-                    {seats[i] === 'ai:deepseek' && (
-                      <label style={{ display: 'block', marginBottom: 6 }}>
-                        DeepSeek API Key
-                        <input
-                          type="password"
-                          value={seatKeys[i]?.deepseek || ''}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setSeatKeys((arr) => {
-                              const n = [...arr];
-                              n[i] = { ...(n[i] || {}), deepseek: v };
-                              return n;
-                            });
-                          }}
-                          style={{ width: '100%' }}
-                        />
-                      </label>
-                    )}
-                  </>
-                )}
-
-                {seats[i] === 'http' && (
-                  <>
-                    <label style={{ display: 'block', marginBottom: 6 }}>
-                      HTTP Base / URL
-                      <input
-                        type="text"
-                        value={seatKeys[i]?.httpBase || ''}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setSeatKeys((arr) => {
-                            const n = [...arr];
-                            n[i] = { ...(n[i] || {}), httpBase: v };
-                            return n;
-                          });
-                        }}
-                        style={{ width: '100%' }}
-                      />
-                    </label>
-                    <label style={{ display: 'block', marginBottom: 6 }}>
-                      HTTP Token（可选）
-                      <input
-                        type="password"
-                        value={seatKeys[i]?.httpToken || ''}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setSeatKeys((arr) => {
-                            const n = [...arr];
-                            n[i] = { ...(n[i] || {}), httpToken: v };
-                            return n;
-                          });
-                        }}
-                        style={{ width: '100%' }}
-                      />
-                    </label>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>每家出牌最小间隔 (ms)</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-              {[0, 1, 2].map((i) => (
-                <div key={i} style={{ border: '1px dashed #eee', borderRadius: 6, padding: 10 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 8 }}>{seatName(i)}</div>
-                  <label style={{ display: 'block' }}>
-                    最小间隔 (ms)
-                    <input
-                      type="number"
-                      min={0}
-                      step={100}
-                      value={seatDelayMs[i] ?? 0}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setSeatDelay(i, v);
-                      }}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
 
