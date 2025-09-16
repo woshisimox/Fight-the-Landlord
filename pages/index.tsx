@@ -42,10 +42,13 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
 /* ===== TrueSkill 本地存档（新增） ===== */
 type TsRole = 'landlord'|'farmer';
 type TsStoreEntry = {
-  id: string;
+  id: string;                 // 身份（详见 seatIdentity）
   label?: string;
-  overall?: Rating | null;
-  roles?: { landlord?: Rating | null; farmer?: Rating | null };
+  overall?: Rating | null;    // 总体
+  roles?: {                   // 角色分档
+    landlord?: Rating | null;
+    farmer?: Rating | null;
+  };
   meta?: { choice?: string; model?: string; httpBase?: string };
 };
 type TsStore = {
@@ -79,7 +82,10 @@ type LiveProps = {
   four2: Four2Policy;
   seats: BotChoice[];
   seatModels: string[];
-  seatKeys: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string }[];
+  seatKeys: {
+    openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string;
+    httpBase?: string; httpToken?: string;
+  }[];
   farmerCoop: boolean;
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
@@ -317,7 +323,7 @@ function LivePanel(props: LiveProps) {
     const choice = props.seats[i];
     const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
-    return `${choice}|${model}|${base}`;
+    return `${choice}|${model}|${base}`; // 身份锚定
   };
 
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
@@ -338,7 +344,7 @@ function LivePanel(props: LiveProps) {
     setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
   };
 
-  // NEW: 按角色应用
+  // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
     const ids = [0,1,2].map(seatIdentity);
     const init = [0,1,2].map(i => {
@@ -377,7 +383,7 @@ function LivePanel(props: LiveProps) {
       const j = JSON.parse(text);
       const store: TsStore = emptyStore();
 
-      // 兼容多种模板
+      // 兼容多种模板：数组 / {players:{}} / 单人
       if (Array.isArray(j?.players)) {
         for (const p of j.players) {
           const id = p.id || p.identity || p.key; if (!id) continue;
@@ -419,7 +425,7 @@ function LivePanel(props: LiveProps) {
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
 
-  // 刷新：按当前地主身份应用
+  // 刷新：按“当前地主身份”应用
   const handleRefreshApply = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
   };
@@ -464,6 +470,7 @@ function LivePanel(props: LiveProps) {
 
   const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
 
+  // 每局观测标记
   const roundFinishedRef = useRef<boolean>(false);
   const seenStatsRef     = useRef<boolean>(false);
 
@@ -534,4 +541,775 @@ function LivePanel(props: LiveProps) {
       return { nextFinished, nextAggStats, nextAggCount };
     };
 
-  /* ... 其余 LivePanel 内容与上一版一致，省略（无改动） ... */
+    const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
+      setLog([]); lastReasonRef.current = [null, null, null];
+      const specs = buildSeatSpecs();
+      const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
+      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
+
+      roundFinishedRef.current = false;
+      seenStatsRef.current = false;
+
+      const r = await fetch('/api/stream_ndjson', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          rounds: 1,
+          startScore: props.startScore,
+          seatDelayMs: props.seatDelayMs,
+          enabled: props.enabled,
+          rob: props.rob,
+          four2: props.four2,
+          seats: specs,
+          clientTraceId: traceId,
+          stopBelowZero: true,
+          farmerCoop: props.farmerCoop,
+        }),
+        signal: controllerRef.current!.signal,
+      });
+      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buf = '';
+      const rewrite = makeRewriteRoundLabel(labelRoundNo);
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+
+        let idx: number;
+        const batch: any[] = [];
+        while ((idx = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line) continue;
+          try { batch.push(JSON.parse(line)); } catch {}
+        }
+
+        if (batch.length) {
+          let nextHands = handsRef.current.map(x => [...x]);
+          let nextPlays = [...playsRef.current];
+          let nextTotals = [...totalsRef.current] as [number, number, number];
+          let nextFinished = finishedRef.current;
+          let nextLog = [...logRef.current];
+          let nextLandlord = landlordRef.current;
+          let nextWinner = winnerRef.current as number | null;
+          let nextDelta = deltaRef.current as [number, number, number] | null;
+          let nextMultiplier = multiplierRef.current;
+          let nextAggStats = aggStatsRef.current;
+          let nextAggCount = aggCountRef.current;
+
+          for (const raw of batch) {
+            const m: any = raw;
+            try {
+              // -------- TS 帧（后端主动提供） --------
+              if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
+                const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
+                setTsArr(incoming);
+
+                if (m.where === 'after-round') {
+                  const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
+                  nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
+                  nextLog = [...nextLog, `【TS】after-round 已更新 μ/σ`];
+                } else if (m.where === 'before-round') {
+                  nextLog = [...nextLog, `【TS】before-round μ/σ 准备就绪`];
+                }
+                continue;
+              }
+
+              // -------- 事件边界 --------
+              if (m.type === 'event' && m.kind === 'round-start') {
+                nextLog = [...nextLog, `【边界】round-start #${m.round}`];
+                continue;
+              }
+              if (m.type === 'event' && m.kind === 'round-end') {
+                nextLog = [...nextLog, `【边界】round-end #${m.round}`];
+                const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
+                nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
+                continue;
+              }
+
+              // -------- 初始发牌/地主 --------
+              const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+              const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
+              if (hasHands) {
+                nextPlays = []; nextWinner = null; nextDelta = null; nextMultiplier = 1;
+                const decorated: string[][] = (rh as string[][]).map(decorateHandCycle);
+                nextHands = decorated;
+
+                const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+                nextLandlord = lord;
+                nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?'}为地主`];
+
+                // 一旦确认地主，按角色（地主/农民）应用存档
+                try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
+
+                lastReasonRef.current = [null, null, null];
+                continue;
+              }
+
+              // -------- AI 过程日志 --------
+              if (m.type === 'event' && m.kind === 'bot-call') {
+                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
+                continue;
+              }
+              if (m.type === 'event' && m.kind === 'bot-done') {
+                nextLog = [
+                  ...nextLog,
+                  `AI完成｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
+                  ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
+                ];
+                lastReasonRef.current[m.seat] = m.reason || null;
+                continue;
+              }
+
+              // -------- 抢/不抢 --------
+              if (m.type === 'event' && m.kind === 'rob') {
+                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
+                continue;
+              }
+
+              // -------- 起新墩 --------
+              if (m.type === 'event' && m.kind === 'trick-reset') {
+                nextLog = [...nextLog, '一轮结束，重新起牌'];
+                nextPlays = [];
+                continue;
+              }
+
+              // -------- 出/过 --------
+              if (m.type === 'event' && m.kind === 'play') {
+                if (m.move === 'pass') {
+                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  lastReasonRef.current[m.seat] = null;
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason }];
+                  nextLog = [...nextLog, `${seatName(m.seat)} 过${reason ? `（${reason}）` : ''}`];
+                } else {
+                  const pretty: string[] = [];
+                  const seat = m.seat as number;
+                  const cards: string[] = m.cards || [];
+                  const nh = (nextHands && (nextHands as any[]).length === 3 ? nextHands : [[], [], []]).map((x: any) => [...x]);
+                  for (const rawCard of cards) {
+                    const options = candDecorations(rawCard);
+                    const chosen = options.find((d: string) => nh[seat].includes(d)) || options[0];
+                    const k = nh[seat].indexOf(chosen);
+                    if (k >= 0) nh[seat].splice(k, 1);
+                    pretty.push(chosen);
+                  }
+                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  lastReasonRef.current[m.seat] = null;
+
+                  nextHands = nh;
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason }];
+                  nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reason ? `（理由：${reason}）` : ''}`];
+                }
+                continue;
+              }
+
+              // -------- 结算（多种别名兼容） --------
+              const isWinLike =
+                (m.type === 'event' && (m.kind === 'win' || m.kind === 'result' || m.kind === 'game-over' || m.kind === 'game_end')) ||
+                (m.type === 'result') || (m.type === 'game-over') || (m.type === 'game_end');
+              if (isWinLike) {
+                const L = (nextLandlord ?? 0) as number;
+                const ds = (Array.isArray(m.deltaScores) ? m.deltaScores
+                          : Array.isArray(m.delta) ? m.delta
+                          : [0,0,0]) as [number,number,number];
+
+                // 将“以地主为基准”的增减分旋转成“按座位顺序”的展示
+                const rot: [number,number,number] = [
+                  ds[(0 - L + 3) % 3],
+                  ds[(1 - L + 3) % 3],
+                  ds[(2 - L + 3) % 3],
+                ];
+                let nextWinnerLocal     = m.winner ?? nextWinner ?? null;
+                nextMultiplier = m.multiplier ?? nextMultiplier ?? 1;
+                nextDelta      = rot;
+                nextTotals     = [
+                  nextTotals[0] + rot[0],
+                  nextTotals[1] + rot[1],
+                  nextTotals[2] + rot[2]
+                ] as any;
+
+                // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
+                if (nextWinnerLocal == null) {
+                  const landlordDelta = ds[0] ?? 0;
+                  if (landlordDelta > 0) nextWinnerLocal = L;
+                  else if (landlordDelta < 0) {
+                    const farmer = [0,1,2].find(x => x !== L)!;
+                    nextWinnerLocal = farmer;
+                  }
+                }
+                nextWinner = nextWinnerLocal;
+
+                // 标记一局结束 & 雷达图兜底
+                {
+                  const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
+                  nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
+                }
+
+                // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
+                {
+                  const updated = tsRef.current.map(r => ({ ...r }));
+                  const farmers = [0,1,2].filter(s => s !== L);
+                  const landlordDelta = ds[0] ?? 0;
+                  const landlordWin = (nextWinner === L) || (landlordDelta > 0);
+                  if (landlordWin) tsUpdateTwoTeams(updated, [L], farmers);
+                  else             tsUpdateTwoTeams(updated, farmers, [L]);
+
+                  setTsArr(updated);
+                  updateStoreAfterRound(updated, L);
+
+                  nextLog = [
+                    ...nextLog,
+                    `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`
+                  ];
+                }
+
+                nextLog = [
+                  ...nextLog,
+                  `胜者：${nextWinner == null ? '—' : seatName(nextWinner)}，倍数 x${nextMultiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
+                ];
+                continue;
+              }
+
+              // -------- 画像统计（两种形态） --------
+              const isStatsTop = (m.type === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
+              const isStatsEvt = (m.type === 'event' && m.kind === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
+              if (isStatsTop || isStatsEvt) {
+                seenStatsRef.current = true;
+                const arr = (m.perSeat ?? m.seats) as any[];
+                const s3 = [0,1,2].map(i=>{
+                  const rec = arr.find((x:any)=>x.seat===i || x.index===i);
+                  const sc = rec?.scaled || rec?.score || {};
+                  return {
+                    coop: Number(sc.coop ?? 2.5),
+                    agg : Number(sc.agg  ?? 2.5),
+                    cons: Number(sc.cons ?? 2.5),
+                    eff : Number(sc.eff  ?? 2.5),
+                    rob : Number(sc.rob  ?? 2.5),
+                  };
+                }) as Score5[];
+
+                const mode  = aggModeRef.current;
+                const a     = alphaRef.current;
+
+                if (!nextAggStats) {
+                  nextAggStats = s3.map(x=>({ ...x }));
+                  nextAggCount = 1;
+                } else {
+                  nextAggStats = nextAggStats.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
+                  nextAggCount = nextAggCount + 1;
+                }
+
+                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
+                nextLog = [...nextLog, `战术画像（本局）：${msg}（已累计 ${nextAggCount} 局）`];
+                continue;
+              }
+
+              // -------- 文本日志 --------
+              if (m.type === 'log' && typeof m.message === 'string') {
+                nextLog = [...nextLog, rewrite(m.message)];
+                continue;
+              }
+            } catch (e) { console.error('[ingest:batch]', e, raw); }
+          }
+
+          setHands(nextHands); setPlays(nextPlays);
+          setTotals(nextTotals); setFinishedCount(nextFinished);
+          setLog(nextLog); setLandlord(nextLandlord);
+          setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
+          setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
+        }
+      }
+
+      setLog(l => [...l, `—— 本局流结束 ——`]);
+    };
+
+    try {
+      for (let i = 0; i < props.rounds; i++) {
+        if (controllerRef.current?.signal.aborted) break;
+        const thisRound = i + 1;
+        await playOneGame(i, thisRound);
+
+        const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
+        if (hasNegative) { setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']); break; }
+        await new Promise(r => setTimeout(r, 800 + Math.floor(Math.random() * 600)));
+      }
+    } catch (e: any) {
+      if (e?.name === 'AbortError') setLog(l => [...l, '已手动停止。']);
+      else setLog(l => [...l, `错误：${e?.message || e}`]);
+    } finally { setRunning(false); }
+  };
+
+  const stop = () => { controllerRef.current?.abort(); setRunning(false); };
+
+  const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
+        <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
+          剩余局数：{remainingGames}
+        </span>
+      </div>
+
+      {/* ========= TrueSkill（实时） ========= */}
+      <Section title="TrueSkill（实时）">
+        {/* 上传 / 存档 / 刷新 */}
+        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
+          <input ref={fileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleUploadFile} />
+          <button onClick={()=>fileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
+          <button onClick={handleSaveArchive} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+          <button onClick={handleRefreshApply} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
+          <div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+          {[0,1,2].map(i=>{
+            const stored = getStoredForSeat(i);
+            const usingRole: 'overall'|'landlord'|'farmer' =
+              landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
+            return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                  <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+                </div>
+                <div style={{ fontSize:13, color:'#374151' }}>
+                  <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
+                  <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
+                  <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
+                </div>
+
+                {/* 区分显示总体/地主/农民三档，并标注当前使用 */}
+                <div style={{ borderTop:'1px dashed #eee', marginTop:8, paddingTop:8 }}>
+                  <div style={{ fontSize:12, marginBottom:6 }}>
+                    当前使用：<b>
+                      {usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}
+                    </b>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12, color:'#374151' }}>
+                    <div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>总体</div>
+                      <div>{muSig(stored.overall)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>地主</div>
+                      <div>{muSig(stored.landlord)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>农民</div>
+                      <div>{muSig(stored.farmer)}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
+          说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。</div>
+      </Section>
+
+      <Section title="积分（总分）">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+              <div><SeatTitle i={i}/></div>
+              <div style={{ fontSize:24, fontWeight:800 }}>{totals[i]}</div>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* ======= 积分下面、手牌上面：雷达图 ======= */}
+      <Section title="战术画像（累计，0~5）">
+        <RadarPanel
+          aggStats={aggStats}
+          aggCount={aggCount}
+          aggMode={aggMode}
+          alpha={alpha}
+          onChangeMode={setAggMode}
+          onChangeAlpha={setAlpha}
+        />
+      </Section>
+
+      <Section title="手牌">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
+              <div style={{ marginBottom:6 }}>
+                <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
+              </div>
+              <Hand cards={hands[i]} />
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="出牌">
+        <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
+          {plays.length === 0
+            ? <div style={{ opacity:0.6 }}>（尚无出牌）</div>
+            : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)
+          }
+        </div>
+      </Section>
+
+      <Section title="结果">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>倍数</div>
+            <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
+          </div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>胜者</div>
+            <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}</div>
+          </div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>本局加减分</div>
+            <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div>
+          </div>
+        </div>
+      </Section>
+
+      <div style={{ display:'flex', gap:8 }}>
+        <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
+        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
+      </div>
+
+      <div style={{ marginTop:18 }}>
+        <Section title="运行日志">
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
+            {log.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）</div> : log.map((t, idx) => <LogLine key={idx} text={t} />)}
+          </div>
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+function RadarPanel({
+  aggStats, aggCount, aggMode, alpha,
+  onChangeMode, onChangeAlpha,
+}:{ aggStats: Score5[] | null; aggCount: number; aggMode:'mean'|'ewma'; alpha:number;
+   onChangeMode:(m:'mean'|'ewma')=>void; onChangeAlpha:(a:number)=>void; }) {
+  const [mode, setMode] = useState<'mean'|'ewma'>(aggMode);
+  const [a, setA] = useState<number>(alpha);
+
+  useEffect(()=>{ setMode(aggMode); }, [aggMode]);
+  useEffect(()=>{ setA(alpha); }, [alpha]);
+
+  return (
+    <>
+      <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:8 }}>
+        <label>
+          汇总方式
+          <select value={mode} onChange={e=>{ const v=e.target.value as ('mean'|'ewma'); setMode(v); onChangeMode(v); }} style={{ marginLeft:6 }}>
+            <option value="ewma">指数加权（推荐）</option>
+            <option value="mean">简单平均</option>
+          </select>
+        </label>
+        {mode === 'ewma' && (
+          <label>
+            α（0.05–0.95）
+            <input type="number" min={0.05} max={0.95} step={0.05}
+              value={a}
+              onChange={e=>{
+                const v = Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35));
+                setA(v); onChangeAlpha(v);
+              }}
+              style={{ width:80, marginLeft:6 }}
+            />
+          </label>
+        )}
+        <div style={{ fontSize:12, color:'#6b7280' }}>
+          {mode==='ewma' ? '越大越看重最近几局' : `已累计 ${aggCount} 局`}
+        </div>
+      </div>
+
+      {aggStats
+        ? (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+            {[0,1,2].map(i=>(
+              <RadarChart key={i} title={`${['甲','乙','丙'][i]}（累计）`} scores={aggStats[i]} />
+            ))}
+          </div>
+        )
+        : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
+      }
+    </>
+  );
+}
+
+/* ========= 默认值（含“清空”按钮的重置） ========= */
+const DEFAULTS = {
+  enabled: true,
+  rounds: 10,
+  startScore: 100,
+  rob: true,
+  four2: 'both' as Four2Policy,
+  farmerCoop: true,
+  seatDelayMs: [1000,1000,1000] as number[],
+  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
+  // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
+  seatModels: ['', '', ''],
+  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
+};
+
+function Home() {
+  const [resetKey, setResetKey] = useState<number>(0);
+  const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
+  const [rounds, setRounds] = useState<number>(DEFAULTS.rounds);
+  const [startScore, setStartScore] = useState<number>(DEFAULTS.startScore);
+  const [rob, setRob] = useState<boolean>(DEFAULTS.rob);
+  const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
+  const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
+  const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
+  const setSeatDelay = (i:number, v:number|string) => setSeatDelayMs(arr => { const n=[...arr]; n[i]=Math.max(0, Math.floor(Number(v)||0)); return n; });
+
+  const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
+  const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
+  const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
+
+  const [liveLog, setLiveLog] = useState<string[]>([]);
+
+  const doResetAll = () => {
+    setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
+    setRob(DEFAULTS.rob); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
+    setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
+    setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
+    setLiveLog([]); setResetKey(k => k + 1);
+  };
+
+  return (
+    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
+      <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Bot Arena</h1>
+
+      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12 }}>
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                启用对局
+                <input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} />
+              </label>
+              <button onClick={doResetAll} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+                清空
+              </button>
+            </div>
+            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
+          </div>
+
+          <label>局数
+            <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
+          </label>
+
+          <label>初始分
+            <input type="number" step={10} value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ width:'100%' }} />
+          </label>
+
+          <label>可抢地主
+            <div><input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} /></div>
+          </label>
+
+          <label>农民配合
+            <div><input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} /></div>
+          </label>
+
+          <label>4带2 规则
+            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
+              <option value="both">都可</option>
+              <option value="2singles">两张单牌</option>
+              <option value="2pairs">两对</option>
+            </select>
+          </label>
+        </div>
+
+        <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
+          <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+            {[0,1,2].map(i=>(
+              <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
+                <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /></div>
+
+                <label style={{ display:'block', marginBottom:6 }}>
+                  选择
+                  <select
+                    value={seats[i]}
+                    onChange={e=>{
+                      const v = e.target.value as BotChoice;
+                      setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
+                      // 新增：切换提供商时，把当前输入框改成该提供商的推荐模型
+                      setSeatModels(arr => { const n=[...arr]; n[i] = defaultModelFor(v); return n; });
+                    }}
+                    style={{ width:'100%' }}
+                  >
+                    <optgroup label="内置">
+                      <option value="built-in:greedy-max">Greedy Max</option>
+                      <option value="built-in:greedy-min">Greedy Min</option>
+                      <option value="built-in:random-legal">Random Legal</option>
+                    </optgroup>
+                    <optgroup label="AI">
+                      <option value="ai:openai">OpenAI</option>
+                      <option value="ai:gemini">Gemini</option>
+                      <option value="ai:grok">Grok</option>
+                      <option value="ai:kimi">Kimi</option>
+                      <option value="ai:qwen">Qwen</option>
+                      <option value="http">HTTP</option>
+                    </optgroup>
+                  </select>
+                </label>
+
+                {seats[i].startsWith('ai:') && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    模型（可选）
+                    <input
+                      type="text"
+                      value={seatModels[i]}
+                      placeholder={defaultModelFor(seats[i])}
+                      onChange={e=>{
+                        const v = e.target.value;
+                        setSeatModels(arr => { const n=[...arr]; n[i] = v; return n; });
+                      }}
+                      style={{ width:'100%' }}
+                    />
+                    <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
+                      留空则使用推荐：{defaultModelFor(seats[i])}
+                    </div>
+                  </label>
+                )}
+
+                {seats[i] === 'ai:openai' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    OpenAI API Key
+                    <input type="password" value={seatKeys[i]?.openai||''}
+                      onChange={e=>{
+                        const v = e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), openai:v }; return n; });
+                      }}
+                      style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:gemini' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Gemini API Key
+                    <input type="password" value={seatKeys[i]?.gemini||''}
+                      onChange={e=>{
+                        const v = e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), gemini:v }; return n; });
+                      }}
+                      style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:grok' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    xAI (Grok) API Key
+                    <input type="password" value={seatKeys[i]?.grok||''}
+                      onChange={e=>{
+                        const v = e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), grok:v }; return n; });
+                      }}
+                      style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:kimi' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Kimi API Key
+                    <input type="password" value={seatKeys[i]?.kimi||''}
+                      onChange={e=>{
+                        const v = e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), kimi:v }; return n; });
+                      }}
+                      style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:qwen' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Qwen API Key
+                    <input type="password" value={seatKeys[i]?.qwen||''}
+                      onChange={e=>{
+                        const v = e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; });
+                      }}
+                      style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'http' && (
+                  <>
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      HTTP Base / URL
+                      <input type="text" value={seatKeys[i]?.httpBase||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpBase:v }; return n; });
+                        }}
+                        style={{ width:'100%' }} />
+                    </label>
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      HTTP Token（可选）
+                      <input type="password" value={seatKeys[i]?.httpToken||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpToken:v }; return n; });
+                        }}
+                        style={{ width:'100%' }} />
+                    </label>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop:12 }}>
+            <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)</div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>(
+                <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
+                  <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
+                  <label style={{ display:'block' }}>
+                    最小间隔 (ms)
+                    <input
+                      type="number" min={0} step={100}
+                      value={ (seatDelayMs[i] ?? 0) }
+                      onChange={e=>setSeatDelay(i, e.target.value)}
+                      style={{ width:'100%' }}
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
+        <LivePanel
+          key={resetKey}
+          rounds={rounds}
+          startScore={startScore}
+          seatDelayMs={seatDelayMs}
+          enabled={enabled}
+          rob={rob}
+          four2={four2}
+          seats={seats}
+          seatModels={seatModels}
+          seatKeys={seatKeys}
+          farmerCoop={farmerCoop}
+          onLog={setLiveLog}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default Home;
