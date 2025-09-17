@@ -553,7 +553,6 @@ function LivePanel(props: LiveProps) {
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
 
-      const r = await 
       // Read local baselines for server echo (no UI/logic change)
       const tsBaseline = (() => { try { return JSON.parse(localStorage.getItem('ts.overall') || 'null'); } catch { return null; } })();
       const radarBaseline = (() => {
@@ -563,6 +562,8 @@ function LivePanel(props: LiveProps) {
           return { count: Number(obj.count) || 0, scores: obj.scores };
         } catch { return null; }
       })();
+
+      const r = await 
 fetch('/api/stream_ndjson', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
