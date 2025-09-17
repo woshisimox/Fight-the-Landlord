@@ -1,14 +1,14 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-// ========= 引擎导入（按你的项目结构调整路径） =========
+// ====== 引擎（已固定为 doudizhu 路径）======
 import * as ddz from '../../lib/doudizhu/engine';
-const runOneGame: any   = (ddz as any).runOneGame;
-const GreedyMax: any    = (ddz as any).GreedyMax;
-const GreedyMin: any    = (ddz as any).GreedyMin;
-const RandomLegal: any  = (ddz as any).RandomLegal;
+const runOneGame: any  = (ddz as any).runOneGame;
+const GreedyMax: any   = (ddz as any).GreedyMax;
+const GreedyMin: any   = (ddz as any).GreedyMin;
+const RandomLegal: any = (ddz as any).RandomLegal;
 
-// ========= 各 AI 适配器（统一成 any，兼容默认导出/具名导出/工厂） =========
+// ====== AI 适配器（统一 any，兼容类/工厂/默认导出）======
 import * as openaiMod from '../../lib/bots/openai_bot';
 import * as geminiMod from '../../lib/bots/gemini_bot';
 import * as grokMod   from '../../lib/bots/grok_bot';
@@ -23,10 +23,8 @@ const HttpBot: any   = (httpMod   as any).HttpBot   ?? (httpMod   as any).defaul
 const KimiBot: any   = (kimiMod   as any).KimiBot   ?? (kimiMod   as any).default ?? kimiMod;
 const QwenBot: any   = (qwenMod   as any).QwenBot   ?? (qwenMod   as any).default ?? qwenMod;
 
-/* ==================== 类型（与前端 LiveProps 对齐） ==================== */
-
+/* ==================== 类型（与前端对齐） ==================== */
 type Four2Policy = 'both' | '2singles' | '2pairs';
-
 type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
@@ -62,8 +60,7 @@ type StartBody = {
   debug?: boolean;
 };
 
-/* ==================== 小工具 ==================== */
-
+/* ==================== 工具 ==================== */
 const LABELS = ['甲', '乙', '丙'];
 
 function defaultModelFor(choice: BotChoice): string {
@@ -77,72 +74,60 @@ function defaultModelFor(choice: BotChoice): string {
   }
 }
 
-/** 写一行 NDJSON，并确保换行 */
 function writeLine(res: NextApiResponse, obj: any) {
   try { res.write(JSON.stringify(obj) + '\n'); } catch {}
 }
 
-/** 通用工厂：最大兼容 “class / 工厂函数 / 直接函数(play)” */
-function makeAnyBot(F: any, arg?: any) {
-  // 1) 当作 class 构造（优先用有参，再试无参）
-  try { const inst = new F(arg); if (inst && typeof inst.play === 'function') return inst; } catch {}
-  try { const inst0 = new F();   if (inst0 && typeof inst0.play === 'function') return inst0; } catch {}
+/** 统一工厂：尽量拿到一个带 bid/play 的“IBot 对象” */
+function makeImplWithBidPlay(F: any, arg?: any): any {
+  // 1) 当作 class（优先带参，再无参）
+  try { const o = new F(arg); if (o && (o.bid || o.play)) return o; } catch {}
+  try { const o0 = new F();   if (o0 && (o0.bid || o0.play)) return o0; } catch {}
 
-  // 2) 当作工厂函数调用（先有参，再无参）
-  try {
-    const ret = F(arg);
-    if (ret && typeof ret.play === 'function') return ret;
-    if (typeof ret === 'function') return { play: ret }; // 工厂返回函数
-    if (ret && typeof ret === 'object' && typeof ret.play === 'function') return ret;
-  } catch {}
-  try {
-    const ret0 = F();
-    if (ret0 && typeof ret0.play === 'function') return ret0;
-    if (typeof ret0 === 'function') return { play: ret0 };
-    if (ret0 && typeof ret0 === 'object' && typeof ret0.play === 'function') return ret0;
-  } catch {}
+  // 2) 当作工厂函数（先带参，再无参）
+  try { const r = F(arg);  if (r && (r.bid || r.play)) return r; } catch {}
+  try { const r0 = F();    if (r0 && (r0.bid || r0.play)) return r0; } catch {}
 
-  // 3) 若 F 本身是“直接函数(play)”，直接包成 { play: F }
-  if (typeof F === 'function') return { play: F };
+  // 3) 若是直接函数，把它当作 play；bid 用 GreedyMax 兜底
+  if (typeof F === 'function') {
+    const bidder = makeImplWithBidPlay(GreedyMax, 'Bidder');
+    return {
+      bid: async (ctx: any) => bidder?.bid ? bidder.bid(ctx) : 'pass',
+      play: async (ctx: any) => F(ctx),
+    };
+  }
 
-  // 4) 兜底
-  return { play: async () => ({ move: 'pass', reason: `invalid bot factory` }) };
-}
-
-/** 统一转为异步可调用 (ctx)=>Promise<Move> */
-function asCallable(impl: any, label: string) {
-  // 连续 pass 计数器（用于帮助定位“只出一轮就结束”的情况）
-  let passCount = 0;
-  return async (ctx: any) => {
-    try {
-      let mv: any;
-      if (!impl) {
-        mv = { move: 'pass', reason: `${label}: bot impl missing` };
-      } else if (typeof impl.play === 'function') {
-        mv = await impl.play(ctx);
-      } else if (typeof impl === 'function') {
-        mv = await impl(ctx);
-      } else {
-        mv = { move: 'pass', reason: `${label}: bot impl not callable` };
-      }
-      // 简单的 pass 连续计数（帮助发现“全程 pass”的问题）
-      if (mv?.move === 'pass') passCount++; else passCount = 0;
-      // 强化 reason，便于前端日志显示
-      if (mv?.move === 'pass' && !mv?.reason) {
-        mv.reason = `${label}: pass`;
-      }
-      // 当连续 pass 很多次，发出一个 debug 事件（由上层调用时写入）
-      (mv as any).__passCount = passCount;
-      return mv;
-    } catch (e: any) {
-      return { move: 'pass', reason: `${label}: bot error: ${e?.message || e}` };
-    }
+  // 4) 兜底：全部 pass（不建议，但避免崩）
+  return {
+    bid: async () => 'pass',
+    play: async () => ({ move: 'pass', reason: 'invalid bot factory' }),
   };
 }
 
-/* ==================== Bot 选择器（内置 + 各 AI + HTTP） ==================== */
+/** AI 适配：AI 只实现 play 时，用内置 GreedyMax 代理 bid，避免“一手结束” */
+function makeAIBot(Factory: any, opts: any, label: string) {
+  const ai = makeImplWithBidPlay(Factory, opts);
+  // 若没有 bid，用 GreedyMax 做叫/抢地主（能输出 1/2/3 或 rob/pass，具体取决于引擎）
+  if (typeof ai.bid !== 'function') {
+    const bidder = makeImplWithBidPlay(GreedyMax, label + ':Bidder');
+    ai.bid = async (ctx: any) => bidder?.bid ? bidder.bid(ctx) : 'pass';
+  }
+  // 强化 play 的 reason，便于前端日志
+  const origPlay = ai.play;
+  ai.play = async (ctx: any) => {
+    try {
+      const mv = await origPlay(ctx);
+      if (mv && mv.move === 'pass' && !mv.reason) mv.reason = `${label}: pass`;
+      return mv ?? { move: 'pass', reason: `${label}: empty move` };
+    } catch (e: any) {
+      return { move: 'pass', reason: `${label}: error ${e?.message || e}` };
+    }
+  };
+  return ai;
+}
 
-function asBot(choice: BotChoice, spec?: SeatSpec) {
+/* ==================== Bot 选择（返回“对象”，不是函数） ==================== */
+function makeSeat(choice: BotChoice, spec?: SeatSpec) {
   const label =
     spec?.seatLabel ||
     (choice === 'built-in:greedy-max' ? '内置:GreedyMax'
@@ -150,58 +135,27 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
     : choice === 'built-in:random-legal' ? '内置:RandomLegal'
     : 'Bot');
 
-  if (choice === 'built-in:greedy-max') {
-    const impl = makeAnyBot(GreedyMax, label);
-    return asCallable(impl, label);
-  }
-  if (choice === 'built-in:greedy-min') {
-    const impl = makeAnyBot(GreedyMin, label);
-    return asCallable(impl, label);
-  }
-  if (choice === 'built-in:random-legal') {
-    const impl = makeAnyBot(RandomLegal, label);
-    return asCallable(impl, label);
-  }
+  if (choice === 'built-in:greedy-max')   return makeImplWithBidPlay(GreedyMax, label);
+  if (choice === 'built-in:greedy-min')   return makeImplWithBidPlay(GreedyMin, label);
+  if (choice === 'built-in:random-legal') return makeImplWithBidPlay(RandomLegal, label);
 
-  if (choice === 'ai:openai') {
-    const impl = makeAnyBot(OpenAIBot, { model: spec?.model, apiKey: spec?.apiKey, label });
-    return asCallable(impl, label);
-  }
-  if (choice === 'ai:gemini') {
-    const impl = makeAnyBot(GeminiBot, { model: spec?.model, apiKey: spec?.apiKey, label });
-    return asCallable(impl, label);
-  }
-  if (choice === 'ai:grok') {
-    const impl = makeAnyBot(GrokBot, { model: spec?.model, apiKey: spec?.apiKey, label });
-    return asCallable(impl, label);
-  }
-  if (choice === 'ai:kimi') {
-    const impl = makeAnyBot(KimiBot, { model: spec?.model, apiKey: spec?.apiKey, label });
-    return asCallable(impl, label);
-  }
-  if (choice === 'ai:qwen') {
-    const impl = makeAnyBot(QwenBot, { model: spec?.model, apiKey: spec?.apiKey, label });
-    return asCallable(impl, label);
-  }
+  if (choice === 'ai:openai') return makeAIBot(OpenAIBot, { model: spec?.model, apiKey: spec?.apiKey, label }, label);
+  if (choice === 'ai:gemini') return makeAIBot(GeminiBot,  { model: spec?.model, apiKey: spec?.apiKey, label }, label);
+  if (choice === 'ai:grok')   return makeAIBot(GrokBot,    { model: spec?.model, apiKey: spec?.apiKey, label }, label);
+  if (choice === 'ai:kimi')   return makeAIBot(KimiBot,    { model: spec?.model, apiKey: spec?.apiKey, label }, label);
+  if (choice === 'ai:qwen')   return makeAIBot(QwenBot,    { model: spec?.model, apiKey: spec?.apiKey, label }, label);
 
-  // HTTP 自定义外部 AI（常见实现只用 base/token；若你实现需要 model，可自行补上）
+  // HTTP 外部（一般只实现 play，这里同样用 GreedyMax 代理 bid）
   if (choice === 'http' || spec?.baseUrl || spec?.token) {
-    const impl = makeAnyBot(HttpBot, { base: spec?.baseUrl, token: spec?.token, label });
-    return asCallable(impl, label);
+    return makeAIBot(HttpBot, { base: spec?.baseUrl, token: spec?.token, label }, label);
   }
 
   // 兜底
-  const fallback = makeAnyBot(RandomLegal, '内置:RandomLegal');
-  return asCallable(fallback, '内置:RandomLegal');
+  return makeImplWithBidPlay(RandomLegal, '内置:RandomLegal');
 }
 
 /* ==================== 请求处理 ==================== */
-
-export const config = {
-  api: {
-    bodyParser: { sizeLimit: '1mb' },
-  },
-};
+export const config = { api: { bodyParser: { sizeLimit: '1mb' } } };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -209,7 +163,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  // NDJSON 头
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Connection', 'keep-alive');
@@ -232,8 +185,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     writeLine(res, { type: 'init', rounds, startScore, rob, four2, farmerCoop, seatDelayMs, seats, seatModels, enabled, debug });
 
-    // 构建三个座位
-    const bots = Array.from({ length: 3 }).map((_, i) => {
+    // 构建 IBot 对象数组（每个都有 bid + play）
+    const seatObjs = Array.from({ length: 3 }).map((_, i) => {
       const choice = seats[i] || 'built-in:random-legal';
       const model  = seatModels[i] || defaultModelFor(choice);
       const keys   = seatKeys[i] || {};
@@ -249,68 +202,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       const spec: SeatSpec = {
-        choice,
-        model,
-        apiKey,
-        baseUrl: keys.httpBase,
-        token:   keys.httpToken,
+        choice, model, apiKey,
+        baseUrl: keys.httpBase, token: keys.httpToken,
         seatLabel: LABELS[i],
       };
-
-      return asBot(choice, spec);
+      return makeSeat(choice, spec);
     });
 
-    // 多局循环
-    let totals: [number, number, number] = [startScore, startScore, startScore];
+    // 兼容不同签名：有的 runOneGame(config, hooks)，有的 runOneGame(config)
+    const cfg = { seats: seatObjs, rob, four2, seatDelayMs, farmerCoop, debug } as any;
+    const iter = (runOneGame.length >= 2) ? runOneGame(cfg, {} as any) : runOneGame(cfg);
 
+    let totals: [number, number, number] = [startScore, startScore, startScore];
     for (let round = 1; round <= rounds; round++) {
       writeLine(res, { type: 'log', message: `—— 第 ${round} 局开始 ——`, round });
-
-      // 兼容 1/2 参签名
-      const iter = runOneGame(
-        {
-          seats: bots as any,
-          rob,
-          four2,
-          seatDelayMs,
-          farmerCoop,
-          debug,
-        } as any,
-        {} as any
-      );
 
       let roundDelta: [number, number, number] = [0, 0, 0];
 
       for await (const ev of iter as any) {
-        // 如果是“出牌/过牌”事件，并且该动作带有 __passCount，且累计很多，则抛一个 debug 事件方便定位
-        if ((ev?.type === 'play' || ev?.type === 'pass') && typeof ev?.move?.__passCount === 'number') {
-          const pc = ev.move.__passCount as number;
-          if (pc > 0 && pc % 10 === 0) {
-            writeLine(res, { type: 'debug', message: `连续 pass 次数 ${pc}，可能 bot 实现无效`, seat: ev?.seat });
-          }
-          // 去掉内部字段，避免前端渲染问题
-          try { delete ev.move.__passCount; } catch {}
-        }
-
         writeLine(res, ev);
-
-        // 增量计分（如果引擎发 scores 事件）
         if (ev?.type === 'scores' && Array.isArray(ev?.delta)) {
           const d = ev.delta as [number, number, number];
           roundDelta = [roundDelta[0] + d[0], roundDelta[1] + d[1], roundDelta[2] + d[2]];
         }
+        if (ev?.type === 'result') break; // 一局完成标志（若引擎按局产出）
       }
 
       totals = [totals[0] + roundDelta[0], totals[1] + roundDelta[1], totals[2] + roundDelta[2]];
       writeLine(res, { type: 'scores', totals, round, delta: roundDelta });
       writeLine(res, { type: 'log', message: `—— 第 ${round} 局结束 ——`, round });
-
       writeLine(res, { type: 'progress', finished: round, left: rounds - round, totals });
     }
 
     writeLine(res, { type: 'end', totals });
     res.end();
-
   } catch (err: any) {
     writeLine(res, { type: 'error', message: String(err?.message || err || 'unknown error') });
     try { res.end(); } catch {}
