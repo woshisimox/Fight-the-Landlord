@@ -29,6 +29,9 @@ type StartPayload = {
   seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
   clientTraceId?: string;
   farmerCoop?: boolean;
+  tsBaseline?: { mu:number; sigma:number }[];
+  radarBaseline?: { count?: number; scores?: any[] };
+
 };
 
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
@@ -36,6 +39,18 @@ const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
 function writeLine(res: NextApiResponse, obj: any) {
   (res as any).write(JSON.stringify(obj) + '\n');
 }
+
+function isValidRatingArray(ts: any): boolean {
+  if (!Array.isArray(ts) || ts.length !== 3) return false;
+  return ts.every((x:any) => x && typeof x.mu === 'number' && isFinite(x.mu) && typeof x.sigma === 'number' && isFinite(x.sigma));
+}
+
+function isValidRadar(rb: any): boolean {
+  if (!rb || !Array.isArray(rb.scores) || rb.scores.length !== 3) return false;
+  const ok = (n:any)=> typeof n === 'number' && isFinite(n);
+  return rb.scores.every((s:any)=> s && ok(s.coop) && ok(s.agg) && ok(s.cons) && ok(s.eff) && ok(s.rob));
+}
+
 
 function providerLabel(choice: BotChoice) {
   switch (choice) {
@@ -349,6 +364,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const seatSpecs = (body.seats || []).slice(0,3);
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
+
+    // Optional baseline echo for NDJSON consumers (no engine changes)
+    const tsBaseline = (body as any).tsBaseline;
+    const radarBaseline = (body as any).radarBaseline;
+    if (isValidRatingArray(tsBaseline) || isValidRadar(radarBaseline)) {
+      writeLine(res, {
+        type: 'baseline',
+        ts: isValidRatingArray(tsBaseline) ? tsBaseline : null,
+        radar: isValidRadar(radarBaseline) ? { count: Number(radarBaseline.count)||0, scores: radarBaseline.scores } : null,
+      });
+    }
+
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 

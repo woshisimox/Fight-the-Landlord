@@ -482,8 +482,7 @@ function LivePanel(props: LiveProps) {
     if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
 
     setRunning(true);
-    setLandlord(null); setHands([[], [], []]);         seenStatsRef.current = false; // reset per round (fallback)
-setPlays([]);
+    setLandlord(null); setHands([[], [], []]); setPlays([]);
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
     setTotals([props.startScore || 0, props.startScore || 0, props.startScore || 0]);
@@ -507,7 +506,6 @@ setPlays([]);
           case 'ai:grok':   return { choice, model, apiKey: keys.grok || '' };
           case 'ai:kimi':   return { choice, model, apiKey: keys.kimi || '' };
           case 'ai:qwen':   return { choice, model, apiKey: keys.qwen || '' };
-          case 'ai:deepseek': return { choice, model, apiKey: keys.deepseek || '' };
           case 'http':      return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
           default:          return { choice };
         }
@@ -555,6 +553,16 @@ setPlays([]);
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
 
+      // Read local baselines for server echo (no UI/logic change)
+      const tsBaseline = (() => { try { return JSON.parse(localStorage.getItem('ts.overall') || 'null'); } catch { return null; } })();
+      const radarBaseline = (() => {
+        try {
+          const obj = JSON.parse(localStorage.getItem('radar.overall') || 'null');
+          if (!obj || !Array.isArray(obj.scores) || obj.scores.length !== 3) return null;
+          return { count: Number(obj.count) || 0, scores: obj.scores };
+        } catch { return null; }
+      })();
+
       const r = await fetch('/api/stream_ndjson', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -569,6 +577,9 @@ setPlays([]);
           clientTraceId: traceId,
           stopBelowZero: true,
           farmerCoop: props.farmerCoop,
+        ,
+          tsBaseline,
+          radarBaseline
         }),
         signal: controllerRef.current!.signal,
       });
@@ -783,9 +794,6 @@ setPlays([]);
               const isStatsTop = (m.type === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               const isStatsEvt = (m.type === 'event' && m.kind === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               if (isStatsTop || isStatsEvt) {
-      if (seenStatsRef.current) { nextLog = [...(nextLog||[]), '战术画像：检测到重复 stats，本局后续 stats 已忽略']; continue; }
-      seenStatsRef.current = true;
-
                 seenStatsRef.current = true;
                 const arr = (m.perSeat ?? m.seats) as any[];
                 const s3 = [0,1,2].map(i=>{
