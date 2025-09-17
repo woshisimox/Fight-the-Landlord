@@ -1323,6 +1323,10 @@ function Home() {
                     />
                   </label>
                 </div>
+
+              ))}
+            </div>
+          </div>
           <div style={{ marginTop:12 }}>
             <div style={{ fontWeight:700, marginBottom:6 }}>每家思考超时（秒）</div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
@@ -1342,10 +1346,6 @@ function Home() {
                     />
                   </label>
                 </div>
-              ))}
-            </div>
-          </div>
-
               ))}
             </div>
           </div>
