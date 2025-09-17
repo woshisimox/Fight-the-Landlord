@@ -82,36 +82,60 @@ function writeLine(res: NextApiResponse, obj: any) {
   try { res.write(JSON.stringify(obj) + '\n'); } catch {}
 }
 
-/** 通用工厂：兼容 “class” 与 “工厂函数” 与 “直接返回函数” */
-function makeAnyBot(ClassOrFactory: any, arg: any) {
-  // 1) 尝试当作 class
+/** 通用工厂：最大兼容 “class / 工厂函数 / 直接函数(play)” */
+function makeAnyBot(F: any, arg?: any) {
+  // 1) 当作 class 构造（优先用有参，再试无参）
+  try { const inst = new F(arg); if (inst && typeof inst.play === 'function') return inst; } catch {}
+  try { const inst0 = new F();   if (inst0 && typeof inst0.play === 'function') return inst0; } catch {}
+
+  // 2) 当作工厂函数调用（先有参，再无参）
   try {
-    const inst = new ClassOrFactory(arg);
-    if (inst && typeof inst.play === 'function') return inst;
+    const ret = F(arg);
+    if (ret && typeof ret.play === 'function') return ret;
+    if (typeof ret === 'function') return { play: ret }; // 工厂返回函数
+    if (ret && typeof ret === 'object' && typeof ret.play === 'function') return ret;
   } catch {}
-  // 2) 尝试当作工厂函数
   try {
-    const maybe = ClassOrFactory(arg);
-    if (maybe && typeof maybe.play === 'function') return maybe;
-    if (typeof maybe === 'function') return { play: maybe }; // 返回函数 => 包装为 { play }
-    // 也可能直接返回一个对象，在下一步 asCallable 里处理
-    if (maybe) return maybe;
+    const ret0 = F();
+    if (ret0 && typeof ret0.play === 'function') return ret0;
+    if (typeof ret0 === 'function') return { play: ret0 };
+    if (ret0 && typeof ret0 === 'object' && typeof ret0.play === 'function') return ret0;
   } catch {}
-  // 3) 兜底
+
+  // 3) 若 F 本身是“直接函数(play)”，直接包成 { play: F }
+  if (typeof F === 'function') return { play: F };
+
+  // 4) 兜底
   return { play: async () => ({ move: 'pass', reason: `invalid bot factory` }) };
 }
 
 /** 统一转为异步可调用 (ctx)=>Promise<Move> */
-function asCallable(impl: any) {
+function asCallable(impl: any, label: string) {
+  // 连续 pass 计数器（用于帮助定位“只出一轮就结束”的情况）
+  let passCount = 0;
   return async (ctx: any) => {
     try {
-      if (!impl) return { move: 'pass', reason: 'bot impl missing' };
-      if (typeof impl.play === 'function') return await impl.play(ctx);
-      if (typeof impl === 'function') return await impl(ctx);
-      // 若是对象但没有 play，尽量容错
-      return { move: 'pass', reason: 'bot impl not callable' };
+      let mv: any;
+      if (!impl) {
+        mv = { move: 'pass', reason: `${label}: bot impl missing` };
+      } else if (typeof impl.play === 'function') {
+        mv = await impl.play(ctx);
+      } else if (typeof impl === 'function') {
+        mv = await impl(ctx);
+      } else {
+        mv = { move: 'pass', reason: `${label}: bot impl not callable` };
+      }
+      // 简单的 pass 连续计数（帮助发现“全程 pass”的问题）
+      if (mv?.move === 'pass') passCount++; else passCount = 0;
+      // 强化 reason，便于前端日志显示
+      if (mv?.move === 'pass' && !mv?.reason) {
+        mv.reason = `${label}: pass`;
+      }
+      // 当连续 pass 很多次，发出一个 debug 事件（由上层调用时写入）
+      (mv as any).__passCount = passCount;
+      return mv;
     } catch (e: any) {
-      return { move: 'pass', reason: `bot error: ${e?.message || e}` };
+      return { move: 'pass', reason: `${label}: bot error: ${e?.message || e}` };
     }
   };
 }
@@ -128,47 +152,47 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
 
   if (choice === 'built-in:greedy-max') {
     const impl = makeAnyBot(GreedyMax, label);
-    return asCallable(impl);
+    return asCallable(impl, label);
   }
   if (choice === 'built-in:greedy-min') {
     const impl = makeAnyBot(GreedyMin, label);
-    return asCallable(impl);
+    return asCallable(impl, label);
   }
   if (choice === 'built-in:random-legal') {
     const impl = makeAnyBot(RandomLegal, label);
-    return asCallable(impl);
+    return asCallable(impl, label);
   }
 
   if (choice === 'ai:openai') {
     const impl = makeAnyBot(OpenAIBot, { model: spec?.model, apiKey: spec?.apiKey, label });
-    return asCallable(impl);
+    return asCallable(impl, label);
   }
   if (choice === 'ai:gemini') {
     const impl = makeAnyBot(GeminiBot, { model: spec?.model, apiKey: spec?.apiKey, label });
-    return asCallable(impl);
+    return asCallable(impl, label);
   }
   if (choice === 'ai:grok') {
     const impl = makeAnyBot(GrokBot, { model: spec?.model, apiKey: spec?.apiKey, label });
-    return asCallable(impl);
+    return asCallable(impl, label);
   }
   if (choice === 'ai:kimi') {
     const impl = makeAnyBot(KimiBot, { model: spec?.model, apiKey: spec?.apiKey, label });
-    return asCallable(impl);
+    return asCallable(impl, label);
   }
   if (choice === 'ai:qwen') {
     const impl = makeAnyBot(QwenBot, { model: spec?.model, apiKey: spec?.apiKey, label });
-    return asCallable(impl);
+    return asCallable(impl, label);
   }
 
-  // HTTP 自定义外部 AI（尽量传 base/token；若你实现需要 model，可自行加上）
+  // HTTP 自定义外部 AI（常见实现只用 base/token；若你实现需要 model，可自行补上）
   if (choice === 'http' || spec?.baseUrl || spec?.token) {
     const impl = makeAnyBot(HttpBot, { base: spec?.baseUrl, token: spec?.token, label });
-    return asCallable(impl);
+    return asCallable(impl, label);
   }
 
   // 兜底
   const fallback = makeAnyBot(RandomLegal, '内置:RandomLegal');
-  return asCallable(fallback);
+  return asCallable(fallback, '内置:RandomLegal');
 }
 
 /* ==================== 请求处理 ==================== */
@@ -258,7 +282,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       let roundDelta: [number, number, number] = [0, 0, 0];
 
       for await (const ev of iter as any) {
+        // 如果是“出牌/过牌”事件，并且该动作带有 __passCount，且累计很多，则抛一个 debug 事件方便定位
+        if ((ev?.type === 'play' || ev?.type === 'pass') && typeof ev?.move?.__passCount === 'number') {
+          const pc = ev.move.__passCount as number;
+          if (pc > 0 && pc % 10 === 0) {
+            writeLine(res, { type: 'debug', message: `连续 pass 次数 ${pc}，可能 bot 实现无效`, seat: ev?.seat });
+          }
+          // 去掉内部字段，避免前端渲染问题
+          try { delete ev.move.__passCount; } catch {}
+        }
+
         writeLine(res, ev);
+
+        // 增量计分（如果引擎发 scores 事件）
         if (ev?.type === 'scores' && Array.isArray(ev?.delta)) {
           const d = ev.delta as [number, number, number];
           roundDelta = [roundDelta[0] + d[0], roundDelta[1] + d[1], roundDelta[2] + d[2]];
