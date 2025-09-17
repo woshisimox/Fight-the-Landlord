@@ -581,12 +581,11 @@ function LivePanel(props: LiveProps) {
       const reader = r.body.getReader();
       dogId = setInterval(() => {
         if (Date.now() - lastEventTs > timeoutMs) {
-          addLog(`⏳ 超过 ${Math.round((props.turnTimeoutSec ?? 30))}s 未收到事件，按规则视为“过”，中断本局并开启下一局`);
-          try { controllerRef.current?.abort(); } catch {}
-          clearInterval(dogId);
+          setLog(l => [...l, `⏳ 超过 ${Math.round((props.turnTimeoutSec ?? 30))}s 未收到事件，已触发前端提示（后端会按规则自动“过”或出最小牌），继续等待…`]);
+          lastEventTs = Date.now(); // 防止重复提示
         }
       }, 1000);
-
+    
       const decoder = new TextDecoder('utf-8');
       let buf = '';
       const rewrite = makeRewriteRoundLabel(labelRoundNo);
@@ -841,7 +840,8 @@ function LivePanel(props: LiveProps) {
         }
       }
 
-      setLog(l => [...l, `—— 本局流结束 ——`]);
+          if (dogId) { try { clearInterval(dogId); } catch {} }
+    setLog(l => [...l, `—— 本局流结束 ——`]);
     };
 
     try {
@@ -1339,7 +1339,7 @@ function Home() {
           farmerCoop={farmerCoop}
           onLog={setLiveLog}
         
-          turnTimeoutSec={{turnTimeoutSec}}
+          turnTimeoutSec={turnTimeoutSec}
         />
       </div>
     </div>

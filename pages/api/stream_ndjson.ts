@@ -98,40 +98,6 @@ function inferCandidateCount(ctx:any): number | undefined {
   return undefined;
 }
 
-/** 选择最小的一步合法出牌：优先最少张数；再按牌点从小到大 */
-function pickMinimalPlay(ctx:any): any {
-  try {
-    const list = ctx?.candidates ?? ctx?.legalMoves ?? ctx?.legal ?? ctx?.moves;
-    const hand = Array.isArray(ctx?.hand) ? ctx.hand : [];
-    const normalize = (x:any) => {
-      if (!x) return null;
-      if (Array.isArray(x)) return { cards: x };
-      if (Array.isArray(x.cards)) return { cards: x.cards, comboType: x.combo?.type || x.type || x.comboType };
-      if (Array.isArray(x.move)) return { cards: x.move };
-      return null;
-    };
-    const toKey = (cards:number[]|string[]) => {
-      try {
-        const rankOrder:any = { '3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14,'2':16,'x':17,'X':18 };
-        const vals = cards.map((c:any)=> typeof c==='number'? c : (rankOrder[String(c)] ?? 999));
-        return [cards.length, Math.min(...vals), ...vals].join(',');
-      } catch { return `${cards.length},999`; }
-    };
-    let candidates:any[] = Array.isArray(list) ? list.map(normalize).filter(Boolean) : [];
-    if (!candidates.length && hand.length) {
-      // 兜底：出手里最小的单牌
-      const sorted = [...hand].sort((a:any,b:any)=> (a<b?-1:a>b?1:0));
-      return { move:'play', cards:[sorted[0]] };
-    }
-    candidates.sort((a:any,b:any)=> (toKey(a.cards) < toKey(b.cards) ? -1 : 1));
-    const pick = candidates[0];
-    return { move:'play', cards: pick.cards, comboType: pick.comboType };
-  } catch {
-    return { move:'pass' };
-  }
-}
-
-
 /** 统一“理由 & 策略”构造（bot 若不给 reason，这里合成） */
 function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx:any, out:any) {
   const by = providerLabel(choice);
@@ -176,6 +142,40 @@ function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx
 }
 
 /** bot 包装：发 bot-call/bot-done，并缓存 reason 以贴到 play/pass */
+
+
+/** 选择最小的一步合法出牌：优先最少张数；再按牌点从小到大 */
+function pickMinimalPlay(ctx:any): any {
+  try {
+    const list = ctx?.candidates ?? ctx?.legalMoves ?? ctx?.legal ?? ctx?.moves;
+    const hand = Array.isArray(ctx?.hand) ? ctx.hand : [];
+    const normalize = (x:any) => {
+      if (!x) return null;
+      if (Array.isArray(x)) return { cards: x };
+      if (Array.isArray(x.cards)) return { cards: x.cards, comboType: x.combo?.type || x.type || x.comboType };
+      if (Array.isArray(x.move)) return { cards: x.move };
+      return null;
+    };
+    const toKey = (cards:any[]) => {
+      try {
+        const rankOrder:any = { '3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14,'2':16,'x':17,'X':18 };
+        const vals = cards.map((c:any)=> typeof c==='number'? c : (rankOrder[String(c)] ?? 999));
+        return [cards.length, Math.min(...vals), ...vals].join(',');
+      } catch { return `${cards.length},999`; }
+    };
+    let candidates:any[] = Array.isArray(list) ? list.map(normalize).filter(Boolean) : [];
+    if (!candidates.length && hand.length) {
+      // 兜底：出手里最小的单牌
+      const sorted = [...hand].sort((a:any,b:any)=> (a<b?-1:a>b?1:0));
+      return { move:'play', cards:[sorted[0]] };
+    }
+    candidates.sort((a:any,b:any)=> (toKey(a.cards) < toKey(b.cards) ? -1 : 1));
+    const pick = candidates[0];
+    return { move:'play', cards: pick.cards, comboType: pick.comboType };
+  } catch {
+    return { move:'pass' };
+  }
+}
 function traceWrap(choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any, res: NextApiResponse,
   onReason: (seat:number, text?:string)=>void,
   timeoutMs?: number
@@ -188,17 +188,16 @@ function traceWrap(choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>
     let out: any; let err: any = null;
     try {
       if (timeoutMs && timeoutMs > 0) {
-        let timed = false;
+        let timed = false as boolean;
         out = await Promise.race([
           Promise.resolve().then(()=>bot(ctx)),
           new Promise((resolve)=>setTimeout(()=>{ timed = true; resolve('__TIMEOUT__'); }, timeoutMs))
         ]);
         if (out === '__TIMEOUT__') {
-          // 超时：跟牌可“过”；必须首攻则出最小合法牌
-          const mustPlay = !ctx?.require?.type;
+          const mustPlay = !ctx?.require?.type; // 没有压制要求 => 首攻，必须出
           if (mustPlay) {
             out = pickMinimalPlay(ctx);
-            try { (out as any).reason = `超时自动出最小牌`; } catch {}
+            try { (out as any).reason = '超时自动出最小牌'; } catch {}
           } else {
             out = { move:'pass', reason:'超时让牌' };
           }
