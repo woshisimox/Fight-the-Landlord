@@ -1,7 +1,7 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-// ====== 引擎（已固定为 doudizhu 路径）======
+// ====== 引擎（固定为 doudizhu 路径）======
 import * as ddz from '../../lib/doudizhu/engine';
 const runOneGame: any  = (ddz as any).runOneGame;
 const GreedyMax: any   = (ddz as any).GreedyMax;
@@ -97,22 +97,20 @@ function makeImplWithBidPlay(F: any, arg?: any): any {
     };
   }
 
-  // 4) 兜底：全部 pass（不建议，但避免崩）
+  // 4) 兜底：全部 pass（避免崩溃）
   return {
     bid: async () => 'pass',
     play: async () => ({ move: 'pass', reason: 'invalid bot factory' }),
   };
 }
 
-/** AI 适配：AI 只实现 play 时，用内置 GreedyMax 代理 bid，避免“一手结束” */
+/** AI 适配：AI 只实现 play 时，用内置 GreedyMax 代理 bid（避免“抢完就结束”） */
 function makeAIBot(Factory: any, opts: any, label: string) {
   const ai = makeImplWithBidPlay(Factory, opts);
-  // 若没有 bid，用 GreedyMax 做叫/抢地主（能输出 1/2/3 或 rob/pass，具体取决于引擎）
   if (typeof ai.bid !== 'function') {
     const bidder = makeImplWithBidPlay(GreedyMax, label + ':Bidder');
     ai.bid = async (ctx: any) => bidder?.bid ? bidder.bid(ctx) : 'pass';
   }
-  // 强化 play 的 reason，便于前端日志
   const origPlay = ai.play;
   ai.play = async (ctx: any) => {
     try {
@@ -185,37 +183,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     writeLine(res, { type: 'init', rounds, startScore, rob, four2, farmerCoop, seatDelayMs, seats, seatModels, enabled, debug });
 
-    // 构建 IBot 对象数组（每个都有 bid + play）
-    const seatObjs = Array.from({ length: 3 }).map((_, i) => {
-      const choice = seats[i] || 'built-in:random-legal';
-      const model  = seatModels[i] || defaultModelFor(choice);
-      const keys   = seatKeys[i] || {};
-
-      let apiKey: string | undefined;
-      switch (choice) {
-        case 'ai:openai': apiKey = keys.openai; break;
-        case 'ai:gemini': apiKey = keys.gemini; break;
-        case 'ai:grok':   apiKey = keys.grok;   break;
-        case 'ai:kimi':   apiKey = keys.kimi;   break;
-        case 'ai:qwen':   apiKey = keys.qwen;   break;
-        default:          apiKey = undefined;   break;
-      }
-
-      const spec: SeatSpec = {
-        choice, model, apiKey,
-        baseUrl: keys.httpBase, token: keys.httpToken,
-        seatLabel: LABELS[i],
-      };
-      return makeSeat(choice, spec);
-    });
-
-    // 兼容不同签名：有的 runOneGame(config, hooks)，有的 runOneGame(config)
-    const cfg = { seats: seatObjs, rob, four2, seatDelayMs, farmerCoop, debug } as any;
-    const iter = (runOneGame.length >= 2) ? runOneGame(cfg, {} as any) : runOneGame(cfg);
-
     let totals: [number, number, number] = [startScore, startScore, startScore];
+
     for (let round = 1; round <= rounds; round++) {
       writeLine(res, { type: 'log', message: `—— 第 ${round} 局开始 ——`, round });
+
+      // ⚠️ 每一局都“重新构建” seat 对象，避免跨局状态污染
+      const seatObjs = Array.from({ length: 3 }).map((_, i) => {
+        const choice = seats[i] || 'built-in:random-legal';
+        const model  = seatModels[i] || defaultModelFor(choice);
+        const keys   = seatKeys[i] || {};
+
+        let apiKey: string | undefined;
+        switch (choice) {
+          case 'ai:openai': apiKey = keys.openai; break;
+          case 'ai:gemini': apiKey = keys.gemini; break;
+          case 'ai:grok':   apiKey = keys.grok;   break;
+          case 'ai:kimi':   apiKey = keys.kimi;   break;
+          case 'ai:qwen':   apiKey = keys.qwen;   break;
+          default:          apiKey = undefined;   break;
+        }
+
+        const spec: SeatSpec = {
+          choice, model, apiKey,
+          baseUrl: keys.httpBase, token: keys.httpToken,
+          seatLabel: LABELS[i],
+        };
+        return makeSeat(choice, spec);
+      });
+
+      // ✅ 把 runOneGame 放到每一局循环里；且不再手动 break，让迭代自然结束
+      const cfg = { seats: seatObjs, rob, four2, seatDelayMs, farmerCoop, debug } as any;
+      const iter = (runOneGame.length >= 2) ? runOneGame(cfg, {} as any) : runOneGame(cfg);
 
       let roundDelta: [number, number, number] = [0, 0, 0];
 
@@ -225,7 +224,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const d = ev.delta as [number, number, number];
           roundDelta = [roundDelta[0] + d[0], roundDelta[1] + d[1], roundDelta[2] + d[2]];
         }
-        if (ev?.type === 'result') break; // 一局完成标志（若引擎按局产出）
       }
 
       totals = [totals[0] + roundDelta[0], totals[1] + roundDelta[1], totals[2] + roundDelta[2]];
