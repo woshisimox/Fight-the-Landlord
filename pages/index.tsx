@@ -506,6 +506,7 @@ function LivePanel(props: LiveProps) {
           case 'ai:grok':   return { choice, model, apiKey: keys.grok || '' };
           case 'ai:kimi':   return { choice, model, apiKey: keys.kimi || '' };
           case 'ai:qwen':   return { choice, model, apiKey: keys.qwen || '' };
+          case 'ai:deepseek': return { choice, model, apiKey: keys.deepseek || '' };
           case 'http':      return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
           default:          return { choice };
         }
