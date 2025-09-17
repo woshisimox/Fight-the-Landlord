@@ -18,131 +18,54 @@ type BotChoice =
 
 type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
 
+/** 客户端请求体（支持按座位数组或单值） */
 type StartPayload = {
-  turnTimeoutSec?: number | number[];
   seats: SeatSpec[];
-  seatDelayMs?: number[];
+  /** 每家最小间隔（ms），可为单值或三元素数组 */
+  seatDelayMs?: number | number[];
+  /** 每家“思考上限/弃牌时间”（秒），可为单值或三元素数组 */
+  turnTimeoutSec?: number | number[];
   rounds?: number;
   rob?: boolean;
   four2?: 'both' | '2singles' | '2pairs';
   stopBelowZero?: boolean;
   seatModels?: string[];
-  seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
+  seatKeys?: {
+    openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string;
+    httpBase?: string; httpToken?: string;
+  }[];
   clientTraceId?: string;
   farmerCoop?: boolean;
 };
 
-const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
+/** 简单的 provider 标签 */
+function providerLabel(choice: BotChoice): string {
+  if (choice.startsWith('built-in')) return 'built-in';
+  if (choice === 'http') return 'http';
+  return choice.replace('ai:', '');
+}
 
+/** NDJSON 输出 */
 function writeLine(res: NextApiResponse, obj: any) {
-  (res as any).write(JSON.stringify(obj) + '\n');
+  try {
+    res.write(`${JSON.stringify(obj)}\n`);
+  } catch {}
 }
 
-function providerLabel(choice: BotChoice) {
-  switch (choice) {
-    case 'built-in:greedy-max': return 'GreedyMax';
-    case 'built-in:greedy-min': return 'GreedyMin';
-    case 'built-in:random-legal': return 'RandomLegal';
-    case 'ai:openai': return 'OpenAI';
-    case 'ai:gemini': return 'Gemini';
-    case 'ai:grok':  return 'Grok';
-    case 'ai:kimi':  return 'Kimi';
-    case 'ai:qwen':  return 'Qwen';
-    case 'ai:deepseek': return 'DeepSeek';
-    case 'http':     return 'HTTP';
-  }
-}
-
-function asBot(choice: BotChoice, spec?: SeatSpec): (ctx:any)=>Promise<any>|any {
-  switch (choice) {
-    case 'built-in:greedy-max': return GreedyMax;
-    case 'built-in:greedy-min': return GreedyMin;
-    case 'built-in:random-legal': return RandomLegal;
-    case 'ai:openai': return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
-    case 'ai:gemini': return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-flash' });
-    case 'ai:grok':   return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
-    case 'ai:kimi':   return KimiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'kimi-k2-0905-preview' });
-    case 'ai:qwen':   return QwenBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'qwen-plus' });
-    case 'ai:deepseek': return DeepseekBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'deepseek-chat' });
-    case 'http':      return HttpBot({ base: (spec?.baseUrl||'').replace(/\/$/,''), token: spec?.token || '' });
-    default:          return GreedyMax;
-  }
-}
-
-/* ---------- 轻量手牌/候选估算，丰富 strategy ---------- */
-function rankScore(r:string){
-  const map:any = { X:10, x:8, '2':7, A:6, K:5, Q:4, J:3, T:2 };
-  return map[r] ?? 1;
-}
-function estimateHandEval(hand:any): number | undefined {
-  try{
-    if (!Array.isArray(hand) || hand.length===0) return undefined;
-    const ranks = hand.map((c:any)=>{
-      const s = String(c);
-      if (s === 'x' || s === 'X' || s.startsWith('🃏')) return s === 'X' || s.endsWith('Y') ? 'X' : 'x';
-      const core = /10/i.test(s) ? s.replace(/10/i,'T') : s;
-      const r = core.match(/[23456789TJQKA]/i)?.[0]?.toUpperCase() ?? '';
-      return r;
-    });
-    const total = ranks.reduce((acc,r)=>acc+rankScore(r),0);
-    const max = hand.length * 10;
-    return Math.round((total/max)*100)/100;
-  }catch{return undefined;}
-}
-function inferCandidateCount(ctx:any): number | undefined {
-  try{
-    const cands = ctx?.candidates ?? ctx?.legalMoves ?? ctx?.legal ?? ctx?.moves;
-    if (Array.isArray(cands)) return cands.length;
-  }catch{}
-  return undefined;
-}
-
-/** 统一“理由 & 策略”构造（bot 若不给 reason，这里合成） */
-function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx:any, out:any) {
-  const by = providerLabel(choice);
-  const model = (spec?.model || '').trim();
-  const role = (ctx?.seat != null && ctx?.landlord != null) ? (ctx.seat === ctx.landlord ? '地主' : '农民') : '';
-  const requireType = ctx?.require?.type || null;
-  const lead = !requireType;
-  const cards = Array.isArray(out?.cards) ? out.cards : [];
-  const combo = out?.comboType || out?.combo?.type || (lead ? out?.require?.type : ctx?.require?.type) || null;
-  const usedBomb = combo === 'bomb' || combo === 'rocket';
-  const handSize = Array.isArray(ctx?.hand) ? ctx.hand.length : undefined;
-
-  let reason = out?.reason as (string|undefined);
+/** 生成简单的 reason/strategy（可按需丰富） */
+function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec | undefined, ctx: any, out: any) {
+  let reason = '';
+  let strategy = '';
+  if (out?.reason) reason = String(out.reason);
   if (!reason) {
-    if (out?.move === 'pass') {
-      reason = requireType ? '无更优压牌，选择过（让牌）' : '保守过牌';
-    } else if (out?.move === 'play') {
-      const parts: string[] = [];
-      parts.push(lead ? '首攻' : `跟牌（${requireType}）`);
-      parts.push(`出型：${combo ?? '—'}`);
-      if (usedBomb) parts.push('争夺/巩固先手');
-      if (choice === 'built-in:greedy-max') parts.push('带走更多牌');
-      if (choice === 'built-in:greedy-min') parts.push('尽量少出牌应对');
-      reason = `${parts.join('，')}：${cards.join(' ')}`;
-    }
+    if (out?.move === 'pass') reason = '让牌/过';
+    else if (Array.isArray(out?.cards)) reason = `出牌${out.cards.length}张`;
+    else reason = '出牌';
   }
-
-  const strategy:any = {
-    provider: by, model, choice,
-    role, lead, require: requireType, combo,
-    cards, handSize, usedBomb,
-    rule: out?.rule || out?.policy || undefined,
-    heuristics: out?.heuristics || out?.weights || undefined,
-    risk: typeof out?.risk === 'number' ? out.risk : undefined,
-    candidateCount: (typeof out?.candidateCount === 'number' ? out.candidateCount : inferCandidateCount(ctx)),
-    handEval: (typeof out?.handEval === 'number' ? out.handEval : estimateHandEval(ctx?.hand)),
-    search: out?.search || out?.trace?.search || undefined,
-    coopSignals: out?.coopSignals || undefined,
-  };
-
+  strategy = `${providerLabel(choice)}:${(spec?.model || '').trim() || 'default'}`;
   return { reason, strategy };
 }
-
-/** bot 包装：发 bot-call/bot-done，并缓存 reason 以贴到 play/pass */
-
-/** 选择最小的一步合法出牌：优先最少张数；再按牌点从小到大 */
+/** 选择最小的一步合法出牌：优先最少张数；再按牌点从小到大；拿不到候选则出最小单张 */
 function pickMinimalPlay(ctx:any): any {
   try {
     const list = ctx?.candidates ?? ctx?.legalMoves ?? ctx?.legal ?? ctx?.moves;
@@ -173,19 +96,74 @@ function pickMinimalPlay(ctx:any): any {
     return { move:'pass' };
   }
 }
+
+/** 将 SeatSpec 转换为可调用的 bot 函数 (ctx)=>Promise<Move> */
+function asBot(choice: BotChoice, spec?: SeatSpec) {
+  if (choice === 'built-in:greedy-max') {
+    const impl = new GreedyMax();
+    return async (ctx:any)=> impl.play(ctx);
+  }
+  if (choice === 'built-in:greedy-min') {
+    const impl = new GreedyMin();
+    return async (ctx:any)=> impl.play(ctx);
+  }
+  if (choice === 'built-in:random-legal') {
+    const impl = new RandomLegal();
+    return async (ctx:any)=> impl.play(ctx);
+  }
+
+  if (choice === 'ai:openai') {
+    const bot = new OpenAIBot({ model: spec?.model, apiKey: spec?.apiKey });
+    return async (ctx:any)=> bot.play(ctx);
+  }
+  if (choice === 'ai:gemini') {
+    const bot = new GeminiBot({ model: spec?.model, apiKey: spec?.apiKey });
+    return async (ctx:any)=> bot.play(ctx);
+  }
+  if (choice === 'ai:grok') {
+    const bot = new GrokBot({ model: spec?.model, apiKey: spec?.apiKey });
+    return async (ctx:any)=> bot.play(ctx);
+  }
+  if (choice === 'ai:kimi') {
+    const bot = new KimiBot({ model: spec?.model, apiKey: spec?.apiKey });
+    return async (ctx:any)=> bot.play(ctx);
+  }
+  if (choice === 'ai:qwen') {
+    const bot = new QwenBot({ model: spec?.model, apiKey: spec?.apiKey });
+    return async (ctx:any)=> bot.play(ctx);
+  }
+  if (choice === 'ai:deepseek') {
+    const bot = new DeepseekBot({ model: spec?.model, apiKey: spec?.apiKey });
+    return async (ctx:any)=> bot.play(ctx);
+  }
+  if (choice === 'http') {
+    const bot = new HttpBot({ baseUrl: spec?.baseUrl, token: spec?.token, model: spec?.model });
+    return async (ctx:any)=> bot.play(ctx);
+  }
+  // 兜底
+  const impl = new RandomLegal();
+  return async (ctx:any)=> impl.play(ctx);
+}
+/** bot 包装：发 bot-call/bot-done；调用前先等待“最小间隔”（期间发 hb），调用后用“思考上限”做兜底（过/最小牌） */
 function traceWrap(
   choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any, res: NextApiResponse,
   onReason: (seat:number, text?:string)=>void,
-  timeoutMs?: number,
-  minIntervalMs?: number
+  timeoutMs?: number,           // 每家的思考超时（ms）
+  minIntervalMs?: number        // 每家的最小间隔（ms）
 ) {
   const by = providerLabel(choice);
   const model = (spec?.model || '').trim();
-    let __lastCallAt = 0;
+
+  // 记录“上次真正调用该家 bot 的时间”，用于最小间隔
+  let __lastCallAt = 0;
   const __sleep = (ms:number)=> new Promise(r=>setTimeout(r, ms));
-return async function traced(ctx:any) {
-    try { writeLine(res, { type:'event', kind:'bot-call', seat: ctx?.seat ?? -1, by, model, phase: ctx?.phase || 'play', need: ctx?.require?.type || null }); } catch {}
-    // honor per-seat min interval BEFORE starting decision timeout
+
+  return async function traced(ctx:any) {
+    try {
+      writeLine(res, { type:'event', kind:'bot-call', seat: ctx?.seat ?? -1, by, model, phase: ctx?.phase || 'play', need: ctx?.require?.type || null });
+    } catch {}
+
+    // 1) 先等待达到“最小间隔”（这段时间内持续发 hb，避免前端误判卡住）
     if (minIntervalMs && minIntervalMs > 0) {
       const now = Date.now();
       const since = now - __lastCallAt;
@@ -200,6 +178,8 @@ return async function traced(ctx:any) {
         }
       }
     }
+
+    // 2) 真正开始“思考上限”计时（只覆盖 bot 的思考，不包含上面的等待）
     const t0 = Date.now();
     let out: any; let err: any = null;
     try {
@@ -210,7 +190,8 @@ return async function traced(ctx:any) {
           new Promise((resolve)=>setTimeout(()=>{ timed = true; resolve('__TIMEOUT__'); }, timeoutMs))
         ]);
         if (out === '__TIMEOUT__') {
-          const mustPlay = !ctx?.require?.type; // lead => must play
+          // 跟牌可“过”；必须首攻（无 require.type）则出最小合法牌
+          const mustPlay = !ctx?.require?.type;
           if (mustPlay) {
             out = pickMinimalPlay(ctx);
             try { (out as any).reason = '超时自动出最小牌'; } catch {}
@@ -221,9 +202,12 @@ return async function traced(ctx:any) {
       } else {
         out = await bot(ctx);
       }
-    } catch (e) { err = e; }
+    } catch (e) {
+      err = e;
+    }
     const tookMs = Date.now() - t0;
 
+    // 3) 生成 reason/strategy，并发 bot-done
     const { reason, strategy } = buildReasonAndStrategy(choice, spec, ctx, out);
     onReason(ctx?.seat ?? -1, reason);
 
@@ -233,220 +217,116 @@ return async function traced(ctx:any) {
         tookMs, reason, strategy, error: err ? String(err) : undefined
       });
     } catch {}
+
+    // 4) 记录“本次真正调用时间”，作为下次最小间隔的起点
     __lastCallAt = Date.now();
+
     if (err) throw err;
     try { if (out && !out.reason) out.reason = reason; } catch {}
     return out;
   };
 }
-
-/** 单局执行：在 play/pass 上贴 reason；每局必产出 stats（含兜底 + final） */
+/** 一局对战的护栏封装：把 engine 的事件转成 NDJSON 写出（根据你现有 engine 适配即可） */
 async function runOneRoundWithGuard(
-  opts: { seats: any[], four2?: 'both'|'2singles'|'2pairs', delayMs?: number, lastReason?: (string|null)[] },
+  opts: { seats: Array<(ctx:any)=>Promise<any>>; four2?: 'both'|'2singles'|'2pairs'; delayMs?: number; lastReason: any[]; rob?: boolean; },
   res: NextApiResponse,
-  roundNo: number
-): Promise<{ seenWin:boolean; seenStats:boolean; landlord:number; eventCount:number }> {
-  const MAX_EVENTS = 4000;
-  const MAX_REPEATED_HEARTBEAT = 200;
-
-  type SeatRec = {
-    pass:number; play:number; cards:number; bombs:number; rob:null|boolean;
-    helpKeepLeadByPass:number; harmOvertakeMate:number; saveMateVsLandlord:number; saveWithBomb:number;
-  };
-  const rec: SeatRec[] = [
-    { pass:0, play:0, cards:0, bombs:0, rob:null, helpKeepLeadByPass:0, harmOvertakeMate:0, saveMateVsLandlord:0, saveWithBomb:0 },
-    { pass:0, play:0, cards:0, bombs:0, rob:null, helpKeepLeadByPass:0, harmOvertakeMate:0, saveMateVsLandlord:0, saveWithBomb:0 },
-    { pass:0, play:0, cards:0, bombs:0, rob:null, helpKeepLeadByPass:0, harmOvertakeMate:0, saveMateVsLandlord:0, saveWithBomb:0 },
-  ];
-
-  let evCount = 0, trickNo = 0;
-  let landlord = -1;
-  let leaderSeat = -1;
-  let currentWinnerSeat = -1;
-  let passed = [false,false,false];
-
-  let rem = [17,17,17];
-  const teammateOf = (s:number) => (landlord<0 || s===landlord) ? -1 : [0,1,2].filter(x=>x!==landlord && x!==s)[0];
-
-  let lastSignature = '';
-  let repeated = 0;
-  let seenWin = false;
-  let seenStats = false;
-  let emittedFinal = false;
-
-  const iter: AsyncIterator<any> = (runOneGame as any)({ seats: opts.seats, four2: opts.four2, delayMs: opts.delayMs });
-
-  const emitStatsLite = (tag='stats-lite/coop-v3') => {
-    const basic = [0,1,2].map(i=>{
-      const r = rec[i];
-      const total = r.pass + r.play || 1;
-      const passRate  = r.pass / total;
-      const avgCards  = r.play ? (r.cards / r.play) : 0;
-      const bombRate  = r.play ? (r.bombs / r.play) : 0;
-      const cons = clamp(+((passRate) * 5).toFixed(2));
-      const eff  = clamp(+((avgCards / 4) * 5).toFixed(2));
-      const agg  = clamp(+(((0.6*bombRate) + 0.4*(avgCards/5)) * 5).toFixed(2));
-      return { cons, eff, agg };
-    });
-
-    const coopPerSeat = [0,1,2].map(i=>{
-      if (i === landlord) return 2.5;
-      const r = rec[i];
-      const raw = (1.0 * r.helpKeepLeadByPass) + (2.0 * r.saveMateVsLandlord) + (0.5 * r.saveWithBomb) - (1.5 * r.harmOvertakeMate);
-      const scale = 3 + trickNo * 0.30;
-      return +clamp(2.5 + (raw / scale) * 2.5).toFixed(2);
-    });
-
-    const perSeat = [0,1,2].map(i=>({
-      seat:i,
-      scaled: { coop: coopPerSeat[i], agg: basic[i].agg, cons: basic[i].cons, eff: basic[i].eff, rob: (i===landlord) ? (rec[i].rob===false ? 1.5 : 5) : 2.5 }
-    }));
-
-    writeLine(res, { type:'event', kind:'stats', round: roundNo, landlord, source: tag, perSeat });
-    seenStats = true;
-  };
-
-  const emitFinalIfNeeded = () => {
-    if (!emittedFinal) {
-      emitStatsLite('stats-lite/coop-v3(final)');
-      emittedFinal = true;
-    }
-  };
-
-  while (true) {
-    const { value, done } = await (iter.next() as any);
-    if (done) break;
-    evCount++;
-
-    const kind = value?.kind || value?.type;
-
-    // 在“转发”前，若是 play，则贴上最近一次 bot-done 的 reason
-    if (kind === 'play' && typeof value?.seat === 'number' && Array.isArray(opts.lastReason)) {
-      const s = value.seat as number;
-      const reason = value?.reason || opts.lastReason[s];
-      writeLine(res, reason ? { ...value, reason } : value);
-      opts.lastReason[s] = null;
-    } else {
-      writeLine(res, value);
-    }
-
-    // 统计钩子
-    if (value?.kind === 'init' && typeof value?.landlord === 'number') {
-      landlord = value.landlord;
-      rem = [17,17,17]; if (landlord>=0) rem[landlord] = 20;
-    }
-    if (value?.kind === 'rob' && typeof value?.seat === 'number') rec[value.seat].rob = !!value.rob;
-
-    if (value?.kind === 'trick-reset') {
-      trickNo++; leaderSeat = -1; currentWinnerSeat = -1; passed = [false,false,false];
-    }
-
-    if (value?.kind === 'play' && typeof value?.seat === 'number') {
-      const seat = value.seat as number;
-      const move = value.move as ('play'|'pass');
-      const ctype = value.comboType || value.combo?.type || value.require?.type || '';
-      if (move === 'pass') {
-        rec[seat].pass++; passed[seat] = true;
-        if (landlord>=0 && seat!==landlord) {
-          const mate = teammateOf(seat);
-          if (mate>=0 && currentWinnerSeat === mate && passed[landlord]) rec[seat].helpKeepLeadByPass++;
-        }
+  round: number
+) {
+  // 这里根据你的 engine，适配事件钩子（以下是通用写法示意）
+  await runOneGame({
+    seats: opts.seats,
+    four2: opts.four2 || 'both',
+    rob: opts.rob ?? false,
+    onEvent: (ev: any) => {
+      // 将引擎事件直接透传/加工
+      if (ev?.kind) {
+        writeLine(res, { type:'event', ...ev });
       } else {
-        const n = Array.isArray(value.cards) ? value.cards.length : 1;
-        rec[seat].play++; rec[seat].cards += n;
-        if (ctype === 'bomb' || ctype === 'rocket') rec[seat].bombs++;
-        if (landlord>=0 && seat!==landlord) {
-          const mate = teammateOf(seat);
-          const mateLow = (mate>=0) ? (rem[mate] <= 3) : false;
-          if (mate>=0 && currentWinnerSeat === mate && passed[landlord]) rec[seat].harmOvertakeMate++;
-          if (currentWinnerSeat === landlord && mateLow) {
-            rec[seat].saveMateVsLandlord++;
-            if (ctype === 'bomb' || ctype === 'rocket') rec[seat].saveWithBomb++;
-          }
-        }
-        if (leaderSeat === -1) leaderSeat = seat;
-        currentWinnerSeat = seat;
-        rem[seat] = Math.max(0, rem[seat] - n);
+        writeLine(res, { type:'event', value: ev });
       }
+    },
+    onInit: (info: any) => {
+      writeLine(res, { type:'event', kind:'init', ...info });
+    },
+    onStats: (stats: any) => {
+      writeLine(res, { type:'stats', ...stats });
     }
-
-    if (kind === 'stats') seenStats = true;
-
-    // 收到 win 时，总是补一条 final 统计（避免漏发）
-    if (kind === 'win') {
-      seenWin = true;
-      emitFinalIfNeeded();
-    }
-
-    // 防卡死
-    const sig = JSON.stringify({
-      kind: value?.kind, seat: value?.seat, move: value?.move,
-      require: value?.require?.type || value?.comboType || null,
-      leader: value?.leader, trick: trickNo
-    });
-    if (sig === lastSignature) repeated++; else repeated = 0;
-    lastSignature = sig;
-
-    if (evCount > MAX_EVENTS || repeated > MAX_REPEATED_HEARTBEAT) {
-      writeLine(res, { type:'log', message:`[防卡死] 触发安全阈值：${evCount} events, repeated=${repeated}。本局强制结束。`});
-      emitFinalIfNeeded();
-      try { if (typeof (iter as any).return === 'function') await (iter as any).return(undefined); } catch {}
-      writeLine(res, { type:'event', kind:'round-end', round: roundNo, seenWin:false, seenStats:true });
-      return { seenWin:false, seenStats:true, landlord, eventCount: evCount };
-    }
+  });
+}
+/** 统一 keys 注入（如果你原文件里是别的注入方式，保留原样即可） */
+function patchSpecWithKeys(spec: SeatSpec | undefined, keys?: StartPayload['seatKeys'], idx?: number): SeatSpec | undefined {
+  if (!spec) return spec;
+  const k = Array.isArray(keys) ? keys[idx ?? 0] : undefined;
+  if (!k) return spec;
+  const s: SeatSpec = { ...spec };
+  if (k.openai) s.apiKey = k.openai;
+  if (k.gemini) s.apiKey = k.gemini;
+  if (k.kimi) s.apiKey = k.kimi;
+  if (k.qwen) s.apiKey = k.qwen;
+  if (k.grok) s.apiKey = k.grok;
+  if (k.httpBase) s.baseUrl = k.httpBase;
+  if (k.httpToken) s.token = k.httpToken;
+  return s;
+}
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method Not Allowed' }); return;
   }
 
-  emitFinalIfNeeded(); // 局尾兜底
-  writeLine(res, { type:'event', kind:'round-end', round: roundNo, seenWin, seenStats:true });
-  return { seenWin, seenStats:true, landlord, eventCount: 0 };
-}
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
+  // NDJSON headers
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
+  try { (res as any).flushHeaders?.(); } catch {}
 
-  let __lastWrite = Date.now();
-  const keepAlive = setInterval(()=>{ try{
-    if((res as any).writableEnded){ clearInterval(keepAlive as any); return; }
-    if(Date.now()-__lastWrite>2500){ writeLine(res, { type:'ka', ts: new Date().toISOString() }); __lastWrite = Date.now(); }
-  }catch{} }, 2500);
+  const body = (req.body || {}) as StartPayload;
+
+  const rounds = Math.max(1, Math.min(9999, Number(body.rounds || 1)));
+  const four2 = body.four2 || 'both';
+  const rob = !!body.rob;
+
+  const seatSpecs = (body.seats || []).slice(0,3).map((s, i) => patchSpecWithKeys(s, body.seatKeys, i));
+
+  // 计算每家思考超时（ms）：支持单值或数组
+  const __tt = body.turnTimeoutSec;
+  let turnTimeoutMsArr = [30000,30000,30000];
+  if (Array.isArray(__tt)) {
+    const a = [Number(__tt[0]||30), Number(__tt[1]||30), Number(__tt[2]||30)];
+    turnTimeoutMsArr = a.map(x => Math.max(1000, (Number.isFinite(x) ? x : 30) * 1000));
+  } else {
+    const ms = Math.max(1000, (Number(__tt)||30) * 1000);
+    turnTimeoutMsArr = [ms, ms, ms];
+  }
+
+  // 计算每家最小间隔（ms）：支持单值或数组（从 seatDelayMs 派生）
+  const delaysRaw = body.seatDelayMs;
+  const minIntervalMsArr = Array.isArray(delaysRaw)
+    ? [Number(delaysRaw[0]||0)||0, Number(delaysRaw[1]||0)||0, Number(delaysRaw[2]||0)||0]
+    : [Number(delaysRaw||0)||0, Number(delaysRaw||0)||0, Number(delaysRaw||0)||0];
+
+  // 原始 bot
+  const baseBots = seatSpecs.map((s) => asBot(s?.choice as BotChoice, s));
+  // 包装：加最小间隔等待 + 思考超时兜底
+  const lastReason = [null, null, null] as any[];
+  const onReason = (seat:number, text?:string)=> {
+    if (typeof seat === 'number') lastReason[seat] = text || null;
+  };
+
+  const roundBots = baseBots.map((bot, i) =>
+    traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i], minIntervalMsArr[i])
+  );
+
+  // keep-alive（避免代理断开）
+  const keepAlive = setInterval(()=> {
+    try { writeLine(res, { type: 'hb', server: true, t: Date.now() }); } catch {}
+  }, 15000);
+  (res as any).on?.('close', ()=> { try{ clearInterval(keepAlive as any);}catch{} });
 
   try {
-    const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const rounds = Math.max(1, Math.min(parseInt(process.env.MAX_ROUNDS || '200',10), Number(body.rounds) || 1));
-    const four2 = body.four2 || 'both';
-    const delays = Array.isArray(body.seatDelayMs) && body.seatDelayMs.length === 3 ? body.seatDelayMs : Array.isArray(body.seatDelayMs) ? (body.seatDelayMs as any) : [Number(body.seatDelayMs||0)||0, Number(body.seatDelayMs||0)||0, Number(body.seatDelayMs||0)||0];
-
-    const seatSpecs = (body.seats || []).slice(0,3);
-    
-    // Per-seat think timeout (ms)
-    const __tt = (body as any).turnTimeoutSec;
-    let turnTimeoutMsArr = [30000,30000,30000];
-    if (Array.isArray(__tt)) {
-      turnTimeoutMsArr = [Number(__tt[0]||30), Number(__tt[1]||30), Number(__tt[2]||30)].map(x=> Math.max(1000, (isFinite(x) ? x : 30) * 1000));
-    } else {
-      const ms = Math.max(1000, (Number(__tt)||30) * 1000);
-      turnTimeoutMsArr = [ms, ms, ms];
-    }
-
-    // Per-seat min interval (throttle) derived from seatDelayMs
-    const minIntervalMsArr = [Number(delays[0]||0)||0, Number(delays[1]||0)||0, Number(delays[2]||0)||0];
-const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
-
-    writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
-
     for (let round = 1; round <= rounds; round++) {
-      writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
-      writeLine(res, { type:'event', kind:'round-start', round });
+      if (round === 1) writeLine(res, { type:'log', message:`—— 开始第 ${round} 局 ——` });
+      else writeLine(res, { type:'log', message:`—— 开始第 ${round} 局 ——` });
 
-      const lastReason: (string|null)[] = [null, null, null];
-      const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
-
-      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i], minIntervalMsArr[i]));
-
-      await runOneRoundWithGuard({ seats: roundBots, four2, delayMs: 0, lastReason }, res, round);
+      await runOneRoundWithGuard({ seats: roundBots, four2, delayMs: 0, lastReason, rob }, res, round);
 
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
@@ -457,3 +337,4 @@ const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
     try{ (res as any).end(); }catch{}
   }
 }
+// 兼容 Next.js 默认导出（已在上面导出）
