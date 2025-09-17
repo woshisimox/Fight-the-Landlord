@@ -76,7 +76,7 @@ const writeStore = (s: TsStore) => { try { s.updatedAt=new Date().toISOString();
 type LiveProps = {
   rounds: number;
   startScore: number;
-  turnTimeoutSec?: number;
+  
   seatDelayMs?: number[];
   enabled: boolean;
   rob: boolean;
@@ -90,7 +90,7 @@ type LiveProps = {
   farmerCoop: boolean;
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
-};
+  turnTimeoutSecs?: number[];};
 
 function SeatTitle({ i }: { i:number }) {
   return <span style={{ fontWeight:700 }}>{['甲','乙','丙'][i]}</span>;
@@ -547,7 +547,12 @@ function LivePanel(props: LiveProps) {
 
     const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
     let lastEventTs = Date.now();
-    const timeoutMs = Math.max(5000, (props.turnTimeoutSec ?? 30) * 1000);
+    const timeoutMs = (()=>{
+      const arr = props.turnTimeoutSecs || [30,30,30];
+      const norm = arr.map(x=> (Number.isFinite(x as any) && (x as any)>0 ? (x as any) : 30));
+      const sec = Math.min(...norm); // 前端仅用于日志提示，取最严格的一个
+      return Math.max(5000, sec*1000);
+    })();
     let dogId: any = null;
 
       setLog([]); lastReasonRef.current = [null, null, null];
@@ -572,7 +577,7 @@ function LivePanel(props: LiveProps) {
           clientTraceId: traceId,
           stopBelowZero: true,
           farmerCoop: props.farmerCoop,
-        turnTimeoutSec: (props.turnTimeoutSec ?? 30)
+        turnTimeoutSec: (props.turnTimeoutSecs ?? [30,30,30])
         }),
         signal: controllerRef.current!.signal,
       });
@@ -1080,6 +1085,8 @@ function Home() {
   const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
   const [rounds, setRounds] = useState<number>(DEFAULTS.rounds);
   const [startScore, setStartScore] = useState<number>(DEFAULTS.startScore);
+  const [turnTimeoutSecs, setTurnTimeoutSecs] = useState<number[]>([30,30,30]);
+
   const [turnTimeoutSec, setTurnTimeoutSec] = useState<number>(30);
 
   const [rob, setRob] = useState<boolean>(DEFAULTS.rob);
@@ -1129,13 +1136,7 @@ function Home() {
           <label>初始分
             <input type="number" step={10} value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ width:'100%' }} />
           </label>
-          
-          <label>弃牌时间（秒）
-            <input type="number" min={5} step={1} value={turnTimeoutSec} onChange={e=>setTurnTimeoutSec(Math.max(5, Math.floor(Number(e.target.value)||0)))} style={{ width:'100%' }} />
-          </label>
-
-
-          <label>可抢地主
+<label>可抢地主
             <div><input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} /></div>
           </label>
 
@@ -1322,6 +1323,29 @@ function Home() {
                     />
                   </label>
                 </div>
+          <div style={{ marginTop:12 }}>
+            <div style={{ fontWeight:700, marginBottom:6 }}>每家思考超时（秒）</div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>(
+                <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
+                  <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
+                  <label style={{ display:'block' }}>
+                    弃牌时间（秒）
+                    <input
+                      type="number" min={5} step={1}
+                      value={ (turnTimeoutSecs[i] ?? 30) }
+                      onChange={e=>{
+                        const v = Math.max(5, Math.floor(Number(e.target.value)||0));
+                        setTurnTimeoutSecs(arr=>{ const cp=[...(arr||[30,30,30])]; cp[i]=v; return cp; });
+                      }}
+                      style={{ width:'100%' }}
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+          </div>
+
               ))}
             </div>
           </div>
@@ -1344,7 +1368,7 @@ function Home() {
           farmerCoop={farmerCoop}
           onLog={setLiveLog}
         
-          turnTimeoutSec={turnTimeoutSec}
+          turnTimeoutSecs={turnTimeoutSecs}
         />
       </div>
     </div>

@@ -29,7 +29,7 @@ type StartPayload = {
   seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
   clientTraceId?: string;
   farmerCoop?: boolean;
-  turnTimeoutSec?: number;
+  turnTimeoutSec?: number | number[];
 
 };
 
@@ -404,6 +404,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     
   const turnTimeoutMs = Math.max(1000, Number((body as any).turnTimeoutSec) * 1000 || 30000);
+
+  // Per-seat think-timeout (ms)
+  const __tt = (body as any).turnTimeoutSec;
+  let turnTimeoutMsArr = [30000,30000,30000];
+  if (Array.isArray(__tt)) {
+    const a0 = Number(__tt[0]); const a1 = Number(__tt[1]); const a2 = Number(__tt[2]);
+    turnTimeoutMsArr = [a0, a1, a2].map(x => Math.max(1000, (isFinite(x) && x>0 ? x : 30) * 1000));
+  } else {
+    const ms = Math.max(1000, Number(__tt) * 1000 || 30000);
+    turnTimeoutMsArr = [ms, ms, ms];
+  }
 const seatSpecs = (body.seats || []).slice(0,3);
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
 
@@ -416,7 +427,7 @@ const seatSpecs = (body.seats || []).slice(0,3);
       const lastReason: (string|null)[] = [null, null, null];
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
 
-      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMs));
+      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i]));
 
       const delayedSeats = roundBots.map((bot, idx) => async (ctx:any) => {
         const ms = delays[idx] || 0; if (ms) await new Promise(r => setTimeout(r, ms));
