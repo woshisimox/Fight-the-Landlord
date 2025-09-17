@@ -2,7 +2,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 // ========= 引擎导入（按你的项目结构调整路径） =========
-import * as ddz from '../../lib/engine';
+import * as ddz from '../../lib/doudizhu/engine';
 const runOneGame: any   = (ddz as any).runOneGame;
 const GreedyMax: any    = (ddz as any).GreedyMax;
 const GreedyMin: any    = (ddz as any).GreedyMin;
