@@ -297,115 +297,6 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 };
 
 /* ==================== LivePanel（对局） ==================== */
-/* ===== PageRank 存档 & 计算（锚定 Greedy Min） ===== */
-type PrNode = { id: string; label?: string };
-type PrStore = {
-  schema: 'ddz-pagerank@1';
-  updatedAt: string;
-  params: { damping: number; epsilon: number };
-  anchorId: string;
-  nodes: Record<string, PrNode>;
-  // 有向加权边：from -> { to: weight }
-  edges: Record<string, Record<string, number>>;
-  totalEdges: number;
-};
-const PR_STORE_KEY = 'ddz_pr_store_v1';
-const PR_ANCHOR_ID = 'built-in:greedy-min||'; // 按 seatIdentity 规则的锚点（choice|model|base）
-
-const prEmpty = (): PrStore => ({
-  schema: 'ddz-pagerank@1',
-  updatedAt: new Date().toISOString(),
-  params: { damping: 0.85, epsilon: 0.02 },
-  anchorId: PR_ANCHOR_ID,
-  nodes: {},
-  edges: {},
-  totalEdges: 0,
-});
-const prRead = (): PrStore => {
-  try { const raw = localStorage.getItem(PR_STORE_KEY); if (!raw) return prEmpty();
-    const j = JSON.parse(raw);
-    if (j?.schema === 'ddz-pagerank@1') return j as PrStore;
-  } catch {}
-  return prEmpty();
-};
-const prWrite = (s: PrStore) => { try { s.updatedAt = new Date().toISOString(); localStorage.setItem(PR_STORE_KEY, JSON.stringify(s)); } catch {} };
-
-const prEnsureNode = (s: PrStore, id: string, label?: string) => {
-  if (!s.nodes[id]) s.nodes[id] = { id, label };
-  if (!s.edges[id]) s.edges[id] = {};
-};
-const prAddEdge = (s: PrStore, from: string, to: string, w = 1) => {
-  if (!from || !to) return;
-  prEnsureNode(s, from); prEnsureNode(s, to);
-  s.edges[from][to] = (s.edges[from][to] || 0) + w;
-  s.totalEdges = (s.totalEdges || 0) + w;
-};
-
-// 计算 PageRank：v 收敛到 r，锚定向量 v 只作用于 Greedy Min
-function prCompute(s: PrStore): { score: Record<string, number>, points: Record<string, number> } {
-  const nodes = Object.keys({ ...s.nodes, ...s.edges });
-  if (nodes.length === 0) return { score: {}, points: {} };
-  const idx: Record<string, number> = {};
-  nodes.forEach((id, i) => { idx[id] = i; if (!s.nodes[id]) s.nodes[id] = { id }; if (!s.edges[id]) s.edges[id] = {}; });
-  const anchor = s.anchorId || PR_ANCHOR_ID;
-  if (idx[anchor] == null) { idx[anchor] = nodes.length; nodes.push(anchor); s.nodes[anchor] = { id: anchor, label: 'Greedy Min (anchor)' }; s.edges[anchor] = {}; }
-
-  // 构造出度分布（不修改原存档）：拷贝一份，并为锚点添加 epsilon 向所有节点的出链
-  const eps = Math.max(0, Math.min(0.5, s.params?.epsilon ?? 0.02));
-  const damp = Math.max(0.5, Math.min(0.99, s.params?.damping ?? 0.85));
-  const out: Record<string, Record<string, number>> = {};
-  for (const i in s.edges) out[i] = { ...(s.edges[i]||{}) };
-  for (const id of nodes) { if (!out[id]) out[id] = {}; }
-  for (const id of nodes) {
-    if (id === anchor) {
-      for (const j of nodes) { if (j !== anchor) out[anchor][j] = (out[anchor][j] || 0) + eps; }
-    }
-  }
-
-  // 迭代
-  let r = new Array(nodes.length).fill(0);
-  r[idx[anchor]] = 1; // 初始全给锚点
-  const v = new Array(nodes.length).fill(0); v[idx[anchor]] = 1; // Teleport 向量
-  const maxIter = 60, tol = 1e-8;
-
-  for (let it=0; it<maxIter; it++) {
-    const next = new Array(nodes.length).fill(0);
-    // A^T * r （行：from，列：to）
-    for (const from of nodes) {
-      const i = idx[from];
-      const outs = out[from];
-      let sum = 0; for (const k in outs) sum += outs[k];
-      if (sum <= 0) { // 悬挂节点：均匀分布
-        const share = r[i] / nodes.length;
-        for (let j=0;j<nodes.length;j++) next[j] += damp * share;
-      } else {
-        for (const to of Object.keys(outs)) {
-          const j = idx[to];
-          next[j] += damp * r[i] * (outs[to] / sum);
-        }
-      }
-    }
-    // + (1-d)*v
-    for (let j=0;j<nodes.length;j++) next[j] += (1 - damp) * v[j];
-    // 归一化
-    const ssum = next.reduce((a,b)=>a+b, 0) || 1;
-    for (let j=0;j<nodes.length;j++) next[j] /= ssum;
-    const diff = next.reduce((acc, x, j)=> acc + Math.abs(x - r[j]), 0);
-    r = next;
-    if (diff < tol) break;
-  }
-
-  // 导出
-  const score: Record<string, number> = {};
-  const points: Record<string, number> = {};
-  const totalE = s.totalEdges || 1;
-  nodes.forEach((id, i) => {
-    score[id]  = r[i];                 // 权重（0~1，总和为1）
-    points[id] = r[i] * totalE;        // 绝对积分：随数据量增长而上升
-  });
-  return { score, points };
-}
-
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
 
@@ -430,73 +321,6 @@ function LivePanel(props: LiveProps) {
   const tsStoreRef = useRef<TsStore>(emptyStore());
   useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
-  // ===== PageRank 存档（锚 Greedy Min） =====
-  const prStoreRef = useRef<PrStore>(prRead());
-  const prFileRef = useRef<HTMLInputElement|null>(null);
-  const [prView, setPrView] = useState<{pr:number, pts:number}[]>([{pr:0,pts:0},{pr:0,pts:0},{pr:0,pts:0}]);
-
-  const prSeatLabel = (i:number) => {
-    const choice = props.seats[i];
-    const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
-    return `${choiceLabel(choice)}${model ? `(${model})` : ''}`;
-  };
-  const prApplyToSeats = (why:string) => {
-    try {
-      [0,1,2].forEach(i=> prEnsureNode(prStoreRef.current, seatIdentity(i), prSeatLabel(i)));
-      const { score, points } = prCompute(prStoreRef.current);
-      setPrView([0,1,2].map(i=>{
-        const id = seatIdentity(i);
-        return { pr: Number((score[id]||0).toFixed(6)), pts: Number((points[id]||0).toFixed(4)) };
-      }));
-      setLog(l => [...l, `【PR】已计算（${why}）：` + [0,1,2].map(i=>`${['甲','乙','丙'][i]} pts=${(Number(points[seatIdentity(i)]||0)).toFixed(2)}`).join(' | ')]);
-    } catch (e:any) {
-      setLog(l => [...l, `【PR】计算失败：${e?.message||e}`]);
-    }
-  };
-  const prUpdateAfterRound = (winners:number[], losers:number[]) => {
-    try {
-      const s = prStoreRef.current;
-      winners.forEach(w=> prEnsureNode(s, seatIdentity(w), prSeatLabel(w)));
-      losers.forEach(l=> prEnsureNode(s, seatIdentity(l), prSeatLabel(l)));
-      losers.forEach(l=> winners.forEach(w=> prAddEdge(s, seatIdentity(l), seatIdentity(w), 1)));
-      prWrite(s);
-      prApplyToSeats('局后更新');
-    } catch (e:any) {
-      setLog(l => [...l, `【PR】更新失败：${e?.message||e}`]);
-    }
-  };
-  const handlePrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    try {
-      const text = await f.text();
-      const j = JSON.parse(text);
-      const s: PrStore = prEmpty();
-      if (j?.nodes && j?.edges) {
-        s.nodes = j.nodes; s.edges = j.edges;
-        s.params = j.params || s.params;
-        s.anchorId = j.anchorId || s.anchorId;
-        s.totalEdges = j.totalEdges || 0;
-      } else if (Array.isArray(j?.edges)) {
-        for (const e of j.edges) {
-          if (e?.from && e?.to && e?.w) prAddEdge(s, e.from, e.to, e.w);
-        }
-      }
-      prStoreRef.current = s; prWrite(s);
-      setLog(l => [...l, `【PR】已上传存档（节点 ${Object.keys(s.nodes).length}，边 ${Object.values(s.edges).reduce((a,b)=>a+Object.keys(b).length,0)}）`]);
-      prApplyToSeats('上传');
-    } catch (err:any) {
-      setLog(l => [...l, `【PR】上传解析失败：${err?.message || err}`]);
-    } finally { e.target.value = ''; }
-  };
-  const handlePrSave = () => {
-    const s = prStoreRef.current; prWrite(s);
-    const blob = new Blob([JSON.stringify(s, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'pagerank_store.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1200);
-    setLog(l => [...l, '【PR】已导出当前存档。']);
-  };
-  const handlePrRefresh = () => prApplyToSeats('手动刷新');
 
   const seatIdentity = (i:number) => {
     const choice = props.seats[i];
@@ -668,7 +492,6 @@ function LivePanel(props: LiveProps) {
     // TrueSkill：开始时先应用 overall（未知地主）
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
     try { applyTsFromStore('比赛开始前'); } catch {}
-    try { prApplyToSeats('开始前'); } catch {}
 
     controllerRef.current = new AbortController();
 
@@ -947,15 +770,6 @@ function LivePanel(props: LiveProps) {
                   ];
                 }
 
-
-                // ✅ PageRank：基于胜负添加边（失败者 -> 胜者），锚定 Greedy Min
-                {
-                  const L = (nextLandlord ?? 0) as number;
-                  const landlordDelta = ds[0] ?? 0;
-                  const winners = (landlordDelta > 0) ? [L] : [0,1,2].filter(x=>x!==L);
-                  const losers  = (landlordDelta > 0) ? [0,1,2].filter(x=>x!==L) : [L];
-                  prUpdateAfterRound(winners as number[], losers as number[]);
-                }
                 nextLog = [
                   ...nextLog,
                   `胜者：${nextWinner == null ? '—' : seatName(nextWinner)}，倍数 x${nextMultiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
@@ -1100,37 +914,6 @@ function LivePanel(props: LiveProps) {
         <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
           说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。</div>
       </Section>
-      {/* ========= PageRank（锚定 Greedy Min） ========= */}
-      <Section title="PageRank（锚定 Greedy Min）">
-        {/* 上传 / 存档 / 刷新 */}
-        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-          <input ref={prFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handlePrUpload} />
-          <button onClick={()=>prFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
-          <button onClick={handlePrSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
-          <button onClick={handlePrRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
-          <div style={{ fontSize:12, color:'#6b7280' }}>锚定 Greedy Min（teleport），并从锚点向所有节点注入 ε 出链；PR 积分会随对局积累而上升。</div>
-        </div>
-
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          {[0,1,2].map(i=>(
-            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
-              </div>
-              <div style={{ fontSize:13, color:'#374151' }}>
-                <div>PR 积分：<b>{prView[i].pts.toFixed(2)}</b></div>
-                <div>PR 权重 r：<b>{prView[i].pr.toFixed(6)}</b></div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
-          说明：PR 基于“失败者→胜者”图；阻尼 d={prStoreRef.current.params.damping}，锚点为 Greedy Min（teleport），
-          并对锚点添加 ε={prStoreRef.current.params.epsilon} 的均匀出链；
-          为体现绝对提升，显示“PR积分 = r × 边数总量”。
-        </div>
-      </Section>
-
 
       <Section title="积分（总分）">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
@@ -1327,12 +1110,12 @@ function Home() {
             <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
           </label>
 
-          <label>可抢地主
-            <div><input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} /></div>
-          </label>
-
           <label>初始分
             <input type="number" step={10} value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ width:'100%' }} />
+          </label>
+
+          <label>可抢地主
+            <div><input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} /></div>
           </label>
 
           <label>农民配合
@@ -1379,6 +1162,7 @@ function Home() {
                       <option value="ai:grok">Grok</option>
                       <option value="ai:kimi">Kimi</option>
                       <option value="ai:qwen">Qwen</option>
+                      <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
                     </optgroup>
                   </select>
@@ -1458,6 +1242,18 @@ function Home() {
                       onChange={e=>{
                         const v = e.target.value;
                         setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; });
+                      }}
+                      style={{ width:'100%' }} />
+                  </label>
+                )}
+
+                {seats[i] === 'ai:deepseek' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    DeepSeek API Key
+                    <input type="password" value={seatKeys[i]?.deepseek||''}
+                      onChange={e=>{
+                        const v = e.target.value;
+                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), deepseek:v }; return n; });
                       }}
                       style={{ width:'100%' }} />
                   </label>
