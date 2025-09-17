@@ -19,6 +19,7 @@ type BotChoice =
 type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
 
 type StartPayload = {
+  turnTimeoutSec?: number | number[];
   seats: SeatSpec[];
   seatDelayMs?: number[];
   rounds?: number;
@@ -29,8 +30,6 @@ type StartPayload = {
   seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
   clientTraceId?: string;
   farmerCoop?: boolean;
-  turnTimeoutSec?: number | number[];
-
 };
 
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
@@ -143,7 +142,6 @@ function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx
 
 /** bot 包装：发 bot-call/bot-done，并缓存 reason 以贴到 play/pass */
 
-
 /** 选择最小的一步合法出牌：优先最少张数；再按牌点从小到大 */
 function pickMinimalPlay(ctx:any): any {
   try {
@@ -165,7 +163,6 @@ function pickMinimalPlay(ctx:any): any {
     };
     let candidates:any[] = Array.isArray(list) ? list.map(normalize).filter(Boolean) : [];
     if (!candidates.length && hand.length) {
-      // 兜底：出手里最小的单牌
       const sorted = [...hand].sort((a:any,b:any)=> (a<b?-1:a>b?1:0));
       return { move:'play', cards:[sorted[0]] };
     }
@@ -176,25 +173,44 @@ function pickMinimalPlay(ctx:any): any {
     return { move:'pass' };
   }
 }
-function traceWrap(choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any, res: NextApiResponse,
+function traceWrap(
+  choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any, res: NextApiResponse,
   onReason: (seat:number, text?:string)=>void,
-  timeoutMs?: number
+  timeoutMs?: number,
+  minIntervalMs?: number
 ) {
   const by = providerLabel(choice);
   const model = (spec?.model || '').trim();
-  return async function traced(ctx:any) {
+    let __lastCallAt = 0;
+  const __sleep = (ms:number)=> new Promise(r=>setTimeout(r, ms));
+return async function traced(ctx:any) {
     try { writeLine(res, { type:'event', kind:'bot-call', seat: ctx?.seat ?? -1, by, model, phase: ctx?.phase || 'play', need: ctx?.require?.type || null }); } catch {}
+    // honor per-seat min interval BEFORE starting decision timeout
+    if (minIntervalMs && minIntervalMs > 0) {
+      const now = Date.now();
+      const since = now - __lastCallAt;
+      const need = Math.max(0, minIntervalMs - since);
+      if (need > 0) {
+        let remain = need;
+        while (remain > 0) {
+          const tick = Math.min(1000, remain);
+          try { writeLine(res, { type:'hb', seat: ctx?.seat, reason:'min-interval', remainMs: remain }); } catch {}
+          await __sleep(tick);
+          remain -= tick;
+        }
+      }
+    }
     const t0 = Date.now();
     let out: any; let err: any = null;
     try {
       if (timeoutMs && timeoutMs > 0) {
-        let timed = false as boolean;
+        let timed = false;
         out = await Promise.race([
           Promise.resolve().then(()=>bot(ctx)),
           new Promise((resolve)=>setTimeout(()=>{ timed = true; resolve('__TIMEOUT__'); }, timeoutMs))
         ]);
         if (out === '__TIMEOUT__') {
-          const mustPlay = !ctx?.require?.type; // 没有压制要求 => 首攻，必须出
+          const mustPlay = !ctx?.require?.type; // lead => must play
           if (mustPlay) {
             out = pickMinimalPlay(ctx);
             try { (out as any).reason = '超时自动出最小牌'; } catch {}
@@ -217,6 +233,7 @@ function traceWrap(choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>
         tookMs, reason, strategy, error: err ? String(err) : undefined
       });
     } catch {}
+    __lastCallAt = Date.now();
     if (err) throw err;
     try { if (out && !out.reason) out.reason = reason; } catch {}
     return out;
@@ -400,23 +417,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const body: StartPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const rounds = Math.max(1, Math.min(parseInt(process.env.MAX_ROUNDS || '200',10), Number(body.rounds) || 1));
     const four2 = body.four2 || 'both';
-    const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
+    const delays = Array.isArray(body.seatDelayMs) && body.seatDelayMs.length === 3 ? body.seatDelayMs : Array.isArray(body.seatDelayMs) ? (body.seatDelayMs as any) : [Number(body.seatDelayMs||0)||0, Number(body.seatDelayMs||0)||0, Number(body.seatDelayMs||0)||0];
 
+    const seatSpecs = (body.seats || []).slice(0,3);
     
-  const turnTimeoutMs = Math.max(1000, Number((body as any).turnTimeoutSec) * 1000 || 30000);
+    // Per-seat think timeout (ms)
+    const __tt = (body as any).turnTimeoutSec;
+    let turnTimeoutMsArr = [30000,30000,30000];
+    if (Array.isArray(__tt)) {
+      turnTimeoutMsArr = [Number(__tt[0]||30), Number(__tt[1]||30), Number(__tt[2]||30)].map(x=> Math.max(1000, (isFinite(x) ? x : 30) * 1000));
+    } else {
+      const ms = Math.max(1000, (Number(__tt)||30) * 1000);
+      turnTimeoutMsArr = [ms, ms, ms];
+    }
 
-  // Per-seat think-timeout (ms)
-  const __tt = (body as any).turnTimeoutSec;
-  let turnTimeoutMsArr = [30000,30000,30000];
-  if (Array.isArray(__tt)) {
-    const a0 = Number(__tt[0]); const a1 = Number(__tt[1]); const a2 = Number(__tt[2]);
-    turnTimeoutMsArr = [a0, a1, a2].map(x => Math.max(1000, (isFinite(x) && x>0 ? x : 30) * 1000));
-  } else {
-    const ms = Math.max(1000, Number(__tt) * 1000 || 30000);
-    turnTimeoutMsArr = [ms, ms, ms];
-  }
-const seatSpecs = (body.seats || []).slice(0,3);
-    const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
+    // Per-seat min interval (throttle) derived from seatDelayMs
+    const minIntervalMsArr = [Number(delays[0]||0)||0, Number(delays[1]||0)||0, Number(delays[2]||0)||0];
+const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
@@ -427,14 +444,9 @@ const seatSpecs = (body.seats || []).slice(0,3);
       const lastReason: (string|null)[] = [null, null, null];
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
 
-      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i]));
+      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i], minIntervalMsArr[i]));
 
-      const delayedSeats = roundBots.map((bot, idx) => async (ctx:any) => {
-        const ms = delays[idx] || 0; if (ms) await new Promise(r => setTimeout(r, ms));
-        return bot(ctx);
-      });
-
-      await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, lastReason }, res, round);
+      await runOneRoundWithGuard({ seats: roundBots, four2, delayMs: 0, lastReason }, res, round);
 
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
