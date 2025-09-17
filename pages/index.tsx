@@ -1,7 +1,6 @@
 // pages/index.tsx
 import React, { useEffect, useRef, useState } from 'react';
 
-/* ========= 基本类型 ========= */
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
@@ -10,11 +9,13 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
-/* ========= TrueSkill（前端轻量实现，仅用于展示） ========= */
+/* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
 type Rating = { mu:number; sigma:number };
 const TS_DEFAULT: Rating = { mu:25, sigma:25/3 };
 const TS_BETA = 25/6;
+// const TS_TAU  = 25/300; // 如需漂移可启用
 
+/* 数值函数 */
 const SQRT2 = Math.sqrt(2);
 function erf(x:number){
   const sign = Math.sign(x);
@@ -47,7 +48,7 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
   teamB.forEach(i=> r[i]=upd(r[i], false));
 }
 
-/* ========= 小部件 ========= */
+/* ====== 页面小部件（保持原布局） ====== */
 function Section({ title, children }:{ title:string; children:React.ReactNode }){
   return (
     <div style={{ marginBottom:16 }}>
@@ -56,23 +57,8 @@ function Section({ title, children }:{ title:string; children:React.ReactNode })
     </div>
   );
 }
-function SeatTitle({ i }: { i:number }) {
-  return <span style={{ fontWeight:700 }}>{['甲','乙','丙'][i]}</span>;
-}
-function choiceLabel(choice: BotChoice): string {
-  switch (choice) {
-    case 'built-in:greedy-max': return 'Greedy Max';
-    case 'built-in:greedy-min': return 'Greedy Min';
-    case 'built-in:random-legal': return 'Random Legal';
-    case 'ai:openai': return 'OpenAI';
-    case 'ai:gemini': return 'Gemini';
-    case 'ai:grok':  return 'Grok';
-    case 'ai:kimi':  return 'Kimi';
-    case 'ai:qwen':  return 'Qwen';
-    case 'ai:deepseek': return 'DeepSeek';
-    case 'http':     return 'HTTP';
-  }
-}
+
+/* ====== 模型预设/校验 ====== */
 function defaultModelFor(choice: BotChoice): string {
   switch (choice) {
     case 'ai:openai': return 'gpt-4o-mini';
@@ -97,9 +83,24 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
     default: return '';
   }
 }
+function choiceLabel(choice: BotChoice): string {
+  switch (choice) {
+    case 'built-in:greedy-max': return 'Greedy Max';
+    case 'built-in:greedy-min': return 'Greedy Min';
+    case 'built-in:random-legal': return 'Random Legal';
+    case 'ai:openai': return 'OpenAI';
+    case 'ai:gemini': return 'Gemini';
+    case 'ai:grok':  return 'Grok';
+    case 'ai:kimi':  return 'Kimi';
+    case 'ai:qwen':  return 'Qwen';
+    case 'ai:deepseek': return 'DeepSeek';
+    case 'http':     return 'HTTP';
+  }
+}
 
-/* ========= 画像（条形雷达） ========= */
+/* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
+
 function RadarChart({ title, scores }:{ title:string; scores: Score5|null }) {
   return (
     <div style={{ border:'1px solid #efefef', borderRadius:12, padding:12 }}>
@@ -130,7 +131,11 @@ function RadarChart({ title, scores }:{ title:string; scores: Score5|null }) {
   );
 }
 
-/* ========= Live 组件 ========= */
+function SeatTitle({ i }: { i:number }) {
+  return <span style={{ fontWeight:700 }}>{['甲','乙','丙'][i]}</span>;
+}
+
+/* ====== 对局组件（Live） ====== */
 type LiveProps = {
   rounds: number;
   startScore: number;
@@ -158,45 +163,78 @@ function Live(props: LiveProps) {
   const [log, setLog] = useState<string[]>([]);
   const [finishedCount, setFinishedCount] = useState<number>(0);
   const [totals, setTotals] = useState<[number,number,number]>([props.startScore||0, props.startScore||0, props.startScore||0]);
+
+  // 画像累计
   const [aggStats, setAggStats] = useState<Score5[]|null>(null);
   const [aggCount, setAggCount] = useState<number>(0);
 
   // TrueSkill
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
-  const persistOverallTs = (r:Rating[]) => { try { localStorage.setItem('ts.overall', JSON.stringify(r)); } catch {} };
+
+  // refs
+  const controllerRef = useRef<AbortController|null>(null);
+  const handsRef = useRef<number[][]>([[],[],[]]);
+  const playsRef = useRef<any[]>([]);
+  const totalsRef = useRef<[number,number,number]>([0,0,0]);
+  const finishedRef = useRef<number>(0);
+  const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
+  const roundFinishedRef = useRef<boolean>(false);
+  // ✅ 改为“按座位去重”
+  const seenStatsRef = useRef<boolean[]>([false, false, false]);
+
+  /* ===== TrueSkill 持久化 ===== */
   const applyTsFromStore = () => {
     try {
       const txt = localStorage.getItem('ts.overall');
       if (!txt) return;
       const arr = JSON.parse(txt) as Rating[];
-      if (Array.isArray(arr) && arr.length===3) setTsArr([{...arr[0]},{...arr[1]},{...arr[2]}]);
+      if (Array.isArray(arr) && arr.length===3) {
+        setTsArr([{...arr[0]},{...arr[1]},{...arr[2]}]);
+      }
+    } catch {}
+  };
+  const persistOverallTs = (r:Rating[]) => {
+    try { localStorage.setItem('ts.overall', JSON.stringify(r)); } catch {}
+  };
+
+  /* ===== 雷达图（画像）持久化 ===== */
+  const persistOverallRadar = (scores: Score5[]|null, count:number) => {
+    try {
+      if (!scores) return;
+      const payload = { version:'radar-1', updatedAt:new Date().toISOString(), count, scores };
+      localStorage.setItem('radar.overall', JSON.stringify(payload));
+    } catch {}
+  };
+  const applyRadarFromStore = () => {
+    try {
+      const txt = localStorage.getItem('radar.overall');
+      if (!txt) return;
+      const obj = JSON.parse(txt);
+      if (obj && Array.isArray(obj.scores) && obj.scores.length===3) {
+        setAggStats(obj.scores);
+        setAggCount(Number(obj.count)||0);
+        setLog(ls=>[...ls, `已从存档刷新画像（count=${Number(obj.count)||0}）`]);
+      }
     } catch {}
   };
 
-  // Refs
-  const controllerRef = useRef<AbortController|null>(null);
-  const handsRef = useRef<number[][]>([[],[],[]]);
-  const playsRef = useRef<any[]>([]);
-  const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
-  const roundFinishedRef = useRef<boolean>(false);
-  // ✅ 改为按座位去重
-  const seenStatsRef = useRef<boolean[]>([false, false, false]);
-
+  /* ===== 启动/连接后端 ===== */
   useEffect(()=>{
-    // ✅ 启停守卫：没点“开始”就不连
+    // ✅ 启停守卫：未启用就不连接
     if (!props.enabled) return;
 
-    // Reset
+    // 重置
     setHands([[], [], []]); setPlays([]);
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
     setTotals([props.startScore || 0, props.startScore || 0, props.startScore || 0]);
     lastReasonRef.current = [null, null, null];
-    seenStatsRef.current = [false, false, false];
 
-    // 恢复 TS 起点
+    // 从存档恢复 TrueSkill & 画像
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
-    applyTsFromStore();
+    try { applyTsFromStore(); } catch {}
+    setAggStats(null); setAggCount(0);
+    try { applyRadarFromStore(); } catch {}
 
     controllerRef.current = new AbortController();
 
@@ -211,7 +249,7 @@ function Live(props: LiveProps) {
           case 'ai:grok':   return { choice, model, apiKey: keys.grok || '' };
           case 'ai:kimi':   return { choice, model, apiKey: keys.kimi || '' };
           case 'ai:qwen':   return { choice, model, apiKey: keys.qwen || '' };
-          case 'ai:deepseek': return { choice, model, apiKey: keys.deepseek || '' }; // ✅ DeepSeek 分支
+          case 'ai:deepseek': return { choice, model, apiKey: keys.deepseek || '' };
           case 'http':      return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
           default:          return { choice };
         }
@@ -230,16 +268,16 @@ function Live(props: LiveProps) {
 
     (async ()=>{
       const specs = buildSeatSpecs();
-      setLog(lines => [...lines, `启动：${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
+      setLog(lines => [...lines, `启动一局：${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       roundFinishedRef.current = false;
-      seenStatsRef.current = [false,false,false];
+      seenStatsRef.current = [false,false,false]; // ✅ 每局重置
 
       const r = await fetch('/api/stream_ndjson', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          // ✅ 多局：把 props.rounds 传给后端
+          // ✅ 多局：把 props.rounds 传给后端（原来是 1）
           rounds: props.rounds,
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
@@ -248,8 +286,7 @@ function Live(props: LiveProps) {
           four2: props.four2,
           seats: specs,
           clientTraceId: traceId,
-          // farmerCoop 可按需传给后端（后端若不用可忽略）
-          farmerCoop: props.farmerCoop,
+          // （去掉 stop 字段；它是函数，JSON 会丢弃）
         }),
         signal: controllerRef.current?.signal,
       });
@@ -283,29 +320,25 @@ function Live(props: LiveProps) {
     return () => {
       controllerRef.current?.abort();
     };
-    // ✅ 收敛依赖：去掉 seatModels/seatKeys，以避免输入时重启
+// 依赖收敛：移除 seatModels/seatKeys，避免编辑输入触发重启
+// 原：..., props.seatModels.join(','), JSON.stringify(props.seatKeys), ...
   }, [props.enabled, props.rounds, props.startScore, props.rob, props.four2, props.seatDelayMs?.join(','), props.seats.join(','), props.farmerCoop]);
 
+  /* ===== 事件处理（保持原 UI 行为） ===== */
   function handleEvent(e:any) {
     switch (e.type) {
-      case 'baseline': {
-        setLog(ls=>[...ls, `baseline 同步：TS=${e.ts?'yes':'no'}，Radar=${e.radar?`yes(count=${e.radar?.count})`:'no'}`]);
-        break;
-      }
       case 'init': {
-        // e.hands: number[][], e.landlord: number, e.bottom: number[]
         setHands(e.hands);
         handsRef.current = e.hands.map((h:number[])=>[...h]);
         setPlays([]); playsRef.current = [];
         setWinner(null); setDelta(null); setMultiplier(1);
         lastReasonRef.current = [null, null, null];
-        // ✅ 每局开始重置每个座位的 stats 去重
+        // ✅ 开局重置每座 stats 去重
         seenStatsRef.current = [false,false,false];
         setLog(ls => [...ls, `发牌：地主=[${'甲乙丙'[e.landlord]}]，底牌=${e.bottom?.length||0}张`]);
         break;
       }
       case 'play': {
-        // e.seat, e.move ('play'|'pass'), e.cards[], e.reason, e.mult?
         if (e.move==='play') {
           setHands(prev=>{
             const n = prev.map(h=>[...h]);
@@ -328,11 +361,16 @@ function Live(props: LiveProps) {
         break;
       }
       case 'stats': {
-        // ✅ 按“座位”去重；每局每座只吃第一条
+        // ✅ 每局“按座位”仅累计一次
         const i = e.seat;
+        if (!Array.isArray(seenStatsRef.current)) seenStatsRef.current = [false,false,false];
         if (!seenStatsRef.current[i]) {
           setAggStats(prev=>{
-            const base = prev || [{coop:0,agg:0,cons:0,eff:0,rob:0},{coop:0,agg:0,cons:0,eff:0,rob:0},{coop:0,agg:0,cons:0,eff:0,rob:0}];
+            const base = prev || [
+              {coop:0,agg:0,cons:0,eff:0,rob:0},
+              {coop:0,agg:0,cons:0,eff:0,rob:0},
+              {coop:0,agg:0,cons:0,eff:0,rob:0},
+            ];
             const next = base.map(x=>({ ...x })) as Score5[];
             const s = e.scores || {};
             (['coop','agg','cons','eff','rob'] as (keyof Score5)[]).forEach(k=>{
@@ -346,7 +384,6 @@ function Live(props: LiveProps) {
         break;
       }
       case 'win': {
-        // e.landlord, e.win, e.delta:[n,n,n], e.after:[n,n,n], e.mult
         setWinner({ landlord:e.landlord, win:e.win });
         setDelta(e.delta);
         setTotals([e.after[0], e.after[1], e.after[2]]);
@@ -360,12 +397,15 @@ function Live(props: LiveProps) {
         setTsArr(r);
         persistOverallTs(r);
 
+        // 画像持久化（保持原逻辑）
+        setTimeout(()=>persistOverallRadar(aggStats, aggCount), 0);
+
         roundFinishedRef.current = true;
         break;
       }
       case 'end': {
         if (!roundFinishedRef.current) {
-          setLog(ls=>[...ls, '⚠ 收到 end，但未见 win；可能是后端提前终止或异常。']);
+          setLog(ls=>[...ls, '⚠ 结束事件收到，但未见 win；可能是后端提前终止或错误。']);
         }
         setFinishedCount(c => c + 1);
         break;
@@ -374,6 +414,55 @@ function Live(props: LiveProps) {
       default: { setLog(ls=>[...ls, `? 未知事件：${JSON.stringify(e).slice(0,140)}…`]); }
     }
   }
+
+  /* ===== 画像 下载 / 上传 / 刷新（保持原交互） ===== */
+  const fileInputRef = useRef<HTMLInputElement|null>(null);
+  const downloadRadar = () => {
+    const payload = {
+      version: 'radar-1',
+      updatedAt: new Date().toISOString(),
+      count: aggCount,
+      scores: aggStats || [
+        { coop:0, agg:0, cons:0, eff:0, rob:0 },
+        { coop:0, agg:0, cons:0, eff:0, rob:0 },
+        { coop:0, agg:0, cons:0, eff:0, rob:0 },
+      ],
+    };
+    try { localStorage.setItem('radar.overall', JSON.stringify(payload)); } catch {}
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `radar_${payload.count||0}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    setLog(ls=>[...ls, `已下载画像存档（count=${payload.count||0}）`]);
+  };
+  const onUploadClick = () => fileInputRef.current?.click();
+  const onFileChange: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = ''; // 允许重复选择同一文件
+    if (!f) return;
+    try {
+      const txt = await f.text();
+      const obj = JSON.parse(txt);
+      const ok = obj && Array.isArray(obj.scores) && obj.scores.length===3;
+      const valNum = (x:any) => typeof x === 'number' && isFinite(x);
+      if (ok) {
+        const s: Score5[] = obj.scores;
+        const valid = s.every(x=> x && valNum(x.coop)&&valNum(x.agg)&&valNum(x.cons)&&valNum(x.eff)&&valNum(x.rob));
+        if (!valid) throw new Error('scores 内存在非法值');
+        setAggStats(s.map(x=>({ ...x })));
+        setAggCount(Number(obj.count)||0);
+        persistOverallRadar(s, Number(obj.count)||0);
+        setLog(ls=>[...ls, `已导入画像存档：count=${Number(obj.count)||0}`]);
+      } else {
+        throw new Error('文件格式不正确（缺少 scores[3]）');
+      }
+    } catch (err:any) {
+      setLog(ls=>[...ls, `! 画像存档导入失败：${err?.message||err}`]);
+    }
+  };
+  const refreshFromStore = () => applyRadarFromStore();
 
   return (
     <>
@@ -428,6 +517,14 @@ function Live(props: LiveProps) {
       </Section>
 
       <Section title="玩家画像（累计）">
+        {/* 操作区：下载 / 上传 / 刷新 */}
+        <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+          <button onClick={downloadRadar} style={{ padding:'4px 10px' }}>下载画像 JSON</button>
+          <button onClick={onUploadClick} style={{ padding:'4px 10px' }}>上传画像 JSON</button>
+          <button onClick={refreshFromStore} style={{ padding:'4px 10px' }}>从存档刷新</button>
+          <input ref={fileInputRef} type="file" accept="application/json" onChange={onFileChange} style={{ display:'none' }} />
+        </div>
+
         {aggStats
           ? (
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
@@ -436,7 +533,7 @@ function Live(props: LiveProps) {
               ))}
             </div>
           )
-          : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
+          : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像；也可通过“上传画像 JSON”导入历史画像）</div>
         }
         <div style={{ fontSize:12, opacity:0.7, marginTop:8 }}>统计次数：{aggCount}</div>
       </Section>
@@ -450,7 +547,7 @@ function Live(props: LiveProps) {
   );
 }
 
-/* ========= 顶层页面 ========= */
+/* ====== 顶层页面（设置 → 对局/画像/日志） ====== */
 const DEFAULTS = {
   enabled: true,
   rounds: 10,
@@ -509,7 +606,6 @@ function Home() {
                   onChange={e=>{
                     const v = e.target.value as BotChoice;
                     setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
-                    // 切换提供商时，当前模型改成该提供商默认值
                     setSeatModels(arr => { const n=[...arr]; n[i] = defaultModelFor(v); return n; });
                   }}
                   style={{ width:'100%' }}
@@ -555,6 +651,7 @@ function Home() {
                     style={{ width:'100%' }} />
                 </label>
               )}
+
               {seats[i] === 'ai:gemini' && (
                 <label style={{ display:'block', marginBottom:6 }}>
                   Gemini API Key
@@ -566,6 +663,7 @@ function Home() {
                     style={{ width:'100%' }} />
                 </label>
               )}
+
               {seats[i] === 'ai:grok' && (
                 <label style={{ display:'block', marginBottom:6 }}>
                   Grok API Key
@@ -577,6 +675,7 @@ function Home() {
                     style={{ width:'100%' }} />
                 </label>
               )}
+
               {seats[i] === 'ai:kimi' && (
                 <label style={{ display:'block', marginBottom:6 }}>
                   Kimi API Key
@@ -588,6 +687,7 @@ function Home() {
                     style={{ width:'100%' }} />
                 </label>
               )}
+
               {seats[i] === 'ai:qwen' && (
                 <label style={{ display:'block', marginBottom:6 }}>
                   Qwen API Key
@@ -599,6 +699,7 @@ function Home() {
                     style={{ width:'100%' }} />
                 </label>
               )}
+
               {seats[i] === 'ai:deepseek' && (
                 <label style={{ display:'block', marginBottom:6 }}>
                   DeepSeek API Key
@@ -610,6 +711,7 @@ function Home() {
                     style={{ width:'100%' }} />
                 </label>
               )}
+
               {seats[i] === 'http' && (
                 <>
                   <label style={{ display:'block', marginBottom:6 }}>
