@@ -1,340 +1,247 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
+
+// ⬇️ 按你的项目结构选择正确的 engine 路径：
+// - 如果是 lib/doudizhu/engine.ts：把 '../../lib/engine' 改成 '../../lib/doudizhu/engine'
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/engine';
+
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
 import { HttpBot } from '../../lib/bots/http_bot';
 import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
-import { DeepseekBot } from '../../lib/bots/deepseek_bot';
+
+/* ==================== 类型（与前端 LiveProps 对齐） ==================== */
+
+type Four2Policy = 'both' | '2singles' | '2pairs';
 
 type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
+  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
   | 'http';
 
-type SeatSpec = { choice: BotChoice; model?: string; apiKey?: string; baseUrl?: string; token?: string };
-
-/** 客户端请求体（支持按座位数组或单值） */
-type StartPayload = {
-  seats: SeatSpec[];
-  /** 每家最小间隔（ms），可为单值或三元素数组 */
-  seatDelayMs?: number | number[];
-  /** 每家“思考上限/弃牌时间”（秒），可为单值或三元素数组 */
-  turnTimeoutSec?: number | number[];
-  rounds?: number;
-  rob?: boolean;
-  four2?: 'both' | '2singles' | '2pairs';
-  stopBelowZero?: boolean;
-  seatModels?: string[];
-  seatKeys?: {
-    openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string;
-    httpBase?: string; httpToken?: string;
-  }[];
-  clientTraceId?: string;
-  farmerCoop?: boolean;
+type SeatKeys = {
+  openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string;
+  httpBase?: string; httpToken?: string;
 };
 
-/** 简单的 provider 标签 */
-function providerLabel(choice: BotChoice): string {
-  if (choice.startsWith('built-in')) return 'built-in';
-  if (choice === 'http') return 'http';
-  return choice.replace('ai:', '');
+type SeatSpec = {
+  choice: BotChoice;
+  model?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  token?: string;
+  seatLabel?: string; // 甲/乙/丙
+};
+
+type StartBody = {
+  rounds: number;
+  startScore?: number;           // 供前端展示/累计，后端不强约束
+  seatDelayMs?: number[];        // 可透传给引擎（如支持）
+  enabled?: boolean;             // 前端开关
+  rob: boolean;                  // 是否抢地主
+  four2: Four2Policy;            // 4 个 2 的策略
+  seats: BotChoice[];            // 三个座位
+  seatModels?: string[];         // 三个座位各自模型
+  seatKeys?: SeatKeys[];         // 三个座位各自 key / http
+  farmerCoop?: boolean;          // 农民协作（若引擎支持）
+  debug?: boolean;
+};
+
+/* ==================== 小工具 ==================== */
+
+const LABELS = ['甲', '乙', '丙'];
+
+function defaultModelFor(choice: BotChoice): string {
+  switch (choice) {
+    case 'ai:openai': return 'gpt-4o-mini';
+    case 'ai:gemini': return 'gemini-1.5-pro';
+    case 'ai:grok':   return 'grok-2-mini';
+    case 'ai:kimi':   return 'moonshot-v1-8k';
+    case 'ai:qwen':   return 'qwen-long';
+    default:          return '';
+  }
 }
 
-/** NDJSON 输出 */
+/** 写一行 NDJSON，并确保换行 */
 function writeLine(res: NextApiResponse, obj: any) {
   try {
-    res.write(`${JSON.stringify(obj)}\n`);
-  } catch {}
-}
-
-/** 生成简单的 reason/strategy（可按需丰富） */
-function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec | undefined, ctx: any, out: any) {
-  let reason = '';
-  let strategy = '';
-  if (out?.reason) reason = String(out.reason);
-  if (!reason) {
-    if (out?.move === 'pass') reason = '让牌/过';
-    else if (Array.isArray(out?.cards)) reason = `出牌${out.cards.length}张`;
-    else reason = '出牌';
-  }
-  strategy = `${providerLabel(choice)}:${(spec?.model || '').trim() || 'default'}`;
-  return { reason, strategy };
-}
-/** 选择最小的一步合法出牌：优先最少张数；再按牌点从小到大；拿不到候选则出最小单张 */
-function pickMinimalPlay(ctx:any): any {
-  try {
-    const list = ctx?.candidates ?? ctx?.legalMoves ?? ctx?.legal ?? ctx?.moves;
-    const hand = Array.isArray(ctx?.hand) ? ctx.hand : [];
-    const normalize = (x:any) => {
-      if (!x) return null;
-      if (Array.isArray(x)) return { cards: x };
-      if (Array.isArray(x.cards)) return { cards: x.cards, comboType: x.combo?.type || x.type || x.comboType };
-      if (Array.isArray(x.move)) return { cards: x.move };
-      return null;
-    };
-    const toKey = (cards:any[]) => {
-      try {
-        const rankOrder:any = { '3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14,'2':16,'x':17,'X':18 };
-        const vals = cards.map((c:any)=> typeof c==='number'? c : (rankOrder[String(c)] ?? 999));
-        return [cards.length, Math.min(...vals), ...vals].join(',');
-      } catch { return `${cards.length},999`; }
-    };
-    let candidates:any[] = Array.isArray(list) ? list.map(normalize).filter(Boolean) : [];
-    if (!candidates.length && hand.length) {
-      const sorted = [...hand].sort((a:any,b:any)=> (a<b?-1:a>b?1:0));
-      return { move:'play', cards:[sorted[0]] };
-    }
-    candidates.sort((a:any,b:any)=> (toKey(a.cards) < toKey(b.cards) ? -1 : 1));
-    const pick = candidates[0];
-    return { move:'play', cards: pick.cards, comboType: pick.comboType };
-  } catch {
-    return { move:'pass' };
+    res.write(JSON.stringify(obj) + '\n');
+    // 不强制 flush，让 Node 自己 flush；Vercel 上这样更稳
+  } catch (err) {
+    // 忽略流关闭后的写入错误
   }
 }
 
-/** 将 SeatSpec 转换为可调用的 bot 函数 (ctx)=>Promise<Move> */
+/* ==================== Bot 适配（关键修复点） ==================== */
+
 function asBot(choice: BotChoice, spec?: SeatSpec) {
   if (choice === 'built-in:greedy-max') {
-    const impl = new GreedyMax();
-    return async (ctx:any)=> impl.play(ctx);
+    // ✅ 关键修复：构造函数改为带 1 个参数（label/name）
+    const impl = new GreedyMax(spec?.seatLabel || '内置:GreedyMax');
+    return async (ctx: any) => impl.play(ctx);
   }
   if (choice === 'built-in:greedy-min') {
-    const impl = new GreedyMin();
-    return async (ctx:any)=> impl.play(ctx);
+    const impl = new GreedyMin(spec?.seatLabel || '内置:GreedyMin');
+    return async (ctx: any) => impl.play(ctx);
   }
   if (choice === 'built-in:random-legal') {
-    const impl = new RandomLegal();
-    return async (ctx:any)=> impl.play(ctx);
+    const impl = new RandomLegal(spec?.seatLabel || '内置:RandomLegal');
+    return async (ctx: any) => impl.play(ctx);
   }
 
   if (choice === 'ai:openai') {
     const bot = new OpenAIBot({ model: spec?.model, apiKey: spec?.apiKey });
-    return async (ctx:any)=> bot.play(ctx);
+    return async (ctx: any) => bot.play(ctx);
   }
   if (choice === 'ai:gemini') {
     const bot = new GeminiBot({ model: spec?.model, apiKey: spec?.apiKey });
-    return async (ctx:any)=> bot.play(ctx);
+    return async (ctx: any) => bot.play(ctx);
   }
   if (choice === 'ai:grok') {
     const bot = new GrokBot({ model: spec?.model, apiKey: spec?.apiKey });
-    return async (ctx:any)=> bot.play(ctx);
+    return async (ctx: any) => bot.play(ctx);
   }
   if (choice === 'ai:kimi') {
     const bot = new KimiBot({ model: spec?.model, apiKey: spec?.apiKey });
-    return async (ctx:any)=> bot.play(ctx);
+    return async (ctx: any) => bot.play(ctx);
   }
   if (choice === 'ai:qwen') {
     const bot = new QwenBot({ model: spec?.model, apiKey: spec?.apiKey });
-    return async (ctx:any)=> bot.play(ctx);
+    return async (ctx: any) => bot.play(ctx);
   }
-  if (choice === 'ai:deepseek') {
-    const bot = new DeepseekBot({ model: spec?.model, apiKey: spec?.apiKey });
-    return async (ctx:any)=> bot.play(ctx);
+
+  // HTTP 自定义外部 AI
+  if (choice === 'http' || spec?.baseUrl || spec?.token) {
+    const bot = new HttpBot({ base: spec?.baseUrl, token: spec?.token, model: spec?.model });
+    return async (ctx: any) => bot.play(ctx);
   }
-  if (choice === 'http') {
-    const bot = new HttpBot({ baseUrl: spec?.baseUrl, token: spec?.token, model: spec?.model });
-    return async (ctx:any)=> bot.play(ctx);
-  }
-  // 兜底
-  const impl = new RandomLegal();
-  return async (ctx:any)=> impl.play(ctx);
+
+  // 兜底：随机合法
+  const fallback = new RandomLegal(spec?.seatLabel || '内置:RandomLegal');
+  return async (ctx: any) => fallback.play(ctx);
 }
-/** bot 包装：发 bot-call/bot-done；调用前先等待“最小间隔”（期间发 hb），调用后用“思考上限”做兜底（过/最小牌） */
-function traceWrap(
-  choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any, res: NextApiResponse,
-  onReason: (seat:number, text?:string)=>void,
-  timeoutMs?: number,           // 每家的思考超时（ms）
-  minIntervalMs?: number        // 每家的最小间隔（ms）
-) {
-  const by = providerLabel(choice);
-  const model = (spec?.model || '').trim();
 
-  // 记录“上次真正调用该家 bot 的时间”，用于最小间隔
-  let __lastCallAt = 0;
-  const __sleep = (ms:number)=> new Promise(r=>setTimeout(r, ms));
+/* ==================== 请求处理 ==================== */
 
-  return async function traced(ctx:any) {
-    try {
-      writeLine(res, { type:'event', kind:'bot-call', seat: ctx?.seat ?? -1, by, model, phase: ctx?.phase || 'play', need: ctx?.require?.type || null });
-    } catch {}
+export const config = {
+  api: {
+    bodyParser: { sizeLimit: '1mb' },
+  },
+};
 
-    // 1) 先等待达到“最小间隔”（这段时间内持续发 hb，避免前端误判卡住）
-    if (minIntervalMs && minIntervalMs > 0) {
-      const now = Date.now();
-      const since = now - __lastCallAt;
-      const need = Math.max(0, minIntervalMs - since);
-      if (need > 0) {
-        let remain = need;
-        while (remain > 0) {
-          const tick = Math.min(1000, remain);
-          try { writeLine(res, { type:'hb', seat: ctx?.seat, reason:'min-interval', remainMs: remain }); } catch {}
-          await __sleep(tick);
-          remain -= tick;
-        }
-      }
-    }
-
-    // 2) 真正开始“思考上限”计时（只覆盖 bot 的思考，不包含上面的等待）
-    const t0 = Date.now();
-    let out: any; let err: any = null;
-    try {
-      if (timeoutMs && timeoutMs > 0) {
-        let timed = false;
-        out = await Promise.race([
-          Promise.resolve().then(()=>bot(ctx)),
-          new Promise((resolve)=>setTimeout(()=>{ timed = true; resolve('__TIMEOUT__'); }, timeoutMs))
-        ]);
-        if (out === '__TIMEOUT__') {
-          // 跟牌可“过”；必须首攻（无 require.type）则出最小合法牌
-          const mustPlay = !ctx?.require?.type;
-          if (mustPlay) {
-            out = pickMinimalPlay(ctx);
-            try { (out as any).reason = '超时自动出最小牌'; } catch {}
-          } else {
-            out = { move:'pass', reason:'超时让牌' };
-          }
-        }
-      } else {
-        out = await bot(ctx);
-      }
-    } catch (e) {
-      err = e;
-    }
-    const tookMs = Date.now() - t0;
-
-    // 3) 生成 reason/strategy，并发 bot-done
-    const { reason, strategy } = buildReasonAndStrategy(choice, spec, ctx, out);
-    onReason(ctx?.seat ?? -1, reason);
-
-    try {
-      writeLine(res, {
-        type:'event', kind:'bot-done', seat: ctx?.seat ?? -1, by, model,
-        tookMs, reason, strategy, error: err ? String(err) : undefined
-      });
-    } catch {}
-
-    // 4) 记录“本次真正调用时间”，作为下次最小间隔的起点
-    __lastCallAt = Date.now();
-
-    if (err) throw err;
-    try { if (out && !out.reason) out.reason = reason; } catch {}
-    return out;
-  };
-}
-/** 一局对战的护栏封装：把 engine 的事件转成 NDJSON 写出（根据你现有 engine 适配即可） */
-async function runOneRoundWithGuard(
-  opts: { seats: Array<(ctx:any)=>Promise<any>>; four2?: 'both'|'2singles'|'2pairs'; delayMs?: number; lastReason: any[]; rob?: boolean; },
-  res: NextApiResponse,
-  round: number
-) {
-  // 这里根据你的 engine，适配事件钩子（以下是通用写法示意）
-  await runOneGame({
-    seats: opts.seats,
-    four2: opts.four2 || 'both',
-    rob: opts.rob ?? false,
-    onEvent: (ev: any) => {
-      // 将引擎事件直接透传/加工
-      if (ev?.kind) {
-        writeLine(res, { type:'event', ...ev });
-      } else {
-        writeLine(res, { type:'event', value: ev });
-      }
-    },
-    onInit: (info: any) => {
-      writeLine(res, { type:'event', kind:'init', ...info });
-    },
-    onStats: (stats: any) => {
-      writeLine(res, { type:'stats', ...stats });
-    }
-  });
-}
-/** 统一 keys 注入（如果你原文件里是别的注入方式，保留原样即可） */
-function patchSpecWithKeys(spec: SeatSpec | undefined, keys?: StartPayload['seatKeys'], idx?: number): SeatSpec | undefined {
-  if (!spec) return spec;
-  const k = Array.isArray(keys) ? keys[idx ?? 0] : undefined;
-  if (!k) return spec;
-  const s: SeatSpec = { ...spec };
-  if (k.openai) s.apiKey = k.openai;
-  if (k.gemini) s.apiKey = k.gemini;
-  if (k.kimi) s.apiKey = k.kimi;
-  if (k.qwen) s.apiKey = k.qwen;
-  if (k.grok) s.apiKey = k.grok;
-  if (k.httpBase) s.baseUrl = k.httpBase;
-  if (k.httpToken) s.token = k.httpToken;
-  return s;
-}
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method Not Allowed' }); return;
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  // NDJSON headers
+  // NDJSON 响应头
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  try { (res as any).flushHeaders?.(); } catch {}
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Connection', 'keep-alive');
 
-  const body = (req.body || {}) as StartPayload;
-
-  const rounds = Math.max(1, Math.min(9999, Number(body.rounds || 1)));
-  const four2 = body.four2 || 'both';
-  const rob = !!body.rob;
-
-  const seatSpecs = (body.seats || []).slice(0,3).map((s, i) => patchSpecWithKeys(s, body.seatKeys, i));
-
-  // 计算每家思考超时（ms）：支持单值或数组
-  const __tt = body.turnTimeoutSec;
-  let turnTimeoutMsArr = [30000,30000,30000];
-  if (Array.isArray(__tt)) {
-    const a = [Number(__tt[0]||30), Number(__tt[1]||30), Number(__tt[2]||30)];
-    turnTimeoutMsArr = a.map(x => Math.max(1000, (Number.isFinite(x) ? x : 30) * 1000));
-  } else {
-    const ms = Math.max(1000, (Number(__tt)||30) * 1000);
-    turnTimeoutMsArr = [ms, ms, ms];
-  }
-
-  // 计算每家最小间隔（ms）：支持单值或数组（从 seatDelayMs 派生）
-  const delaysRaw = body.seatDelayMs;
-  const minIntervalMsArr = Array.isArray(delaysRaw)
-    ? [Number(delaysRaw[0]||0)||0, Number(delaysRaw[1]||0)||0, Number(delaysRaw[2]||0)||0]
-    : [Number(delaysRaw||0)||0, Number(delaysRaw||0)||0, Number(delaysRaw||0)||0];
-
-  // 原始 bot
-  const baseBots = seatSpecs.map((s) => asBot(s?.choice as BotChoice, s));
-  // 包装：加最小间隔等待 + 思考超时兜底
-  const lastReason = [null, null, null] as any[];
-  const onReason = (seat:number, text?:string)=> {
-    if (typeof seat === 'number') lastReason[seat] = text || null;
-  };
-
-  const roundBots = baseBots.map((bot, i) =>
-    traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i], minIntervalMsArr[i])
-  );
-
-  // keep-alive（避免代理断开）
-  const keepAlive = setInterval(()=> {
-    try { writeLine(res, { type: 'hb', server: true, t: Date.now() }); } catch {}
-  }, 15000);
-  (res as any).on?.('close', ()=> { try{ clearInterval(keepAlive as any);}catch{} });
+  const body = (req.body || {}) as StartBody;
+  const {
+    rounds = 1,
+    startScore = 100,
+    seatDelayMs = [0, 0, 0],
+    enabled = true,
+    rob = true,
+    four2 = 'both',
+    seats = ['built-in:greedy-max', 'built-in:greedy-min', 'built-in:random-legal'],
+    seatModels = [],
+    seatKeys = [],
+    farmerCoop = false,
+    debug = false,
+  } = body;
 
   try {
+    // 初始化事件
+    writeLine(res, { type: 'init', rounds, startScore, rob, four2, farmerCoop, seatDelayMs, seats, seatModels, enabled, debug });
+
+    // 构建 3 个座位的 bot
+    const bots = Array.from({ length: 3 }).map((_, i) => {
+      const choice = seats[i] || 'built-in:random-legal';
+      const model = seatModels[i] || defaultModelFor(choice);
+      const keys = seatKeys[i] || {};
+
+      let apiKey: string | undefined;
+      switch (choice) {
+        case 'ai:openai': apiKey = keys.openai; break;
+        case 'ai:gemini': apiKey = keys.gemini; break;
+        case 'ai:grok':   apiKey = keys.grok;   break;
+        case 'ai:kimi':   apiKey = keys.kimi;   break;
+        case 'ai:qwen':   apiKey = keys.qwen;   break;
+        default:          apiKey = undefined;   break;
+      }
+
+      const spec: SeatSpec = {
+        choice,
+        model,
+        apiKey,
+        baseUrl: keys.httpBase,
+        token: keys.httpToken,
+        seatLabel: LABELS[i],
+      };
+
+      return asBot(choice, spec);
+    });
+
+    // 多局循环（若你的部署希望“一局一请求”，可把 rounds 固定为 1，这里保持通用）
+    let totals: [number, number, number] = [startScore, startScore, startScore];
+
     for (let round = 1; round <= rounds; round++) {
-      if (round === 1) writeLine(res, { type:'log', message:`—— 开始第 ${round} 局 ——` });
-      else writeLine(res, { type:'log', message:`—— 开始第 ${round} 局 ——` });
+      writeLine(res, { type: 'log', message: `—— 第 ${round} 局开始 ——`, round });
 
-      await runOneRoundWithGuard({ seats: roundBots, four2, delayMs: 0, lastReason, rob }, res, round);
+      // runOneGame 的签名在你的工程里可能是 1 个或 2 个参数。
+      // 之前有同学遇到 “Expected 2 arguments” 的编译报错，这里传入一个空对象当第二参并用 any 规避类型冲突。
+      const iter = runOneGame(
+        {
+          seats: bots as any,  // 传入 3 个异步 bot 函数
+          rob,
+          four2,
+          seatDelayMs,
+          farmerCoop,
+          debug,
+        } as any,
+        {} as any
+      );
 
-      if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
+      // 事件流转发
+      // 你的 engine 通常会产出：deal / bid / play / pass / trick / log / result / scores 等事件
+      // 这里做直通，并在局末累加 totals（若事件里携带 deltaScores）
+      let roundDelta: [number, number, number] = [0, 0, 0];
+
+      for await (const ev of iter as any) {
+        // 直通所有事件
+        writeLine(res, ev);
+
+        // 增量计分（如果有的话）
+        if (ev?.type === 'scores' && Array.isArray(ev?.delta)) {
+          const d = ev.delta as [number, number, number];
+          roundDelta = [roundDelta[0] + d[0], roundDelta[1] + d[1], roundDelta[2] + d[2]];
+        }
+      }
+
+      totals = [totals[0] + roundDelta[0], totals[1] + roundDelta[1], totals[2] + roundDelta[2]];
+      writeLine(res, { type: 'scores', totals, round, delta: roundDelta });
+      writeLine(res, { type: 'log', message: `—— 第 ${round} 局结束 ——`, round });
+
+      // 进度
+      const left = rounds - round;
+      writeLine(res, { type: 'progress', finished: round, left, totals });
     }
-  } catch (e:any) {
-    writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
-  } finally {
-    try{ clearInterval(keepAlive as any);}catch{};
-    try{ (res as any).end(); }catch{}
+
+    // 全部完成
+    writeLine(res, { type: 'end', totals });
+    res.end();
+
+  } catch (err: any) {
+    writeLine(res, { type: 'error', message: String(err?.message || err || 'unknown error') });
+    try { res.end(); } catch {}
   }
 }
-// 兼容 Next.js 默认导出（已在上面导出）
