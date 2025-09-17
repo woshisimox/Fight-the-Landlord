@@ -1110,12 +1110,12 @@ function Home() {
             <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
           </label>
 
-          <label>初始分
-            <input type="number" step={10} value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ width:'100%' }} />
-          </label>
-
           <label>可抢地主
             <div><input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} /></div>
+          </label>
+
+          <label>初始分
+            <input type="number" step={10} value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ width:'100%' }} />
           </label>
 
           <label>农民配合
