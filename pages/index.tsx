@@ -1129,6 +1129,11 @@ function Home() {
           <label>初始分
             <input type="number" step={10} value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ width:'100%' }} />
           </label>
+          
+          <label>弃牌时间（秒）
+            <input type="number" min={5} step={1} value={turnTimeoutSec} onChange={e=>setTurnTimeoutSec(Math.max(5, Math.floor(Number(e.target.value)||0)))} style={{ width:'100%' }} />
+          </label>
+
 
           <label>可抢地主
             <div><input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} /></div>
