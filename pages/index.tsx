@@ -76,6 +76,7 @@ const writeStore = (s: TsStore) => { try { s.updatedAt=new Date().toISOString();
 type LiveProps = {
   rounds: number;
   startScore: number;
+  turnTimeoutSec?: number;
   seatDelayMs?: number[];
   enabled: boolean;
   rob: boolean;
@@ -545,6 +546,10 @@ function LivePanel(props: LiveProps) {
     };
 
     const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
+    let lastEventTs = Date.now();
+    const timeoutMs = Math.max(5000, (props.turnTimeoutSec ?? 30) * 1000);
+    let dogId: any = null;
+
       setLog([]); lastReasonRef.current = [null, null, null];
       const specs = buildSeatSpecs();
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
@@ -553,18 +558,7 @@ function LivePanel(props: LiveProps) {
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
 
-      // Read local baselines for server echo (no UI/logic change)
-      const tsBaseline = (() => { try { return JSON.parse(localStorage.getItem('ts.overall') || 'null'); } catch { return null; } })();
-      const radarBaseline = (() => {
-        try {
-          const obj = JSON.parse(localStorage.getItem('radar.overall') || 'null');
-          if (!obj || !Array.isArray(obj.scores) || obj.scores.length !== 3) return null;
-          return { count: Number(obj.count) || 0, scores: obj.scores };
-        } catch { return null; }
-      })();
-
-      const r = await 
-fetch('/api/stream_ndjson', {
+      const r = await fetch('/api/stream_ndjson', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -578,14 +572,21 @@ fetch('/api/stream_ndjson', {
           clientTraceId: traceId,
           stopBelowZero: true,
           farmerCoop: props.farmerCoop,
-          tsBaseline,
-          radarBaseline
+        turnTimeoutSec: (props.turnTimeoutSec ?? 30)
         }),
         signal: controllerRef.current!.signal,
       });
       if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
 
       const reader = r.body.getReader();
+      dogId = setInterval(() => {
+        if (Date.now() - lastEventTs > timeoutMs) {
+          addLog(`⏳ 超过 ${Math.round((props.turnTimeoutSec ?? 30))}s 未收到事件，按规则视为“过”，中断本局并开启下一局`);
+          try { controllerRef.current?.abort(); } catch {}
+          clearInterval(dogId);
+        }
+      }, 1000);
+
       const decoder = new TextDecoder('utf-8');
       let buf = '';
       const rewrite = makeRewriteRoundLabel(labelRoundNo);
@@ -1079,6 +1080,8 @@ function Home() {
   const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
   const [rounds, setRounds] = useState<number>(DEFAULTS.rounds);
   const [startScore, setStartScore] = useState<number>(DEFAULTS.startScore);
+  const [turnTimeoutSec, setTurnTimeoutSec] = useState<number>(30);
+
   const [rob, setRob] = useState<boolean>(DEFAULTS.rob);
   const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
   const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
@@ -1335,6 +1338,8 @@ function Home() {
           seatKeys={seatKeys}
           farmerCoop={farmerCoop}
           onLog={setLiveLog}
+        
+          turnTimeoutSec={{turnTimeoutSec}}
         />
       </div>
     </div>

@@ -29,8 +29,7 @@ type StartPayload = {
   seatKeys?: { openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; httpBase?: string; httpToken?: string; }[];
   clientTraceId?: string;
   farmerCoop?: boolean;
-  tsBaseline?: { mu:number; sigma:number }[];
-  radarBaseline?: { count?: number; scores?: any[] };
+  turnTimeoutSec?: number;
 
 };
 
@@ -39,18 +38,6 @@ const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
 function writeLine(res: NextApiResponse, obj: any) {
   (res as any).write(JSON.stringify(obj) + '\n');
 }
-
-function isValidRatingArray(ts: any): boolean {
-  if (!Array.isArray(ts) || ts.length !== 3) return false;
-  return ts.every((x:any) => x && typeof x.mu === 'number' && isFinite(x.mu) && typeof x.sigma === 'number' && isFinite(x.sigma));
-}
-
-function isValidRadar(rb: any): boolean {
-  if (!rb || !Array.isArray(rb.scores) || rb.scores.length !== 3) return false;
-  const ok = (n:any)=> typeof n === 'number' && isFinite(n);
-  return rb.scores.every((s:any)=> s && ok(s.coop) && ok(s.agg) && ok(s.cons) && ok(s.eff) && ok(s.rob));
-}
-
 
 function providerLabel(choice: BotChoice) {
   switch (choice) {
@@ -111,6 +98,40 @@ function inferCandidateCount(ctx:any): number | undefined {
   return undefined;
 }
 
+/** 选择最小的一步合法出牌：优先最少张数；再按牌点从小到大 */
+function pickMinimalPlay(ctx:any): any {
+  try {
+    const list = ctx?.candidates ?? ctx?.legalMoves ?? ctx?.legal ?? ctx?.moves;
+    const hand = Array.isArray(ctx?.hand) ? ctx.hand : [];
+    const normalize = (x:any) => {
+      if (!x) return null;
+      if (Array.isArray(x)) return { cards: x };
+      if (Array.isArray(x.cards)) return { cards: x.cards, comboType: x.combo?.type || x.type || x.comboType };
+      if (Array.isArray(x.move)) return { cards: x.move };
+      return null;
+    };
+    const toKey = (cards:number[]|string[]) => {
+      try {
+        const rankOrder:any = { '3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14,'2':16,'x':17,'X':18 };
+        const vals = cards.map((c:any)=> typeof c==='number'? c : (rankOrder[String(c)] ?? 999));
+        return [cards.length, Math.min(...vals), ...vals].join(',');
+      } catch { return `${cards.length},999`; }
+    };
+    let candidates:any[] = Array.isArray(list) ? list.map(normalize).filter(Boolean) : [];
+    if (!candidates.length && hand.length) {
+      // 兜底：出手里最小的单牌
+      const sorted = [...hand].sort((a:any,b:any)=> (a<b?-1:a>b?1:0));
+      return { move:'play', cards:[sorted[0]] };
+    }
+    candidates.sort((a:any,b:any)=> (toKey(a.cards) < toKey(b.cards) ? -1 : 1));
+    const pick = candidates[0];
+    return { move:'play', cards: pick.cards, comboType: pick.comboType };
+  } catch {
+    return { move:'pass' };
+  }
+}
+
+
 /** 统一“理由 & 策略”构造（bot 若不给 reason，这里合成） */
 function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx:any, out:any) {
   const by = providerLabel(choice);
@@ -155,9 +176,9 @@ function buildReasonAndStrategy(choice: BotChoice, spec: SeatSpec|undefined, ctx
 }
 
 /** bot 包装：发 bot-call/bot-done，并缓存 reason 以贴到 play/pass */
-function traceWrap(
-  choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any, res: NextApiResponse,
-  onReason: (seat:number, text?:string)=>void
+function traceWrap(choice: BotChoice, spec: SeatSpec|undefined, bot: (ctx:any)=>any, res: NextApiResponse,
+  onReason: (seat:number, text?:string)=>void,
+  timeoutMs?: number
 ) {
   const by = providerLabel(choice);
   const model = (spec?.model || '').trim();
@@ -165,7 +186,27 @@ function traceWrap(
     try { writeLine(res, { type:'event', kind:'bot-call', seat: ctx?.seat ?? -1, by, model, phase: ctx?.phase || 'play', need: ctx?.require?.type || null }); } catch {}
     const t0 = Date.now();
     let out: any; let err: any = null;
-    try { out = await bot(ctx); } catch (e) { err = e; }
+    try {
+      if (timeoutMs && timeoutMs > 0) {
+        let timed = false;
+        out = await Promise.race([
+          Promise.resolve().then(()=>bot(ctx)),
+          new Promise((resolve)=>setTimeout(()=>{ timed = true; resolve('__TIMEOUT__'); }, timeoutMs))
+        ]);
+        if (out === '__TIMEOUT__') {
+          // 超时：跟牌可“过”；必须首攻则出最小合法牌
+          const mustPlay = !ctx?.require?.type;
+          if (mustPlay) {
+            out = pickMinimalPlay(ctx);
+            try { (out as any).reason = `超时自动出最小牌`; } catch {}
+          } else {
+            out = { move:'pass', reason:'超时让牌' };
+          }
+        }
+      } else {
+        out = await bot(ctx);
+      }
+    } catch (e) { err = e; }
     const tookMs = Date.now() - t0;
 
     const { reason, strategy } = buildReasonAndStrategy(choice, spec, ctx, out);
@@ -362,20 +403,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const four2 = body.four2 || 'both';
     const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
 
-    const seatSpecs = (body.seats || []).slice(0,3);
+    
+  const turnTimeoutMs = Math.max(1000, Number((body as any).turnTimeoutSec) * 1000 || 30000);
+const seatSpecs = (body.seats || []).slice(0,3);
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
-
-    // Optional baseline echo for NDJSON consumers (no engine changes)
-    const tsBaseline = (body as any).tsBaseline;
-    const radarBaseline = (body as any).radarBaseline;
-    if (isValidRatingArray(tsBaseline) || isValidRadar(radarBaseline)) {
-      writeLine(res, {
-        type: 'baseline',
-        ts: isValidRatingArray(tsBaseline) ? tsBaseline : null,
-        radar: isValidRadar(radarBaseline) ? { count: Number(radarBaseline.count)||0, scores: radarBaseline.scores } : null,
-      });
-    }
-
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
@@ -386,7 +417,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const lastReason: (string|null)[] = [null, null, null];
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
 
-      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason));
+      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMs));
 
       const delayedSeats = roundBots.map((bot, idx) => async (ctx:any) => {
         const ms = delays[idx] || 0; if (ms) await new Promise(r => setTimeout(r, ms));
