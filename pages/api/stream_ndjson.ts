@@ -427,14 +427,9 @@ const seatSpecs = (body.seats || []).slice(0,3);
       const lastReason: (string|null)[] = [null, null, null];
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
 
-      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i]));
+      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i], (delays[i]||0)));
 
-      const delayedSeats = roundBots.map((bot, idx) => async (ctx:any) => {
-        const ms = delays[idx] || 0; if (ms) await new Promise(r => setTimeout(r, ms));
-        return bot(ctx);
-      });
-
-      await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, lastReason }, res, round);
+            await runOneRoundWithGuard({ seats: roundBots, four2, delayMs: 0, lastReason }, res, round);
 
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }

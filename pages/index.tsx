@@ -551,7 +551,10 @@ function LivePanel(props: LiveProps) {
       const arr = props.turnTimeoutSecs || [30,30,30];
       const norm = arr.map(x=> (Number.isFinite(x as any) && (x as any)>0 ? (x as any) : 30));
       const sec = Math.min(...norm);
-      return Math.max(5000, sec*1000);
+      const delayArr = (props.seatDelayMs || [0,0,0]).map(d=> Math.max(0, Number(d)||0));
+      const maxDelay = Math.max(...delayArr);
+      // 前端提示阈值 = (最小弃牌秒数 + 最大最小间隔)；确保“弃牌时间”从最小间隔之后开始计算
+      return Math.max(5000, sec*1000 + maxDelay);
     })();
     let dogId: any = null;
 
