@@ -168,7 +168,7 @@ function cardsBrief(cards:string[]):string{
 function traceWrap(
   choice: BotChoice,
   spec: SeatSpec|undefined,
-  bot: (ctx:any)=>Promise<any>,
+  bot: (ctx:any)=>any,
   res: NextApiResponse,
   onReason: (seat:number, text?:string)=>void,
   timeoutMs: number
