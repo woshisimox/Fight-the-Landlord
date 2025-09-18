@@ -9,6 +9,70 @@ import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
+/** 解析“每手最大思考时长”（ms），返回三座位数组 */
+function parseTurnTimeoutMsArr(req: import('next').NextApiRequest): [number, number, number] {
+  const fromQuery = (k: string) => {
+    const v = (req.query as any)?.[k];
+    return Array.isArray(v) ? v[0] : v;
+  };
+  const fromBody = (k: string) => (req.body as any)?.[k];
+
+  const clampMs = (sec: any) => Math.max(1000, (Number(sec) && Number(sec) > 0 ? Number(sec) : 30) * 1000);
+
+  // body: turnTimeoutSecs / turnTimeoutSec 传数组
+  let arr = fromBody('turnTimeoutSecs') ?? fromBody('turnTimeoutSec');
+  if (Array.isArray(arr)) {
+    const nums = arr.map((x: any) => clampMs(x));
+    if (nums.length >= 3) return [nums[0], nums[1], nums[2]];
+    if (nums.length === 2) return [nums[0], nums[1], nums[1]];
+    if (nums.length === 1) return [nums[0], nums[0], nums[0]];
+  }
+
+  // body: __tt / tt / turnTimeout （数字或字符串）
+  const tryBodyKeys = [fromBody('__tt'), fromBody('tt'), fromBody('turnTimeout')];
+  for (const v of tryBodyKeys) {
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+      const ms = clampMs(v);
+      return [ms, ms, ms];
+    }
+    if (typeof v === 'string' && v.trim()) {
+      const s = v.trim();
+      if (s.includes(',') || s.includes('/') || /\s/.test(s)) {
+        const vals = s.split(/[,\s/]+/).filter(Boolean).map(clampMs);
+        const a = vals[0] ?? 30000;
+        const b = vals[1] ?? a;
+        const c = vals[2] ?? b;
+        return [a, b, c];
+      } else {
+        const ms = clampMs(s);
+        return [ms, ms, ms];
+      }
+    }
+  }
+
+  // query: 兼容同名参数
+  const rawTT = fromQuery('__tt') ?? fromQuery('tt') ?? fromQuery('turnTimeout') ?? fromQuery('turnTimeoutSec') ?? fromQuery('turnTimeoutSecs');
+  if (typeof rawTT === 'string' && rawTT.trim()) {
+    const s = rawTT.trim();
+    if (s.includes(',') || s.includes('/') || /\s/.test(s)) {
+      const vals = s.split(/[,\s/]+/).filter(Boolean).map(clampMs);
+      const a = vals[0] ?? 30000;
+      const b = vals[1] ?? a;
+      const c = vals[2] ?? b;
+      return [a, b, c];
+    } else {
+      const ms = clampMs(s);
+      return [ms, ms, ms];
+    }
+  } else if (typeof rawTT === 'number' && Number.isFinite(rawTT) && rawTT > 0) {
+    const ms = clampMs(rawTT);
+    return [ms, ms, ms];
+  }
+
+  return [30000, 30000, 30000];
+}
+
+
 type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
@@ -409,21 +473,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const turnTimeoutMs = Math.max(1000, Number((body as any).turnTimeoutSec) * 1000 || 30000);
 
   // Per-seat think-timeout (ms)
-  const __tt = (body as any).turnTimeoutSec;
-  let turnTimeoutMsArr = [30000,30000,30000];
-  if (Array.isArray(__tt)) {
-    turnTimeoutMsArr = [0,1,2].map(i=>{
-      const sec = Number(__tt[i]);
-      return Math.max(1000, (isFinite(sec) && sec>0 ? sec : 30) * 1000);
-    });
-  } else {
-    const sec = Number(__tt);
-    const ms  = Math.max(1000, (isFinite(sec) && sec>0 ? sec : 30) * 1000);
-    turnTimeoutMsArr = [ms, ms, ms];
-  } else {
-    const ms = Math.max(1000, Number(__tt) * 1000 || 30000);
-    turnTimeoutMsArr = [ms, ms, ms];
-  }
+  const turnTimeoutMsArr = parseTurnTimeoutMsArr(req);
 const seatSpecs = (body.seats || []).slice(0,3);
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
 
