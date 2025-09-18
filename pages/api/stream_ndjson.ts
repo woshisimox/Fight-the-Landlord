@@ -402,6 +402,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const four2 = body.four2 || 'both';
     const delays = body.seatDelayMs && body.seatDelayMs.length === 3 ? body.seatDelayMs : [0,0,0];
 
+  // track last action timestamp per seat for 'min interval between two moves'
+  const lastActAt = [0,0,0];
+
     
   const turnTimeoutMs = Math.max(1000, Number((body as any).turnTimeoutSec) * 1000 || 30000);
 
@@ -409,8 +412,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const __tt = (body as any).turnTimeoutSec;
   let turnTimeoutMsArr = [30000,30000,30000];
   if (Array.isArray(__tt)) {
-    const a0 = Number(__tt[0]); const a1 = Number(__tt[1]); const a2 = Number(__tt[2]);
-    turnTimeoutMsArr = [a0, a1, a2].map(x => Math.max(1000, (isFinite(x) && x>0 ? x : 30) * 1000));
+    turnTimeoutMsArr = [0,1,2].map(i=>{
+      const sec = Number(__tt[i]);
+      return Math.max(1000, (isFinite(sec) && sec>0 ? sec : 30) * 1000);
+    });
+  } else {
+    const sec = Number(__tt);
+    const ms  = Math.max(1000, (isFinite(sec) && sec>0 ? sec : 30) * 1000);
+    turnTimeoutMsArr = [ms, ms, ms];
   } else {
     const ms = Math.max(1000, Number(__tt) * 1000 || 30000);
     turnTimeoutMsArr = [ms, ms, ms];
@@ -427,9 +436,14 @@ const seatSpecs = (body.seats || []).slice(0,3);
       const lastReason: (string|null)[] = [null, null, null];
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
 
-      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i], (delays[i]||0)));
+      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i]));
 
-            await runOneRoundWithGuard({ seats: roundBots, four2, delayMs: 0, lastReason }, res, round);
+      const delayedSeats = roundBots.map((bot, idx) => async (ctx:any) => {
+        const ms = delays[idx] || 0; if (ms) await new Promise(r => setTimeout(r, ms));
+        return bot(ctx);
+      });
+
+      await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, lastReason }, res, round);
 
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }

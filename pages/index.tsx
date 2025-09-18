@@ -502,13 +502,14 @@ function LivePanel(props: LiveProps) {
         const model = normalized || defaultModelFor(choice);
         const keys = props.seatKeys[i] || {};
         switch (choice) {
-          case 'ai:openai': return { choice, model, apiKey: keys.openai || '' };
-          case 'ai:gemini': return { choice, model, apiKey: keys.gemini || '' };
-          case 'ai:grok':   return { choice, model, apiKey: keys.grok || '' };
-          case 'ai:kimi':   return { choice, model, apiKey: keys.kimi || '' };
-          case 'ai:qwen':   return { choice, model, apiKey: keys.qwen || '' };
-          case 'http':      return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
-          default:          return { choice };
+          case 'ai:openai':   return { choice, model, apiKey: keys.openai || '' };
+          case 'ai:gemini':   return { choice, model, apiKey: keys.gemini || '' };
+          case 'ai:grok':     return { choice, model, apiKey: keys.grok || '' };
+          case 'ai:kimi':     return { choice, model, apiKey: keys.kimi || '' };
+          case 'ai:qwen':     return { choice, model, apiKey: keys.qwen || '' };
+		  case 'ai:deepseek': return { choice, model, apiKey: keys.deepseek || '' };
+          case 'http':        return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
+          default:            return { choice };
         }
       });
     };
@@ -551,10 +552,7 @@ function LivePanel(props: LiveProps) {
       const arr = props.turnTimeoutSecs || [30,30,30];
       const norm = arr.map(x=> (Number.isFinite(x as any) && (x as any)>0 ? (x as any) : 30));
       const sec = Math.min(...norm);
-      const delayArr = (props.seatDelayMs || [0,0,0]).map(d=> Math.max(0, Number(d)||0));
-      const maxDelay = Math.max(...delayArr);
-      // 前端提示阈值 = (最小弃牌秒数 + 最大最小间隔)；确保“弃牌时间”从最小间隔之后开始计算
-      return Math.max(5000, sec*1000 + maxDelay);
+      return Math.max(5000, sec*1000);
     })();
     let dogId: any = null;
 
