@@ -1,241 +1,223 @@
+// @ts-nocheck
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
+import { OpenAIBot } from '../../lib/bots/openai_bot';
+import { GeminiBot } from '../../lib/bots/gemini_bot';
+import { GrokBot } from '../../lib/bots/grok_bot';
+import { HttpBot } from '../../lib/bots/http_bot';
+import { KimiBot } from '../../lib/bots/kimi_bot';
+import { QwenBot } from '../../lib/bots/qwen_bot';
+// 如有 DeepSeek，请解除下一行注释并确保存在对应文件
+// import { DeepSeekBot } from '../../lib/bots/deepseek_bot';
 
-// ====== 引擎（固定为 doudizhu 路径）======
-import * as ddz from '../../lib/doudizhu/engine';
-const runOneGame: any  = (ddz as any).runOneGame;
-const GreedyMax: any   = (ddz as any).GreedyMax;
-const GreedyMin: any   = (ddz as any).GreedyMin;
-const RandomLegal: any = (ddz as any).RandomLegal;
-
-// ====== AI 适配器（统一 any，兼容类/工厂/默认导出）======
-import * as openaiMod from '../../lib/bots/openai_bot';
-import * as geminiMod from '../../lib/bots/gemini_bot';
-import * as grokMod   from '../../lib/bots/grok_bot';
-import * as httpMod   from '../../lib/bots/http_bot';
-import * as kimiMod   from '../../lib/bots/kimi_bot';
-import * as qwenMod   from '../../lib/bots/qwen_bot';
-
-const OpenAIBot: any = (openaiMod as any).OpenAIBot ?? (openaiMod as any).default ?? openaiMod;
-const GeminiBot: any = (geminiMod as any).GeminiBot ?? (geminiMod as any).default ?? geminiMod;
-const GrokBot: any   = (grokMod   as any).GrokBot   ?? (grokMod   as any).default ?? grokMod;
-const HttpBot: any   = (httpMod   as any).HttpBot   ?? (httpMod   as any).default ?? httpMod;
-const KimiBot: any   = (kimiMod   as any).KimiBot   ?? (kimiMod   as any).default ?? kimiMod;
-const QwenBot: any   = (qwenMod   as any).QwenBot   ?? (qwenMod   as any).default ?? qwenMod;
-
-/* ==================== 类型（与前端对齐） ==================== */
-type Four2Policy = 'both' | '2singles' | '2pairs';
+type BotFunc = (ctx:any)=>Promise<any>|any;
 type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
+  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
 type SeatKeys = {
-  openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string;
+  openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; deepseek?: string;
   httpBase?: string; httpToken?: string;
 };
 
-type SeatSpec = {
-  choice: BotChoice;
-  model?: string;
-  apiKey?: string;
-  baseUrl?: string;
-  token?: string;
-  seatLabel?: string; // 甲/乙/丙
-};
-
-type StartBody = {
-  rounds: number;
-  startScore?: number;
-  seatDelayMs?: number[];
-  enabled?: boolean;
-  rob: boolean;
-  four2: Four2Policy;
-  seats: BotChoice[];
-  seatModels?: string[];
-  seatKeys?: SeatKeys[];
-  farmerCoop?: boolean;
-  debug?: boolean;
-};
-
-/* ==================== 工具 ==================== */
-const LABELS = ['甲', '乙', '丙'];
-
-function defaultModelFor(choice: BotChoice): string {
-  switch (choice) {
-    case 'ai:openai': return 'gpt-4o-mini';
-    case 'ai:gemini': return 'gemini-1.5-pro';
-    case 'ai:grok':   return 'grok-2-mini';
-    case 'ai:kimi':   return 'moonshot-v1-8k';
-    case 'ai:qwen':   return 'qwen-long';
-    default:          return '';
+function writeLine(res: NextApiResponse, obj: any) {
+  try {
+    res.write(JSON.stringify(obj) + '\n');
+  } catch (e) {
+    // 尽量避免因某帧异常导致整个流中断
+    try { res.write(JSON.stringify({ type:'error', message: String(e) }) + '\n'); } catch {}
   }
 }
 
-function writeLine(res: NextApiResponse, obj: any) {
-  try { res.write(JSON.stringify(obj) + '\n'); } catch {}
-}
+function ok(v:any){ return v!==undefined && v!==null; }
 
-/** 统一工厂：尽量拿到一个带 bid/play 的“IBot 对象” */
-function makeImplWithBidPlay(F: any, arg?: any): any {
-  // 1) 当作 class（优先带参，再无参）
-  try { const o = new F(arg); if (o && (o.bid || o.play)) return o; } catch {}
-  try { const o0 = new F();   if (o0 && (o0.bid || o0.play)) return o0; } catch {}
+function chooseBot(kind: BotChoice, model?: string, keys?: SeatKeys): BotFunc {
+  try {
+    switch (kind) {
+      case 'built-in:greedy-max': return async (ctx:any)=> await GreedyMax(ctx);
+      case 'built-in:greedy-min': return async (ctx:any)=> await GreedyMin(ctx);
+      case 'built-in:random-legal': return async (ctx:any)=> await RandomLegal(ctx);
 
-  // 2) 当作工厂函数（先带参，再无参）
-  try { const r = F(arg);  if (r && (r.bid || r.play)) return r; } catch {}
-  try { const r0 = F();    if (r0 && (r0.bid || r0.play)) return r0; } catch {}
-
-  // 3) 若是直接函数，把它当作 play；bid 用 GreedyMax 兜底
-  if (typeof F === 'function') {
-    const bidder = makeImplWithBidPlay(GreedyMax, 'Bidder');
-    return {
-      bid: async (ctx: any) => bidder?.bid ? bidder.bid(ctx) : 'pass',
-      play: async (ctx: any) => F(ctx),
+      case 'ai:openai': {
+        if (OpenAIBot && keys?.openai) return OpenAIBot({ model, apiKey: keys.openai }) as unknown as BotFunc;
+        return async (ctx:any)=> {
+          const m = await GreedyMax(ctx);
+          m.reason = `外部AI(openai)未接入后端，已回退内建（GreedyMax）`;
+          return m;
+        };
+      }
+      case 'ai:gemini': {
+        if (GeminiBot && keys?.gemini) return GeminiBot({ model, apiKey: keys.gemini }) as unknown as BotFunc;
+        return async (ctx:any)=> {
+          const m = await GreedyMax(ctx);
+          m.reason = `外部AI(gemini)未接入后端，已回退内建（GreedyMax）`;
+          return m;
+        };
+      }
+      case 'ai:grok': {
+        if (GrokBot && keys?.grok) return GrokBot({ model, apiKey: keys.grok }) as unknown as BotFunc;
+        return async (ctx:any)=> {
+          const m = await GreedyMax(ctx);
+          m.reason = `外部AI(grok)未接入后端，已回退内建（GreedyMax）`;
+          return m;
+        };
+      }
+      case 'ai:kimi': {
+        if (KimiBot && keys?.kimi) return KimiBot({ model, apiKey: keys.kimi }) as unknown as BotFunc;
+        return async (ctx:any)=> {
+          const m = await GreedyMax(ctx);
+          m.reason = `外部AI(kimi)未接入后端，已回退内建（GreedyMax）`;
+          return m;
+        };
+      }
+      case 'ai:qwen': {
+        if (QwenBot && keys?.qwen) return QwenBot({ model, apiKey: keys.qwen }) as unknown as BotFunc;
+        return async (ctx:any)=> {
+          const m = await GreedyMax(ctx);
+          m.reason = `外部AI(qwen)未接入后端，已回退内建（GreedyMax）`;
+          return m;
+        };
+      }
+      case 'ai:deepseek': {
+        // if (DeepSeekBot && keys?.deepseek) return DeepSeekBot({ model, apiKey: keys.deepseek }) as unknown as BotFunc;
+        return async (ctx:any)=> {
+          const m = await GreedyMax(ctx);
+          m.reason = `外部AI(deepseek)未接入后端，已回退内建（GreedyMax）`;
+          return m;
+        };
+      }
+      case 'http': {
+        if (HttpBot) {
+          return HttpBot({
+            base: keys?.httpBase,
+            token: keys?.httpToken,
+            apiKey: keys?.httpToken,
+            url: keys?.httpBase,
+            model,
+            headers: {}
+          }) as unknown as BotFunc;
+        }
+        return async (ctx:any)=> {
+          const m = await GreedyMax(ctx);
+          m.reason = `外部AI(http)未接入后端，已回退内建（GreedyMax）`;
+          return m;
+        };
+      }
+      default:
+        return async (ctx:any)=> await GreedyMax(ctx);
+    }
+  } catch (e) {
+    return async (ctx:any)=> {
+      try {
+        const m = await GreedyMax(ctx);
+        m.reason = `bot构建失败(${String(e)}), fallback GreedyMax`;
+        return m;
+      } catch {
+        return { move: 'pass', reason: 'bot构建失败且fallback失败' };
+      }
     };
   }
-
-  // 4) 兜底：全部 pass（避免崩溃）
-  return {
-    bid: async () => 'pass',
-    play: async () => ({ move: 'pass', reason: 'invalid bot factory' }),
-  };
 }
-
-/** AI 适配：AI 只实现 play 时，用内置 GreedyMax 代理 bid（避免“抢完就结束”） */
-function makeAIBot(Factory: any, opts: any, label: string) {
-  const ai = makeImplWithBidPlay(Factory, opts);
-  if (typeof ai.bid !== 'function') {
-    const bidder = makeImplWithBidPlay(GreedyMax, label + ':Bidder');
-    ai.bid = async (ctx: any) => bidder?.bid ? bidder.bid(ctx) : 'pass';
-  }
-  const origPlay = ai.play;
-  ai.play = async (ctx: any) => {
-    try {
-      const mv = await origPlay(ctx);
-      if (mv && mv.move === 'pass' && !mv.reason) mv.reason = `${label}: pass`;
-      return mv ?? { move: 'pass', reason: `${label}: empty move` };
-    } catch (e: any) {
-      return { move: 'pass', reason: `${label}: error ${e?.message || e}` };
-    }
-  };
-  return ai;
-}
-
-/* ==================== Bot 选择（返回“对象”，不是函数） ==================== */
-function makeSeat(choice: BotChoice, spec?: SeatSpec) {
-  const label =
-    spec?.seatLabel ||
-    (choice === 'built-in:greedy-max' ? '内置:GreedyMax'
-    : choice === 'built-in:greedy-min' ? '内置:GreedyMin'
-    : choice === 'built-in:random-legal' ? '内置:RandomLegal'
-    : 'Bot');
-
-  if (choice === 'built-in:greedy-max')   return makeImplWithBidPlay(GreedyMax, label);
-  if (choice === 'built-in:greedy-min')   return makeImplWithBidPlay(GreedyMin, label);
-  if (choice === 'built-in:random-legal') return makeImplWithBidPlay(RandomLegal, label);
-
-  if (choice === 'ai:openai') return makeAIBot(OpenAIBot, { model: spec?.model, apiKey: spec?.apiKey, label }, label);
-  if (choice === 'ai:gemini') return makeAIBot(GeminiBot,  { model: spec?.model, apiKey: spec?.apiKey, label }, label);
-  if (choice === 'ai:grok')   return makeAIBot(GrokBot,    { model: spec?.model, apiKey: spec?.apiKey, label }, label);
-  if (choice === 'ai:kimi')   return makeAIBot(KimiBot,    { model: spec?.model, apiKey: spec?.apiKey, label }, label);
-  if (choice === 'ai:qwen')   return makeAIBot(QwenBot,    { model: spec?.model, apiKey: spec?.apiKey, label }, label);
-
-  // HTTP 外部（一般只实现 play，这里同样用 GreedyMax 代理 bid）
-  if (choice === 'http' || spec?.baseUrl || spec?.token) {
-    return makeAIBot(HttpBot, { base: spec?.baseUrl, token: spec?.token, label }, label);
-  }
-
-  // 兜底
-  return makeImplWithBidPlay(RandomLegal, '内置:RandomLegal');
-}
-
-/* ==================== 请求处理 ==================== */
-export const config = { api: { bodyParser: { sizeLimit: '1mb' } } };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'Method Not Allowed' });
+    res.status(405).json({ error: 'Method Not Allowed' });
+    return;
   }
 
-  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Connection', 'keep-alive');
+  // Streaming headers
+  res.writeHead(200, {
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    // 'Transfer-Encoding': 'chunked' // 平台通常自动设置
+  });
 
-  const body = (req.body || {}) as StartBody;
-  const {
-    rounds = 1,
-    startScore = 100,
-    seatDelayMs = [0, 0, 0],
-    enabled = true,
-    rob = true,
-    four2 = 'both',
-    seats = ['built-in:greedy-max', 'built-in:greedy-min', 'built-in:random-legal'],
-    seatModels = [],
-    seatKeys = [],
-    farmerCoop = false,
-    debug = false,
-  } = body;
+  const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+
+  const rounds:number = Number(body.rounds ?? 1) || 1;
+  const startScore:number = Number(body.startScore ?? 0) || 0;
+  const seatDelayMs:number[] = Array.isArray(body.seatDelayMs) ? body.seatDelayMs : [0,0,0];
+  const enabled:boolean = !!(ok(body.enabled) ? body.enabled : true);
+  const rob:boolean = !!(ok(body.rob) ? body.rob : true);
+  const four2:any = body.four2 ?? 'both';
+  const seats:BotChoice[] = Array.isArray(body.seats) ? body.seats : ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'];
+  const seatModels:string[] = Array.isArray(body.seatModels) ? body.seatModels : ['','',''];
+  const seatKeys:SeatKeys[] = Array.isArray(body.seatKeys) ? body.seatKeys : [{},{},{}];
+  const farmerCoop:boolean = !!(ok(body.farmerCoop) ? body.farmerCoop : true);
+  const turnTimeoutSecs:number[] = Array.isArray(body.turnTimeoutSecs) ? body.turnTimeoutSecs
+    : (ok(body.turnTimeoutSec) ? [Number(body.turnTimeoutSec)||30, Number(body.turnTimeoutSec)||30, Number(body.turnTimeoutSec)||30] : [30,30,30]);
+
+  // Bot 构建
+  const bots: BotFunc[] = seats.slice(0,3).map((kind, i)=> chooseBot(kind as BotChoice, seatModels[i] || '', seatKeys[i] || {}));
+
+  writeLine(res, { type:'event', kind:'server-ready', ts: Date.now() });
 
   try {
-    writeLine(res, { type: 'init', rounds, startScore, rob, four2, farmerCoop, seatDelayMs, seats, seatModels, enabled, debug });
-
-    let totals: [number, number, number] = [startScore, startScore, startScore];
-
     for (let round = 1; round <= rounds; round++) {
-      writeLine(res, { type: 'log', message: `—— 第 ${round} 局开始 ——`, round });
+      writeLine(res, { type:'event', kind:'round-start', round });
 
-      // ⚠️ 每一局都“重新构建” seat 对象，避免跨局状态污染
-      const seatObjs = Array.from({ length: 3 }).map((_, i) => {
-        const choice = seats[i] || 'built-in:random-legal';
-        const model  = seatModels[i] || defaultModelFor(choice);
-        const keys   = seatKeys[i] || {};
+      let seenResult = false;
+      let lastWinner: number | null = null;
+      let lastDelta: number[] | null = null;
+      let lastMultiplier: number | null = null;
+      let landlord: number | null = null;
 
-        let apiKey: string | undefined;
-        switch (choice) {
-          case 'ai:openai': apiKey = keys.openai; break;
-          case 'ai:gemini': apiKey = keys.gemini; break;
-          case 'ai:grok':   apiKey = keys.grok;   break;
-          case 'ai:kimi':   apiKey = keys.kimi;   break;
-          case 'ai:qwen':   apiKey = keys.qwen;   break;
-          default:          apiKey = undefined;   break;
-        }
+      const config:any = {
+        seats: bots as any,
+        rob,
+        four2,
+        farmerCoop,
+        seatDelayMs,
+        enabled,
+        startScore,
+        turnTimeoutSecs,
+      };
 
-        const spec: SeatSpec = {
-          choice, model, apiKey,
-          baseUrl: keys.httpBase, token: keys.httpToken,
-          seatLabel: LABELS[i],
-        };
-        return makeSeat(choice, spec);
-      });
+      const iter:any = runOneGame(config, {} as any);
 
-      // ✅ 把 runOneGame 放到每一局循环里；且不再手动 break，让迭代自然结束
-      const cfg = { seats: seatObjs, rob, four2, seatDelayMs, farmerCoop, debug } as any;
-      const iter = (runOneGame.length >= 2) ? runOneGame(cfg, {} as any) : runOneGame(cfg);
-
-      let roundDelta: [number, number, number] = [0, 0, 0];
-
-      for await (const ev of iter as any) {
+      for await (const ev of iter) {
+        // 透传所有事件
         writeLine(res, ev);
-        if (ev?.type === 'scores' && Array.isArray(ev?.delta)) {
-          const d = ev.delta as [number, number, number];
-          roundDelta = [roundDelta[0] + d[0], roundDelta[1] + d[1], roundDelta[2] + d[2]];
-        }
+
+        // 抓取常用字段以便兜底
+        try {
+          if (typeof ev.landlord === 'number') landlord = ev.landlord;
+          if (ev.type === 'result' || (ev.type==='event' && (ev.kind==='result'||ev.kind==='win'||ev.kind==='game-over'))) {
+            seenResult = true;
+            if (ok(ev.winner)) lastWinner = ev.winner;
+            if (Array.isArray(ev.deltaScores)) lastDelta = ev.deltaScores;
+            if (Array.isArray(ev.delta)) lastDelta = ev.delta;
+            if (ok(ev.multiplier)) lastMultiplier = ev.multiplier;
+          }
+        } catch {}
       }
 
-      totals = [totals[0] + roundDelta[0], totals[1] + roundDelta[1], totals[2] + roundDelta[2]];
-      writeLine(res, { type: 'scores', totals, round, delta: roundDelta });
-      writeLine(res, { type: 'log', message: `—— 第 ${round} 局结束 ——`, round });
-      writeLine(res, { type: 'progress', finished: round, left: rounds - round, totals });
+      // 若引擎未显式发 result，给一个兜底（尽量保守）
+      if (!seenResult) {
+        writeLine(res, {
+          type: 'result',
+          winner: ok(lastWinner) ? lastWinner : null,
+          deltaScores: Array.isArray(lastDelta) ? lastDelta : [0,0,0],
+          multiplier: ok(lastMultiplier) ? lastMultiplier : 1,
+          landlord: ok(landlord) ? landlord : null,
+        });
+      }
+
+      // 明确边界：回合结束
+      writeLine(res, { type:'event', kind:'round-end', round });
     }
 
-    writeLine(res, { type: 'end', totals });
-    res.end();
-  } catch (err: any) {
-    writeLine(res, { type: 'error', message: String(err?.message || err || 'unknown error') });
+    // 结束
+    try { res.end(); } catch {}
+  } catch (e:any) {
+    writeLine(res, { type:'error', message: String(e?.message || e) });
     try { res.end(); } catch {}
   }
 }
