@@ -852,6 +852,8 @@ function LivePanel(props: LiveProps) {
                 } else {
                   nextAggStats = nextAggStats.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
                   nextAggCount = nextAggCount + 1;
+                setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
+
                 }
 
                 const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
