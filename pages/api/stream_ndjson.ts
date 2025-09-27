@@ -7,10 +7,10 @@ import { GrokBot } from '../../lib/bots/grok_bot';
 import { HttpBot } from '../../lib/bots/http_bot';
 import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
-// 如你的项目暂未提供 DeepseekBot，可删掉下一行及映射中的 deepseek
+// 如无 DeepseekBot，可删除本行与 asBot 内对应分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
-/* ==================== 小工具 ==================== */
+/* =============== 小工具 =============== */
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
 
 function writeLine(res: NextApiResponse, obj: any) {
@@ -56,7 +56,7 @@ function parseTurnTimeoutMsArr(req: NextApiRequest): [number,number,number] {
   return [30000,30000,30000];
 }
 
-/* ==================== 类型 ==================== */
+/* =============== 类型 =============== */
 type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
@@ -74,18 +74,16 @@ type SeatSpec = {
 
 type RunBody = {
   rounds: number;
-  rob?: boolean;
   four2?: 'both'|'2singles'|'2pairs';
   seats: SeatSpec[];
   seatDelayMs?: number[];
-  farmerCoop?: boolean;
   startScore?: number;
   turnTimeoutSecs?: number[];  // [s0,s1,s2]
   turnTimeoutSec?: number | number[];
   debug?: any;
 };
 
-/* ==================== Bot 工厂 ==================== */
+/* =============== Bot 工厂 =============== */
 function providerLabel(choice: BotChoice) {
   switch (choice) {
     case 'built-in:greedy-max': return 'GreedyMax';
@@ -124,7 +122,7 @@ function stringifyMove(m:any){
   return `${type}${cards}`;
 }
 
-/* ==================== 包装：带超时与理由跟踪 ==================== */
+/* =============== 包装：带超时与理由跟踪 =============== */
 function traceWrap(
   choice: BotChoice,
   spec: SeatSpec|undefined,
@@ -137,12 +135,12 @@ function traceWrap(
 ){
   const label = providerLabel(choice);
   return async (ctx:any) => {
-    // 可选的起手延迟，节流调用频率
+    // 可选起手延迟（节流）
     if (startDelayMs && startDelayMs>0) {
       await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
     }
 
-    // 发起调用事件（便于前端调试）
+    // 调用事件（便于前端调试）
     try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, provider: label, phase: ctx?.phase || 'play' }); } catch {}
 
     const timeout = new Promise((resolve)=> {
@@ -162,24 +160,23 @@ function traceWrap(
       onReason(seatIndex, undefined);
     }
 
-    // 结束回调
     try { writeLine(res, { type:'event', kind:'bot-ret', seat: seatIndex, ok: true }); } catch {}
 
     return result;
   };
 }
 
-/* ==================== 单局执行（带 NDJSON 输出与画像统计） ==================== */
+/* =============== 单局执行（NDJSON 输出 + 画像统计） =============== */
 async function runOneRoundWithGuard(
-  { seats, four2, rob, lastReason }:
-  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; rob: boolean; lastReason: (string|null)[] },
+  { seats, four2, lastReason }:
+  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; lastReason: (string|null)[] },
   res: NextApiResponse,
   round: number
 ){
-  const iter = runOneGame({ seats, four2, rob } as any);
+  const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
 
-  // ---- 画像统计累加器 ----
+  // 画像统计
   let landlordIdx: number = -1;
   const stats = [0,1,2].map(()=>({
     plays: 0,
@@ -190,7 +187,7 @@ async function runOneRoundWithGuard(
   }));
 
   for await (const ev of (iter as any)) {
-    // 初始发牌与地主
+    // 初始发牌/底牌/地主
     if (!sentInit && ev?.type==='init') {
       sentInit = true;
       landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
@@ -198,18 +195,18 @@ async function runOneRoundWithGuard(
       continue;
     }
 
-    // 每回合行为
+    // 每回合
     if (ev?.type==='turn') {
       const { seat, move, cards, hand, totals } = ev;
 
-      // ---- 累计画像 ----
+      // 画像累计
       const cc: string[] = Array.isArray(cards) ? cards : [];
       if (move === 'play') {
         stats[seat].plays++;
         stats[seat].cardsPlayed += cc.length;
 
-        const isRocket = cc.length === 2 && cc.includes('x') && cc.includes('X');
-        const isBomb   = !isRocket && cc.length === 4 && (new Set(cc)).size === 1;  // 简单判断：四张同点数
+        const isRocket = cc.length === 2 && cc.includes('x') && cc.includes('X');  // 王炸
+        const isBomb   = !isRocket && cc.length === 4 && (new Set(cc)).size === 1; // 炸弹（粗判）
         if (isBomb)   stats[seat].bombs++;
         if (isRocket) stats[seat].rockets++;
       } else {
@@ -222,9 +219,9 @@ async function runOneRoundWithGuard(
       continue;
     }
 
-    // 单局结果
+    // 结果
     if (ev?.type==='result') {
-      // ---- 在 result 之前产出画像（前端会立即累计，避免兜底 2.5）----
+      // —— 在 result 之前产出画像（同时两种形态，确保前端命中）——
       const perSeat = [0,1,2].map((i)=>{
         const s = stats[i];
         const total = Math.max(1, s.plays + s.passes);
@@ -247,21 +244,25 @@ async function runOneRoundWithGuard(
         }};
       });
 
+      // 1) 顶层 stats（最稳）
+      writeLine(res, { type:'stats', perSeat });
+
+      // 2) event/ kind=stats（兼容另一分支）
       writeLine(res, { type:'event', kind:'stats', perSeat });
 
-      // ---- 再写出原始 result（修正 .ev / .lastReason 的错误写法）----
+      // 再写 result（携带 lastReason）
       writeLine(res, { type:'result', ...(ev || {}), lastReason: [...lastReason] });
       break;
     }
 
-    // 其它事件透传（若引擎还有额外类型）
+    // 其它事件透传
     if (ev && ev.type && (ev.kind || ev.type!=='result')) {
       writeLine(res, ev);
     }
   }
 }
 
-/* ==================== HTTP 处理 ==================== */
+/* =============== HTTP 处理 =============== */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST' && req.method !== 'GET') {
     res.status(405).json({ error: 'Method Not Allowed' });
@@ -275,14 +276,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.setHeader('Connection', 'keep-alive');
   } catch {}
 
-  // keep-alive，避免前端长连被中断
+  // keep-alive，避免长连被中断
   const keepAlive = setInterval(() => { try { (res as any).write('\n'); } catch {} }, 15000);
 
   try {
     const body: RunBody = (req.method === 'POST' ? (req as any).body : {}) as any;
     const rounds = Math.max(1, Math.floor(Number(body.rounds || (req.query as any)?.rounds || 1)));
     const four2  = (body.four2 || (req.query as any)?.four2 || 'both') as 'both'|'2singles'|'2pairs';
-    const rob    = !!(body.rob ?? (req.query as any)?.rob ?? true); // 保持默认开启抢地主
 
     const turnTimeoutMsArr = parseTurnTimeoutMsArr(req);
     const seatSpecs = (body.seats || []).slice(0,3) as SeatSpec[];
@@ -305,7 +305,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, rob, lastReason }, res, round);
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
