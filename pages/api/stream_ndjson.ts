@@ -252,52 +252,34 @@ for await (const ev of iter as any) {
     }
 
     if (ev?.type === 'turn') {
+  // === 统一的“看牌说话”逻辑（三家一致） ===
   let seat = (ev as any).seat ?? (ev as any).player ?? (ev as any).index ?? 0;
-      if (!(seat>=0 && seat<=2)) seat = Number(seat) || 0; seat = Math.max(0, Math.min(2, seat));
+  seat = Math.max(0, Math.min(2, Number(seat) || 0));
 
-  const rawMove = (ev as any).move;
-  const mv  = typeof rawMove === 'string'
-    ? rawMove
-    : (rawMove?.move ?? (ev as any).action ?? (ev as any).kind ?? 'pass');
-
-  const playType = (ev as any).type ?? rawMove?.type ?? '';
+  // 优先从事件取牌，其次从 move.cards 兜底；仍为空则尝试使用刚才 bot 的返回
   let cardsArr: string[] =
     Array.isArray((ev as any).cards) ? (ev as any).cards
-    : Array.isArray(rawMove?.cards)  ? rawMove.cards
-    : [];
+    : (Array.isArray((ev as any).move?.cards) ? (ev as any).move.cards : []);
 
-  if (mv === 'play' && cardsArr.length === 0 && Array.isArray((ev as any).cards)) {
-    cardsArr = (ev as any).cards;
+  if ((!Array.isArray(cardsArr) || cardsArr.length === 0) && getLastMove) {
+    const lm = getLastMove(seat) as any;
+    if (lm?.move === 'play' && Array.isArray(lm.cards) && lm.cards.length > 0) {
+      cardsArr = lm.cards;
+    }
   }
 
-// normalise 'mv' using presence of cards
-let _mv = mv as any;
-if (_mv !== 'play' && _mv !== 'pass') {
-  _mv = (Array.isArray(cardsArr) && cardsArr.length) ? 'play' : 'pass';
-}
-if (_mv === 'pass' && Array.isArray(cardsArr) && cardsArr.length) {
-  _mv = 'play';
-}
-// fallback from lastBotMove when engine didn't provide cards
-if ((_mv === 'pass' || !Array.isArray(cardsArr) || cardsArr.length===0) && (getLastMove?.(seat) as any)?.move === 'play' && Array.isArray((getLastMove?.(seat) as any)?.cards) && ((getLastMove?.(seat) as any)?.cards?.length>0)) {
-  _mv = 'play';
-  cardsArr = (getLastMove?.(seat) as any)?.cards;
-}
   const reason = lastReason[seat] || null;
-  if (_mv === 'pass') {
-    // stats
-    try { st[seat].passes++; } catch {}
-    writeLine(res, { type: 'event', kind: 'play', seat, move: 'pass', reason });
-  } else /* _mv === 'play' */ {
-    // stats
+
+  if (Array.isArray(cardsArr) && cardsArr.length > 0) {
+    // 统计 & 事件
     try {
       st[seat].plays++;
-      st[seat].cards += Array.isArray(cardsArr) ? cardsArr.length : 0;
-      const t = (playType || '').toLowerCase();
-      if (t.includes('bomb'))   st[seat].bombs++;
-      if (t.includes('rocket')) st[seat].rockets++;
+      st[seat].cards += cardsArr.length;
     } catch {}
-    writeLine(res, { type: 'event', kind: 'play', seat, move: 'play', ptype: playType, cards: cardsArr, reason });
+    writeLine(res, { type: 'event', kind: 'play', seat, move: 'play', cards: cardsArr, reason });
+  } else {
+    try { st[seat].passes++; } catch {}
+    writeLine(res, { type: 'event', kind: 'play', seat, move: 'pass', reason });
   }
   continue;
 }
