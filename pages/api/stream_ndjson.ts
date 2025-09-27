@@ -250,7 +250,8 @@ for await (const ev of iter as any) {
     }
 
     if (ev?.type === 'turn') {
-  const seat = (ev as any).seat ?? (ev as any).player ?? (ev as any).index ?? 0;
+  let seat = (ev as any).seat ?? (ev as any).player ?? (ev as any).index ?? 0;
+      if (!(seat>=0 && seat<=2)) seat = Number(seat) || 0; seat = Math.max(0, Math.min(2, seat));
 
   const rawMove = (ev as any).move;
   const mv  = typeof rawMove === 'string'
@@ -268,11 +269,11 @@ for await (const ev of iter as any) {
   }
 
   const reason = lastReason[seat] || null;
-  if (mv === 'pass') {
+  if (_mv === 'pass') {
     // stats
     try { st[seat].passes++; } catch {}
     writeLine(res, { type: 'event', kind: 'play', seat, move: 'pass', reason });
-  } else {
+  } else /* _mv === 'play' */ {
     // stats
     try {
       st[seat].plays++;
