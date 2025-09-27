@@ -257,7 +257,7 @@ for await (const ev of iter as any) {
     ? rawMove
     : (rawMove?.move ?? (ev as any).action ?? (ev as any).kind ?? 'pass');
 
-  const type = (ev as any).type ?? rawMove?.type ?? '';
+  const playType = (ev as any).type ?? rawMove?.type ?? '';
   let cardsArr: string[] =
     Array.isArray((ev as any).cards) ? (ev as any).cards
     : Array.isArray(rawMove?.cards)  ? rawMove.cards
@@ -277,11 +277,11 @@ for await (const ev of iter as any) {
     try {
       st[seat].plays++;
       st[seat].cards += Array.isArray(cardsArr) ? cardsArr.length : 0;
-      const t = (type || '').toLowerCase();
+      const t = (playType || '').toLowerCase();
       if (t.includes('bomb'))   st[seat].bombs++;
       if (t.includes('rocket')) st[seat].rockets++;
     } catch {}
-    writeLine(res, { type: 'event', kind: 'play', seat, move: 'play', type, cards: cardsArr, reason });
+    writeLine(res, { type: 'event', kind: 'play', seat, move: 'play', ptype: playType, cards: cardsArr, reason });
   }
   continue;
 }
