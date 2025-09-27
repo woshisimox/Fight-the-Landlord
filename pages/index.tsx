@@ -994,12 +994,15 @@ function LivePanel(props: LiveProps) {
                   ds[(2 - L + 3) % 3],
                 ];
                 let nextWinnerLocal     = m.winner ?? nextWinner ?? null;
-                nextMultiplier = m.multiplier ?? nextMultiplier ?? 1;
-                nextDelta      = rot;
+                // 计分与倍率：若结果帧未给 multiplier，则使用前端累计的 nextMultiplier；并将 delta 按倍率放大
+                const effMult = (m.multiplier ?? (nextMultiplier ?? 1));
+                const rot2 = (m.multiplier != null) ? rot : (rot.map(v => (typeof v === 'number' ? v * (nextMultiplier ?? 1) : v)) as [number,number,number]);
+                nextMultiplier = effMult;
+                nextDelta      = rot2;
                 nextTotals     = [
-                  nextTotals[0] + rot[0],
-                  nextTotals[1] + rot[1],
-                  nextTotals[2] + rot[2]
+                  nextTotals[0] + rot2[0],
+                  nextTotals[1] + rot2[1],
+                  nextTotals[2] + rot2[2]
                 ] as any;
 
                 // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
