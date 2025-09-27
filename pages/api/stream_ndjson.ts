@@ -263,7 +263,7 @@ async function runOneRoundWithGuard(
           stats[seatNum].plays++;
           stats[seatNum].cardsPlayed += cardsArr.length;
           // rockets: 小王x + 大王X 恰好两张
-          if (cardsArr.length === 2 && (cardsArr.includes('x') && cardsArr.includes('X'))) {
+          if (Array.isArray(cardsArr) && cardsArr.length === 2 && cardsArr.includes('x') && cardsArr.includes('X')) {
             stats[seatNum].rockets++;
           }
           // bombs: >=4张同点数的炸弹（排除王）
