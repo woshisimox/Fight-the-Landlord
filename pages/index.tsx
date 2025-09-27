@@ -564,7 +564,7 @@ function LivePanel(props: LiveProps) {
       if (lord!=null) {
         
         entry.roles = entry.roles || {};
-		cconst role: 'landlord' | 'farmer' = (i === lord ? 'landlord' : 'farmer');
+		const role: 'landlord' | 'farmer' = (i === lord ? 'landlord' : 'farmer');
         entry.roles[role] = mergeRadarAgg(entry.roles[role], s3[i]);
       }
       const choice = props.seats[i];
