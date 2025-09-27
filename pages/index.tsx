@@ -701,40 +701,7 @@ function LivePanel(props: LiveProps) {
               }
 
               // -------- 出/过 --------
-              
-              // -------- 回合（turn）——与 'play' 逻辑等效，优先使用 hand 同步手牌 --------
-              if (m.type === 'turn') {
-                const seat = m.seat as number;
-                const move = m.move as string;
-                if (move === 'pass') {
-                  const reason = (m.reason ?? lastReasonRef.current[seat]) || undefined;
-                  lastReasonRef.current[seat] = null;
-                  nextPlays = [...nextPlays, { seat, move: 'pass', reason }];
-                  nextLog = [...nextLog, `${seatName(seat)} 过${reason ? `（${reason}）` : ''}`];
-                } else {
-                  const cards: string[] = m.cards || [];
-                  // 若后端提供出牌后的 hand，直接覆盖本座位手牌，更稳
-                  if (Array.isArray(m.hand)) {
-                    try { nextHands[seat] = decorateHandCycle(m.hand as string[]); } catch { nextHands[seat] = m.hand; }
-                  } else {
-                    // 否则按 'play' 逻辑从当前手牌中剔除本次出的牌
-                    const pretty: string[] = [];
-                    const nh = (nextHands && (nextHands as any[])?.length === 3 ? nextHands : [[], [], []]).map((x: any) => [...x]);
-                    for (const rawCard of cards) {
-                      const options = candDecorations(rawCard);
-                      const chosen = options.find((d: string) => nh[seat].includes(d)) || options[0];
-                      const k = nh[seat].indexOf(chosen);
-                      if (k >= 0) nh[seat].splice(k, 1);
-                      pretty.push(chosen);
-                    }
-                    nextHands = nh as any;
-                    nextPlays = [...nextPlays, { seat, move: 'play', cards: pretty }];
-                    nextLog = [...nextLog, `${seatName(seat)} 出 ${pretty.join(' ')}`];
-                  }
-                }
-                continue;
-              }
-if (m.type === 'event' && m.kind === 'play') {
+              if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
                   lastReasonRef.current[m.seat] = null;
@@ -832,7 +799,8 @@ if (m.type === 'event' && m.kind === 'play') {
               // -------- 画像统计（两种形态） --------
               const isStatsTop = (m.type === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               const isStatsEvt = (m.type === 'event' && m.kind === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
-              if (isStatsTop || isStatsEvt) {
+              const isStatsAnon = (!m.type && !m.kind && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
+              if (isStatsTop || isStatsEvt || isStatsAnon) {
                 seenStatsRef.current = true;
                 const arr = (m.perSeat ?? m.seats) as any[];
                 const s3 = [0,1,2].map(i=>{
