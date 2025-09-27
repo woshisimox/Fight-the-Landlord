@@ -237,15 +237,55 @@ async function runOneRoundWithGuard(
   const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
   
-  for await (const ev of iter as any) {
+  
+  // --- added: round stats accumulator and landlord capture ---
+  let landlordIdx: number | null = null;
+  const st = [0,1,2].map(()=>({ plays:0, passes:0, bombs:0, rockets:0, cards:0 }));
+for await (const ev of iter as any) {
     if (!sentInit && ev?.type==='init') {
       sentInit = true;
+      landlordIdx = (ev as any).landlordIdx ?? null;
       writeLine(res, { type:'init', landlordIdx: ev.landlordIdx, bottom: ev.bottom, hands: ev.hands });
       continue;
     }
 
     if (ev?.type === 'turn') {
-      const { seat, move, cards } = ev as any;
+  const seat = (ev as any).seat ?? (ev as any).player ?? (ev as any).index ?? 0;
+
+  const rawMove = (ev as any).move;
+  const mv  = typeof rawMove === 'string'
+    ? rawMove
+    : (rawMove?.move ?? (ev as any).action ?? (ev as any).kind ?? 'pass');
+
+  const type = (ev as any).type ?? rawMove?.type ?? '';
+  let cardsArr: string[] =
+    Array.isArray((ev as any).cards) ? (ev as any).cards
+    : Array.isArray(rawMove?.cards)  ? rawMove.cards
+    : [];
+
+  if (mv === 'play' && cardsArr.length === 0 && Array.isArray((ev as any).cards)) {
+    cardsArr = (ev as any).cards;
+  }
+
+  const reason = lastReason[seat] || null;
+  if (mv === 'pass') {
+    // stats
+    try { st[seat].passes++; } catch {}
+    writeLine(res, { type: 'event', kind: 'play', seat, move: 'pass', reason });
+  } else {
+    // stats
+    try {
+      st[seat].plays++;
+      st[seat].cards += Array.isArray(cardsArr) ? cardsArr.length : 0;
+      const t = (type || '').toLowerCase();
+      if (t.includes('bomb'))   st[seat].bombs++;
+      if (t.includes('rocket')) st[seat].rockets++;
+    } catch {}
+    writeLine(res, { type: 'event', kind: 'play', seat, move: 'play', type, cards: cardsArr, reason });
+  }
+  continue;
+}
+    = ev as any;
       const reason = lastReason[seat] || null;
       if (move === 'pass') {
         writeLine(res, { type: 'event', kind: 'play', seat, move: 'pass', reason });
@@ -256,6 +296,20 @@ async function runOneRoundWithGuard(
     }
 
     if (ev?.type === 'result') {
+  // --- added: per-round radar stats event ---
+  try {
+    const perSeat = [0,1,2].map(i => {
+      const s = st[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
+      const p = Math.max(1, s.plays || 0);
+      const agg  = clamp( ( (s.bombs||0)*2 + (s.rockets||0)*3 + Math.max(0, (s.cards||0)/p - 2) ), 0, 5 );
+      const eff  = clamp( (s.cards||0) / p, 0, 5 );
+      const cons = clamp( 5 - agg, 0, 5 );
+      const rob  = clamp( (landlordIdx === i ? 5 : 2), 0, 5 );
+      const coop = 2.5;
+      return { seat:i, scaled:{ coop, agg, cons, eff, rob } };
+    });
+    writeLine(res, { type:'event', kind:'stats', perSeat });
+  } catch {}
       const deltaScores = Array.isArray((ev as any).deltaScores)
         ? (ev as any).deltaScores
         : (Array.isArray((ev as any).delta) ? (ev as any).delta : [0,0,0]);
