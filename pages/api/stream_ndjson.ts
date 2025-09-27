@@ -273,7 +273,6 @@ for await (const ev of iter as any) {
   } catch {}
   continue;
 }
-/ pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
