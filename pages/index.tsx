@@ -795,17 +795,7 @@ function LivePanel(props: LiveProps) {
       let buf = '';
       const rewrite = makeRewriteRoundLabel(labelRoundNo);
       const applyBatch = (batch:any[]) => {
-          let nextHands = handsRef.current.map(x => [...x]);
-          let nextPlays = [...playsRef.current];
-          let nextTotals = [...totalsRef.current] as [number, number, number];
-          let nextFinished = finishedRef.current;
-          let nextLog = [...logRef.current];
-          let nextLandlord = landlordRef.current;
-          let nextWinner = winnerRef.current as number | null;
-          let nif (batch.length) { applyBatch(batch); })); } catch {}
-        }
-
-        if (batch.length) {
+  if (!batch.length) return;
           let nextHands = handsRef.current.map(x => [...x]);
           let nextPlays = [...playsRef.current];
           let nextTotals = [...totalsRef.current] as [number, number, number];
@@ -1041,7 +1031,7 @@ function LivePanel(props: LiveProps) {
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
-        }
+}
       }
 
           
