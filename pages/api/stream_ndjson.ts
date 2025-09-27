@@ -231,8 +231,8 @@ function traceWrap(
 
 /* ---------- 单局运行 + 守护：产出 NDJSON ---------- */
 async function runOneRoundWithGuard(
-  { seats, four2, delayMs, lastReason }:
-  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; delayMs: number; lastReason: (string|null)[] },
+  { seats, four2, delayMs, lastReason, getLastMove }:
+  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; delayMs: number; lastReason: (string|null)[]; getLastMove?: (seat:number)=>any },
   res: NextApiResponse,
   round: number
 ){
@@ -279,9 +279,9 @@ if (_mv === 'pass' && Array.isArray(cardsArr) && cardsArr.length) {
   _mv = 'play';
 }
 // fallback from lastBotMove when engine didn't provide cards
-if ((_mv === 'pass' || !Array.isArray(cardsArr) || cardsArr.length===0) && lastBotMove[seat]?.move === 'play' && Array.isArray(lastBotMove[seat]?.cards) && lastBotMove[seat].cards.length>0) {
+if ((_mv === 'pass' || !Array.isArray(cardsArr) || cardsArr.length===0) && (getLastMove?.(seat) as any)?.move === 'play' && Array.isArray((getLastMove?.(seat) as any)?.cards) && ((getLastMove?.(seat) as any)?.cards?.length>0)) {
   _mv = 'play';
-  cardsArr = lastBotMove[seat].cards;
+  cardsArr = (getLastMove?.(seat) as any)?.cards;
 }
   const reason = lastReason[seat] || null;
   if (_mv === 'pass') {
@@ -365,6 +365,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     for (let round = 1; round <= rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
       writeLine(res, { type:'event', kind:'round-start', round });
+      const lastBotMove: any[] = [null, null, null];
+      const onMove = (seat:number, mv:any)=>{ if (seat>=0&&seat<3) lastBotMove[seat]=mv; };
+
 
       const lastReason: (string|null)[] = [null, null, null];
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
@@ -376,7 +379,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return bot(ctx);
       });
 
-      await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, lastReason }, res, round);
+      await runOneRoundWithGuard({ seats: delayedSeats, four2, delayMs: 0, lastReason, getLastMove: (seat:number)=> lastBotMove[seat] }, res, round);
 
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
