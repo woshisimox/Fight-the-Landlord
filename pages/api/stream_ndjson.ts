@@ -236,45 +236,15 @@ async function runOneRoundWithGuard(
 ){
   const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
-  let landlordIdx = -1;
-  const stats = [
-    { plays:0, passes:0, cardsPlayed:0, bombs:0, rockets:0 },
-    { plays:0, passes:0, cardsPlayed:0, bombs:0, rockets:0 },
-    { plays:0, passes:0, cardsPlayed:0, bombs:0, rockets:0 },
-  ];
-
   
   for await (const ev of iter as any) {
     if (!sentInit && ev?.type==='init') {
       sentInit = true;
-      landlordIdx = Number(ev.landlordIdx ?? ev.landlord ?? -1);
-      writeLine(res, { type:'init', landlordIdx, bottom: ev.bottom, hands: ev.hands });
+      writeLine(res, { type:'init', landlordIdx: ev.landlordIdx, bottom: ev.bottom, hands: ev.hands });
       continue;
     }
 
     if (ev?.type==='turn') {
-      try {
-        const seatNum = Number(ev.seat ?? 0) | 0;
-        const mv = (ev.move ?? (ev.pass ? 'pass' : ((Array.isArray(ev.cards) && ev.cards.length) ? 'play' : 'pass')));
-        const cardsArr = Array.isArray(ev.cards) ? ev.cards : [];
-        if (mv === 'pass') {
-          stats[seatNum].passes++;
-        } else {
-          stats[seatNum].plays++;
-          stats[seatNum].cardsPlayed += cardsArr.length;
-          // rockets: 小王x + 大王X 恰好两张
-          if (Array.isArray(cardsArr) && cardsArr.length === 2 && cardsArr.includes('x') && cardsArr.includes('X')) {
-            stats[seatNum].rockets++;
-          }
-          // bombs: >=4张同点数的炸弹（排除王）
-          if (cardsArr.length >= 4) {
-            const ranks = cardsArr.filter(c => c !== 'x' && c !== 'X' && not c.startswith('🃏'));
-            const uniq = Array.from(new Set(ranks));
-            if (uniq.length == 1) stats[seatNum].bombs++;
-          }
-        }
-      } catch {}
-
       const { seat, move, cards, hand, totals } = ev;
       const moveStr = stringifyMove({ move, cards });
       const reason = lastReason[seat] || null;
@@ -283,25 +253,6 @@ async function runOneRoundWithGuard(
     }
 
     if (ev?.type==='result') {
-      // emit tactical stats before result so the front-end doesn't fallback to 2.5
-      try {
-        const clamp = (x:number)=> Math.max(0, Math.min(5, x));
-        const perSeat = [0,1,2].map((i)=>{
-          const s = stats[i] || { plays:0, passes:0, cardsPlayed:0, bombs:0, rockets:0 };
-          const total = Math.max(1, s.plays + s.passes);
-          const passRate = s.passes / total;
-          const avgCards = s.plays ? (s.cardsPlayed / Math.max(1,s.plays)) : 0;
-          const agg   = clamp(1.5*s.bombs + 2.0*s.rockets + (1-passRate)*3 + Math.min(4, avgCards)*0.25);
-          const cons  = clamp(3 + passRate*2 - (s.bombs + s.rockets)*0.6);
-          let   eff   = clamp(2 + avgCards*0.6 - passRate*1.5);
-          if ((ev as any)?.winner === i) eff = clamp(eff + 0.8);
-          const coop  = clamp((i===landlordIdx ? 2.0 : 2.5) + passRate*2.5 - (s.bombs + s.rockets)*0.4);
-          const rob   = clamp((i===landlordIdx ? 3.5 : 2.0) + 0.3*s.bombs + 0.6*s.rockets - passRate);
-          return { seat: i, scaled: { coop, agg, cons, eff, rob } };
-        });
-        writeLine(res, { type:'event', kind:'stats', perSeat });
-      } catch {}
-
       writeLine(res, { type:'result', ...ev, lastReason: [...lastReason] });
       break;
     }
