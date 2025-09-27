@@ -377,9 +377,9 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
   } catch {}
 };
 
-      const p = Math.max(1, srec.plays || 0);
-      const aggScore  = clamp( ( (srec.bombs||0)*2 + (srec.rockets||0)*3 + Math.max(0, (srec.cards||0)/p - 2) ), 0, 5 );
-      const eff  = clamp( (srec.cards||0) / p, 0, 5 );
+      const p = Math.max(1, s.plays || 0);
+      const aggScore  = clamp( ( (s.bombs||0)*2 + (s.rockets||0)*3 + Math.max(0, (s.cards||0)/p - 2) ), 0, 5 );
+      const eff  = clamp( (s.cards||0) / p, 0, 5 );
       const cons = clamp( 5 - aggScore, 0, 5 );
       const rob  = clamp( (landlordIdx === i ? 5 : 2), 0, 5 );
       const coop = 2.5;
