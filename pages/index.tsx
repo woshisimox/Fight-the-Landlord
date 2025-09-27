@@ -729,7 +729,7 @@ function LivePanel(props: LiveProps) {
                     }
                     nextHands = nh as any;
                     nextPlays = [...nextPlays, { seat, move: 'play', cards: pretty }];
-                    nextLog = [...nextLog, `${seatName(seat)} 出 ${cardsBrief(cards)}`];
+                    nextLog = [...nextLog, `${seatName(seat)} 出 ${pretty.join(' ')}`];
                   }
                 }
                 continue;
