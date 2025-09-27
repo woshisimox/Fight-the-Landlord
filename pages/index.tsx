@@ -562,7 +562,7 @@ function LivePanel(props: LiveProps) {
       const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
       entry.overall = mergeRadarAgg(entry.overall, s3[i]);
       if (lord!=null) {
-        const role = (i===lord ? 'landlord' : 'farmer') as const;
+        const role: 'landlord' | 'farmer' = (i === lord ? 'landlord' : 'farmer');
         entry.roles = entry.roles || {};
         entry.roles[role] = mergeRadarAgg(entry.roles[role], s3[i]);
       }
