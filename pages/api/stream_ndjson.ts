@@ -254,13 +254,9 @@ for await (const ev of iter as any) {
       continue;
     }
 
-        if (ev?.type === 'turn') {
-      // turn events are consumed via onMove; skip here
-      continue;
-    }
+            if (ev?.type === 'turn') { continue; }
     
     if (ev?.type === 'result') {
-  // Final per-round radar stats based on accumulated onMove() counters
   try {
     const arr = ((globalThis as any).__roundAgg as any[]) || [0,1,2].map(()=>({ plays:0, passes:0, bombs:0, rockets:0, cards:0 }));
     const perSeat = [0,1,2].map(i => {
@@ -609,17 +605,17 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
       writeLine(res, { type:'event', kind:'round-start', round });
       const lastBotMove: any[] = [null, null, null];
       const onMove = (seat:number, mv:any)=>{
-        const g:any = (globalThis as any);
-        if (!g.__roundAgg) g.__roundAgg = [0,1,2].map(()=>({ plays:0, passes:0, bombs:0, rockets:0, cards:0 }));
-        const _agg = g.__roundAgg;
+  const g:any = (globalThis as any);
+  if (!g.__roundAgg) g.__roundAgg = [0,1,2].map(()=>({ plays:0, passes:0, bombs:0, rockets:0, cards:0 }));
+  const _agg = g.__roundAgg;
+
   if (!(seat>=0 && seat<3)) return;
-  lastBotMove[seat] = mv;
 
   const moveKind = (mv && mv.move === 'play' && Array.isArray(mv.cards) && mv.cards.length>0) ? 'play' : 'pass';
   const cardsArr = (moveKind === 'play') ? (mv.cards as string[]) : [];
   const reason = lastReason[seat] || null;
 
-  // 统计（局内累计，供雷达图实时化）
+  // 统计
   try {
     if (moveKind === 'play') {
       _agg[seat].plays++;
@@ -632,7 +628,7 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
     }
   } catch {}
 
-  // 写出牌事件（刷新手牌/日志）
+  // 写出牌事件
   if (moveKind === 'play') {
     writeLine(res, { type:'event', kind:'play', seat, move:'play', cards: cardsArr, reason });
   } else {
@@ -640,10 +636,22 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
   }
   try { lastReason[seat] = null; } catch {}
 
-  // 再写一次中途画像（让雷达图实时滚动）
+  // 画像（中途刷新）
   try {
     const perSeat = [0,1,2].map(i => {
-      const a = _agg[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
+      const s = _agg[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
+      const p = Math.max(1, s.plays || 0);
+      const aggScore  = clamp( ((s.bombs||0)*2 + (s.rockets||0)*3 + Math.max(0, (s.cards||0)/p - 2)), 0, 5 );
+      const effScore  = clamp( (s.cards||0) / p, 0, 5 );
+      const consScore = clamp( 5 - aggScore, 0, 5 );
+      const robScore  = 2.5;
+      const coopScore = 2.5;
+      return { seat:i, scaled:{ coop:coopScore, agg:aggScore, cons:consScore, eff:effScore, rob:robScore } };
+    });
+    writeLine(res, { type:'event', kind:'stats', perSeat });
+  } catch {}
+};
+
       const p = Math.max(1, a.plays || 0);
       const aggScore  = clamp( ( (a.bombs||0)*2 + (a.rockets||0)*3 + Math.max(0, (a.cards||0)/p - 2) ), 0, 5 );
       const effScore  = clamp( (a.cards||0) / p, 0, 5 );
