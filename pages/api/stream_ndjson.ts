@@ -372,7 +372,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const lastReason: (string|null)[] = [null, null, null];
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
 
-      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, turnTimeoutMsArr[i]));
+      const roundBots = baseBots.map((bot, i) => traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot, res, onReason, onMove, turnTimeoutMsArr[i]));
 
       const delayedSeats = roundBots.map((bot, idx) => async (ctx:any) => {
         const ms = delays[idx] || 0; if (ms) await new Promise(r => setTimeout(r, ms));
