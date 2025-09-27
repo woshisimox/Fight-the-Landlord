@@ -905,7 +905,6 @@ function LivePanel(props: LiveProps) {
                 }
                 continue;
               }
-              }
 
               // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
