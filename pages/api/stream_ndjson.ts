@@ -238,6 +238,9 @@ async function runOneRoundWithGuard(
 ){
   const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
+  // hoisted per-round accumulator for radar stats
+  let agg: any[] = [0,1,2].map(()=>({ plays:0, passes:0, bombs:0, rockets:0, cards:0 }));
+
   
   
   // --- added: round stats accumulator and landlord capture ---
