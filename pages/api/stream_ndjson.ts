@@ -171,6 +171,7 @@ function traceWrap(
   bot: (ctx:any)=>any,
   res: NextApiResponse,
   onReason: (seat:number, text?:string)=>void,
+  onMove: (seat:number, move:any)=>void,
   timeoutMs: number
 ){
   const label = providerLabel(choice);
@@ -214,6 +215,7 @@ function traceWrap(
       }
 
       onReason(ctx?.seatIndex ?? -1, reason);
+      try { onMove(ctx?.seatIndex ?? -1, r); } catch {}
       writeLine(res, { type:'strategy', seat: ctx?.seatIndex ?? -1, reason, ms: Date.now()-t0 });
       return r;
     } catch (e:any) {
@@ -275,6 +277,11 @@ if (_mv !== 'play' && _mv !== 'pass') {
 }
 if (_mv === 'pass' && Array.isArray(cardsArr) && cardsArr.length) {
   _mv = 'play';
+}
+// fallback from lastBotMove when engine didn't provide cards
+if ((_mv === 'pass' || !Array.isArray(cardsArr) || cardsArr.length===0) && lastBotMove[seat]?.move === 'play' && Array.isArray(lastBotMove[seat]?.cards) && lastBotMove[seat].cards.length>0) {
+  _mv = 'play';
+  cardsArr = lastBotMove[seat].cards;
 }
   const reason = lastReason[seat] || null;
   if (_mv === 'pass') {
