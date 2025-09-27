@@ -715,7 +715,7 @@ function LivePanel(props: LiveProps) {
                   const cards: string[] = m.cards || [];
                   // 若后端提供出牌后的 hand，直接覆盖本座位手牌，更稳
                   if (Array.isArray(m.hand)) {
-                    try { nextHands[seat] = (m.hand as string[]).map(decorateCard); } catch { nextHands[seat] = m.hand; }
+                    try { nextHands[seat] = decorateHandCycle(m.hand as string[]); } catch { nextHands[seat] = m.hand; }
                   } else {
                     // 否则按 'play' 逻辑从当前手牌中剔除本次出的牌
                     const pretty: string[] = [];
