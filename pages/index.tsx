@@ -906,7 +906,20 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- AI 过程日志 --------
+              
+              // -------- 首次手牌兜底注入（若没有 init 帧但消息里带了 hands） --------
+              {
+                const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+                if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
+                  nextHands = (rh0 as string[][]).map(decorateHandCycle);
+                  const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
+                  if (lord2 != null) nextLandlord = lord2;
+                  // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
+                  nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
+                }
+              }
+
+// -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
                 nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
