@@ -337,10 +337,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 每座位的最大思考时长（毫秒）
     const turnTimeoutMsArr = parseTurnTimeoutMsArr(req);
 
-    const seatSpecs = (body.seats || []).slice(0,3);
-    const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
+    const seatSpecsRaw = (body.seats || []).slice(0,3);
+const seatSpecs = [0,1,2].map(i => {
+  const s = seatSpecsRaw[i] || seatSpecsRaw[0] || { choice: 'built-in:greedy-max' };
+  const choice = (s as any).choice || 'built-in:greedy-max';
+  return { ...(s as any), choice } as SeatSpec;
+});
+const baseBots = seatSpecs.map((s) => asBot(s.choice as BotChoice, s));
+    writeLine(res, { type:'log', message: `座位配置: ${seatSpecs.map(s=>s?.choice||'N/A').join(' | ')}` });
 
-    writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
+writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
 
     for (let round = 1; round <= rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
