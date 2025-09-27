@@ -285,16 +285,7 @@ for await (const ev of iter as any) {
   }
   continue;
 }
-    = ev as any;
-      const reason = lastReason[seat] || null;
-      if (move === 'pass') {
-        writeLine(res, { type: 'event', kind: 'play', seat, move: 'pass', reason });
-      } else {
-        writeLine(res, { type: 'event', kind: 'play', seat, move: 'play', cards, reason });
-      }
-      continue;
-    }
-
+    
     if (ev?.type === 'result') {
   // --- added: per-round radar stats event ---
   try {
