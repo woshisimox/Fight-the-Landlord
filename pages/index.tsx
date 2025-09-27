@@ -794,19 +794,15 @@ function LivePanel(props: LiveProps) {
       const decoder = new TextDecoder('utf-8');
       let buf = '';
       const rewrite = makeRewriteRoundLabel(labelRoundNo);
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-
-        let idx: number;
-        const batch: any[] = [];
-        while ((idx = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, idx).trim();
-          buf = buf.slice(idx + 1);
-          if (!line) continue;
-          try { batch.push(JSON.parse(line)); } catch {}
+      const applyBatch = (batch:any[]) => {
+          let nextHands = handsRef.current.map(x => [...x]);
+          let nextPlays = [...playsRef.current];
+          let nextTotals = [...totalsRef.current] as [number, number, number];
+          let nextFinished = finishedRef.current;
+          let nextLog = [...logRef.current];
+          let nextLandlord = landlordRef.current;
+          let nextWinner = winnerRef.current as number | null;
+          let nif (batch.length) { applyBatch(batch); })); } catch {}
         }
 
         if (batch.length) {
@@ -1048,8 +1044,31 @@ function LivePanel(props: LiveProps) {
         }
       }
 
-          if (dogId) { try { clearInterval(dogId); } catch {} }
-    setLog(l => [...l, `—— 本局流结束 ——`]);
+          
+      // Flush last line if stream ended without newline
+      try {
+        const leftover = buf.trim();
+        if (leftover) {
+          try { const last = JSON.parse(leftover); applyBatch([last]); } catch {}
+        }
+      } catch {}
+if (dogId) { try { clearInterval(dogId); } catch {} }
+    
+      // Safety finalize: if no result/round-end observed, mark finished and add neutral radar
+      if (!roundFinishedRef.current) {
+        const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
+        const mode = aggModeRef.current;
+        const a    = alphaRef.current;
+        let ns = aggStatsRef.current;
+        let nc = aggCountRef.current;
+        if (!ns) { ns = [neutral, neutral, neutral]; nc = 1; }
+        else { ns = ns.map(prev => mergeScore(prev, neutral, mode, nc, a)); nc = nc + 1; }
+        setAggStats(ns); setAggCount(nc);
+        setFinishedCount(x => x + 1);
+        roundFinishedRef.current = true;
+        setLog(l => [...l, '【安全兜底】流结束但未收到 result/round-end，已按兜底规则结算 1 局。']);
+      }
+setLog(l => [...l, `—— 本局流结束 ——`]);
     };
 
     try {
