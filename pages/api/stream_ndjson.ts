@@ -352,7 +352,51 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
       writeLine(res, { type:'event', kind:'round-start', round });
       const lastBotMove: any[] = [null, null, null];
-      const onMove = (seat:number, mv:any)=>{ if (seat>=0&&seat<3) lastBotMove[seat]=mv; };
+      const onMove = (seat:number, mv:any)=>{
+  if (!(seat>=0 && seat<3)) return;
+  lastBotMove[seat] = mv;
+
+  const moveKind = (mv && mv.move === 'play' && Array.isArray(mv.cards) && mv.cards.length>0) ? 'play' : 'pass';
+  const cardsArr = (moveKind === 'play') ? (mv.cards as string[]) : [];
+  const reason = lastReason[seat] || null;
+
+  // 更新统计
+  try {
+    if (moveKind === 'play') {
+      st[seat].plays++;
+      st[seat].cards += cardsArr.length;
+      const t = (mv.type || mv.ptype || '').toString().toLowerCase();
+      if (t.includes('bomb'))   st[seat].bombs++;
+      if (t.includes('rocket')) st[seat].rockets++;
+    } else {
+      st[seat].passes++;
+    }
+  } catch {}
+
+  // 先写出牌事件（供前端日志&手牌刷新）
+  if (moveKind === 'play') {
+    writeLine(res, { type:'event', kind:'play', seat, move:'play', cards: cardsArr, reason });
+  } else {
+    writeLine(res, { type:'event', kind:'play', seat, move:'pass', reason });
+  }
+  try { lastReason[seat] = null; } catch {}
+
+  // 再写一次中途画像（让雷达图实时滚动）
+  try {
+    const perSeat = [0,1,2].map(i => {
+      const srec = st[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
+      const p = Math.max(1, srec.plays || 0);
+      const agg  = clamp( ( (srec.bombs||0)*2 + (srec.rockets||0)*3 + Math.max(0, (srec.cards||0)/p - 2) ), 0, 5 );
+      const eff  = clamp( (srec.cards||0) / p, 0, 5 );
+      const cons = clamp( 5 - agg, 0, 5 );
+      const rob  = clamp( (landlordIdx === i ? 5 : 2), 0, 5 );
+      const coop = 2.5;
+      return { seat:i, scaled:{ coop, agg, cons, eff, rob } };
+    });
+    writeLine(res, { type:'event', kind:'stats', perSeat });
+  } catch {}
+};
+ };
 
 
       const lastReason: (string|null)[] = [null, null, null];
