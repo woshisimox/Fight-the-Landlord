@@ -251,36 +251,10 @@ for await (const ev of iter as any) {
       continue;
     }
 
-    if (ev?.type === 'turn') {
-  // === 统一的“看牌说话”逻辑（三家一致） ===
-  let seat = (ev as any).seat ?? (ev as any).player ?? (ev as any).index ?? 0;
-  seat = Math.max(0, Math.min(2, Number(seat) || 0));
-
-  // 优先从事件取牌，其次从 move.cards 兜底；仍为空则尝试使用刚才 bot 的返回
-  let cardsArr: string[] =
-    Array.isArray((ev as any).cards) ? (ev as any).cards
-    : (Array.isArray((ev as any).move?.cards) ? (ev as any).move.cards : []);
-
-  if ((!Array.isArray(cardsArr) || cardsArr.length === 0) && getLastMove) {
-    const lm = getLastMove(seat) as any;
-    if (lm?.move === 'play' && Array.isArray(lm.cards) && lm.cards.length > 0) {
-      cardsArr = lm.cards;
+        if (ev?.type === 'turn') {
+      // turn events are consumed via onMove; skip here
+      continue;
     }
-  }
-
-  const reason = lastReason[seat] || null;
-
-  if (Array.isArray(cardsArr) && cardsArr.length > 0) {
-    // 统计 & 事件
-    try {
-      agg[seat].plays++;
-      agg[seat].cards += cardsArr.length;
-    } catch {}
-    } else {
-    try { agg[seat].passes++; } catch {}
-    }
-  continue;
-}
     
     if (ev?.type === 'result') {
   // --- added: per-round radar stats event ---
