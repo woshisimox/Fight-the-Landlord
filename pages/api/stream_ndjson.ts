@@ -273,11 +273,11 @@ for await (const ev of iter as any) {
   if (Array.isArray(cardsArr) && cardsArr.length > 0) {
     // 统计 & 事件
     try {
-      st[seat].plays++;
-      st[seat].cards += cardsArr.length;
+      agg[seat].plays++;
+      agg[seat].cards += cardsArr.length;
     } catch {}
     } else {
-    try { st[seat].passes++; } catch {}
+    try { agg[seat].passes++; } catch {}
     }
   continue;
 }
@@ -286,7 +286,7 @@ for await (const ev of iter as any) {
   // --- added: per-round radar stats event ---
   try {
     const perSeat = [0,1,2].map(i => {
-      const s = st[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
+      const s = agg[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
       const p = Math.max(1, s.plays || 0);
       const agg  = clamp( ( (s.bombs||0)*2 + (s.rockets||0)*3 + Math.max(0, (s.cards||0)/p - 2) ), 0, 5 );
       const eff  = clamp( (s.cards||0) / p, 0, 5 );
@@ -351,6 +351,8 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
     for (let round = 1; round <= rounds; round++) {
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
       writeLine(res, { type:'event', kind:'round-start', round });
+      const agg = [0,1,2].map(()=>({ plays:0, passes:0, bombs:0, rockets:0, cards:0 }));
+
       const lastBotMove: any[] = [null, null, null];
       const onMove = (seat:number, mv:any)=>{
   if (!(seat>=0 && seat<3)) return;
@@ -360,20 +362,20 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
   const cardsArr = (moveKind === 'play') ? (mv.cards as string[]) : [];
   const reason = lastReason[seat] || null;
 
-  // 更新统计
+  // 统计（局内累计，供雷达图实时化）
   try {
     if (moveKind === 'play') {
-      st[seat].plays++;
-      st[seat].cards += cardsArr.length;
-      const t = (mv.type || mv.ptype || '').toString().toLowerCase();
-      if (t.includes('bomb'))   st[seat].bombs++;
-      if (t.includes('rocket')) st[seat].rockets++;
+      agg[seat].plays++;
+      agg[seat].cards += cardsArr.length;
+      const t = ((mv as any).type || (mv as any).ptype || '').toString().toLowerCase();
+      if (t.includes('bomb'))   agg[seat].bombs++;
+      if (t.includes('rocket')) agg[seat].rockets++;
     } else {
-      st[seat].passes++;
+      agg[seat].passes++;
     }
   } catch {}
 
-  // 先写出牌事件（供前端日志&手牌刷新）
+  // 写出牌事件（刷新手牌/日志）
   if (moveKind === 'play') {
     writeLine(res, { type:'event', kind:'play', seat, move:'play', cards: cardsArr, reason });
   } else {
@@ -384,7 +386,19 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
   // 再写一次中途画像（让雷达图实时滚动）
   try {
     const perSeat = [0,1,2].map(i => {
-      const srec = st[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
+      const a = agg[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
+      const p = Math.max(1, a.plays || 0);
+      const aggScore  = clamp( ( (a.bombs||0)*2 + (a.rockets||0)*3 + Math.max(0, (a.cards||0)/p - 2) ), 0, 5 );
+      const effScore  = clamp( (a.cards||0) / p, 0, 5 );
+      const consScore = clamp( 5 - aggScore, 0, 5 );
+      const robScore  = 2.5; // 局外不掌握地主索引，这里取中性；局末还有一次精确 stats
+      const coopScore = 2.5;
+      return { seat:i, scaled:{ coop:coopScore, agg:aggScore, cons:consScore, eff:effScore, rob:robScore } };
+    });
+    writeLine(res, { type:'event', kind:'stats', perSeat });
+  } catch {}
+};
+
       const p = Math.max(1, srec.plays || 0);
       const agg  = clamp( ( (srec.bombs||0)*2 + (srec.rockets||0)*3 + Math.max(0, (srec.cards||0)/p - 2) ), 0, 5 );
       const eff  = clamp( (srec.cards||0) / p, 0, 5 );
