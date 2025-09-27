@@ -244,16 +244,29 @@ async function runOneRoundWithGuard(
       continue;
     }
 
-    if (ev?.type==='turn') {
-      const { seat, move, cards, hand, totals } = ev;
-      const moveStr = stringifyMove({ move, cards });
+    if (ev?.type === 'turn') {
+      const { seat, move, cards } = ev as any;
       const reason = lastReason[seat] || null;
-      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, totals });
+      if (move === 'pass') {
+        writeLine(res, { type: 'event', kind: 'play', seat, move: 'pass', reason });
+      } else {
+        writeLine(res, { type: 'event', kind: 'play', seat, move: 'play', cards, reason });
+      }
       continue;
     }
 
-    if (ev?.type==='result') {
-      writeLine(res, { type:'result', ...ev, lastReason: [...lastReason] });
+    if (ev?.type === 'result') {
+      const deltaScores = Array.isArray((ev as any).deltaScores)
+        ? (ev as any).deltaScores
+        : (Array.isArray((ev as any).delta) ? (ev as any).delta : [0,0,0]);
+      writeLine(res, {
+        type: 'result',
+        winner: (ev as any).winner ?? null,
+        landlordIdx: (ev as any).landlordIdx ?? null,
+        multiplier: (ev as any).multiplier ?? 1,
+        deltaScores,
+      });
+      writeLine(res, { type: 'event', kind: 'round-end', round });
       break;
     }
 

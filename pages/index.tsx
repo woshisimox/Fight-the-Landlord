@@ -700,7 +700,35 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 出/过 --------
+              
+              // -------- 兼容旧协议：type:'turn' --------
+              if (m.type === 'turn') {
+                if (m.move === 'pass') {
+                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  lastReasonRef.current[m.seat] = null;
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason }];
+                  nextLog = [...nextLog, `${seatName(m.seat)} 过${reason ? `（${reason}）` : ''}`];
+                } else {
+                  const pretty: string[] = [];
+                  const seat = m.seat as number;
+                  const cards: string[] = m.cards || [];
+                  const nh = (nextHands && (nextHands as any[])?.length === 3 ? nextHands : [[], [], []]).map((x: any) => [...x]);
+                  for (const rawCard of cards) {
+                    const options = candDecorations(rawCard);
+                    const chosen = options.find((d: string) => nh[seat].includes(d)) || options[0];
+                    const k = nh[seat].indexOf(chosen);
+                    if (k >= 0) nh[seat].splice(k, 1);
+                    pretty.push(chosen);
+                  }
+                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  lastReasonRef.current[m.seat] = null;
+                  nextHands = nh;
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason }];
+                  nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reason ? `（理由：${reason}）` : ''}`];
+                }
+                continue;
+              }
+// -------- 出/过 --------
               if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
