@@ -613,7 +613,6 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
   const cardsArr = (moveKind === 'play') ? (mv.cards as string[]) : [];
   const reason = lastReason[seat] || null;
 
-  // 统计
   try {
     if (moveKind === 'play') {
       _agg[seat].plays++;
@@ -626,7 +625,6 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
     }
   } catch {}
 
-  // 写出牌事件
   if (moveKind === 'play') {
     writeLine(res, { type:'event', kind:'play', seat, move:'play', cards: cardsArr, reason });
   } else {
@@ -634,9 +632,8 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
   }
   try { lastReason[seat] = null; } catch {}
 
-  // 画像（中途刷新）
   try {
-    const perSeat = [0,1,2].map(i => {
+// removed duplicate perSeat block line
       const s = _agg[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
       const p = Math.max(1, s.plays || 0);
       const aggScore  = clamp( ((s.bombs||0)*2 + (s.rockets||0)*3 + Math.max(0, (s.cards||0)/p - 2)), 0, 5 );
@@ -648,11 +645,11 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
     });
     writeLine(res, { type:'event', kind:'stats', perSeat });
   } catch {}
-};
+};;
 
-      const p = Math.max(1, a.plays || 0);
-      const aggScore  = clamp( ( (a.bombs||0)*2 + (a.rockets||0)*3 + Math.max(0, (a.cards||0)/p - 2) ), 0, 5 );
-      const effScore  = clamp( (a.cards||0) / p, 0, 5 );
+      const p = Math.max(1, s.plays || 0);
+      const aggScore  = clamp( ( (s.bombs||0)*2 + (s.rockets||0)*3 + Math.max(0, (s.cards||0)/p - 2) ), 0, 5 );
+      const effScore  = clamp( (s.cards||0) / p, 0, 5 );
       const consScore = clamp( 5 - aggScore, 0, 5 );
       const robScore  = 2.5; // 局外不掌握地主索引，这里取中性；局末还有一次精确 stats
       const coopScore = 2.5;
