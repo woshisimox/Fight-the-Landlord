@@ -447,6 +447,205 @@ function LivePanel(props: LiveProps) {
     };
   };
 
+
+  /* ===== Radar（战术画像）本地存档（新增） ===== */
+  type RadarAgg = { scores: Score5; count: number };
+  type RadarStoreEntry = {
+    id: string; // 身份：choice|model|base（沿用 seatIdentity）
+    overall?: RadarAgg | null;  // 不区分身份时累计
+    roles?: { landlord?: RadarAgg | null; farmer?: RadarAgg | null }; // 按角色分档
+    meta?: { choice?: string; model?: string; httpBase?: string };
+  };
+  type RadarStore = {
+    schema: 'ddz-radar@1';
+    updatedAt: string;
+    players: Record<string, RadarStoreEntry>;
+  };
+  const RADAR_STORE_KEY = 'ddz_radar_store_v1';
+
+  const ensureScore5 = (x:any): Score5 => ({
+    coop: Number(x?.coop ?? 2.5),
+    agg : Number(x?.agg  ?? 2.5),
+    cons: Number(x?.cons ?? 2.5),
+    eff : Number(x?.eff  ?? 2.5),
+    rob : Number(x?.rob  ?? 2.5),
+  });
+  const ensureRadarAgg = (x:any): RadarAgg => ({
+    scores: ensureScore5(x?.scores),
+    count : Math.max(0, Number(x?.count)||0),
+  });
+
+  const emptyRadarStore = (): RadarStore =>
+    ({ schema:'ddz-radar@1', updatedAt:new Date().toISOString(), players:{} });
+
+  const readRadarStore = (): RadarStore => {
+    try {
+      const raw = localStorage.getItem(RADAR_STORE_KEY);
+      if (!raw) return emptyRadarStore();
+      const j = JSON.parse(raw);
+      if (j?.schema === 'ddz-radar@1' && j?.players) return j as RadarStore;
+    } catch {}
+    return emptyRadarStore();
+  };
+  const writeRadarStore = (s: RadarStore) => {
+    try { s.updatedAt=new Date().toISOString();
+      localStorage.setItem(RADAR_STORE_KEY, JSON.stringify(s));
+    } catch {}
+  };
+
+  /** 用“均值 + 次数”合并（与前端 mean 聚合一致） */
+  function mergeRadarAgg(prev: RadarAgg|null|undefined, inc: Score5): RadarAgg {
+    if (!prev) return { scores: { ...inc }, count: 1 };
+    const c = prev.count;
+    const mean = (a:number,b:number)=> (a*c + b)/(c+1);
+    return {
+      scores: {
+        coop: mean(prev.scores.coop, inc.coop),
+        agg : mean(prev.scores.agg , inc.agg ),
+        cons: mean(prev.scores.cons, inc.cons),
+        eff : mean(prev.scores.eff , inc.eff ),
+        rob : mean(prev.scores.rob , inc.rob ),
+      },
+      count: c + 1,
+    };
+  }
+
+  // —— Radar 存档：读写/应用/上传/导出 —— //
+  const radarStoreRef = useRef<RadarStore>(emptyRadarStore());
+  useEffect(()=>{ try { radarStoreRef.current = readRadarStore(); } catch {} }, []);
+  const radarFileRef = useRef<HTMLInputElement|null>(null);
+
+  /** 取指定座位的（按角色可选）Radar 累计 */
+  const resolveRadarForIdentity = (id:string, role?: 'landlord'|'farmer'): RadarAgg | null => {
+    const p = radarStoreRef.current.players[id];
+    if (!p) return null;
+    if (role && p.roles?.[role]) return ensureRadarAgg(p.roles[role]);
+    if (p.overall) return ensureRadarAgg(p.overall);
+    const L = p.roles?.landlord, F = p.roles?.farmer;
+    if (L && F) {
+      const ll = ensureRadarAgg(L), ff = ensureRadarAgg(F);
+      const tot = Math.max(1, ll.count + ff.count);
+      const w = (a:number,b:number,ca:number,cb:number)=> (a*ca + b*cb)/tot;
+      return {
+        scores: {
+          coop: w(ll.scores.coop, ff.scores.coop, ll.count, ff.count),
+          agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
+          cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
+          eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
+          rob : w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
+        },
+        count: tot,
+      };
+    }
+    if (L) return ensureRadarAgg(L);
+    if (F) return ensureRadarAgg(F);
+    return null;
+  };
+
+  /** 根据当前地主身份（已知/未知）把存档套到 UI 的 aggStats/aggCount */
+  const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
+    const ids = [0,1,2].map(seatIdentity);
+    const s3 = [0,1,2].map(i=>{
+      const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
+      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 }, count: 0 };
+    });
+    setAggStats(s3.map(x=>({ ...x.scores })));
+    setAggCount(Math.max(s3[0].count, s3[1].count, s3[2].count));
+    setLog(l => [...l, `【Radar】已从存档应用（${why}，地主=${lord ?? '未知'}）`]);
+  };
+
+  /** 在收到一帧“本局画像 s3[0..2]”后，写入 Radar 存档（overall + 角色分档） */
+  const updateRadarStoreFromStats = (s3: Score5[], lord: number | null) => {
+    const ids = [0,1,2].map(seatIdentity);
+    for (let i=0;i<3;i++){
+      const id = ids[i];
+      const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
+      entry.overall = mergeRadarAgg(entry.overall, s3[i]);
+      if (lord!=null) {
+        const role: 'landlord' | 'farmer' = (i===lord ? 'landlord' : 'farmer');
+        entry.roles = entry.roles || {};
+        entry.roles[role] = mergeRadarAgg(entry.roles[role], s3[i]);
+      }
+      const choice = props.seats[i];
+      const model  = (props.seatModels[i] || '').trim();
+      const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
+      entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
+      radarStoreRef.current.players[id] = entry;
+    }
+    writeRadarStore(radarStoreRef.current);
+  };
+
+  /** 上传 Radar 存档（JSON） */
+  const handleRadarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    try {
+      const text = await f.text();
+      const j = JSON.parse(text);
+      const store: RadarStore = emptyRadarStore();
+
+      if (Array.isArray(j?.players)) {
+        for (const p of j.players) {
+          const id = p.id || p.identity || p.key; if (!id) continue;
+          store.players[id] = {
+            id,
+            overall: p.overall ? ensureRadarAgg(p.overall) : null,
+            roles: {
+              landlord: p.roles?.landlord ? ensureRadarAgg(p.roles.landlord) : (p.landlord ? ensureRadarAgg(p.landlord) : null),
+              farmer  : p.roles?.farmer   ? ensureRadarAgg(p.roles.farmer)   : (p.farmer   ? ensureRadarAgg(p.farmer)   : null),
+            },
+            meta: p.meta || {},
+          };
+        }
+      } else if (j?.players && typeof j.players === 'object') {
+        for (const [id, p] of Object.entries<any>(j.players)) {
+          store.players[id] = {
+            id,
+            overall: p?.overall ? ensureRadarAgg(p.overall) : null,
+            roles: {
+              landlord: p?.roles?.landlord ? ensureRadarAgg(p.roles.landlord) : null,
+              farmer  : p?.roles?.farmer   ? ensureRadarAgg(p.roles.farmer)   : null,
+            },
+            meta: p?.meta || {},
+          };
+        }
+      } else if (Array.isArray(j)) {
+        for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p as any; }
+      } else if (j?.id) {
+        store.players[j.id] = j as any;
+      }
+
+      radarStoreRef.current = store; writeRadarStore(store);
+      setLog(l => [...l, `【Radar】已上传存档（${Object.keys(store.players).length} 位）`]);
+    } catch (err:any) {
+      setLog(l => [...l, `【Radar】上传解析失败：${err?.message || err}`]);
+    } finally { e.target.value = ''; }
+  };
+
+  /** 导出当前 Radar 存档 */
+  const handleRadarSave = () => {
+    if (aggStatsRef.current) {
+      const ids = [0,1,2].map(seatIdentity);
+      for (let i=0;i<3;i++){
+        const id = ids[i];
+        const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
+        entry.overall = mergeRadarAgg(entry.overall, aggStatsRef.current[i]);
+        radarStoreRef.current.players[id] = entry;
+      }
+      writeRadarStore(radarStoreRef.current);
+    }
+
+    const blob = new Blob([JSON.stringify(radarStoreRef.current, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'radar_store.json'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 1200);
+    setLog(l => [...l, '【Radar】已导出当前存档。']);
+  };
+
+  /** 手动刷新：按当前地主身份（未知则用 overall）把存档套到面板 */
+  const handleRadarRefresh = () => {
+    applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
+  };
+
   // 累计画像
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
   const [alpha, setAlpha] = useState<number>(0.35);
@@ -557,9 +756,13 @@ function LivePanel(props: LiveProps) {
     let dogId: any = null;
 
       setLog([]); lastReasonRef.current = [null, null, null];
-      const specs = buildSeatSpecs();
+      const baseSpecs = buildSeatSpecs();
+      const startShift = ((labelRoundNo - 1) % 3 + 3) % 3;
+      const specs = [0,1,2].map(i => baseSpecs[(i + startShift) % 3]);
+      const toUiSeat = (j:number) => (j + startShift) % 3;
+      const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
-      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(specs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
+      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
@@ -624,7 +827,37 @@ function LivePanel(props: LiveProps) {
           let nextAggCount = aggCountRef.current;
 
           for (const raw of batch) {
-            const m: any = raw;
+            let m: any = raw;
+            // Remap engine->UI indices when startShift != 0
+            if (startShift) {
+              const mapMsg = (obj:any)=>{
+                const out:any = { ...obj };
+                const mapSeat = (x:any)=> (typeof x==='number' ? toUiSeat(x) : x);
+                const mapArr = (a:any)=> (Array.isArray(a) && a.length===3 ? remap3(a) : a);
+                out.seat = mapSeat(out.seat);
+                if ('landlordIdx' in out) out.landlordIdx = mapSeat(out.landlordIdx);
+                if ('landlord' in out) out.landlord = mapSeat(out.landlord);
+                if ('winner' in out) out.winner = mapSeat(out.winner);
+                if ('hands' in out) out.hands = mapArr(out.hands);
+                if ('totals' in out) out.totals = mapArr(out.totals);
+                if ('delta' in out) out.delta = mapArr(out.delta);
+                if ('ratings' in out) out.ratings = mapArr(out.ratings);
+                if (out.payload) {
+                  const p:any = { ...out.payload };
+                  if ('seat' in p) p.seat = mapSeat(p.seat);
+                  if ('landlord' in p) p.landlord = mapSeat(p.landlord);
+                  if ('hands' in p) p.hands = mapArr(p.hands);
+                  if ('totals' in p) p.totals = mapArr(p.totals);
+                  out.payload = p;
+                }
+                return out;
+              };
+              m = mapMsg(raw);
+            } else {
+              const m_any:any = raw; m = m_any;
+            }
+
+            // m already defined above
             try {
               // -------- TS 帧（后端主动提供） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
@@ -643,6 +876,11 @@ function LivePanel(props: LiveProps) {
 
               // -------- 事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
+                // 清空上一局残余手牌/出牌；等待 init/hands 再填充
+                nextPlays = [];
+                nextHands = [[], [], []] as any;
+                nextLandlord = null;
+
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
               }
@@ -653,26 +891,40 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 初始发牌/地主 --------
-              const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
-              const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
-              if (hasHands) {
-                nextPlays = []; nextWinner = null; nextDelta = null; nextMultiplier = 1;
-                const decorated: string[][] = (rh as string[][]).map(decorateHandCycle);
-                nextHands = decorated;
+              // -------- 初始发牌（仅限 init 帧） --------
+              if (m.type === 'init') {
+                const rh = m.hands;
+                if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
+                  nextPlays = [];
+                  nextWinner = null;
+                  nextDelta = null;
+                  nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
+                  nextHands = (rh as string[][]).map(decorateHandCycle);
 
-                const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
-                nextLandlord = lord;
-                nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?'}为地主`];
+                  const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
+                  nextLandlord = lord;
+                  nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
 
-                // 一旦确认地主，按角色（地主/农民）应用存档
-                try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
-
-                lastReasonRef.current = [null, null, null];
+                  try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
+                  lastReasonRef.current = [null, null, null];
+                }
                 continue;
               }
 
-              // -------- AI 过程日志 --------
+              
+              // -------- 首次手牌兜底注入（若没有 init 帧但消息里带了 hands） --------
+              {
+                const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+                if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
+                  nextHands = (rh0 as string[][]).map(decorateHandCycle);
+                  const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
+                  if (lord2 != null) nextLandlord = lord2;
+                  // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
+                  nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
+                }
+              }
+
+// -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
                 nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
@@ -689,6 +941,7 @@ function LivePanel(props: LiveProps) {
 
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'rob') {
+  if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
                 nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
                 continue;
               }
@@ -700,35 +953,7 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              
-              // -------- 兼容旧协议：type:'turn' --------
-              if (m.type === 'turn') {
-                if (m.move === 'pass') {
-                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
-                  lastReasonRef.current[m.seat] = null;
-                  nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason }];
-                  nextLog = [...nextLog, `${seatName(m.seat)} 过${reason ? `（${reason}）` : ''}`];
-                } else {
-                  const pretty: string[] = [];
-                  const seat = m.seat as number;
-                  const cards: string[] = m.cards || [];
-                  const nh = (nextHands && (nextHands as any[])?.length === 3 ? nextHands : [[], [], []]).map((x: any) => [...x]);
-                  for (const rawCard of cards) {
-                    const options = candDecorations(rawCard);
-                    const chosen = options.find((d: string) => nh[seat].includes(d)) || options[0];
-                    const k = nh[seat].indexOf(chosen);
-                    if (k >= 0) nh[seat].splice(k, 1);
-                    pretty.push(chosen);
-                  }
-                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
-                  lastReasonRef.current[m.seat] = null;
-                  nextHands = nh;
-                  nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason }];
-                  nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reason ? `（理由：${reason}）` : ''}`];
-                }
-                continue;
-              }
-// -------- 出/过 --------
+              // -------- 出/过 --------
               if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
@@ -774,13 +999,20 @@ function LivePanel(props: LiveProps) {
                   ds[(2 - L + 3) % 3],
                 ];
                 let nextWinnerLocal     = m.winner ?? nextWinner ?? null;
-                nextMultiplier = m.multiplier ?? nextMultiplier ?? 1;
-                nextDelta      = rot;
-                nextTotals     = [
-                  nextTotals[0] + rot[0],
-                  nextTotals[1] + rot[1],
-                  nextTotals[2] + rot[2]
-                ] as any;
+                const effMult = (m.multiplier ?? (nextMultiplier ?? 1));
+// 判定 rot 是否已经按倍数放大：基分 |-2|+|+1|+|+1| = 4
+const sumAbs = Math.abs(rot[0]) + Math.abs(rot[1]) + Math.abs(rot[2]);
+const needScale = effMult > 1 && (sumAbs === 4 || (sumAbs % effMult !== 0));
+const rot2 = needScale
+  ? (rot.map(v => (typeof v === 'number' ? v * effMult : v)) as [number, number, number])
+  : rot;
+nextMultiplier = effMult;
+nextDelta      = rot2;
+nextTotals     = [
+  nextTotals[0] + rot2[0],
+  nextTotals[1] + rot2[1],
+  nextTotals[2] + rot2[2]
+] as any;
 
                 // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
                 if (nextWinnerLocal == null) {
@@ -827,8 +1059,7 @@ function LivePanel(props: LiveProps) {
               // -------- 画像统计（两种形态） --------
               const isStatsTop = (m.type === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
               const isStatsEvt = (m.type === 'event' && m.kind === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
-              const isStatsAnon = (!m.type && !m.kind && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
-              if (isStatsTop || isStatsEvt || isStatsAnon) {
+              if (isStatsTop || isStatsEvt) {
                 seenStatsRef.current = true;
                 const arr = (m.perSeat ?? m.seats) as any[];
                 const s3 = [0,1,2].map(i=>{
@@ -843,6 +1074,9 @@ function LivePanel(props: LiveProps) {
                   };
                 }) as Score5[];
 
+                // 同步写入 Radar 本地存档（overall + 角色分档）
+                updateRadarStoreFromStats(s3, nextLandlord);
+
                 const mode  = aggModeRef.current;
                 const a     = alphaRef.current;
 
@@ -852,8 +1086,6 @@ function LivePanel(props: LiveProps) {
                 } else {
                   nextAggStats = nextAggStats.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
                   nextAggCount = nextAggCount + 1;
-                setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
-
                 }
 
                 const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
@@ -979,6 +1211,15 @@ function LivePanel(props: LiveProps) {
 
       {/* ======= 积分下面、手牌上面：雷达图 ======= */}
       <Section title="战术画像（累计，0~5）">
+        {/* Radar：上传 / 存档 / 刷新 */}
+        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
+          <input ref={radarFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleRadarUpload} />
+          <button onClick={()=>radarFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
+          <button onClick={handleRadarSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+          <button onClick={handleRadarRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
+          <div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
+        </div>
+
         <RadarPanel
           aggStats={aggStats}
           aggCount={aggCount}
