@@ -268,6 +268,14 @@ for await (const ev of iter as any) {
     cardsArr = (ev as any).cards;
   }
 
+// normalise 'mv' using presence of cards
+let _mv = mv as any;
+if (_mv !== 'play' && _mv !== 'pass') {
+  _mv = (Array.isArray(cardsArr) && cardsArr.length) ? 'play' : 'pass';
+}
+if (_mv === 'pass' && Array.isArray(cardsArr) && cardsArr.length) {
+  _mv = 'play';
+}
   const reason = lastReason[seat] || null;
   if (_mv === 'pass') {
     // stats
