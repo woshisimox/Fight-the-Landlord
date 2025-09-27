@@ -263,7 +263,7 @@ for await (const ev of iter as any) {
   // --- added: per-round radar stats event ---
   try {
     const perSeat = [0,1,2].map(i => {
-      const s = agg[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
+      const s = ((globalThis as any).__roundAgg || [0,1,2].map(()=>({plays:0,passes:0,bombs:0,rockets:0,cards:0})))[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
       const p = Math.max(1, s.plays || 0);
       const aggScore  = clamp( ( (s.bombs||0)*2 + (s.rockets||0)*3 + Math.max(0, (s.cards||0)/p - 2) ), 0, 5 );
       const eff  = clamp( (s.cards||0) / p, 0, 5 );
@@ -330,6 +330,9 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
       writeLine(res, { type:'event', kind:'round-start', round });
       const lastBotMove: any[] = [null, null, null];
       const onMove = (seat:number, mv:any)=>{
+        const g:any = (globalThis as any);
+        if (!g.__roundAgg) g.__roundAgg = [0,1,2].map(()=>({ plays:0, passes:0, bombs:0, rockets:0, cards:0 }));
+        const _agg = g.__roundAgg;
   if (!(seat>=0 && seat<3)) return;
   lastBotMove[seat] = mv;
 
@@ -340,13 +343,13 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
   // 统计（局内累计，供雷达图实时化）
   try {
     if (moveKind === 'play') {
-      agg[seat].plays++;
-      agg[seat].cards += cardsArr.length;
+      _agg[seat].plays++;
+      _agg[seat].cards += cardsArr.length;
       const t = ((mv as any).type || (mv as any).ptype || '').toString().toLowerCase();
-      if (t.includes('bomb'))   agg[seat].bombs++;
-      if (t.includes('rocket')) agg[seat].rockets++;
+      if (t.includes('bomb'))   _agg[seat].bombs++;
+      if (t.includes('rocket')) _agg[seat].rockets++;
     } else {
-      agg[seat].passes++;
+      _agg[seat].passes++;
     }
   } catch {}
 
@@ -361,7 +364,7 @@ writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2
   // 再写一次中途画像（让雷达图实时滚动）
   try {
     const perSeat = [0,1,2].map(i => {
-      const a = agg[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
+      const a = _agg[i] || {plays:0,passes:0,bombs:0,rockets:0,cards:0};
       const p = Math.max(1, a.plays || 0);
       const aggScore  = clamp( ( (a.bombs||0)*2 + (a.rockets||0)*3 + Math.max(0, (a.cards||0)/p - 2) ), 0, 5 );
       const effScore  = clamp( (a.cards||0) / p, 0, 5 );
