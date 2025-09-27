@@ -562,9 +562,8 @@ function LivePanel(props: LiveProps) {
       const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
       entry.overall = mergeRadarAgg(entry.overall, s3[i]);
       if (lord!=null) {
-        
+        const role: 'landlord' | 'farmer' = (i===lord ? 'landlord' : 'farmer');
         entry.roles = entry.roles || {};
-		const role: 'landlord' | 'farmer' = (i === lord ? 'landlord' : 'farmer');
         entry.roles[role] = mergeRadarAgg(entry.roles[role], s3[i]);
       }
       const choice = props.seats[i];
@@ -887,23 +886,25 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 
-              // -------- 初始发牌/地主 --------
-              const rh = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
-              const hasHands = Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0]);
-              if (hasHands) {
-                nextPlays = []; nextWinner = null; nextDelta = null; nextMultiplier = 1;
-                const decorated: string[][] = (rh as string[][]).map(decorateHandCycle);
-                nextHands = decorated;
+              // -------- 初始发牌（仅限 init 帧） --------
+              if (m.type === 'init') {
+                const rh = m.hands;
+                if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
+                  nextPlays = [];
+                  nextWinner = null;
+                  nextDelta = null;
+                  nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
+                  nextHands = (rh as string[][]).map(decorateHandCycle);
 
-                const lord = m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
-                nextLandlord = lord;
-                nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?'}为地主`];
+                  const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
+                  nextLandlord = lord;
+                  nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
 
-                // 一旦确认地主，按角色（地主/农民）应用存档
-                try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
-
-                lastReasonRef.current = [null, null, null];
+                  try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
+                  lastReasonRef.current = [null, null, null];
+                }
                 continue;
+              }
               }
 
               // -------- AI 过程日志 --------
