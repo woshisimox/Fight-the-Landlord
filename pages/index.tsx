@@ -1,5 +1,9 @@
 // pages/index.tsx
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 're
+          let nextScores = scoreSeriesRef.current.map(x => [...x]);
+          let sawAnyTurn = false;
+          let nextCuts = roundCutsRef.current.slice();
+act';
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
@@ -247,7 +251,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
 }
 
 /* ================ 实时曲线：每手牌得分 ================= */
-function ScoreTimeline({ series, height=220 }: { series:(number|null)[][]; height?:number }) {
+function ScoreTimeline({ series, bands=[], labels=['甲','乙','丙'], height=220 }: { series:(number|null)[][]; bands?:number[]; labels?:string[]; height?:number }) {
   const ref = useRef<HTMLDivElement|null>(null);
   const [w, setW] = useState(600);
   useEffect(()=>{
@@ -259,6 +263,11 @@ function ScoreTimeline({ series, height=220 }: { series:(number|null)[][]; heigh
 
   const data = series || [[],[],[]];
   const n = Math.max(data[0]?.length||0, data[1]?.length||0, data[2]?.length||0);
+  const cuts = Array.isArray(bands) && bands.length ? [...bands] : [0];
+  cuts.sort((a,b)=>a-b);
+  if (cuts[0] !== 0) cuts.unshift(0);
+  if (cuts[cuts.length-1] !== n) cuts.push(n);
+
   const values:number[] = [];
   for (const arr of data) for (const v of (arr||[])) if (typeof v==='number') values.push(v);
   const vmin = values.length ? Math.min(...values) : -5;
@@ -299,7 +308,18 @@ function ScoreTimeline({ series, height=220 }: { series:(number|null)[][]; heigh
     <div ref={ref} style={{ width:'100%' }}>
       <svg width={width} height={heightPx} style={{ display:'block', width:'100%' }}>
         <g transform={`translate(${left},${top})`}>
-          {/* 网格 + 轴 */}
+          
+          {/* 局间底色交替 */}
+          {cuts.slice(0, Math.max(0, cuts.length-1)).map((st, i)=>{
+            const ed = cuts[i+1];
+            if (ed <= st) return null;
+            const x0 = x(st);
+            const x1 = x(Math.max(st, ed-1));
+            const w  = Math.max(0.5, x1 - x0);
+            const fill = (i % 2 === 0) ? '#ffffff' : '#f0f7ff';
+            return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
+          })}
+{/* 网格 + 轴 */}
           <line x1={0} y1={ih} x2={iw} y2={ih} stroke="#e5e7eb" />
           <line x1={0} y1={0} x2={0} y2={ih} stroke="#e5e7eb" />
           {yTicks.map((v,i)=>(
@@ -408,6 +428,9 @@ function LivePanel(props: LiveProps) {
   const [finishedCount, setFinishedCount] = useState(0);
   // —— 每手牌得分（动态曲线） ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
+  const [roundCuts, setRoundCuts] = useState<number[]>([0]);
+  const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
+
   const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
 
 
@@ -775,6 +798,62 @@ function LivePanel(props: LiveProps) {
   const roundFinishedRef = useRef<boolean>(false);
   const seenStatsRef     = useRef<boolean>(false);
 
+  
+  const scoreFileRef = useRef<HTMLInputElement|null>(null);
+
+  const agentIdForIndex = (i:number) => {
+    const choice = props.seats[i] as BotChoice;
+    const label = choiceLabel(choice);
+    if (choice.startsWith('built-in')) return label;
+    const model = (props.seatModels?.[i]) || defaultModelFor(choice);
+    return `${label}:${model}`;
+  };
+
+  const handleScoreSave = () => {
+    const agents = [0,1,2].map(agentIdForIndex);
+    const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
+    const payload = {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      agents,
+      rounds: roundCuts,
+      n,
+      seriesBySeat: scoreSeries,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  };
+
+  const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const f = e.target.files?.[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const j = JSON.parse(String(rd.result||'{}'));
+          const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
+          const targetAgents = [0,1,2].map(agentIdForIndex);
+          const mapped:(number|null)[][] = [[],[],[]];
+          for (let i=0;i<3;i++){
+            const idx = fileAgents.indexOf(targetAgents[i]);
+            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
+          }
+          setScoreSeries(mapped);
+          if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
+        } catch (err) {
+          console.error('[score upload] parse error', err);
+        }
+      };
+      rd.readAsText(f);
+    } catch (err) {
+      console.error('[score upload] error', err);
+    } finally {
+      if (scoreFileRef.current) scoreFileRef.current.value = '';
+    }
+  };
+
   const start = async () => {
     if (running) return;
     if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
@@ -997,8 +1076,13 @@ function LivePanel(props: LiveProps) {
                 const rh = m.hands;
                 if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
                   nextPlays = [];
-                  nextScores = [[],[],[]];
+                  {
+                    const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
+                    if (nextCuts.length === 0) nextCuts = [n0];
+                    else if (nextCuts[nextCuts.length-1] !== n0) nextCuts = [...nextCuts, n0];
+                  }
 
+                  
                   nextWinner = null;
                   nextDelta = null;
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
@@ -1236,7 +1320,8 @@ nextTotals     = [
             } catch (e) { console.error('[ingest:batch]', e, raw); }
           }
 
-                    setScoreSeries(nextScores);
+                    setRoundCuts(nextCuts);
+          setScoreSeries(nextScores);
 setHands(nextHands); setPlays(nextPlays);
           setTotals(nextTotals); setFinishedCount(nextFinished);
           setLog(nextLog); setLandlord(nextLandlord);
@@ -1366,8 +1451,14 @@ setHands(nextHands); setPlays(nextPlays);
         />
       
       <Section title="出牌评分（每局动态）">
+        <div style={{ display:'flex', gap:8, alignItems:'center', margin:'8px 0 12px' }}>
+          <input ref={scoreFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleScoreUpload} />
+          <button onClick={()=>scoreFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
+          <button onClick={handleScoreSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+        </div>
+
         <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始自动清零；出牌（含过牌）按时间推进绘制。过牌没有分数会留空。</div>
-        <ScoreTimeline series={scoreSeries} height={240} />
+        <ScoreTimeline series={scoreSeries} bands={roundCuts} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
       </Section>
 </Section>
 
