@@ -1,45 +1,41 @@
 // lib/bots/deepseek_bot.ts
+import { extractFirstJsonObject, nonEmptyReason } from './util';
+
+type BotMove =
+  | { move: 'pass'; reason?: string }
+  | { move: 'play'; cards: string[]; reason?: string };
+type BotCtx = { hands: string[]; require?: any; canPass: boolean; policy?: any };
+type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
+
+// 简易兜底（当上游 API 出错时）：
+// - 若允许过牌：直接过牌
+// - 否则：打出第一张手牌（可能不是最优，但可让引擎继续运行）
+function fallbackMove(ctx: BotCtx, reason: string): BotMove {
+  if (ctx && ctx.canPass) return { move: 'pass', reason };
+  const first = Array.isArray(ctx?.hands) && ctx.hands.length ? ctx.hands[0] : '3';
+  return { move: 'play', cards: [first], reason };
+}
+
 export function DeepseekBot({ apiKey, model }: { apiKey?: string; model?: string }) {
   const endpoint = 'https://api.deepseek.com/v1/chat/completions';
   const mdl = (model && String(model).trim()) || 'deepseek-chat';
 
-  function parseOut(txt: string): any {
+  return async function bot(ctx: BotCtx): Promise<BotMove> {
     try {
-      const m = txt.match(/\{[\s\S]*\}/);
-      const obj = JSON.parse(m ? m[0] : txt);
-      return obj && typeof obj === 'object' ? obj : null;
-    } catch { return null; }
-  }
+      if (!apiKey) throw new Error('DeepSeek API key 未配置');
 
-  return async (ctx: any) => {
-    try {
-      if (!apiKey) {
-        return { move: 'pass', reason: '外部AI(deepseek)未接入后端，已回退内建（GreedyMax）' };
-      }
-      const cands: any[] = ctx?.candidates ?? ctx?.legalMoves ?? ctx?.legal ?? [];
       const prompt = [
-        { role: 'system', content: 'You are a Dou Dizhu assistant. Reply ONLY with strict JSON.' },
+        { role: 'system', content: 'Only reply with a strict JSON object for the move.' },
         { role: 'user', content:
-`You are deciding ONE move for the Chinese card game Dou Dizhu (Fight the Landlord).
-Game state (JSON):
-${JSON.stringify({
-  landlord: ctx?.landlord,
-  seat: ctx?.seat,
-  lead: ctx?.lead,
-  lastTrick: ctx?.lastTrick ?? null,
-  candidates: cands,
-  seen: (Array.isArray((ctx as any).seen)?(ctx as any).seen:[]),
-  seenBySeat: (Array.isArray((ctx as any).seenBySeat)?(ctx as any).seenBySeat:[[],[],[]]),
-  seatInfo: { seat:(ctx as any).seat, landlord:(ctx as any).landlord, leader:(ctx as any).leader, trick:(ctx as any).trick }
-}).slice(0, 6000)}
-
-Rules:
-- Choose exactly ONE element from "candidates" as your action.
-- If you cannot beat, choose {"move":"pass"}.
-- If you play, respond as {"move":"play","cards":<the chosen candidate>,"reason":"short why"}.
-- If pass, respond as {"move":"pass","reason":"short why"}.
-Return JSON only.` }
-      ];
+          `你是斗地主出牌助手。必须只输出一个 JSON 对象：\n`+
+          `{ "move": "play|pass", "cards": ["A","A"], "reason": "简要理由" }\n\n`+
+          `手牌：${ctx.hands.join('')}\n`+
+          `需跟：${ctx.require?JSON.stringify(ctx.require):'null'}\n`+
+          `可过：${ctx.canPass?'true':'false'}\n`+
+          `策略：${ctx.policy}\n`+
+          `只能出完全合法的牌型；若必须跟牌则给出能压住的最优解。请仅返回严格的 JSON：{"move":"play"|"pass","cards":string[],"reason":string}。`
+        }
+      ] as any[];
 
       const resp = await fetch(endpoint, {
         method: 'POST',
@@ -47,20 +43,22 @@ Return JSON only.` }
           'content-type': 'application/json',
           'authorization': `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ model: mdl, messages: prompt, temperature: 0.3, stream: false })
+        body: JSON.stringify({ model: mdl, temperature: 0.2, messages: prompt, stream: false })
       });
-      const j = await resp.json();
+      if (!resp.ok) throw new Error('HTTP '+resp.status+' '+(await resp.text()).slice(0,200));
+      const j: any = await resp.json();
       const txt = j?.choices?.[0]?.message?.content || '';
-      const parsed = parseOut(txt) || {};
-      const mv = (parsed.move || '').toLowerCase();
+      const parsed: any = extractFirstJsonObject(String(txt)) || {};
+      const mv = parsed.move === 'pass' ? 'pass' : 'play';
+      const cards: string[] = Array.isArray(parsed.cards) ? parsed.cards : [];
+      const reason = nonEmptyReason(parsed.reason, 'DeepSeek');
 
-      if (mv === 'play' && Array.isArray(parsed.cards) && parsed.cards.length) {
-        const cards = parsed.cards;
-        return { move: 'play', cards, reason: parsed.reason || 'DeepSeek' };
-      }
-      return { move: 'pass', reason: parsed.reason || 'DeepSeek-pass' };
-    } catch (err: any) {
-      return { move: 'pass', reason: 'DeepSeek 调用失败：' + (err?.message || String(err)) };
+      if (mv === 'pass') return { move:'pass', reason };
+      if (cards.length) return { move:'play', cards, reason };
+      return fallbackMove(ctx, 'DeepSeek 返回不含有效 cards，已回退');
+    } catch (e: any) {
+      const reason = `DeepSeek 调用失败：${e?.message || e}，已回退`;
+      return fallbackMove(ctx, reason);
     }
   };
 }

@@ -1,24 +1,35 @@
-export function extractFirstJsonObject(text:string){try{return JSON.parse(text)}catch{}const s=text.indexOf('{');const e=text.lastIndexOf('}');if(s>=0&&e>s){try{return JSON.parse(text.slice(s,e+1))}catch{}}return null;} export function nonEmptyReason(r?:string,p?:string){const s=(r??'').trim();return s||((p?p:'AI')+' 已调用');}
+// lib/bots/util.ts — consolidated, single-definition helpers
 
-/** 返回一行“已出牌：…”的调试文本；不依赖任何类型 */
-export function formatSeenLine(ctx:any): string {
-  const arr = Array.isArray((ctx as any)?.seen) ? (ctx as any).seen as string[] : [];
-  return `已出牌：${arr.length ? arr.join('') : '无'}`;
+/** 从一段文本中提取第一个顶层 JSON 对象（宽松解析） */
+export function extractFirstJsonObject(text: string): any | null {
+  try {
+    if (!text) return null;
+    // 快速路径：已是纯 JSON
+    const trimmed = text.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try { return JSON.parse(trimmed); } catch {}
+    }
+    // 宽松扫描第一对大括号并尝试解析
+    let depth = 0, start = -1;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '{') { if (depth === 0) start = i; depth++; }
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0 && start >= 0) {
+          const cand = text.slice(start, i + 1);
+          try { return JSON.parse(cand); } catch {}
+        }
+      }
+    }
+  } catch {}
+  return null;
 }
 
-
-/** 返回一行“座位：我=… 地主=… 首家=… 轮次=…”；零依赖类型 */
-export function formatSeatLine(ctx:any): string {
-  return `座位：我=${ctx?.seat} 地主=${ctx?.landlord} 首家=${ctx?.leader} 轮次=${ctx?.trick}`;
-}
-
-/** 返回一行“按座位已出牌：S0=… | S1=… | S2=…”；零依赖类型 */
-export function formatSeenBySeatLine(ctx:any): string {
-  const arr: string[][] = Array.isArray(ctx?.seenBySeat) ? ctx.seenBySeat : [[],[],[]];
-  const s0 = arr[0]?.join('') || '';
-  const s1 = arr[1]?.join('') || '';
-  const s2 = arr[2]?.join('') || '';
-  return `按座位已出牌：S0=${s0} | S1=${s1} | S2=${s2}`;
+/** 兜底理由，若为空则返回“{provider} 已调用” */
+export function nonEmptyReason(r?: string, provider?: string): string {
+  const s = (r ?? '').trim();
+  return s || `${provider ? provider : 'AI'} 已调用`;
 }
 
 /** 统一格式：座位行 */
