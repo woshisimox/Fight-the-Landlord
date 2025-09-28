@@ -152,7 +152,7 @@ const CHAIN_MIN = {
 };
 const MAX_SEQ_VALUE = ORDER['A']; // 顺子、连对、飞机核心不可含 '2' 与王
 
-export function classify(cards: Label[], four2: Four2Policy = 'both'): Combo | null {
+function classify(cards: Label[], four2: Four2Policy = 'both'): Combo | null {
   const N = cards.length;
   if (N <= 0) return null;
 
@@ -454,7 +454,7 @@ function generateAllMoves(hand: Label[], four2: Four2Policy): Label[][] {
   });
 }
 
-export function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy): Label[][] {
+function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy): Label[][] {
   const all = generateAllMoves(hand, four2);
   if (!require) return all;
 
@@ -469,42 +469,14 @@ export function generateMoves(hand: Label[], require: Combo | null, four2: Four2
 
 // ========== 内置 Bot ==========
 export const RandomLegal: BotFunc = (ctx) => {
-  const four2 = (ctx?.policy?.four2 ?? 'both') as Four2Policy;
+  if (ctx.canPass && ctx.require) return { move: 'pass' };
+  const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
-
-  // 有跟牌需求：尽量“接”
-  if (ctx.require) {
-    if (legal.length) {
-      // 1) 同型同长的“最小可压”优先
-      const annotated = legal.map(mv => classify(mv, four2)!);
-      const sameIdx = annotated.findIndex(
-        c => c.type === ctx.require!.type && (c.len ?? 0) === (ctx.require!.len ?? 0)
-      );
-      if (sameIdx >= 0) return { move: 'play', cards: legal[sameIdx] };
-
-      // 2) 没有同型：再考虑炸弹/王炸
-      const bombIdx = annotated.findIndex(c => c.type === 'bomb');
-      if (bombIdx >= 0) return { move: 'play', cards: legal[bombIdx] };
-      const rockIdx = annotated.findIndex(c => c.type === 'rocket');
-      if (rockIdx >= 0) return { move: 'play', cards: legal[rockIdx] };
-
-      // 3) 兜底：任选一个能压的（仍然“接牌”）
-      return { move: 'play', cards: legal[0] };
-    }
-    // 没法接且允许过，才 pass
-    if (ctx.canPass) return { move: 'pass', reason: 'no-legal' };
-  }
-
-  // 首出或被迫出：出最小候选
   if (legal.length) return { move: 'play', cards: legal[0] };
-
-  // 极端兜底（理论上到不了）
-  const c = ctx.hands?.[0];
-  if (c) return { move: 'play', cards: [c] };
-  return { move: 'pass', reason: 'empty-hand' };
+  // 兜底：首家且无 require 或 bot 乱回
+  const c = ctx.hands[0] ?? '♠3';
+  return { move: 'play', cards: [c] };
 };
-
-
 
 export const GreedyMin: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
