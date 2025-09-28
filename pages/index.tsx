@@ -1119,8 +1119,6 @@ const start = async () => {
                 const rh = m.hands;
                 if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
                   nextPlays = [];
-                  
-                    else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, (lordPeek ?? -1)]; }
                   }
 
                   
@@ -1140,21 +1138,14 @@ const start = async () => {
                     }
                   }
 
+                  
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
-                  // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
-                  if (nextCuts.length > 0) {
-                    const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal = (nextLandlord ?? -1) as number | -1;
-                    if (nextLords[idxBand] !== lordVal) {
-                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
-                    }
-                  }
-
-                    const lordVal = (lord ?? -1) as number | -1;
+                    const lordVal = ((m as any).landlordIdx ?? (m as any).landlord ?? nextLandlord ?? -1) as number | -1;
                     if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
                     else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
                   }
+
 
                   nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
 
