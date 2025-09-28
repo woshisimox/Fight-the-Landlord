@@ -1008,6 +1008,8 @@ const start = async () => {
           let nextFinished = finishedRef.current;
           let nextLog = [...logRef.current];
           let nextLandlord = landlordRef.current;
+          let nextCuts = roundCutsRef.current.slice();
+          let nextLords = roundLordsRef.current.slice();
 if (nextCuts.length > 0) {
                     const idxBand = Math.max(0, nextCuts.length - 1);
                     const lordVal = (nextLandlord ?? -1) as number | -1;
