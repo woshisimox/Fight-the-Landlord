@@ -190,7 +190,7 @@ export function classify(cards: Card[], four2: Four2Policy='both'): Classified |
       if (n === 3*L) {
         return { type: 'plane', len: L, key: rankIndex[triRanks[triRanks.length-1]] };
       }
-      // 带翅（+L 个单）
+      // 带翅（+L 单）
       if (n === 4*L && byCount[1].length === L) {
         return { type: 'plane', len: L, key: rankIndex[triRanks[triRanks.length-1]] };
       }
