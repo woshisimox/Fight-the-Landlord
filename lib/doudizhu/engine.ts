@@ -556,7 +556,8 @@ export const RandomLegal: BotFunc = (ctx) => {
     const choice = pickWeighted(pool);
     const t=(classify(choice,four2) as any)?.type; const key=keyRankOfMove(choice);
     const all:string[]=(globalThis as any).__DDZ_SEEN ?? []; const lens=((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]).map((a:any)=>Array.isArray(a)?a.length:0).join('/');
-    const reason = ['RandomLegal', `seat=${ctx.seat} landlord=${ctx.landlord}`, `seen=${all.length} seatSeen=${lens}`, `follow`, `type=${t} key=${key}`].join(' | ');
+    const sc = scoreMove(choice);
+    const reason = ['RandomLegal', `seat=${ctx.seat} landlord=${ctx.landlord}`, `seen=${all.length} seatSeen=${lens}`, `follow`, `type=${t} key=${key}`, `score=${sc.toFixed(2)}`].join(' | ');
     return { move:'play', cards: choice, reason };
   }
 
@@ -567,7 +568,8 @@ export const RandomLegal: BotFunc = (ctx) => {
     const choice = pickWeighted(pool);
     const t=(classify(choice,four2) as any)?.type; const key=keyRankOfMove(choice);
     const all:string[]=(globalThis as any).__DDZ_SEEN ?? []; const lens=((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]).map((a:any)=>Array.isArray(a)?a.length:0).join('/');
-    const reason = ['RandomLegal', `seat=${ctx.seat} landlord=${ctx.landlord}`, `seen=${all.length} seatSeen=${lens}`, `lead`, `type=${t} key=${key}`].join(' | ');
+    const sc = scoreMove(choice);
+    const reason = ['RandomLegal', `seat=${ctx.seat} landlord=${ctx.landlord}`, `seen=${all.length} seatSeen=${lens}`, `lead`, `type=${t} key=${key}`, `score=${sc.toFixed(2)}`].join(' | ');
     return { move:'play', cards: choice, reason };
   }
 
