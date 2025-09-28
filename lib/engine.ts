@@ -1,40 +1,29 @@
 // lib/engine.ts
-// 统一导出入口：从 ./doudizhu/engine 转发，并提供 IBot 类型别名。
-// ⚠️ 不再导入/导出 EventObj，以兼容精简/占位引擎。
+// 汇总导出斗地主引擎（兼容旧项目对 Label 的引用）
 
-import {
+export {
   runOneGame,
   GreedyMax,
   GreedyMin,
   RandomLegal,
+  classify,
+  generateMoves,
+  type Card,
+  type MoveType,
+  type Classified,
+  type Require,
   type Four2Policy,
-  type Label,
+  type Policy,
+  type PlayMove,
+  type PassMove,
+  type RobMove,
   type BotMove,
   type BotCtx,
   type BotFunc,
+  type RunOptions,
+  type GameEvent,
 } from './doudizhu/engine';
 
-export type IBot = BotFunc;
-
-export { runOneGame, GreedyMax, GreedyMin, RandomLegal };
-export type { Four2Policy, Label, BotMove, BotCtx };
-
-// 兼容别名
-export const BotGreedyMax = GreedyMax;
-export const BotGreedyMin = GreedyMin;
-export const BotRandomLegal = RandomLegal;
-
-type EngineOpts = {
-  four2?: Four2Policy;
-  delayMs?: number;
-};
-
-export class Engine {
-  private opts: EngineOpts;
-  constructor(opts?: EngineOpts) { this.opts = opts || {}; }
-  run(seats: [IBot, IBot, IBot], extra?: Partial<EngineOpts>) {
-    const four2 = extra?.four2 ?? this.opts.four2 ?? 'both';
-    const delayMs = extra?.delayMs ?? this.opts.delayMs ?? 1000;
-    return runOneGame({ seats, four2, delayMs } as any);
-  }
-}
+// ✅ 兼容旧代码：有些地方会从 lib/engine.ts 导入 Label
+// 如果你的项目里 Label 有更严格的语义，再把它收紧为联合字面量即可。
+export type Label = string;
