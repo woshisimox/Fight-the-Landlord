@@ -345,12 +345,6 @@ async function runOneRoundWithGuard(
   };
 
   for await (const ev of (iter as any)) {
-
-  // —— 保存最近一次“理由/分数”，供 turn 行输出 ——
-  const lastReason: (string|null)[] = [null, null, null];
-  const lastScore:  (number|null)[] = [null, null, null];
-  const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
-  const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScore[seat] = (typeof sc==='number'? sc: null); };
     // 初始发牌/地主
     if (!sentInit && ev?.type==='init') {
       sentInit = true;
@@ -453,6 +447,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       writeLine(res, { type:'log', message:`—— 第 ${round} 局开始 ——` });
       writeLine(res, { type:'event', kind:'round-start', round });
 
+
+  // —— 保存最近一次“理由/分数”，供 traceWrap 与 turn 输出 ——
+  const lastReason: (string|null)[] = [null, null, null];
+  const lastScore:  (number|null)[] = [null, null, null];
+  const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
+  const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScore[seat] = (typeof sc==='number'? sc: null); };
       const wrapped = baseBots.map((bot, i) =>
         traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot as any, res, onReason, onScore,
                   turnTimeoutMsArr[i] ?? turnTimeoutMsArr[0],
