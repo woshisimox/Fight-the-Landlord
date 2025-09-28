@@ -469,13 +469,11 @@ function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy)
 
 // ========== 内置 Bot ==========
 export const RandomLegal: BotFunc = (ctx) => {
-  if (ctx.canPass && ctx.require) return { move: 'pass' };
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
-  if (legal.length) return { move: 'play', cards: legal[0] };
-  // 兜底：首家且无 require 或 bot 乱回
-  const c = ctx.hands[0] ?? '♠3';
-  return { move: 'play', cards: [c] };
+  if (ctx.require && ctx.canPass && !legal.length) return { move:'pass' };
+  if (legal.length) return { move:'play', cards: legal[legal.length-1] };
+  return ctx.canPass ? { move:'pass' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'] };
 };
 
 export const GreedyMin: BotFunc = (ctx) => {
