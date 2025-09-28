@@ -1,9 +1,5 @@
 // pages/index.tsx
-import { useEffect, useRef, useState } from 're
-          let nextScores = scoreSeriesRef.current.map(x => [...x]);
-          let sawAnyTurn = false;
-          let nextCuts = roundCutsRef.current.slice();
-act';
+import React, { useEffect, useRef, useState } from 'react';
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
