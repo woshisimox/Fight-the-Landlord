@@ -870,7 +870,13 @@ function LivePanel(props: LiveProps) {
     }
   };
 
-  const start = async () => {
+  
+  const handleScoreRefresh = () => {
+    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+    setRoundCuts(prev => [...prev]);
+    setRoundLords(prev => [...prev]);
+  };
+const start = async () => {
     if (running) return;
     if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
 
@@ -1095,10 +1101,7 @@ function LivePanel(props: LiveProps) {
                 const rh = m.hands;
                 if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
                   nextPlays = [];
-                  {
-                    const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
-                    const lordPeek = (m.landlordIdx ?? m.landlord ?? nextLandlord ?? null) as number | null;
-                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordPeek ?? -1]; }
+                  
                     else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, (lordPeek ?? -1)]; }
                   }
 
@@ -1110,6 +1113,13 @@ function LivePanel(props: LiveProps) {
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
+                  {
+                    const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
+                    const lordVal = (lord ?? -1) as number | -1;
+                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
+                    else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
+                  }
+
                   nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
 
                   try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
@@ -1476,7 +1486,8 @@ setHands(nextHands); setPlays(nextPlays);
           <input ref={scoreFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleScoreUpload} />
           <button onClick={()=>scoreFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
           <button onClick={handleScoreSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
-        </div>
+        
+          <button onClick={handleScoreRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button></div>
 
         <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始自动清零；出牌（含过牌）按时间推进绘制。过牌没有分数会留空。</div>
         <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
