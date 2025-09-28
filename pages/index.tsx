@@ -1134,13 +1134,14 @@ for (const raw of batch) {
                   }
                   // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
                   if (nextCuts.length > 0) {
-                    const idxBand = Math.max
-                  if (nextCuts.length > 0) {
                     const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal = (nextLandlord ?? -1) as number | -1;
-                    if (nextLords[idxBand] !== lordVal) {
-                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    const lordVal2 = (nextLandlord ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal2) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
                     }
+                  }
+
+                }
                   }
                     const idxBand = Math.max(0, nextCuts.length - 1);
                     const lordVal2 = (nextLandlord ?? -1) as number | -1;
