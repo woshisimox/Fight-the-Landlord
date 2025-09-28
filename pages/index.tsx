@@ -1129,6 +1129,28 @@ for (const raw of batch) {
                   if (lord2 != null) nextLandlord = lord2;
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
+                  {
+                    // —— 兜底：没有 init 帧时，也要推进 roundCuts / roundLords ——
+                    const n0 = Math.max(
+                      nextScores[0]?.length||0,
+                      nextScores[1]?.length||0,
+                      nextScores[2]?.length||0
+                    );
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
+                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
+                    else if (nextCuts[nextCuts.length-1] !== n0) {
+                      nextCuts = [...nextCuts, n0];
+                      nextLords = [...nextLords, lordVal];
+                    }
+                    // 回填当前段的地主，避免底色为空白
+                    if (nextCuts.length > 0) {
+                      const idxBand = Math.max(0, nextCuts.length - 1);
+                      if (nextLords[idxBand] !== lordVal) {
+                        nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                      }
+                    }
+                  }
+            
                 }
               }
 
