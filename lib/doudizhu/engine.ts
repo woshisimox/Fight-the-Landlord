@@ -633,10 +633,6 @@ export const RandomLegal: BotFunc = (ctx) => {
 };
 
 
-  // 兜底：没有 legal 的极端情况
-  return ctx.canPass ? { move:'pass' } : { move:'play', cards: [ctx.hands[0] ?? '♠3'] };
-};
-
 export const GreedyMin: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
