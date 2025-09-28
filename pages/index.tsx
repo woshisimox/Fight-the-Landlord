@@ -310,7 +310,17 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
       <svg width={width} height={heightPx} style={{ display:'block', width:'100%' }}>
         <g transform={`translate(${left},${top})`}>
           
-          
+          {/* 局间底色交替 */}
+          {cuts.slice(0, Math.max(0, cuts.length-1)).map((st, i)=>{
+            const ed = cuts[i+1];
+            if (ed <= st) return null;
+            const x0 = x(st);
+            const x1 = x(Math.max(st, ed-1));
+            const w  = Math.max(0.5, x1 - x0);
+            const fill = (i % 2 === 0) ? '#ffffff' : '#f0f7ff';
+            return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
+          })}
+
           {/* 按地主上色的局间底色 */}
           {cuts.slice(0, Math.max(0, cuts.length-1)).map((st, i)=>{
             const ed = cuts[i+1];
@@ -860,13 +870,7 @@ function LivePanel(props: LiveProps) {
     }
   };
 
-  
-  const handleScoreRefresh = () => {
-    // 复制一份当前数据，强制触发重渲染
-    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
-    setRoundCuts(prev => [...prev]);
-  };
-const start = async () => {
+  const start = async () => {
     if (running) return;
     if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
 
@@ -1087,7 +1091,10 @@ const start = async () => {
               }
 
               // -------- 初始发牌（仅限 init 帧） --------
-              if (m.type === 'init') 
+              if (m.type === 'init') {
+                const rh = m.hands;
+                if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
+                  nextPlays = [];
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordPeek = (m.landlordIdx ?? m.landlord ?? nextLandlord ?? null) as number | null;
@@ -1095,15 +1102,8 @@ const start = async () => {
                     else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, (lordPeek ?? -1)]; }
                   }
 
-
                   
-                  
-                  // 恢复原有 rh 定义与校验
-                  const rh = (m as any).hands;
-                  if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
-                    nextHands = (rh as string[][]).map(decorateHandCycle);
-                  }
-nextWinner = null;
+                  nextWinner = null;
                   nextDelta = null;
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
                   nextHands = (rh as string[][]).map(decorateHandCycle);
@@ -1476,8 +1476,7 @@ setHands(nextHands); setPlays(nextPlays);
           <input ref={scoreFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleScoreUpload} />
           <button onClick={()=>scoreFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
           <button onClick={handleScoreSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
-                  <button onClick={handleScoreRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
-</div>
+        </div>
 
         <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始自动清零；出牌（含过牌）按时间推进绘制。过牌没有分数会留空。</div>
         <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
