@@ -305,8 +305,8 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
 async function runOneRoundWithGuard(
-  { seats, four2, lastReason }:
-  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; lastReason: (string|null)[] },
+  { seats, four2, lastReason, lastScore }:
+  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; lastReason: (string|null)[]; lastScore: (number|null)[] },
   res: NextApiResponse,
   round: number
 ){
@@ -344,12 +344,6 @@ async function runOneRoundWithGuard(
     }
   };
 
-  
-  // —— 保存最近一次“理由/分数”，供 traceWrap 与 turn 输出 ——
-  const lastReasonBuf: (string|null)[] = [null, null, null];
-  const lastScoreBuf:  (number|null)[] = [null, null, null];
-  const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReasonBuf[seat] = text || null; };
-  const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScoreBuf[seat] = (typeof sc==='number'? sc: null); };
 for await (const ev of (iter as any)) {
     // 初始发牌/地主
     if (!sentInit && ev?.type==='init') {
@@ -366,8 +360,8 @@ for await (const ev of (iter as any)) {
       const { seat, move, cards, hand, totals } = ev;
       countPlay(seat, move, cards);
       const moveStr = stringifyMove({ move, cards });
-      const reason = lastReasonBuf[seat] || null;
-      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: (lastScoreBuf[seat] ?? undefined), totals });
+      const reason = lastReason[seat] || null;
+      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: (lastScore[seat] ?? undefined), totals });
       continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
@@ -454,8 +448,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       writeLine(res, { type:'event', kind:'round-start', round });
 
 
-  const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReasonBuf[seat] = text || null; };
-  const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScoreBuf[seat] = (typeof sc==='number'? sc: null); };
+
+
+
+      // —— per-request buffers for reason/score ——
+      const lastReason: (string|null)[] = [null, null, null];
+      const lastScore:  (number|null)[] = [null, null, null];
+      const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
+      const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScore[seat] = (typeof sc==='number'? sc: null); };
       const wrapped = baseBots.map((bot, i) =>
         traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot as any, res, onReason, onScore,
                   turnTimeoutMsArr[i] ?? turnTimeoutMsArr[0],
@@ -463,10 +463,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason }, res, round);
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
-      if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
+      if (round < 
+      // —— per-request buffers for reason/score ——
+      const lastReason: (string|null)[] = [null, null, null];
+      const lastScore:  (number|null)[] = [null, null, null];
+      const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
+      const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScore[seat] = (typeof sc==='number'? sc: null); };
+rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
   } catch (e:any) {
     writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
