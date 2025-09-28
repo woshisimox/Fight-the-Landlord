@@ -1008,9 +1008,9 @@ const start = async () => {
           let nextFinished = finishedRef.current;
           let nextLog = [...logRef.current];
           let nextLandlord = landlordRef.current;
-                  if (nextCuts.length > 0) {
+if (nextCuts.length > 0) {
                     const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
                     if (nextLords[idxBand] !== lordVal) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
                     }
@@ -1025,8 +1025,6 @@ const start = async () => {
           
           let nextScores = scoreSeriesRef.current.map(x => [...x]);
           let sawAnyTurn = false;
-          let nextCuts = roundCutsRef.current.slice();
-          let nextLords = roundLordsRef.current.slice();
 for (const raw of batch) {
             let m: any = raw;
             // Remap engine->UI indices when startShift != 0
@@ -1073,7 +1071,7 @@ for (const raw of batch) {
             
                   if (nextCuts.length > 0) {
                     const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
                     if (nextLords[idxBand] !== lordVal) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
                     }
@@ -1095,15 +1093,7 @@ for (const raw of batch) {
               }
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
-                const res = markRoundF
-                  if (nextCuts.length > 0) {
-                    const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
-                    if (nextLords[idxBand] !== lordVal) {
-                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
-                    }
-                  }
-    inishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
+                const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 continue;
               }
@@ -1122,7 +1112,7 @@ for (const raw of batch) {
                   nextLandlord = lord;
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
-                    const lordVal = ( ((m as any).landlordIdx ?? (m as any).landlord ?? nextLandlord ?? nextLeader ?? -1) as number | -1 );
+                    const lordVal = ( ((m as any).landlordIdx ?? (m as any).landlord ?? nextLandlord ?? -1) as number | -1 );
                     if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
                     else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
                     // 回填本段地主，避免未知导致白底
@@ -1145,7 +1135,7 @@ for (const raw of batch) {
                     const idxBand = Math.max
                   if (nextCuts.length > 0) {
                     const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
                     if (nextLords[idxBand] !== lordVal) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
                     }
