@@ -925,27 +925,11 @@ const start = async () => {
     };
 
     
-
     function markRoundFinishedIfNeeded(nextFinished: number, nextAggStats: Score5[] | null, nextAggCount: number) {
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
-          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
-          const mode = aggModeRef.current;
-          const a = Math.max(0, Math.min(1, alphaRef.current || 0.3));
-          if (!nextAggStats || nextAggStats.length !== 3) {
-            nextAggStats = [neutral, neutral, neutral];
-            nextAggCount = 1;
-          } else {
-            nextAggStats = nextAggStats.map(prev => mergeScore(prev, neutral, mode, nextAggCount, a));
-            nextAggCount = nextAggCount + 1;
-          }
-        }
-        roundFinishedRef.current = true;
-        nextFinished = nextFinished + 1;
-      }
-      return { nextFinished, nextAggStats, nextAggCount };
+          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 
     }
-
 const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
     let lastEventTs = Date.now();
     const timeoutMs = (()=>{
@@ -1023,7 +1007,7 @@ const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
           let nextLandlord = landlordRef.current;
                   if (nextCuts.length > 0) {
                     const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
                     if (nextLords[idxBand] !== lordVal) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
                     }
@@ -1086,7 +1070,7 @@ for (const raw of batch) {
             
                   if (nextCuts.length > 0) {
                     const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
                     if (nextLords[idxBand] !== lordVal) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
                     }
@@ -1108,15 +1092,7 @@ for (const raw of batch) {
               }
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
-                const res = markRoundF
-                  if (nextCuts.length > 0) {
-                    const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
-                    if (nextLords[idxBand] !== lordVal) {
-                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
-                    }
-                  }
-    inishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
+                const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 continue;
               }
@@ -1135,7 +1111,7 @@ for (const raw of batch) {
                   nextLandlord = lord;
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
-                    const lordVal = ( ((m as any).landlordIdx ?? (m as any).landlord ?? nextLandlord ?? nextLeader ?? -1) as number | -1 );
+                    const lordVal = ( ((m as any).landlordIdx ?? (m as any).landlord ?? nextLandlord ?? -1) as number | -1 );
                     if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
                     else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
                     // 回填本段地主，避免未知导致白底
@@ -1158,12 +1134,12 @@ for (const raw of batch) {
                     const idxBand = Math.max
                   if (nextCuts.length > 0) {
                     const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
                     if (nextLords[idxBand] !== lordVal) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
                     }
                   }
-    (0, nextCuts.length - 1);
+
                     const lordVal2 = (nextLandlord ?? -1) as number | -1;
                     if (nextLords[idxBand] !== lordVal2) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
