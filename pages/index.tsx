@@ -908,8 +908,6 @@ const start = async () => {
         if (s.choice === 'http') return `${nm}=HTTP(${s.baseUrl ? 'custom' : 'default'})`;
         return `${nm}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
       }).join(', ');
-
-    
           const mode = aggModeRef.current;
           const a    = alphaRef.current;
           if (!nextAggStats) {
@@ -927,11 +925,27 @@ const start = async () => {
     };
 
     
+
     function markRoundFinishedIfNeeded(nextFinished: number, nextAggStats: Score5[] | null, nextAggCount: number) {
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
-          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 
+          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
+          const mode = aggModeRef.current;
+          const a = Math.max(0, Math.min(1, alphaRef.current || 0.3));
+          if (!nextAggStats || nextAggStats.length !== 3) {
+            nextAggStats = [neutral, neutral, neutral];
+            nextAggCount = 1;
+          } else {
+            nextAggStats = nextAggStats.map(prev => mergeScore(prev, neutral, mode, nextAggCount, a));
+            nextAggCount = nextAggCount + 1;
+          }
+        }
+        roundFinishedRef.current = true;
+        nextFinished = nextFinished + 1;
+      }
+      return { nextFinished, nextAggStats, nextAggCount };
     }
+
 const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
     let lastEventTs = Date.now();
     const timeoutMs = (()=>{
@@ -1094,7 +1108,15 @@ for (const raw of batch) {
               }
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
-                const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
+                const res = markRoundF
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+    inishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 continue;
               }
