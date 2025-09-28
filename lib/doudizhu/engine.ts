@@ -472,8 +472,10 @@ export const RandomLegal: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
 
-  // —— 仅在本函数内使用的小工具（不改变任何类型/导出） ——
+  // —— 仅在本函数内使用的小工具（不改变任何外部结构/导出） ——
+  const isType = (t: any, ...names: string[]) => names.includes(String(t));
   const rankOfLocal = (c: string) => (c === 'x' || c === 'X') ? c : c.slice(-1);
+
   const removeCards = (hand: string[], pick: string[]) => {
     const h = hand.slice();
     for (const c of pick) {
@@ -532,11 +534,11 @@ export const RandomLegal: BotFunc = (ctx) => {
   const keyRankOfMove = (mv: string[]) => {
     const cls = classify(mv, four2)!;
     const cnt = countByRankLocal(mv);
-    if (cls.type === 'rocket') return 'X';
-    if (cls.type === 'bomb' || cls.type === 'four_two_singles' || cls.type === 'four_two_pairs') {
+    if (isType(cls.type, 'rocket')) return 'X';
+    if (isType(cls.type, 'bomb', 'four_two_singles', 'four_two_pairs')) {
       for (const [r, n] of cnt.entries()) if (n === 4) return r;
     }
-    if (cls.type === 'pair' || cls.type === 'pair_seq') {
+    if (isType(cls.type, 'pair', 'pair_seq')) {
       // 连对取最大对的 rank
       let best = '3', bestPos = -1;
       for (const [r, n] of cnt.entries()) if (n >= 2 && POS[r] != null && POS[r] > bestPos) {
@@ -544,14 +546,14 @@ export const RandomLegal: BotFunc = (ctx) => {
       }
       return best;
     }
-    if (cls.type === 'triple' || cls.type === 'triple_one' || cls.type === 'triple_pair' || cls.type === 'plane' || cls.type === 'plane_single' || cls.type === 'plane_pair') {
+    if (isType(cls.type, 'triple', 'triple_one', 'triple_pair', 'plane', 'plane_single', 'plane_pair')) {
       let best = '3', bestPos = -1;
       for (const [r, n] of cnt.entries()) if (n >= 3 && POS[r] != null && POS[r] > bestPos) {
         best = r; bestPos = POS[r];
       }
       return best;
     }
-    if (cls.type === 'straight') {
+    if (isType(cls.type, 'straight')) {
       let best = '3', bestPos = -1;
       for (const r of Object.keys(cnt)) if (r !== '2' && r !== 'x' && r !== 'X' && POS[r] != null && POS[r] > bestPos) {
         best = r; bestPos = POS[r];
@@ -580,8 +582,8 @@ export const RandomLegal: BotFunc = (ctx) => {
   // 对某个候选求“被更大压住的风险 proxy”（越小越安全）
   const overtakeRisk = (mv: string[]) => {
     const cls = classify(mv, four2)!;
-    if (cls.type === 'rocket') return 0; // 无人可压
-    if (cls.type === 'bomb') {
+    if (isType(cls.type, 'rocket')) return 0; // 无人可压
+    if (isType(cls.type, 'bomb')) {
       // 只有王炸能压炸弹
       const rx = (unseen.get('x') || 0) > 0 && (unseen.get('X') || 0) > 0 ? 1 : 0;
       return rx * 3;
@@ -589,12 +591,12 @@ export const RandomLegal: BotFunc = (ctx) => {
     const keyR = keyRankOfMove(mv);
     const keyPos = POSALL[keyR] ?? -1;
 
-    if (cls.type === 'single') {
+    if (isType(cls.type, 'single')) {
       let higher = 0;
       for (const r of ORDER) if ((POSALL[r] ?? -1) > keyPos) higher += (unseen.get(r) || 0);
       return higher * 0.2 + ((unseen.get('x')||0) && (unseen.get('X')||0) ? 0.5 : 0);
     }
-    if (cls.type === 'pair') {
+    if (isType(cls.type, 'pair')) {
       let higherPairs = 0;
       for (const r of ORDER) {
         const p = POSALL[r] ?? -1;
@@ -603,7 +605,7 @@ export const RandomLegal: BotFunc = (ctx) => {
       const rockets = ((unseen.get('x')||0) && (unseen.get('X')||0)) ? 0.5 : 0;
       return higherPairs + rockets;
     }
-    if (cls.type === 'triple' || cls.type === 'triple_one' || cls.type === 'triple_pair') {
+    if (isType(cls.type, 'triple', 'triple_one', 'triple_pair')) {
       let higherTriples = 0;
       for (const r of ORDER) {
         const p = POSALL[r] ?? -1;
@@ -611,7 +613,7 @@ export const RandomLegal: BotFunc = (ctx) => {
       }
       return higherTriples + 0.5;
     }
-    if (cls.type === 'four_two_singles' || cls.type === 'four_two_pairs') {
+    if (isType(cls.type, 'four_two_singles', 'four_two_pairs')) {
       // 能压它的：更大的炸弹或王炸
       let higherBombs = 0;
       for (const r of ORDER) {
@@ -621,7 +623,7 @@ export const RandomLegal: BotFunc = (ctx) => {
       const rockets = ((unseen.get('x')||0) && (unseen.get('X')||0)) ? 1 : 0;
       return higherBombs * 1.5 + rockets * 2;
     }
-    if (cls.type === 'straight' || cls.type === 'pair_seq' || cls.type === 'plane' || cls.type === 'plane_single' || cls.type === 'plane_pair') {
+    if (isType(cls.type, 'straight', 'pair_seq', 'plane', 'plane_single', 'plane_pair')) {
       let higherMaterial = 0;
       for (const r of SEQ) {
         const p = POSALL[r] ?? -1;
@@ -665,7 +667,7 @@ export const RandomLegal: BotFunc = (ctx) => {
 
     // 避免轻易用炸弹/王炸（除非必要）
     const pickedType = classify(picked, four2)!;
-    const bombPenalty = (pickedType.type === 'bomb' || pickedType.type === 'rocket') ? 1.2 : 0;
+    const bombPenalty = isType(pickedType.type, 'bomb', 'rocket') ? 1.2 : 0;
 
     const outReward = picked.length * 0.4; // 出得多略加分
     return (
@@ -694,9 +696,9 @@ export const RandomLegal: BotFunc = (ctx) => {
     if (!legal.length) return ctx.canPass ? { move:'pass' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'] };
 
     // 同型同长优先（尽量不炸）
-    const req = ctx.require;
+    const req = ctx.require as any;
     const sameType = legal.filter(mv => {
-      const c = classify(mv, four2)!;
+      const c = classify(mv, four2)! as any;
       return c.type === req.type && (c.len ?? 0) === (req.len ?? 0);
     });
     const pool = sameType.length ? sameType : legal;
@@ -712,8 +714,8 @@ export const RandomLegal: BotFunc = (ctx) => {
   // 自由出：优先非炸/王，按综合分挑最优
   if (legal.length) {
     const nonBombs = legal.filter(mv => {
-      const t = classify(mv, four2)!.type;
-      return t !== 'bomb' && t !== 'rocket';
+      const t = (classify(mv, four2)! as any).type;
+      return !isType(t, 'bomb', 'rocket');
     });
     const pool = nonBombs.length ? nonBombs : legal;
 
