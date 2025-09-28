@@ -1097,7 +1097,13 @@ const start = async () => {
 
 
                   
-                  nextWinner = null;
+                  
+                  // 恢复原有 rh 定义与校验
+                  const rh = (m as any).hands;
+                  if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
+                    nextHands = (rh as string[][]).map(decorateHandCycle);
+                  }
+nextWinner = null;
                   nextDelta = null;
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
                   nextHands = (rh as string[][]).map(decorateHandCycle);
