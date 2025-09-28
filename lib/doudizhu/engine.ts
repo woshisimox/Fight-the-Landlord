@@ -25,6 +25,9 @@ export type Require = Classified & {
 
 export type Four2Policy = 'both' | '2singles' | '2pairs';
 
+// ✅ 兼容旧 import 的 Label 类型（若你希望更严格，可改成联合字面量）
+export type Label = string;
+
 export type Policy = {
   four2?: Four2Policy;
   followProb?: number;  // RandomLegal 的“接牌概率”（0~1），默认 1
@@ -71,15 +74,13 @@ const SUITS = ['♠','♥','♦','♣'] as const;
 const rankIndex: Record<string, number> = Object.fromEntries(RANKS.map((r, i)=>[r, i]));
 
 function rankOf(c: Card): string {
-  // Jokers: 'x' / 'X'
-  if (c === 'x' || c === 'X') return c;
+  if (c === 'x' || c === 'X') return c; // Jokers
   return c.slice(-1);
 }
 function valOf(c: Card): number {
   const r = rankOf(c);
   return rankIndex[r] ?? -1;
 }
-
 function sortCardsAsc(cards: Card[]): Card[] {
   return [...cards].sort((a,b)=> valOf(a)-valOf(b) || a.localeCompare(b));
 }
@@ -101,9 +102,7 @@ function countByRank(cards: Card[]): Map<string, Card[]> {
 
 function isSequential(ranks: string[], minLen=5): boolean {
   if (ranks.length < minLen) return false;
-  // 不能包含 2 / Jokers
-  if (ranks.some(r => r==='2' || r==='x' || r==='X')) return false;
-  // 连续性判断
+  if (ranks.some(r => r==='2' || r==='x' || r==='X')) return false; // 顺子不能含 2/Joker
   for (let i=1;i<ranks.length;i++){
     if (rankIndex[ranks[i]] !== rankIndex[ranks[i-1]]+1) return false;
   }
@@ -122,7 +121,7 @@ export function classify(cards: Card[], four2: Four2Policy='both'): Classified |
     return { type: 'rocket', key: rankIndex['X'] };
   }
 
-  const groups = countByRank(sorted); // rank -> list of cards
+  const groups = countByRank(sorted);
   const byCount: Record<number, string[]> = { 1:[], 2:[], 3:[], 4:[] };
   [...groups.entries()].forEach(([r, arr])=>{
     byCount[arr.length].push(r);
@@ -144,23 +143,21 @@ export function classify(cards: Card[], four2: Four2Policy='both'): Classified |
     return { type: 'four-with-two', key: rankIndex[r] };
   }
 
-  // 三张
+  // 三张/三带
   if (n === 3 && byCount[3].length === 1) {
     const r = byCount[3][0];
     return { type: 'triple', key: rankIndex[r] };
   }
-  // 三带一
   if (n === 4 && byCount[3].length === 1 && byCount[1].length === 1) {
     const r = byCount[3][0];
     return { type: 'triple-with-single', key: rankIndex[r] };
   }
-  // 三带二
   if (n === 5 && byCount[3].length === 1 && byCount[2].length === 1) {
     const r = byCount[3][0];
     return { type: 'triple-with-pair', key: rankIndex[r] };
   }
 
-  // 单，对
+  // 单/对
   if (n === 1) return { type: 'single', key: rankIndex[ranks[0]] };
   if (n === 2 && byCount[2].length === 1) {
     const r = byCount[2][0];
@@ -174,27 +171,24 @@ export function classify(cards: Card[], four2: Four2Policy='both'): Classified |
     }
   }
 
-  // 连对：>=3 对，按序
+  // 连对
   if (n % 2 === 0 && n >= 6 && byCount[2].length*2 === n) {
     if (isSequential(byCount[2], 3)) {
       return { type: 'pair-straight', len: byCount[2].length, key: rankIndex[byCount[2][byCount[2].length-1]] };
     }
   }
 
-  // 飞机不带 / 带翅（简化：要求等张数三顺 + 等数量附加牌）
+  // 飞机（不带 / 带翅）
   if (byCount[3].length >= 2) {
     const triRanks = byCount[3];
     if (isSequential(triRanks, 2)) {
       const L = triRanks.length;
-      // 不带（3*L）
       if (n === 3*L) {
         return { type: 'plane', len: L, key: rankIndex[triRanks[triRanks.length-1]] };
       }
-      // 带翅（+L 单）
       if (n === 4*L && byCount[1].length === L) {
         return { type: 'plane', len: L, key: rankIndex[triRanks[triRanks.length-1]] };
       }
-      // 带翅（+L 对）
       if (n === 5*L && byCount[2].length === L) {
         return { type: 'plane', len: L, key: rankIndex[triRanks[triRanks.length-1]] };
       }
@@ -207,23 +201,17 @@ export function classify(cards: Card[], four2: Four2Policy='both'): Classified |
 /* ==================== 合法出牌生成 ==================== */
 
 export function generateMoves(hands: Card[], require?: Require, four2: Four2Policy='both'): Card[][] {
-  // 生成“全部可能”的思路会很重；这里采用“足够好 & 可用”的启发式生成：
-  // 1) 当 require 存在：筛选出“同型同长且更大”的组合；若没有，再给出炸弹/王炸
-  // 2) 当 require 不存在：给出一组升序的候选，避免爆炸式组合（已满足内置 bot 的需要）
-
   const hand = sortCardsAsc(hands);
   const groups = countByRank(hand);
 
   const seqCandidates: Card[][] = [];
 
-  // ===== 工具：从同 rank 抽 n 张（若足够） =====
   const takeN = (r: string, n: number): Card[] | null => {
     const arr = groups.get(r) || [];
     if (arr.length >= n) return arr.slice(0, n);
     return null;
   };
 
-  // ===== 工具：构建三顺 / 连对 / 顺子 =====
   const buildSinglesSequential = (minLen=5) => {
     const ranks = [...groups.keys()].filter(r => (groups.get(r)!.length>=1 && r!=='2' && r!=='x' && r!=='X'))
       .sort((a,b)=>rankIndex[a]-rankIndex[b]);
@@ -267,10 +255,8 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
       const seg = ranks.slice(i, j+1);
       if (seg.length >= minTri) {
         const L = seg.length;
-        // 飞机不带
-        seqCandidates.push(seg.flatMap(r=>takeN(r,3)!));
-        // 带翅（+L 单）
-        const singleRanks = [...groups.entries()]
+        seqCandidates.push(seg.flatMap(r=>takeN(r,3)!));              // 飞机不带
+        const singleRanks = [...groups.entries()]                       // 带单翅
           .filter(([rk,arr])=> arr.length===1 && !seg.includes(rk))
           .map(([rk])=>rk)
           .slice(0, L);
@@ -279,8 +265,7 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
           singleRanks.forEach(rk => singles.push(...takeN(rk,1)!));
           seqCandidates.push(seg.flatMap(r=>takeN(r,3)!).concat(singles));
         }
-        // 带翅（+L 对）
-        const pairRanks = [...groups.entries()]
+        const pairRanks = [...groups.entries()]                         // 带对子翅
           .filter(([rk,arr])=> arr.length>=2 && !seg.includes(rk))
           .map(([rk])=>rk)
           .slice(0, L);
@@ -293,40 +278,32 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
     }
   };
 
-  // ===== 基础小型构型 =====
   const singles = [...groups.entries()].flatMap(([r, arr]) => arr.length>=1 ? [arr.slice(0,1)] : []);
   const pairs   = [...groups.entries()].flatMap(([r, arr]) => arr.length>=2 ? [arr.slice(0,2)] : []);
   const triples = [...groups.entries()].flatMap(([r, arr]) => arr.length>=3 ? [arr.slice(0,3)] : []);
   const bombs   = [...groups.entries()].flatMap(([r, arr]) => arr.length===4 ? [arr.slice(0,4)] : []);
-  // 四带二
   const fourWithTwo: Card[][] = [];
   for (const [r, arr] of groups.entries()) {
     if (arr.length === 4) {
-      // 两单
       const singles2 = singles.filter(s => rankOf(s[0])!==r).slice(0,2);
       if (singles2.length===2) fourWithTwo.push(arr.slice(0,4).concat(singles2[0], singles2[1]));
-      // 一对
       const pair2 = pairs.find(p => rankOf(p[0])!==r);
       if (pair2) fourWithTwo.push(arr.slice(0,4).concat(pair2));
     }
   }
-  // 王炸
   const hasx = hand.includes('x'), hasX = hand.includes('X');
   const rockets = (hasx && hasX) ? [[ 'x', 'X' ] as Card[]] : [];
 
-  // 构建序列类
   buildSinglesSequential(5);
   buildPairsSequential(3);
   buildTriplesSequential(2);
 
-  // 全部候选（未去重）
   let candidates: Card[][] = [
     ...singles, ...pairs, ...triples,
     ...fourWithTwo, ...bombs, ...rockets,
-    ...seqCandidates, // 顺子、连对、飞机等
+    ...seqCandidates,
   ];
 
-  // 去重（按牌面字符串拼接）
   const uniq = new Map<string, Card[]>();
   for (const mv of candidates) {
     const k = sortCardsAsc(mv).join(',');
@@ -334,35 +311,24 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
   }
   candidates = [...uniq.values()];
 
-  // 过滤 & 排序
   if (require) {
     const legal = candidates.filter(mv=>{
       const c = classify(mv, four2);
       if (!c) return false;
-      // 同型同长且更大
       if (c.type === require.type) {
         if ((typeof c.len === 'number') !== (typeof require.len === 'number')) return false;
         if (typeof c.len === 'number' && typeof require.len === 'number' && c.len !== require.len) return false;
         return c.key > require.key;
       }
-      // 炸弹 / 王炸：可以压所有非炸弹（王炸压所有）
       if (c.type === 'bomb' && require.type !== 'bomb' && require.type !== 'rocket') return true;
       if (c.type === 'rocket') return true;
-      // 炸弹压炸弹（更大）
-      if (c.type === 'bomb' && require.type === 'bomb') {
-        return c.key > require.key;
-      }
+      if (c.type === 'bomb' && require.type === 'bomb') return c.key > require.key;
       return false;
     });
 
-    // 升序（方便“最小可压优先”）
     legal.sort((a,b)=>{
       const ca = classify(a, four2)!; const cb = classify(b, four2)!;
-      const orderType = (t:MoveType):number => {
-        if (t==='rocket') return 100;
-        if (t==='bomb') return 90;
-        return 10;
-      };
+      const orderType = (t:MoveType):number => t==='rocket'?100 : t==='bomb'?90 : 10;
       const ot = orderType(ca.type) - orderType(cb.type);
       if (ot) return ot;
       if ((ca.len||0)!==(cb.len||0)) return (ca.len||0)-(cb.len||0);
@@ -370,13 +336,10 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
     });
     return legal;
   } else {
-    // 首出：给出一组“偏小”的候选，避免一次性爆炸
     const smalls: Card[][] = [];
-    // 先单，再对，再三，再顺子，避免浪费关键牌
     smalls.push(...singles.slice(0,4));
     smalls.push(...pairs.slice(0,2));
     smalls.push(...triples.slice(0,1));
-    // 取一两个短顺、短连对（若有）
     const seqs = seqCandidates
       .map(mv => ({ mv, c: classify(mv, four2)! }))
       .filter(x => x.c.type==='straight' || x.c.type==='pair-straight')
@@ -384,11 +347,7 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
       .slice(0,2)
       .map(x=>x.mv);
     smalls.push(...seqs);
-
-    // 兜底：至少有一个最小单
     if (smalls.length===0 && singles.length) smalls.push(singles[0]);
-
-    // 升序
     smalls.sort((a,b)=>{
       const ca = classify(a, four2)!; const cb = classify(b, four2)!;
       if ((ca.len||0)!==(cb.len||0)) return (ca.len||0)-(cb.len||0);
@@ -400,24 +359,19 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
 
 /* ==================== 内置算法 ==================== */
 
-// 默认 RandomLegal 的“接牌概率”
 const RANDOMLEGAL_FOLLOW_PROB = 1;
 
 export const RandomLegal: BotFunc = (ctx) => {
   const four2 = (ctx?.policy?.four2 ?? 'both') as Four2Policy;
   const legal = generateMoves(ctx.hands, ctx.require, four2);
 
-  // 需要跟牌：优先同型最小可压；没有同型→炸弹/王炸；确无→pass
   if (ctx.require) {
     const followProb = Math.max(0, Math.min(1, ctx?.policy?.followProb ?? RANDOMLEGAL_FOLLOW_PROB));
-
     if (legal.length) {
-      // 同型优先
       const annotated = legal.map(mv => classify(mv, four2)!);
       const sameIdx = annotated.findIndex(c => c.type===ctx.require!.type && (c.len??0)===(ctx.require!.len??0));
       if (Math.random() < followProb) {
         if (sameIdx >= 0) return { move:'play', cards: legal[sameIdx] };
-        // 没有同型：找炸弹/王炸
         const bombIdx = annotated.findIndex(c => c.type==='bomb');
         if (bombIdx >= 0) return { move:'play', cards: legal[bombIdx] };
         const rockIdx = annotated.findIndex(c => c.type==='rocket');
@@ -429,15 +383,11 @@ export const RandomLegal: BotFunc = (ctx) => {
     if (ctx.canPass) return { move:'pass', reason:'no-legal' };
   }
 
-  // 首出/被迫出：选择最小候选
   if (legal.length) return { move:'play', cards: legal[0] };
-
-  // 兜底：至少打一张
   const c = ctx.hands?.[0] ?? '♠3';
   return { move:'play', cards:[c] };
 };
 
-// GreedyMin：总是打“可行中的最小”
 export const GreedyMin: BotFunc = (ctx) => {
   const four2 = (ctx?.policy?.four2 ?? 'both') as Four2Policy;
   const legal = generateMoves(ctx.hands, ctx.require, four2);
@@ -451,7 +401,6 @@ export const GreedyMin: BotFunc = (ctx) => {
   return { move:'play', cards:[c], reason:'fallback' };
 };
 
-// GreedyMax：偏激进，优先更大的及强势牌（炸弹/王炸）
 export const GreedyMax: BotFunc = (ctx) => {
   const four2 = (ctx?.policy?.four2 ?? 'both') as Four2Policy;
   const legal = generateMoves(ctx.hands, ctx.require, four2);
@@ -460,7 +409,6 @@ export const GreedyMax: BotFunc = (ctx) => {
     const c = ctx.hands?.[0] ?? '♠3';
     return { move:'play', cards:[c], reason:'fallback' };
   }
-  // 最大优先：rocket > bomb > others by key/len
   legal.sort((a,b)=>{
     const ca = classify(a, four2)!; const cb = classify(b, four2)!;
     const ord = (t:MoveType)=> t==='rocket'?3 : t==='bomb'?2 : 1;
@@ -478,7 +426,7 @@ function makeDeck(): Card[] {
   const deck: Card[] = [];
   for (const s of SUITS) {
     for (const r of RANKS) {
-      if (r==='x' || r==='X') continue; // Jokers 另外加
+      if (r==='x' || r==='X') continue;
       deck.push(`${s}${r}`);
     }
   }
@@ -506,7 +454,6 @@ function mulberry32(a:number) {
 }
 
 function evalHandStrength(hand: Card[]): number {
-  // 粗糙评估：高牌、对/三/炸、是否有王炸等
   const g = countByRank(hand);
   let s = 0;
   for (const [r, arr] of g.entries()) {
@@ -525,7 +472,6 @@ export async function* runOneGame(opts: RunOptions): AsyncGenerator<GameEvent> {
   const { seats, seed, rob=true, four2='both' } = { rob:true, four2:'both', ...opts };
   if (!seats || seats.length<3) throw new Error('seats must be 3 bot functions');
 
-  // 1) 发牌
   const deck = shuffle(makeDeck(), seed);
   const hands: Card[][] = [deck.slice(0,17), deck.slice(17,34), deck.slice(34,51)];
   const dipai: Card[] = deck.slice(51);
@@ -533,10 +479,8 @@ export async function* runOneGame(opts: RunOptions): AsyncGenerator<GameEvent> {
 
   yield { type:'init', hands, dipai };
 
-  // 2) 抢地主（简化：若 rob=false，直接给最强手做地主）
   let landlord = 0;
   if (rob) {
-    // 轮询三次，若有多人“rob”，最后一个“rob”者为地主；若无人抢，则最强者为地主
     let lastRob: number | null = null;
     for (let r=0;r<3;r++){
       const seat = r%3;
@@ -550,29 +494,24 @@ export async function* runOneGame(opts: RunOptions): AsyncGenerator<GameEvent> {
     }
     if (lastRob!=null) landlord = lastRob;
     else {
-      // 无人抢：选最强
       const scores = hands.map(h=>evalHandStrength(h));
       landlord = scores.indexOf(Math.max(...scores));
     }
   } else {
-    // 直接最强
     const scores = hands.map(h=>evalHandStrength(h));
     landlord = scores.indexOf(Math.max(...scores));
   }
 
-  // 3) 亮底（底牌归地主）
   hands[landlord].push(...dipai);
   hands[landlord] = sortCardsAsc(hands[landlord]);
   yield { type:'reveal', landlord, dipai, hands };
 
-  // 4) 对局：地主先手，直到一方出完牌
   let turn = landlord;
   let require: Require | undefined = undefined;
   let lastPlayedSeat = -1;
 
   while (true) {
     const myHand = hands[turn];
-    // 是否允许过牌：有 require 且本轮不是最后出牌者
     const canPass = !!require && lastPlayedSeat !== turn;
 
     const ctx: BotCtx = {
@@ -588,9 +527,7 @@ export async function* runOneGame(opts: RunOptions): AsyncGenerator<GameEvent> {
     const mv = await Promise.resolve(seats[turn](ctx));
 
     if (mv.move === 'pass') {
-      // 只有在 canPass 时才允许 pass
       if (!canPass) {
-        // 被迫改为出最小
         const legal = generateMoves(myHand, require, four2);
         const play = legal[0] ?? [myHand[0]];
         applyMove(hands, turn, play);
@@ -602,7 +539,6 @@ export async function* runOneGame(opts: RunOptions): AsyncGenerator<GameEvent> {
         yield { type:'pass', seat:turn, reason: mv.reason || 'pass' };
       }
     } else if (mv.move === 'play') {
-      // 校验是否合法；不合法则改最小合法（兜底）
       const legal = generateMoves(myHand, require, four2);
       let play = sortCardsAsc(mv.cards || []);
       if (!play.length || !includesAll(myHand, play) || !containsCombo(legal, play)) {
@@ -614,11 +550,9 @@ export async function* runOneGame(opts: RunOptions): AsyncGenerator<GameEvent> {
       lastPlayedSeat = turn;
       yield { type:'play', seat:turn, cards: play, cls, remain: hands[turn].length, reason: mv.reason };
     } else {
-      // 抢地主阶段外收到 rob/nrob：忽略为 pass 处理
       if (canPass) {
         yield { type:'pass', seat:turn, reason:'n/a' };
       } else {
-        // 必须出牌
         const legal = generateMoves(myHand, require, four2);
         const play = legal[0] ?? [myHand[0]];
         applyMove(hands, turn, play);
@@ -629,32 +563,28 @@ export async function* runOneGame(opts: RunOptions): AsyncGenerator<GameEvent> {
       }
     }
 
-    // 出完了吗？
     if (hands[turn].length === 0) {
       const winner = turn;
       yield { type:'end', landlord, winner, lastMove: require };
       return;
     }
 
-    // 轮换到下家
     turn = (turn + 1) % 3;
 
-    // 如果轮回到“最后一次有出牌的座位”，表示另外两家都 pass 了 → 新一轮，自由出牌
     if (turn === lastPlayedSeat) {
-      require = undefined; // 重置跟牌要求
+      require = undefined; // 新一轮，自由出牌
     }
   }
 }
 
-// 辅助：从手牌移除出过的牌
+/* ============ 小工具 ============ */
+
 function applyMove(hands: Card[][], seat: number, play: Card[]) {
   for (const p of play) {
     const idx = hands[seat].indexOf(p);
     if (idx >= 0) hands[seat].splice(idx, 1);
   }
 }
-
-// 辅助：hand 是否包含 play 所有牌
 function includesAll(hand: Card[], play: Card[]): boolean {
   const m = new Map<string, number>();
   for (const c of hand) m.set(c, (m.get(c)||0)+1);
@@ -665,8 +595,6 @@ function includesAll(hand: Card[], play: Card[]): boolean {
   }
   return true;
 }
-
-// 辅助：legal 中是否包含与 play“牌面相同”的组合
 function containsCombo(legal: Card[][], play: Card[]): boolean {
   const k = sortCardsAsc(play).join(',');
   return legal.some(m => sortCardsAsc(m).join(',') === k);
