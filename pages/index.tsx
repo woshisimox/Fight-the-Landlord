@@ -1025,6 +1025,15 @@ const start = async () => {
           let nextFinished = finishedRef.current;
           let nextLog = [...logRef.current];
           let nextLandlord = landlordRef.current;
+                  // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+
           let nextWinner = winnerRef.current as number | null;
           let nextDelta = deltaRef.current as [number, number, number] | null;
           let nextMultiplier = multiplierRef.current;
@@ -1075,6 +1084,15 @@ const start = async () => {
                   nextLog = [...nextLog, `【TS】after-round 已更新 μ/σ`];
                 } else if (m.where === 'before-round') {
                   nextLog = [...nextLog, `【TS】before-round μ/σ 准备就绪`];
+                  // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+
                 }
                 continue;
               }
@@ -1113,8 +1131,26 @@ const start = async () => {
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
+                  // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
+                  // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+
                     const lordVal = (lord ?? -1) as number | -1;
                     if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
                     else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
