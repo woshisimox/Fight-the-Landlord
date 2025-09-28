@@ -9,6 +9,12 @@ import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
+// ==== Seen-cards buffer for this request (available to built-in bots via globalThis) ====
+declare global {
+  // eslint-disable-next-line no-var
+  var __DDZ_SEEN: string[] | undefined;
+}
+(globalThis as any).__DDZ_SEEN ??= [];
 
 /* ========== 小工具 ========== */
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
@@ -142,7 +148,7 @@ function traceWrap(
     let result:any;
     const t0 = Date.now();
     try {
-      result = await Promise.race([ Promise.resolve(bot(ctx)), timeout ]);
+      result = await Promise.race([ Promise.resolve(bot({ ...ctx, seen: ((globalThis as any).__DDZ_SEEN || []) })), timeout ]);
     } catch (e:any) {
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
     }
@@ -206,6 +212,7 @@ async function runOneRoundWithGuard(
     if (ev?.type==='turn') {
       const { seat, move, cards, hand, totals } = ev;
       countPlay(seat, move, cards);
+      try { if (Array.isArray(cards) && cards.length) (globalThis as any).__DDZ_SEEN!.push(...cards); } catch {}
       const moveStr = stringifyMove({ move, cards });
       const reason = lastReason[seat] || null;
       writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, totals });
@@ -214,6 +221,7 @@ async function runOneRoundWithGuard(
     if (ev?.type==='event' && ev?.kind==='play') {
       const { seat, move, cards } = ev;
       countPlay(seat, move, cards);
+      try { if (Array.isArray(cards) && cards.length) (globalThis as any).__DDZ_SEEN!.push(...cards); } catch {}
       writeLine(res, ev);
       continue;
     }
@@ -304,6 +312,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
+      (globalThis as any).__DDZ_SEEN && ((globalThis as any).__DDZ_SEEN.length = 0);
       await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });

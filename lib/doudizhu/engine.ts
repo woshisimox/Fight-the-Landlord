@@ -472,7 +472,7 @@ export const RandomLegal: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
 
-  // ========== 仅在本函数内部的小工具 ==========
+  // —— 仅在本函数内使用的小工具（不改变任何类型/导出） ——
   const rankOfLocal = (c: string) => (c === 'x' || c === 'X') ? c : c.slice(-1);
   const removeCards = (hand: string[], pick: string[]) => {
     const h = hand.slice();
@@ -494,7 +494,7 @@ export const RandomLegal: BotFunc = (ctx) => {
   // 顺子/连对用的序（不含 2/x/X）
   const SEQ = ['3','4','5','6','7','8','9','T','J','Q','K','A'];
   const POS = Object.fromEntries(SEQ.map((r, i) => [r, i])) as Record<string, number>;
-  // 全序（含 2/x/X），用于比较“更大”
+  // 全序（含 2/x/X）
   const ORDER = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
   const POSALL = Object.fromEntries(ORDER.map((r, i) => [r, i])) as Record<string, number>;
 
@@ -533,10 +533,10 @@ export const RandomLegal: BotFunc = (ctx) => {
     const cls = classify(mv, four2)!;
     const cnt = countByRankLocal(mv);
     if (cls.type === 'rocket') return 'X';
-    if (cls.type === 'bomb' || cls.type === 'four-with-two') {
+    if (cls.type === 'bomb' || cls.type === 'four_two_singles' || cls.type === 'four_two_pairs') {
       for (const [r, n] of cnt.entries()) if (n === 4) return r;
     }
-    if (cls.type === 'pair' || cls.type === 'pair-straight') {
+    if (cls.type === 'pair' || cls.type === 'pair_seq') {
       // 连对取最大对的 rank
       let best = '3', bestPos = -1;
       for (const [r, n] of cnt.entries()) if (n >= 2 && POS[r] != null && POS[r] > bestPos) {
@@ -544,7 +544,7 @@ export const RandomLegal: BotFunc = (ctx) => {
       }
       return best;
     }
-    if (cls.type === 'triple' || cls.type === 'triple-with-single' || cls.type === 'triple-with-pair' || cls.type === 'plane') {
+    if (cls.type === 'triple' || cls.type === 'triple_one' || cls.type === 'triple_pair' || cls.type === 'plane' || cls.type === 'plane_single' || cls.type === 'plane_pair') {
       let best = '3', bestPos = -1;
       for (const [r, n] of cnt.entries()) if (n >= 3 && POS[r] != null && POS[r] > bestPos) {
         best = r; bestPos = POS[r];
@@ -584,16 +584,14 @@ export const RandomLegal: BotFunc = (ctx) => {
     if (cls.type === 'bomb') {
       // 只有王炸能压炸弹
       const rx = (unseen.get('x') || 0) > 0 && (unseen.get('X') || 0) > 0 ? 1 : 0;
-      return rx * 3; // 有王炸未见 → 有一定风险
+      return rx * 3;
     }
     const keyR = keyRankOfMove(mv);
     const keyPos = POSALL[keyR] ?? -1;
 
-    // 统计“比 key 更大的可用资源”数量（不同牌型粗略估计）
     if (cls.type === 'single') {
       let higher = 0;
       for (const r of ORDER) if ((POSALL[r] ?? -1) > keyPos) higher += (unseen.get(r) || 0);
-      // 炸弹/王炸也能接，但算作常量小惩罚，避免过度复杂
       return higher * 0.2 + ((unseen.get('x')||0) && (unseen.get('X')||0) ? 0.5 : 0);
     }
     if (cls.type === 'pair') {
@@ -605,15 +603,15 @@ export const RandomLegal: BotFunc = (ctx) => {
       const rockets = ((unseen.get('x')||0) && (unseen.get('X')||0)) ? 0.5 : 0;
       return higherPairs + rockets;
     }
-    if (cls.type === 'triple' || cls.type === 'triple-with-single' || cls.type === 'triple-with-pair') {
+    if (cls.type === 'triple' || cls.type === 'triple_one' || cls.type === 'triple_pair') {
       let higherTriples = 0;
       for (const r of ORDER) {
         const p = POSALL[r] ?? -1;
         if (p > keyPos && (unseen.get(r) || 0) >= 3) higherTriples++;
       }
-      return higherTriples + 0.5; // 炸弹/王炸可能性：常量轻惩罚
+      return higherTriples + 0.5;
     }
-    if (cls.type === 'four-with-two') {
+    if (cls.type === 'four_two_singles' || cls.type === 'four_two_pairs') {
       // 能压它的：更大的炸弹或王炸
       let higherBombs = 0;
       for (const r of ORDER) {
@@ -623,16 +621,15 @@ export const RandomLegal: BotFunc = (ctx) => {
       const rockets = ((unseen.get('x')||0) && (unseen.get('X')||0)) ? 1 : 0;
       return higherBombs * 1.5 + rockets * 2;
     }
-    if (cls.type === 'straight' || cls.type === 'pair-straight' || cls.type === 'plane') {
-      // 近似：看比 key 更大的 rank 是否仍有足够“素材”存在
+    if (cls.type === 'straight' || cls.type === 'pair_seq' || cls.type === 'plane' || cls.type === 'plane_single' || cls.type === 'plane_pair') {
       let higherMaterial = 0;
       for (const r of SEQ) {
         const p = POSALL[r] ?? -1;
         if (p > keyPos) higherMaterial += (unseen.get(r) || 0);
       }
-      return higherMaterial * 0.1 + 0.6; // 炸弹/王炸常量惩罚
+      return higherMaterial * 0.1 + 0.6;
     }
-    return 1; // 兜底
+    return 1;
   };
 
   // ========= 结构评分：少裸单/少打散/顺子潜力/少用炸弹 =========
@@ -689,8 +686,8 @@ export const RandomLegal: BotFunc = (ctx) => {
   // ========= 选择逻辑 =========
   const scoreMove = (mv: string[]) => {
     const sShape = shapeScore(ctx.hands, mv);
-    const sRisk = -overtakeRisk(mv); // 风险越小越好（取负）
-    return sShape + sRisk * 0.35;    // 风险权重可微调
+    const sRisk  = -overtakeRisk(mv); // 风险越小越好（取负）
+    return sShape + sRisk * 0.35;     // 风险权重可微调
   };
 
   if (ctx.require) {
