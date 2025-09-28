@@ -472,8 +472,8 @@ export const RandomLegal: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
 
-  // —— 仅在本函数内使用的小工具（不改变任何类型/导出） ——
-  const getRank = (c: string) => (c === 'x' || c === 'X') ? c : c.slice(-1);
+  // ========== 仅在本函数内部的小工具 ==========
+  const rankOfLocal = (c: string) => (c === 'x' || c === 'X') ? c : c.slice(-1);
   const removeCards = (hand: string[], pick: string[]) => {
     const h = hand.slice();
     for (const c of pick) {
@@ -485,15 +485,18 @@ export const RandomLegal: BotFunc = (ctx) => {
   const countByRankLocal = (cards: string[]) => {
     const m = new Map<string, number>();
     for (const c of cards) {
-      const r = getRank(c);
+      const r = rankOfLocal(c);
       m.set(r, (m.get(r) || 0) + 1);
     }
     return m; // rank -> count
   };
 
-  // 仅用于顺子/连对潜力的本地序（不含 2/x/X）
+  // 顺子/连对用的序（不含 2/x/X）
   const SEQ = ['3','4','5','6','7','8','9','T','J','Q','K','A'];
-  const POS: Record<string, number> = Object.fromEntries(SEQ.map((r, i) => [r, i]));
+  const POS = Object.fromEntries(SEQ.map((r, i) => [r, i])) as Record<string, number>;
+  // 全序（含 2/x/X），用于比较“更大”
+  const ORDER = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
+  const POSALL = Object.fromEntries(ORDER.map((r, i) => [r, i])) as Record<string, number>;
 
   const longestSingleChain = (cards: string[]) => {
     const cnt = countByRankLocal(cards);
@@ -509,7 +512,6 @@ export const RandomLegal: BotFunc = (ctx) => {
     }
     return best;
   };
-
   const longestPairChain = (cards: string[]) => {
     const cnt = countByRankLocal(cards);
     const ranks = Array.from(cnt.entries())
@@ -526,7 +528,114 @@ export const RandomLegal: BotFunc = (ctx) => {
     return best;
   };
 
-  // 形状评分（分越高越好）：少裸单、少打散、保留顺子/连对潜力；炸弹/王炸轻惩罚；多出牌略加分
+  // 从候选出牌里提取“关键 rank”（比较大小时的主轴）
+  const keyRankOfMove = (mv: string[]) => {
+    const cls = classify(mv, four2)!;
+    const cnt = countByRankLocal(mv);
+    if (cls.type === 'rocket') return 'X';
+    if (cls.type === 'bomb' || cls.type === 'four-with-two') {
+      for (const [r, n] of cnt.entries()) if (n === 4) return r;
+    }
+    if (cls.type === 'pair' || cls.type === 'pair-straight') {
+      // 连对取最大对的 rank
+      let best = '3', bestPos = -1;
+      for (const [r, n] of cnt.entries()) if (n >= 2 && POS[r] != null && POS[r] > bestPos) {
+        best = r; bestPos = POS[r];
+      }
+      return best;
+    }
+    if (cls.type === 'triple' || cls.type === 'triple-with-single' || cls.type === 'triple-with-pair' || cls.type === 'plane') {
+      let best = '3', bestPos = -1;
+      for (const [r, n] of cnt.entries()) if (n >= 3 && POS[r] != null && POS[r] > bestPos) {
+        best = r; bestPos = POS[r];
+      }
+      return best;
+    }
+    if (cls.type === 'straight') {
+      let best = '3', bestPos = -1;
+      for (const r of Object.keys(cnt)) if (r !== '2' && r !== 'x' && r !== 'X' && POS[r] != null && POS[r] > bestPos) {
+        best = r; bestPos = POS[r];
+      }
+      return best;
+    }
+    // single 等：取牌面最大
+    let best = '3', bestPos = -1;
+    for (const r of Object.keys(cnt)) {
+      const p = POSALL[r] ?? -1;
+      if (p > bestPos) { best = r; bestPos = p; }
+    }
+    return best;
+  };
+
+  // ========== “已出牌意识”：基于全牌库 - 我方手牌 - 已出牌 的未见牌估计 ==========
+  const BASE: Record<string, number> = Object.fromEntries(
+    ORDER.map(r => [r, (r === 'x' || r === 'X') ? 1 : 4])
+  ) as Record<string, number>;
+  const seen: string[] = (globalThis as any).__DDZ_SEEN ?? []; // 没设置就当空数组
+  const unseen = new Map<string, number>(Object.entries(BASE));
+  const sub = (arr: string[]) => { for (const c of arr) { const r = rankOfLocal(c); unseen.set(r, Math.max(0, (unseen.get(r) || 0) - 1)); } };
+  sub(ctx.hands);
+  sub(seen);
+
+  // 对某个候选求“被更大压住的风险 proxy”（越小越安全）
+  const overtakeRisk = (mv: string[]) => {
+    const cls = classify(mv, four2)!;
+    if (cls.type === 'rocket') return 0; // 无人可压
+    if (cls.type === 'bomb') {
+      // 只有王炸能压炸弹
+      const rx = (unseen.get('x') || 0) > 0 && (unseen.get('X') || 0) > 0 ? 1 : 0;
+      return rx * 3; // 有王炸未见 → 有一定风险
+    }
+    const keyR = keyRankOfMove(mv);
+    const keyPos = POSALL[keyR] ?? -1;
+
+    // 统计“比 key 更大的可用资源”数量（不同牌型粗略估计）
+    if (cls.type === 'single') {
+      let higher = 0;
+      for (const r of ORDER) if ((POSALL[r] ?? -1) > keyPos) higher += (unseen.get(r) || 0);
+      // 炸弹/王炸也能接，但算作常量小惩罚，避免过度复杂
+      return higher * 0.2 + ((unseen.get('x')||0) && (unseen.get('X')||0) ? 0.5 : 0);
+    }
+    if (cls.type === 'pair') {
+      let higherPairs = 0;
+      for (const r of ORDER) {
+        const p = POSALL[r] ?? -1;
+        if (p > keyPos && (unseen.get(r) || 0) >= 2) higherPairs++;
+      }
+      const rockets = ((unseen.get('x')||0) && (unseen.get('X')||0)) ? 0.5 : 0;
+      return higherPairs + rockets;
+    }
+    if (cls.type === 'triple' || cls.type === 'triple-with-single' || cls.type === 'triple-with-pair') {
+      let higherTriples = 0;
+      for (const r of ORDER) {
+        const p = POSALL[r] ?? -1;
+        if (p > keyPos && (unseen.get(r) || 0) >= 3) higherTriples++;
+      }
+      return higherTriples + 0.5; // 炸弹/王炸可能性：常量轻惩罚
+    }
+    if (cls.type === 'four-with-two') {
+      // 能压它的：更大的炸弹或王炸
+      let higherBombs = 0;
+      for (const r of ORDER) {
+        const p = POSALL[r] ?? -1;
+        if (p > keyPos && (unseen.get(r) || 0) === 4) higherBombs++;
+      }
+      const rockets = ((unseen.get('x')||0) && (unseen.get('X')||0)) ? 1 : 0;
+      return higherBombs * 1.5 + rockets * 2;
+    }
+    if (cls.type === 'straight' || cls.type === 'pair-straight' || cls.type === 'plane') {
+      // 近似：看比 key 更大的 rank 是否仍有足够“素材”存在
+      let higherMaterial = 0;
+      for (const r of SEQ) {
+        const p = POSALL[r] ?? -1;
+        if (p > keyPos) higherMaterial += (unseen.get(r) || 0);
+      }
+      return higherMaterial * 0.1 + 0.6; // 炸弹/王炸常量惩罚
+    }
+    return 1; // 兜底
+  };
+
+  // ========= 结构评分：少裸单/少打散/顺子潜力/少用炸弹 =========
   const shapeScore = (before: string[], picked: string[]) => {
     const after = removeCards(before, picked);
     const preCnt = countByRankLocal(before);
@@ -543,7 +652,7 @@ export const RandomLegal: BotFunc = (ctx) => {
       if (r === 'x' || r === 'X') jokers += n;
     }
 
-    // 打散惩罚：从一组里只拿走部分张（拆对/三/炸）→ 惩罚
+    // 打散惩罚（拆对子/三/炸）
     let breakPenalty = 0;
     const used = countByRankLocal(picked);
     for (const [r, k] of used.entries()) {
@@ -557,12 +666,11 @@ export const RandomLegal: BotFunc = (ctx) => {
     const chain = longestSingleChain(after);
     const pairSeq = longestPairChain(after);
 
-    // 炸弹/王炸轻微惩罚（除非候选只剩它们）
+    // 避免轻易用炸弹/王炸（除非必要）
     const pickedType = classify(picked, four2)!;
     const bombPenalty = (pickedType.type === 'bomb' || pickedType.type === 'rocket') ? 1.2 : 0;
 
-    const outReward = picked.length * 0.4;
-
+    const outReward = picked.length * 0.4; // 出得多略加分
     return (
       outReward
       - singles * 1.0
@@ -578,12 +686,17 @@ export const RandomLegal: BotFunc = (ctx) => {
     );
   };
 
-  // ====== 选择逻辑 ======
+  // ========= 选择逻辑 =========
+  const scoreMove = (mv: string[]) => {
+    const sShape = shapeScore(ctx.hands, mv);
+    const sRisk = -overtakeRisk(mv); // 风险越小越好（取负）
+    return sShape + sRisk * 0.35;    // 风险权重可微调
+  };
+
   if (ctx.require) {
-    // 没法接且可以过 → pass；否则挑评分最佳的“接牌”
     if (!legal.length) return ctx.canPass ? { move:'pass' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'] };
 
-    // 同型同长优先（尽量不炸），在候选中按形状分挑最优
+    // 同型同长优先（尽量不炸）
     const req = ctx.require;
     const sameType = legal.filter(mv => {
       const c = classify(mv, four2)!;
@@ -591,16 +704,15 @@ export const RandomLegal: BotFunc = (ctx) => {
     });
     const pool = sameType.length ? sameType : legal;
 
-    let best = pool[0];
-    let bestScore = -Infinity;
+    let best = pool[0], bestScore = -Infinity;
     for (const mv of pool) {
-      const sc = shapeScore(ctx.hands, mv);
+      const sc = scoreMove(mv);
       if (sc > bestScore) { bestScore = sc; best = mv; }
     }
     return { move:'play', cards: best };
   }
 
-  // 自由出：优先非炸弹/王炸，按形状分挑最优
+  // 自由出：优先非炸/王，按综合分挑最优
   if (legal.length) {
     const nonBombs = legal.filter(mv => {
       const t = classify(mv, four2)!.type;
@@ -608,18 +720,17 @@ export const RandomLegal: BotFunc = (ctx) => {
     });
     const pool = nonBombs.length ? nonBombs : legal;
 
-    let best = pool[0];
-    let bestScore = -Infinity;
+    let best = pool[0], bestScore = -Infinity;
     for (const mv of pool) {
-      const sc = shapeScore(ctx.hands, mv);
+      const sc = scoreMove(mv);
       if (sc > bestScore) { bestScore = sc; best = mv; }
     }
     return { move:'play', cards: best };
   }
 
-  // 极端兜底
   return ctx.canPass ? { move:'pass' } : { move:'play', cards: [ctx.hands[0] ?? '♠3'] };
 };
+
 
 
 
