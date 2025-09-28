@@ -1008,6 +1008,14 @@ const start = async () => {
           let nextFinished = finishedRef.current;
           let nextLog = [...logRef.current];
           let nextLandlord = landlordRef.current;
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+    
           let nextWinner = winnerRef.current as number | null;
           let nextDelta = deltaRef.current as [number, number, number] | null;
           let nextMultiplier = multiplierRef.current;
@@ -1062,7 +1070,15 @@ for (const raw of batch) {
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                   nextLog = [...nextLog, `【TS】after-round 已更新 μ/σ`];
                 } else if (m.where === 'before-round') {
-                  nextLog = [...nextLog, `【TS】before-round μ/σ 准备就绪`];
+            
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+          nextLog = [...nextLog, `【TS】before-round μ/σ 准备就绪`];
                 }
                 continue;
               }
@@ -1079,7 +1095,15 @@ for (const raw of batch) {
               }
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
-                const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
+                const res = markRoundF
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+    inishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 continue;
               }
@@ -1098,13 +1122,35 @@ for (const raw of batch) {
                   nextLandlord = lord;
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
+                    const lordVal = ( ((m as any).landlordIdx ?? (m as any).landlord ?? nextLandlord ?? nextLeader ?? -1) as number | -1 );
+                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
+                    else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
+                    // 回填本段地主，避免未知导致白底
+                    if (nextCuts.length > 0) {
+                      const idxBand = Math.max(0, nextCuts.length - 1);
+                      if (nextLords[idxBand] !== lordVal) {
+                        nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                      }
+                    }
+                  }
+    
+                  {
+                    const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
                     if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
                     else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
                   }
                   // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
                   if (nextCuts.length > 0) {
+                    const idxBand = Math.max
+                  if (nextCuts.length > 0) {
                     const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? nextLeader ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+    (0, nextCuts.length - 1);
                     const lordVal2 = (nextLandlord ?? -1) as number | -1;
                     if (nextLords[idxBand] !== lordVal2) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
