@@ -909,7 +909,162 @@ const start = async () => {
         return `${nm}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
       }).join(', ');
 
-    const markRoundFinishedIfNeeded( nextFinished, nextAggStats, nextAggCount);
+    const markRoundFinishedIfNeeded = (
+      nextFinished:number,
+      nextAggStats: Score5[] | null,
+      nextAggCount: number
+    ) => {
+      if (!roundFinishedRef.current) {
+        if (!seenStatsRef.current) {
+          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
+          const mode = aggModeRef.current;
+          const a    = alphaRef.current;
+          if (!nextAggStats) {
+            nextAggStats = [neutral, neutral, neutral];
+            nextAggCount = 1;
+          } else {
+            nextAggStats = nextAggStats.map(prev => mergeScore(prev, neutral, mode, nextAggCount, a));
+            nextAggCount = nextAggCount + 1;
+          }
+        }
+        roundFinishedRef.current = true;
+        nextFinished = nextFinished + 1;
+      }
+      return { nextFinished, nextAggStats, nextAggCount };
+    };
+
+    const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
+    let lastEventTs = Date.now();
+    const timeoutMs = (()=>{
+      const arr = props.turnTimeoutSecs || [30,30,30];
+      const norm = arr.map(x=> (Number.isFinite(x as any) && (x as any)>0 ? (x as any) : 30));
+      const sec = Math.min(...norm);
+      return Math.max(5000, sec*1000);
+    })();
+    let dogId: any = null;
+
+      setLog([]); lastReasonRef.current = [null, null, null];
+      const baseSpecs = buildSeatSpecs();
+      const startShift = ((labelRoundNo - 1) % 3 + 3) % 3;
+      const specs = [0,1,2].map(i => baseSpecs[(i + startShift) % 3]);
+      const toUiSeat = (j:number) => (j + startShift) % 3;
+      const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
+      const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
+      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
+
+      roundFinishedRef.current = false;
+      seenStatsRef.current = false;
+
+      const r = await fetch('/api/stream_ndjson', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          rounds: 1,
+          startScore: props.startScore,
+          seatDelayMs: props.seatDelayMs,
+          enabled: props.enabled,
+          rob: props.rob,
+          four2: props.four2,
+          seats: specs,
+          clientTraceId: traceId,
+          stopBelowZero: true,
+          farmerCoop: props.farmerCoop,
+        turnTimeoutSec: (props.turnTimeoutSecs ?? [30,30,30])
+        }),
+        signal: controllerRef.current!.signal,
+      });
+      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+
+      const reader = r.body.getReader();
+      dogId = setInterval(() => {
+        if (Date.now() - lastEventTs > timeoutMs) {
+          setLog(l => [...l, `⏳ 超过 ${Math.round(timeoutMs/1000)}s 未收到事件，已触发前端提示（后端会按规则自动“过”或出最小牌），继续等待…`]);
+          lastEventTs = Date.now(); // 防止重复提示
+        }
+      }, 1000);
+    
+      const decoder = new TextDecoder('utf-8');
+      let buf = '';
+      const rewrite = makeRewriteRoundLabel(labelRoundNo);
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+
+        let idx: number;
+        const batch: any[] = [];
+        while ((idx = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line) continue;
+          try { batch.push(JSON.parse(line)); } catch {}
+        }
+
+        if (batch.length) {
+          let nextHands = handsRef.current.map(x => [...x]);
+          let nextPlays = [...playsRef.current];
+          let nextTotals = [...totalsRef.current] as [number, number, number];
+          let nextFinished = finishedRef.current;
+          let nextLog = [...logRef.current];
+          let nextLandlord = landlordRef.current;
+if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+    
+          let nextWinner = winnerRef.current as number | null;
+          let nextDelta = deltaRef.current as [number, number, number] | null;
+          let nextMultiplier = multiplierRef.current;
+          let nextAggStats = aggStatsRef.current;
+          let nextAggCount = aggCountRef.current;
+
+          
+          let nextScores = scoreSeriesRef.current.map(x => [...x]);
+          let sawAnyTurn = false;
+for (const raw of batch) {
+            let m: any = raw;
+            // Remap engine->UI indices when startShift != 0
+            if (startShift) {
+              const mapMsg = (obj:any)=>{
+                const out:any = { ...obj };
+                const mapSeat = (x:any)=> (typeof x==='number' ? toUiSeat(x) : x);
+                const mapArr = (a:any)=> (Array.isArray(a) && a.length===3 ? remap3(a) : a);
+                out.seat = mapSeat(out.seat);
+                if ('landlordIdx' in out) out.landlordIdx = mapSeat(out.landlordIdx);
+                if ('landlord' in out) out.landlord = mapSeat(out.landlord);
+                if ('winner' in out) out.winner = mapSeat(out.winner);
+                if ('hands' in out) out.hands = mapArr(out.hands);
+                if ('totals' in out) out.totals = mapArr(out.totals);
+                if ('delta' in out) out.delta = mapArr(out.delta);
+                if ('ratings' in out) out.ratings = mapArr(out.ratings);
+                if (out.payload) {
+                  const p:any = { ...out.payload };
+                  if ('seat' in p) p.seat = mapSeat(p.seat);
+                  if ('landlord' in p) p.landlord = mapSeat(p.landlord);
+                  if ('hands' in p) p.hands = mapArr(p.hands);
+                  if ('totals' in p) p.totals = mapArr(p.totals);
+                  out.payload = p;
+                }
+                return out;
+              };
+              m = mapMsg(raw);
+            } else {
+              const m_any:any = raw; m = m_any;
+            }
+
+            // m already defined above
+            try {
+              // -------- TS 帧（后端主动提供） --------
+              if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
+                const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
+                setTsArr(incoming);
+
+                if (m.where === 'after-round') {
+                  const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                   nextLog = [...nextLog, `【TS】after-round 已更新 μ/σ`];
                 } else if (m.where === 'before-round') {
@@ -938,7 +1093,217 @@ const start = async () => {
               }
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
-                const res = markRoundFinishedIfNeeded( nextFinished, nextAggStats, nextAggCount);
+                const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
+                nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
+                continue;
+              }
+
+              // -------- 初始发牌（仅限 init 帧） --------
+              if (m.type === 'init') {
+                const rh = m.hands;
+                if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
+                  nextPlays = [];
+                  nextWinner = null;
+                  nextDelta = null;
+                  nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
+                  nextHands = (rh as string[][]).map(decorateHandCycle);
+
+                  const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
+                  nextLandlord = lord;
+                  {
+                    const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
+                    const lordVal = ( ((m as any).landlordIdx ?? (m as any).landlord ?? nextLandlord ?? -1) as number | -1 );
+                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
+                    else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
+                    // 回填本段地主，避免未知导致白底
+                    if (nextCuts.length > 0) {
+                      const idxBand = Math.max(0, nextCuts.length - 1);
+                      if (nextLords[idxBand] !== lordVal) {
+                        nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                      }
+                    }
+                  }
+    
+                  {
+                    const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
+                    const lordVal = (lord ?? -1) as number | -1;
+                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
+                    else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
+                  }
+                  // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal2 = (nextLandlord ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal2) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
+                    }
+                  }
+
+                  nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
+
+                  try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
+                  lastReasonRef.current = [null, null, null];
+                }
+                continue;
+              }
+
+              
+              // -------- 首次手牌兜底注入（若没有 init 帧但消息里带了 hands） --------
+              {
+                const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
+                if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
+                  nextHands = (rh0 as string[][]).map(decorateHandCycle);
+                  const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
+                  if (lord2 != null) nextLandlord = lord2;
+                  // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
+                  nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
+                }
+              }
+
+// -------- AI 过程日志 --------
+              if (m.type === 'event' && m.kind === 'bot-call') {
+                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
+                continue;
+              }
+              if (m.type === 'event' && m.kind === 'bot-done') {
+                nextLog = [
+                  ...nextLog,
+                  `AI完成｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
+                  ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
+                ];
+                lastReasonRef.current[m.seat] = m.reason || null;
+                continue;
+              }
+
+              // -------- 抢/不抢 --------
+              if (m.type === 'event' && m.kind === 'rob') {
+  if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
+                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
+                continue;
+              }
+
+              // -------- 起新墩 --------
+              if (m.type === 'event' && m.kind === 'trick-reset') {
+                nextLog = [...nextLog, '一轮结束，重新起牌'];
+                nextPlays = [];
+                continue;
+              }
+
+              // -------- 出/过 --------
+              
+                // （fallback）若本批次没有收到 'turn' 行，则从 event:play 中恢复 score
+                if (!sawAnyTurn) {
+                  const s = (typeof m.seat === 'number') ? m.seat as number : -1;
+                  if (s>=0 && s<3) {
+                    let val: number|null = (typeof (m as any).score === 'number') ? (m as any).score as number : null;
+                    if (typeof val !== 'number') {
+                      const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
+                      const mm = /score=([+-]?\d+(?:\.\d+)?)/.exec(rr || '');
+                      if (mm) { val = parseFloat(mm[1]); }
+                    }
+                    for (let i=0;i<3;i++){
+                      if (!Array.isArray(nextScores[i])) nextScores[i]=[];
+                      nextScores[i] = [...nextScores[i], (i===s ? val : null)];
+                    }
+                  }
+                }
+
+              // -------- 记录 turn（含 score） --------
+              if (m.type === 'turn') {
+                const s = (typeof m.seat === 'number') ? m.seat as number : -1;
+                if (s>=0 && s<3) {
+                  sawAnyTurn = true;
+                  const val = (typeof m.score === 'number') ? (m.score as number) : null;
+                  for (let i=0;i<3;i++){
+                    if (!Array.isArray(nextScores[i])) nextScores[i]=[];
+                    nextScores[i] = [...nextScores[i], (i===s ? val : null)];
+                  }
+                }
+                continue;
+              }
+if (m.type === 'event' && m.kind === 'play') {
+                if (m.move === 'pass') {
+                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  lastReasonRef.current[m.seat] = null;
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason }];
+                  nextLog = [...nextLog, `${seatName(m.seat)} 过${reason ? `（${reason}）` : ''}`];
+                } else {
+                  const pretty: string[] = [];
+                  const seat = m.seat as number;
+                  const cards: string[] = m.cards || [];
+                  const nh = (nextHands && (nextHands as any[]).length === 3 ? nextHands : [[], [], []]).map((x: any) => [...x]);
+                  for (const rawCard of cards) {
+                    const options = candDecorations(rawCard);
+                    const chosen = options.find((d: string) => nh[seat].includes(d)) || options[0];
+                    const k = nh[seat].indexOf(chosen);
+                    if (k >= 0) nh[seat].splice(k, 1);
+                    pretty.push(chosen);
+                  }
+                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  lastReasonRef.current[m.seat] = null;
+
+                  nextHands = nh;
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason }];
+                  nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reason ? `（理由：${reason}）` : ''}`];
+                }
+                continue;
+              }
+
+              // -------- 结算（多种别名兼容） --------
+              const isWinLike =
+                (m.type === 'event' && (m.kind === 'win' || m.kind === 'result' || m.kind === 'game-over' || m.kind === 'game_end')) ||
+                (m.type === 'result') || (m.type === 'game-over') || (m.type === 'game_end');
+              if (isWinLike) {
+                const L = (nextLandlord ?? 0) as number;
+                const ds = (Array.isArray(m.deltaScores) ? m.deltaScores
+                          : Array.isArray(m.delta) ? m.delta
+                          : [0,0,0]) as [number,number,number];
+
+                // 将“以地主为基准”的增减分旋转成“按座位顺序”的展示
+                const rot: [number,number,number] = [
+                  ds[(0 - L + 3) % 3],
+                  ds[(1 - L + 3) % 3],
+                  ds[(2 - L + 3) % 3],
+                ];
+                let nextWinnerLocal     = m.winner ?? nextWinner ?? null;
+                const effMult = (m.multiplier ?? (nextMultiplier ?? 1));
+// 判定 rot 是否已经按倍数放大：基分 |-2|+|+1|+|+1| = 4
+const sumAbs = Math.abs(rot[0]) + Math.abs(rot[1]) + Math.abs(rot[2]);
+const needScale = effMult > 1 && (sumAbs === 4 || (sumAbs % effMult !== 0));
+const rot2 = needScale
+  ? (rot.map(v => (typeof v === 'number' ? v * effMult : v)) as [number, number, number])
+  : rot;
+nextMultiplier = effMult;
+nextDelta      = rot2;
+nextTotals     = [
+  nextTotals[0] + rot2[0],
+  nextTotals[1] + rot2[1],
+  nextTotals[2] + rot2[2]
+] as any;
+
+                // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
+                if (nextWinnerLocal == null) {
+                  const landlordDelta = ds[0] ?? 0;
+                  if (landlordDelta > 0) nextWinnerLocal = L;
+                  else if (landlordDelta < 0) {
+                    const farmer = [0,1,2].find(x => x !== L)!;
+                    nextWinnerLocal = farmer;
+                  }
+                }
+                nextWinner = nextWinnerLocal;
+
+                // 标记一局结束 & 雷达图兜底
+                {
+                  const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 }
 
