@@ -469,14 +469,113 @@ function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy)
 
 // ========== 内置 Bot ==========
 export const RandomLegal: BotFunc = (ctx) => {
-  if (ctx.canPass && ctx.require) return { move: 'pass' };
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
-  if (legal.length) return { move: 'play', cards: legal[0] };
-  // 兜底：首家且无 require 或 bot 乱回
+
+  const isType = (t:any,...n:string[])=>n.includes(String(t));
+  const rankOfLocal = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+  const removeCards=(h:string[],p:string[])=>{const a=h.slice();for(const c of p){const i=a.indexOf(c);if(i>=0)a.splice(i,1);}return a;};
+  const countByRankLocal=(cs:string[])=>{const m=new Map<string,number>();for(const c of cs){const r=rankOfLocal(c);m.set(r,(m.get(r)||0)+1);}return m;};
+  const SEQ=['3','4','5','6','7','8','9','T','J','Q','K','A'];
+  const POS=Object.fromEntries(SEQ.map((r,i)=>[r,i])) as Record<string,number>;
+  const ORDER=['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
+  const POSALL=Object.fromEntries(ORDER.map((r,i)=>[r,i])) as Record<string,number>;
+
+  const longestSingleChain=(cs:string[])=>{const cnt=countByRankLocal(cs);const rs=Array.from(cnt.keys()).filter(r=>r!=='2'&&r!=='x'&&r!=='X').sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));let best=0,i=0;while(i<rs.length){let j=i;while(j+1<rs.length&&(POS[rs[j+1]]??-1)===(POS[rs[j]]??-2)+1)j++;best=Math.max(best,j-i+1);i=j+1;}return best;};
+  const longestPairChain=(cs:string[])=>{const cnt=countByRankLocal(cs);const rs=Array.from(cnt.entries()).filter(([r,n])=>n>=2&&r!=='2'&&r!=='x'&&r!=='X').map(([r])=>r).sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));let best=0,i=0;while(i<rs.length){let j=i;while(j+1<rs.length&&(POS[rs[j+1]]??-1)===(POS[rs[j]]??-2)+1)j++;best=Math.max(best,j-i+1);i=j+1;}return best;};
+
+  const keyRankOfMove=(mv:string[])=>{const cls=classify(mv,four2)! as any;const cnt=countByRankLocal(mv);
+    if(isType(cls.type,'rocket'))return'X';
+    if(isType(cls.type,'bomb','four_two_singles','four_two_pairs')){for(const[r,n]of cnt.entries())if(n===4)return r;}
+    if(isType(cls.type,'pair','pair_seq')){let best='3',bp=-1;for(const[r,n]of cnt.entries())if(n>=2&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
+    if(isType(cls.type,'triple','triple_one','triple_pair','plane','plane_single','plane_pair')){let best='3',bp=-1;for(const[r,n]of cnt.entries())if(n>=3&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
+    if(isType(cls.type,'straight')){let best='3',bp=-1;for(const r of Object.keys(cnt))if(r!=='2'&&r!=='x'&&r!=='X'&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
+    let best='3',bp=-1;for(const r of Object.keys(cnt)){const p=POSALL[r]??-1;if(p>bp){best=r;bp=p;}}return best;};
+
+  // —— 未现牌估计（结合已出牌与手牌）
+  const BASE:Record<string,number>=Object.fromEntries(ORDER.map(r=>[r,(r==='x'||r==='X')?1:4])) as Record<string,number>;
+  const seenAll:string[]=(globalThis as any).__DDZ_SEEN ?? [];
+  const unseen=new Map<string,number>(Object.entries(BASE));
+  const sub=(arr:string[])=>{for(const c of arr){const r=rankOfLocal(c);unseen.set(r,Math.max(0,(unseen.get(r)||0)-1));}}; sub(ctx.hands); sub(seenAll);
+
+  const baseOvertakeRisk=(mv:string[])=>{const cls=classify(mv,four2)! as any;
+    if(isType(cls.type,'rocket'))return 0;
+    if(isType(cls.type,'bomb')){const rx=(unseen.get('x')||0)>0&&(unseen.get('X')||0)>0?1:0;return rx*3;}
+    const keyR=keyRankOfMove(mv); const kp=POSALL[keyR]??-1;
+    if(isType(cls.type,'single')){let h=0;for(const r of ORDER)if((POSALL[r]??-1)>kp)h+=(unseen.get(r)||0);return h*0.2+(((unseen.get('x')||0)&&(unseen.get('X')||0))?0.5:0);}
+    if(isType(cls.type,'pair')){let hp=0;for(const r of ORDER){const p=POSALL[r]??-1;if(p>kp&&(unseen.get(r)||0)>=2)hp++;}return hp+(((unseen.get('x')||0)&&(unseen.get('X')||0))?0.5:0);}
+    if(isType(cls.type,'triple','triple_one','triple_pair')){let ht=0;for(const r of ORDER){const p=POSALL[r]??-1;if(p>kp&&(unseen.get(r)||0)>=3)ht++;}return ht+0.5;}
+    if(isType(cls.type,'four_two_singles','four_two_pairs')){let hb=0;for(const r of ORDER){const p=POSALL[r]??-1;if(p>kp&&(unseen.get(r)||0)===4)hb++;}return hb*1.5+(((unseen.get('x')||0)&&(unseen.get('X')||0))?2:0);}
+    if(isType(cls.type,'straight','pair_seq','plane','plane_single','plane_pair')){let hm=0;for(const r of SEQ){const p=POSALL[r]??-1;if(p>kp)hm+=(unseen.get(r)||0);}return hm*0.1+0.6;}
+    return 1;
+  };
+
+  // —— 座位权重：对手的反压计入，队友弱化为 0.25
+  const afterSeats=[(ctx.seat+1)%3,(ctx.seat+2)%3];
+  const isOpp=(s:number)=> (ctx.seat===ctx.landlord) ? true : (s===ctx.landlord);
+  const numOppAfter=afterSeats.filter(isOpp).length;
+  const numAllyAfter=afterSeats.length - numOppAfter;
+  const seatRiskFactor=(numOppAfter + 0.25*numAllyAfter)/2;
+
+  const shapeScore=(before:string[],picked:string[])=>{
+    const after=removeCards(before,picked);
+    const pre=countByRankLocal(before), post=countByRankLocal(after);
+    let singles=0,lowSingles=0,pairs=0,triples=0,bombs=0,jokers=0;
+    for(const [r,n] of post.entries()){ if(n===1){singles++; if(r!=='2'&&r!=='x'&&r!=='X')lowSingles++;} else if(n===2)pairs++; else if(n===3)triples++; else if(n===4)bombs++; if(r==='x'||r==='X')jokers+=n; }
+    let breakPenalty=0; const used=countByRankLocal(picked);
+    for(const [r,k] of used.entries()){ const preN=pre.get(r)||0; if(preN>=2&&k<preN) breakPenalty += (preN===2?1.0:preN===3?0.8:1.2); }
+    const chain=longestSingleChain(after), pairSeq=longestPairChain(after);
+    const t=classify(picked,four2)! as any; const bombPenalty=isType(t.type,'bomb','rocket')?1.2:0;
+    const outReward=picked.length*0.4;
+    return outReward - singles*1.0 - lowSingles*0.3 + pairs*0.4 + triples*0.5 + bombs*0.6 + jokers*0.2 + chain*0.25 + pairSeq*0.25 - breakPenalty - bombPenalty;
+  };
+
+  const scoreMove=(mv:string[])=>{
+    const sShape=shapeScore(ctx.hands,mv);
+    const sRisk = - baseOvertakeRisk(mv) * seatRiskFactor;
+    return sShape + sRisk * 0.35;
+  };
+
+  // —— softmax 加权随机选择（保持“随机”风格，但受策略影响）
+  function pickWeighted(pool:string[]): string[] {
+    const scores = pool.map(scoreMove);
+    const T = 0.6; // 温度：越小越贪心，越大越随机
+    const exps = scores.map(s => Math.exp(s / T));
+    const sum = exps.reduce((a,b)=>a+b,0) || 1;
+    let r = Math.random()*sum;
+    for (let i=0;i<pool.length;i++){ r -= exps[i]; if (r<=0) return pool[i]; }
+    return pool[pool.length-1];
+  }
+
+  // ====== 决策 ======
+  if (ctx.require) {
+    if (!legal.length) return ctx.canPass ? { move:'pass', reason:'RandomLegal: 需跟但无可接，选择过牌' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'], reason:'RandomLegal: 需跟无可接且不许过，只能兜底' };
+    const req = ctx.require as any;
+    const same = legal.filter(mv => { const c = classify(mv, four2)! as any; return c.type===req.type && (c.len??0)===(req.len??0); });
+    const pool = same.length ? same : legal;          // 优先同型同长度
+    const choice = pickWeighted(pool);
+    const t=(classify(choice,four2) as any)?.type; const key=keyRankOfMove(choice);
+    const all:string[]=(globalThis as any).__DDZ_SEEN ?? []; const lens=((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]).map((a:any)=>Array.isArray(a)?a.length:0).join('/');
+    const reason = ['RandomLegal', `seat=${ctx.seat} landlord=${ctx.landlord}`, `seen=${all.length} seatSeen=${lens}`, `follow`, `type=${t} key=${key}`].join(' | ');
+    return { move:'play', cards: choice, reason };
+  }
+
+  if (legal.length) {
+    // 首出时尽量不消耗炸弹
+    const nonBombs = legal.filter(mv => { const t=(classify(mv, four2)! as any).type; return !isType(t,'bomb','rocket'); });
+    const pool = nonBombs.length ? nonBombs : legal;
+    const choice = pickWeighted(pool);
+    const t=(classify(choice,four2) as any)?.type; const key=keyRankOfMove(choice);
+    const all:string[]=(globalThis as any).__DDZ_SEEN ?? []; const lens=((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]).map((a:any)=>Array.isArray(a)?a.length:0).join('/');
+    const reason = ['RandomLegal', `seat=${ctx.seat} landlord=${ctx.landlord}`, `seen=${all.length} seatSeen=${lens}`, `lead`, `type=${t} key=${key}`].join(' | ');
+    return { move:'play', cards: choice, reason };
+  }
+
+  // 兜底
   const c = ctx.hands[0] ?? '♠3';
-  return { move: 'play', cards: [c] };
+  return { move:'play', cards:[c], reason:'RandomLegal: 无可选，兜底打首张' };
 };
+
 
 export const GreedyMin: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
