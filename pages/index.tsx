@@ -1142,7 +1142,7 @@ for (const raw of batch) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
                     }
                   }
-    (0, nextCuts.length - 1);
+                    const idxBand = Math.max(0, nextCuts.length - 1);
                     const lordVal2 = (nextLandlord ?? -1) as number | -1;
                     if (nextLords[idxBand] !== lordVal2) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
