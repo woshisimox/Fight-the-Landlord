@@ -466,13 +466,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
-      if (round < 
-      // —— per-request buffers for reason/score ——
-      const lastReason: (string|null)[] = [null, null, null];
-      const lastScore:  (number|null)[] = [null, null, null];
-      const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
-      const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScore[seat] = (typeof sc==='number'? sc: null); };
-rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
+      if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
   } catch (e:any) {
     writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
