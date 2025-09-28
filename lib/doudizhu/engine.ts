@@ -472,8 +472,8 @@ export const RandomLegal: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
 
-  // ---- 仅供本函数内部的小工具（不影响外部接口） ----
-  const removeCards = (hand: Card[], pick: Card[]) => {
+  // ---- 仅在本函数内部用到的小工具（不改变任何外部结构/导出） ----
+  const removeCards = (hand: string[], pick: string[]) => {
     const h = hand.slice();
     for (const c of pick) {
       const i = h.indexOf(c);
@@ -481,7 +481,7 @@ export const RandomLegal: BotFunc = (ctx) => {
     }
     return h;
   };
-  const countByRankLocal = (cards: Card[]) => {
+  const countByRankLocal = (cards: string[]) => {
     const m = new Map<string, number>();
     for (const c of cards) {
       const r = rankOf(c);
@@ -489,8 +489,8 @@ export const RandomLegal: BotFunc = (ctx) => {
     }
     return m; // rank -> count
   };
-  const longestSingleChain = (cards: Card[]) => {
-    // 顺子：不含 2/x/X
+  const longestSingleChain = (cards: string[]) => {
+    // 顺子潜力：不含 2/x/X
     const cnt = countByRankLocal(cards);
     const ok = Array.from(cnt.keys())
       .filter(r => r !== '2' && r !== 'x' && r !== 'X')
@@ -504,8 +504,8 @@ export const RandomLegal: BotFunc = (ctx) => {
     }
     return best;
   };
-  const longestPairChain = (cards: Card[]) => {
-    // 连对：每个 rank 至少 2 张，且不含 2/x/X
+  const longestPairChain = (cards: string[]) => {
+    // 连对潜力：每个 rank 至少 2 张，且不含 2/x/X
     const cnt = countByRankLocal(cards);
     const ok = Array.from(cnt.entries())
       .filter(([r,n]) => n >= 2 && r !== '2' && r !== 'x' && r !== 'X')
@@ -521,8 +521,8 @@ export const RandomLegal: BotFunc = (ctx) => {
     return best;
   };
 
-  // 形状评分：分越高越好（少裸单、少打散、多保留顺子潜力；炸弹/王炸有轻微惩罚）
-  const shapeScore = (before: Card[], picked: Card[]) => {
+  // 形状评分：分越高越好（少裸单、少打散、多保留顺子/连对潜力；炸弹/王炸轻惩罚）
+  const shapeScore = (before: string[], picked: string[]) => {
     const after = removeCards(before, picked);
     const preCnt = countByRankLocal(before);
     const postCnt = countByRankLocal(after);
@@ -531,14 +531,14 @@ export const RandomLegal: BotFunc = (ctx) => {
     for (const [r, n] of postCnt.entries()) {
       if (n === 1) {
         singles++;
-        if (r !== '2' && r !== 'x' && r !== 'X') lowSingles++; // 可用于顺子的“裸单”更糟
+        if (r !== '2' && r !== 'x' && r !== 'X') lowSingles++; // 可参与顺子的“裸单”更糟
       } else if (n === 2) pairs++;
       else if (n === 3) triples++;
       else if (n === 4) bombs++;
       if (r === 'x' || r === 'X') jokers += n;
     }
 
-    // 打散惩罚：若从一个成组里“拿走一部分”，惩罚（避免拆对子/三张/炸弹）
+    // 打散惩罚：从一个成组里“拿走一部分”，惩罚（避免拆对/三/炸）
     let breakPenalty = 0;
     const used = countByRankLocal(picked);
     for (const [r, k] of used.entries()) {
@@ -552,7 +552,7 @@ export const RandomLegal: BotFunc = (ctx) => {
     const chain = longestSingleChain(after);
     const pairSeq = longestPairChain(after);
 
-    // 炸弹/王炸轻微惩罚（除非没有别的可接，会在候选集里自然被选中）
+    // 炸弹/王炸轻微惩罚（除非候选只有它们）
     const pickedType = classify(picked, four2)!;
     const pickedIsBomb = pickedType.type === 'bomb' || pickedType.type === 'rocket';
     const bombPenalty = pickedIsBomb ? 1.2 : 0;
@@ -579,7 +579,7 @@ export const RandomLegal: BotFunc = (ctx) => {
     // 没法接且可以过 → pass；否则挑评分最佳的“接牌”
     if (!legal.length) return ctx.canPass ? { move:'pass' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'] };
 
-    // 同型同长优先（有的话只在这些里选，尽量不炸）
+    // 同型同长优先（尽量不炸）
     const req = ctx.require;
     const sameType = legal.filter(mv => {
       const c = classify(mv, four2)!;
@@ -596,7 +596,7 @@ export const RandomLegal: BotFunc = (ctx) => {
     return { move:'play', cards: best };
   }
 
-  // 自由出：避免炸弹/王炸优先，挑结构更友好的那手
+  // 自由出：优先非炸弹/王炸，挑结构更友好的那手
   if (legal.length) {
     const nonBombs = legal.filter(mv => {
       const t = classify(mv, four2)!.type;
