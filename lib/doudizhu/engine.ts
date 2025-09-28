@@ -471,9 +471,18 @@ function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy)
 export const RandomLegal: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
+
+  // 有跟牌需求且可以过，但完全没有可接 → pass
   if (ctx.require && ctx.canPass && !legal.length) return { move:'pass' };
-  if (legal.length) return { move:'play', cards: legal[legal.length-1] };
-  return ctx.canPass ? { move:'pass' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'] };
+
+  // 只要有合法解，就“接牌”（保留 random 的风格）
+  if (legal.length) {
+    const i = Math.floor(Math.random() * legal.length);
+    return { move:'play', cards: legal[i] };
+  }
+
+  // 兜底：没有 legal 的极端情况
+  return ctx.canPass ? { move:'pass' } : { move:'play', cards: [ctx.hands[0] ?? '♠3'] };
 };
 
 export const GreedyMin: BotFunc = (ctx) => {
