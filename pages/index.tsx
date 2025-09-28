@@ -246,6 +246,125 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     rob:  a*curr.rob  + (1-a)*prev.rob,
   };
 }
+
+/* ================ 实时曲线：每手牌得分（按地主淡色分局） ================= */
+function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','丙'], height=220 }: { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number }) {
+  const ref = useRef<HTMLDivElement|null>(null);
+  const [w, setW] = useState(600);
+  useEffect(()=>{
+    const el = ref.current; if(!el) return;
+    const ro = new ResizeObserver(()=> setW(el.clientWidth || 600));
+    ro.observe(el);
+    return ()=> ro.disconnect();
+  }, []);
+
+  const data = series || [[],[],[]];
+  const n = Math.max(data[0]?.length||0, data[1]?.length||0, data[2]?.length||0);
+  const values:number[] = [];
+  for (const arr of data) for (const v of (arr||[])) if (typeof v==='number') values.push(v);
+  const vmin = values.length ? Math.min(...values) : -5;
+  const vmax = values.length ? Math.max(...values) : 5;
+  const pad = (vmax-vmin) * 0.15 + 1e-6;
+  const y0 = vmin - pad, y1 = vmax + pad;
+  const width = Math.max(320, w);
+  const heightPx = height;
+  const left = 36, right = 10, top = 10, bottom = 22;
+  const iw = Math.max(10, width - left - right);
+  const ih = Math.max(10, heightPx - top - bottom);
+  const x = (i:number)=> (n<=1 ? 0 : (i/(n-1))*iw);
+  const y = (v:number)=> ih - ( (v - y0) / (y1 - y0) ) * ih;
+
+  const colorLine = ['#ef4444', '#3b82f6', '#10b981'];
+  const colorBand = ['rgba(239,68,68,0.08)','rgba(59,130,246,0.08)','rgba(16,185,129,0.10)'];
+  const colors = colorLine;
+
+  const cuts = Array.isArray(bands) && bands.length ? [...bands] : [0];
+  cuts.sort((a,b)=>a-b);
+  if (cuts[0] !== 0) cuts.unshift(0);
+  if (cuts[cuts.length-1] !== n) cuts.push(n);
+
+  const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
+  while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
+
+  const makePath = (arr:(number|null)[])=>{
+    let d=''; let open=false;
+    for (let i=0;i<n;i++){
+      const v = arr[i];
+      if (typeof v !== 'number') { open=false; continue; }
+      const px = x(i), py = y(v);
+      d += (open? ` L ${px} ${py}` : `M ${px} ${py}`);
+      open = true;
+    }
+    return d;
+  };
+
+  // x 轴刻度（最多 12 个）
+  const ticks = []; const maxTicks = 12;
+  for (let i=0;i<n;i++){
+    const step = Math.ceil(n / maxTicks);
+    if (i % step === 0) ticks.push(i);
+  }
+  // y 轴刻度（5 条）
+  const yTicks = []; for (let k=0;k<=4;k++){ yTicks.push(y0 + (k/4)*(y1-y0)); }
+
+  return (
+    <div ref={ref} style={{ width:'100%' }}>
+      <svg width={width} height={heightPx} style={{ display:'block', width:'100%' }}>
+        <g transform={`translate(${left},${top})`}>
+          {/* 按地主上色的局间底色 */}
+          {cuts.slice(0, Math.max(0, cuts.length-1)).map((st, i)=>{
+            const ed = cuts[i+1];
+            if (ed <= st) return null;
+            const x0 = x(st);
+            const x1 = x(Math.max(st, ed-1));
+            const w  = Math.max(0.5, x1 - x0);
+            const lord = landlordsArr[i] ?? -1;
+            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
+            return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
+          })}
+
+          {/* 网格 + 轴 */}
+          <line x1={0} y1={ih} x2={iw} y2={ih} stroke="#e5e7eb" />
+          <line x1={0} y1={0} x2={0} y2={ih} stroke="#e5e7eb" />
+          {yTicks.map((v,i)=>(
+            <g key={i} transform={`translate(0,${y(v)})`}>
+              <line x1={0} y1={0} x2={iw} y2={0} stroke="#f3f4f6" />
+              <text x={-6} y={4} fontSize={10} fill="#6b7280" textAnchor="end">{v.toFixed(1)}</text>
+            </g>
+          ))}
+          {ticks.map((i,idx)=>(
+            <g key={idx} transform={`translate(${x(i)},0)`}>
+              <line x1={0} y1={0} x2={0} y2={ih} stroke="#f8fafc" />
+              <text x={0} y={ih+14} fontSize={10} fill="#6b7280" textAnchor="middle">{i+1}</text>
+            </g>
+          ))}
+
+          {/* 三条曲线 */}
+          {data.map((arr, si)=>(
+            <>
+              <path key={'p'+si} d={makePath(arr)} fill="none" stroke={colors[si]} strokeWidth={2} />
+              {arr.map((v,i)=> (typeof v==='number') && (
+                <circle key={'c'+si+'-'+i} cx={x(i)} cy={y(v)} r={2.5} fill={colors[si]} />
+              ))}
+            </>
+          ))}
+        </g>
+      </svg>
+
+      {/* 图例 */}
+      <div style={{ display:'flex', gap:12, marginTop:6, fontSize:12, color:'#374151' }}>
+        {[0,1,2].map(i=>(
+          <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ width:10, height:10, borderRadius:5, background:colors[i], display:'inline-block' }} />
+            <span>{labels?.[i] ?? ['甲','乙','丙'][i]}</span>
+          </div>
+        ))}
+        <div style={{ marginLeft:'auto', color:'#6b7280' }}>横轴：第几手牌 ｜ 纵轴：score</div>
+      </div>
+    </div>
+  );
+}
+
 function RadarChart({ title, scores }:{ title: string; scores: Score5; }) {
   const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
   const size = 180, R = 70, cx = size/2, cy = size/2;
@@ -312,6 +431,14 @@ function LivePanel(props: LiveProps) {
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
+  // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
+  const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
+  const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
+  const [roundCuts, setRoundCuts] = useState<number[]>([0]);
+  const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
+  const [roundLords, setRoundLords] = useState<number[]>([]);
+  const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
+
 
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -677,7 +804,68 @@ function LivePanel(props: LiveProps) {
   const roundFinishedRef = useRef<boolean>(false);
   const seenStatsRef     = useRef<boolean>(false);
 
-  const start = async () => {
+  
+  const scoreFileRef = useRef<HTMLInputElement|null>(null);
+
+  const agentIdForIndex = (i:number) => {
+    const choice = props.seats[i] as BotChoice;
+    const label = choiceLabel(choice);
+    if ((choice as string).startsWith('built-in')) return label;
+    const model = (props.seatModels?.[i]) || defaultModelFor(choice);
+    return `${label}:${model}`;
+  };
+
+  const handleScoreSave = () => {
+    const agents = [0,1,2].map(agentIdForIndex);
+    const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
+    const payload = {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      agents,
+      rounds: roundCutsRef.current,
+      n,
+      seriesBySeat: scoreSeriesRef.current,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  };
+
+  const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const f = e.target.files?.[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const j = JSON.parse(String(rd.result||'{}'));
+          const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
+          const targetAgents = [0,1,2].map(agentIdForIndex);
+          const mapped:(number|null)[][] = [[],[],[]];
+          for (let i=0;i<3;i++){
+            const idx = fileAgents.indexOf(targetAgents[i]);
+            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
+          }
+          setScoreSeries(mapped);
+          if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
+        } catch (err) {
+          console.error('[score upload] parse error', err);
+        }
+      };
+      rd.readAsText(f);
+    } catch (err) {
+      console.error('[score upload] error', err);
+    } finally {
+      if (scoreFileRef.current) scoreFileRef.current.value = '';
+    }
+  };
+
+  const handleScoreRefresh = () => {
+    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+    setRoundCuts(prev => [...prev]);
+    setRoundLords(prev => [...prev]);
+  };
+const start = async () => {
     if (running) return;
     if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
 
@@ -826,7 +1014,12 @@ function LivePanel(props: LiveProps) {
           let nextAggStats = aggStatsRef.current;
           let nextAggCount = aggCountRef.current;
 
-          for (const raw of batch) {
+          
+          let nextScores = scoreSeriesRef.current.map(x => [...x]);
+          let sawAnyTurn = false;
+          let nextCuts = roundCutsRef.current.slice();
+          let nextLords = roundLordsRef.current.slice();
+for (const raw of batch) {
             let m: any = raw;
             // Remap engine->UI indices when startShift != 0
             if (startShift) {
@@ -903,6 +1096,21 @@ function LivePanel(props: LiveProps) {
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
+                  {
+                    const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
+                    const lordVal = (lord ?? -1) as number | -1;
+                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
+                    else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
+                  }
+                  // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    const lordVal2 = (nextLandlord ?? -1) as number | -1;
+                    if (nextLords[idxBand] !== lordVal2) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
+                    }
+                  }
+
                   nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
 
                   try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
@@ -954,7 +1162,38 @@ function LivePanel(props: LiveProps) {
               }
 
               // -------- 出/过 --------
-              if (m.type === 'event' && m.kind === 'play') {
+              
+                // （fallback）若本批次没有收到 'turn' 行，则从 event:play 中恢复 score
+                if (!sawAnyTurn) {
+                  const s = (typeof m.seat === 'number') ? m.seat as number : -1;
+                  if (s>=0 && s<3) {
+                    let val: number|null = (typeof (m as any).score === 'number') ? (m as any).score as number : null;
+                    if (typeof val !== 'number') {
+                      const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
+                      const mm = /score=([+-]?\d+(?:\.\d+)?)/.exec(rr || '');
+                      if (mm) { val = parseFloat(mm[1]); }
+                    }
+                    for (let i=0;i<3;i++){
+                      if (!Array.isArray(nextScores[i])) nextScores[i]=[];
+                      nextScores[i] = [...nextScores[i], (i===s ? val : null)];
+                    }
+                  }
+                }
+
+              // -------- 记录 turn（含 score） --------
+              if (m.type === 'turn') {
+                const s = (typeof m.seat === 'number') ? m.seat as number : -1;
+                if (s>=0 && s<3) {
+                  sawAnyTurn = true;
+                  const val = (typeof m.score === 'number') ? (m.score as number) : null;
+                  for (let i=0;i<3;i++){
+                    if (!Array.isArray(nextScores[i])) nextScores[i]=[];
+                    nextScores[i] = [...nextScores[i], (i===s ? val : null)];
+                  }
+                }
+                continue;
+              }
+if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
                   lastReasonRef.current[m.seat] = null;
@@ -1101,6 +1340,9 @@ nextTotals     = [
             } catch (e) { console.error('[ingest:batch]', e, raw); }
           }
 
+          setRoundLords(nextLords);
+          setRoundCuts(nextCuts);
+          setScoreSeries(nextScores);
           setHands(nextHands); setPlays(nextPlays);
           setTotals(nextTotals); setFinishedCount(nextFinished);
           setLog(nextLog); setLandlord(nextLandlord);
@@ -1230,7 +1472,18 @@ nextTotals     = [
         />
       </Section>
 
-      <Section title="手牌">
+      
+      <Section title="出牌评分（每局动态）">
+        <div style={{ display:'flex', gap:8, alignItems:'center', margin:'8px 0 12px' }}>
+          <input ref={scoreFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleScoreUpload} />
+          <button onClick={()=>scoreFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
+          <button onClick={handleScoreSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+          <button onClick={handleScoreRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
+        </div>
+        <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
+        <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
+      </Section>
+<Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
           {[0,1,2].map(i=>(
             <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
