@@ -9,16 +9,17 @@ import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
-// ==== Seen-cards buffer for this request (available to built-in bots via globalThis) ====
+
+// ==== Seen-cards buffers (global per-request) ====
 declare global {
   // eslint-disable-next-line no-var
   var __DDZ_SEEN: string[] | undefined;
-
   // eslint-disable-next-line no-var
   var __DDZ_SEEN_BY_SEAT: string[][] | undefined;
 }
 (globalThis as any).__DDZ_SEEN ??= [];
 (globalThis as any).__DDZ_SEEN_BY_SEAT ??= [[],[],[]];
+
 
 /* ========== 小工具 ========== */
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
@@ -152,7 +153,9 @@ function traceWrap(
     let result:any;
     const t0 = Date.now();
     try {
-      result = await Promise.race([ Promise.resolve(bot({ ...ctx, seen: ((globalThis as any).__DDZ_SEEN || []), seenBySeat: ((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]) })), timeout ]);
+      const ctxWithSeen = { ...ctx, seen: ((globalThis as any).__DDZ_SEEN || []), seenBySeat: ((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]) };
+      try { console.debug('[CTX]', `seat=${ctxWithSeen?.seat} landlord=${ctxWithSeen?.landlord} leader=${ctxWithSeen?.leader} trick=${ctxWithSeen?.trick}`, `seen=${ctxWithSeen?.seen?.length||0}`, `seatSeen=${(ctxWithSeen?.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
+      result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
     } catch (e:any) {
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
     }
@@ -162,6 +165,7 @@ function traceWrap(
         ? `[${label}] ${result.reason}`
         : `[${label}] ${(result?.move==='play' ? stringifyMove(result) : 'pass')}`;
 
+    try { const cardsStr = Array.isArray(result?.cards)?result.cards.join(''):''; console.debug('[DECISION]', `seat=${seatIndex}`, `move=${result?.move}`, `cards=${cardsStr}`, `reason=${reason}`); } catch {}
     onReason(seatIndex, reason);
     try { writeLine(res, { type:'event', kind:'bot-done', seat: seatIndex, by: label, model: spec?.model||'', tookMs: Date.now()-t0, reason }); } catch {}
 
@@ -208,6 +212,8 @@ async function runOneRoundWithGuard(
     if (!sentInit && ev?.type==='init') {
       sentInit = true;
       landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
+      try { (globalThis as any).__DDZ_SEEN && ((globalThis as any).__DDZ_SEEN.length = 0); } catch {}
+      try { (globalThis as any).__DDZ_SEEN_BY_SEAT && ((globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]]); } catch {}
       writeLine(res, { type:'init', landlordIdx, bottom: ev.bottom, hands: ev.hands });
       continue;
     }
@@ -216,7 +222,7 @@ async function runOneRoundWithGuard(
     if (ev?.type==='turn') {
       const { seat, move, cards, hand, totals } = ev;
       countPlay(seat, move, cards);
-      try { if (Array.isArray(cards) && cards.length) { (globalThis as any).__DDZ_SEEN!.push(...cards); (globalThis as any).__DDZ_SEEN_BY_SEAT && (globalThis as any).__DDZ_SEEN_BY_SEAT[seat]?.push(...cards); } } catch {}
+      try { if (Array.isArray(cards) && cards.length) { (globalThis as any).__DDZ_SEEN!.push(...cards); (globalThis as any).__DDZ_SEEN_BY_SEAT && (globalThis as any).__DDZ_SEEN_BY_SEAT[seat]?.push(...cards);} } catch {}
       const moveStr = stringifyMove({ move, cards });
       const reason = lastReason[seat] || null;
       writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, totals });
@@ -225,7 +231,7 @@ async function runOneRoundWithGuard(
     if (ev?.type==='event' && ev?.kind==='play') {
       const { seat, move, cards } = ev;
       countPlay(seat, move, cards);
-      try { if (Array.isArray(cards) && cards.length) { (globalThis as any).__DDZ_SEEN!.push(...cards); (globalThis as any).__DDZ_SEEN_BY_SEAT && (globalThis as any).__DDZ_SEEN_BY_SEAT[seat]?.push(...cards); } } catch {}
+      try { if (Array.isArray(cards) && cards.length) { (globalThis as any).__DDZ_SEEN!.push(...cards); (globalThis as any).__DDZ_SEEN_BY_SEAT && (globalThis as any).__DDZ_SEEN_BY_SEAT[seat]?.push(...cards);} } catch {}
       writeLine(res, ev);
       continue;
     }
@@ -316,8 +322,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
-      (globalThis as any).__DDZ_SEEN && ((globalThis as any).__DDZ_SEEN.length = 0);
-      (globalThis as any).__DDZ_SEEN_BY_SEAT && ((globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]]);
       await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });

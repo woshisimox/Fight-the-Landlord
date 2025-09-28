@@ -41,7 +41,7 @@ export const QwenBot=(o:{apiKey:string,model?:string}):BotFunc=>async (ctx:BotCt
 
             `已出牌：${(Array.isArray((ctx as any).seen) && (ctx as any).seen.length) ? (ctx as any).seen.join('') : '无'}\n`+
             
-            `只能出完全合法的牌型；若必须跟牌则给出能压住的最优解。`
+            `只能出完全合法的牌型；若必须跟牌则给出能压住的最优解。请仅返回严格的 JSON：{"move":"play"|"pass","cards":string[],"reason":string}。`
           }
         ]
       })

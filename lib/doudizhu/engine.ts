@@ -469,166 +469,13 @@ function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy)
 
 // ========== 内置 Bot ==========
 export const RandomLegal: BotFunc = (ctx) => {
+  if (ctx.canPass && ctx.require) return { move: 'pass' };
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
-
-  // —— 仅在本函数内使用的小工具（不改变任何外部结构/导出） ——
-  const isType = (t: any, ...names: string[]) => names.includes(String(t));
-  const rankOfLocal = (c: string) => (c === 'x' || c === 'X') ? c : c.slice(-1);
-
-  const removeCards = (hand: string[], pick: string[]) => {
-    const h = hand.slice();
-    for (const c of pick) { const i = h.indexOf(c); if (i >= 0) h.splice(i, 1); }
-    return h;
-  };
-  const countByRankLocal = (cards: string[]) => {
-    const m = new Map<string, number>();
-    for (const c of cards) { const r = rankOfLocal(c); m.set(r, (m.get(r) || 0) + 1); }
-    return m;
-  };
-
-  // 顺序
-  const SEQ   = ['3','4','5','6','7','8','9','T','J','Q','K','A'];
-  const POS   = Object.fromEntries(SEQ.map((r,i)=>[r,i])) as Record<string,number>;
-  const ORDER = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
-  const POSALL= Object.fromEntries(ORDER.map((r,i)=>[r,i])) as Record<string,number>;
-
-  const longestSingleChain = (cards: string[]) => {
-    const cnt = countByRankLocal(cards);
-    const ranks = Array.from(cnt.keys()).filter(r=>r!=='2'&&r!=='x'&&r!=='X')
-      .sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));
-    let best=0,i=0; while(i<ranks.length){ let j=i; while(j+1<ranks.length&&(POS[ranks[j+1]]??-1)===(POS[ranks[j]]??-2)+1) j++; best=Math.max(best,j-i+1); i=j+1; }
-    return best;
-  };
-  const longestPairChain = (cards: string[]) => {
-    const cnt = countByRankLocal(cards);
-    const ranks = Array.from(cnt.entries()).filter(([r,n])=>n>=2&&r!=='2'&&r!=='x'&&r!=='X')
-      .map(([r])=>r).sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));
-    let best=0,i=0; while(i<ranks.length){ let j=i; while(j+1<ranks.length&&(POS[ranks[j+1]]??-1)===(POS[ranks[j]]??-2)+1) j++; best=Math.max(best,j-i+1); i=j+1; }
-    return best;
-  };
-
-  // 关键 rank（用于大小比较 & 偏置）
-  const keyRankOfMove = (mv: string[]) => {
-    const cls = classify(mv, four2)! as any;
-    const cnt = countByRankLocal(mv);
-    if (isType(cls.type,'rocket')) return 'X';
-    if (isType(cls.type,'bomb','four_two_singles','four_two_pairs')) {
-      for (const [r,n] of cnt.entries()) if (n===4) return r;
-    }
-    if (isType(cls.type,'pair','pair_seq')) {
-      let best='3',bp=-1; for (const [r,n] of cnt.entries()) if (n>=2&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}
-      return best;
-    }
-    if (isType(cls.type,'triple','triple_one','triple_pair','plane','plane_single','plane_pair')) {
-      let best='3',bp=-1; for (const [r,n] of cnt.entries()) if (n>=3&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}
-      return best;
-    }
-    if (isType(cls.type,'straight')) {
-      let best='3',bp=-1; for (const r of Object.keys(cnt)) if (r!=='2'&&r!=='x'&&r!=='X'&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}
-      return best;
-    }
-    let best='3',bp=-1; for (const r of Object.keys(cnt)) { const p=POSALL[r]??-1; if (p>bp){best=r;bp=p;} } return best;
-  };
-
-  // ====== 已出牌意识（全局 + 座位） ======
-  const BASE: Record<string, number> = Object.fromEntries(ORDER.map(r=>[r,(r==='x'||r==='X')?1:4])) as Record<string,number>;
-  const seenAll: string[]   = (globalThis as any).__DDZ_SEEN ?? [];
-  const seenBySeat: string[][] = (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]];
-
-  const unseen = new Map<string, number>(Object.entries(BASE));
-  const sub = (arr: string[]) => { for (const c of arr){ const r = rankOfLocal(c); unseen.set(r, Math.max(0,(unseen.get(r)||0)-1)); } };
-  sub(ctx.hands); sub(seenAll);
-
-  // 被压风险（不区分座位的基线）
-  const baseOvertakeRisk = (mv: string[]) => {
-    const cls = classify(mv, four2)! as any;
-    if (isType(cls.type,'rocket')) return 0;
-    if (isType(cls.type,'bomb')) {
-      const rx = (unseen.get('x')||0)>0 && (unseen.get('X')||0)>0 ? 1 : 0;
-      return rx * 3;
-    }
-    const keyR = keyRankOfMove(mv); const keyPos = POSALL[keyR] ?? -1;
-
-    if (isType(cls.type,'single')) {
-      let higher=0; for (const r of ORDER) if ((POSALL[r]??-1)>keyPos) higher += (unseen.get(r)||0);
-      return higher*0.2 + (((unseen.get('x')||0)&&(unseen.get('X')||0))?0.5:0);
-    }
-    if (isType(cls.type,'pair')) {
-      let hp=0; for (const r of ORDER){ const p=POSALL[r]??-1; if (p>keyPos && (unseen.get(r)||0)>=2) hp++; }
-      return hp + (((unseen.get('x')||0)&&(unseen.get('X')||0))?0.5:0);
-    }
-    if (isType(cls.type,'triple','triple_one','triple_pair')) {
-      let ht=0; for (const r of ORDER){ const p=POSALL[r]??-1; if (p>keyPos && (unseen.get(r)||0)>=3) ht++; }
-      return ht + 0.5;
-    }
-    if (isType(cls.type,'four_two_singles','four_two_pairs')) {
-      let hb=0; for (const r of ORDER){ const p=POSALL[r]??-1; if (p>keyPos && (unseen.get(r)||0)===4) hb++; }
-      return hb*1.5 + (((unseen.get('x')||0)&&(unseen.get('X')||0))?2:0);
-    }
-    if (isType(cls.type,'straight','pair_seq','plane','plane_single','plane_pair')) {
-      let hm=0; for (const r of SEQ){ const p=POSALL[r]??-1; if (p>keyPos) hm += (unseen.get(r)||0); }
-      return hm*0.1 + 0.6;
-    }
-    return 1;
-  };
-
-  // —— 座位加权：只把“对手的机会”当作主要风险；队友的机会权重很小（0.25）
-  const afterSeats = [ (ctx.seat+1)%3, (ctx.seat+2)%3 ];
-  const isOpp = (s:number) => (ctx.seat === ctx.landlord) ? true : (s === ctx.landlord);
-  const numOppAfter  = afterSeats.filter(isOpp).length;
-  const numAllyAfter = afterSeats.length - numOppAfter;
-  const seatRiskFactor = (numOppAfter + 0.25 * numAllyAfter) / 2; // ∈[0.125, 1]
-
-  // 结构评分
-  const shapeScore = (before: string[], picked: string[]) => {
-    const after = removeCards(before, picked);
-    const preCnt = countByRankLocal(before);
-    const postCnt= countByRankLocal(after);
-
-    let singles=0,lowSingles=0,pairs=0,triples=0,bombs=0,jokers=0;
-    for (const [r,n] of postCnt.entries()){
-      if (n===1){ singles++; if (r!=='2'&&r!=='x'&&r!=='X') lowSingles++; }
-      else if (n===2) pairs++; else if (n===3) triples++; else if (n===4) bombs++;
-      if (r==='x'||r==='X') jokers += n;
-    }
-    // 打散惩罚
-    let breakPenalty=0; const used=countByRankLocal(picked);
-    for (const [r,k] of used.entries()){ const pre = preCnt.get(r)||0; if (pre>=2 && k<pre) breakPenalty += (pre===2?1.0:pre===3?0.8:1.2); }
-    const chain=longestSingleChain(after); const pairSeq=longestPairChain(after);
-    const pickedType = classify(picked, four2)! as any;
-    const bombPenalty = isType(pickedType.type,'bomb','rocket') ? 1.2 : 0;
-    const outReward = picked.length*0.4;
-    return outReward - singles*1.0 - lowSingles*0.3 + pairs*0.4 + triples*0.5 + bombs*0.6 + jokers*0.2 + chain*0.25 + pairSeq*0.25 - breakPenalty - bombPenalty;
-  };
-
-  // 综合评分：结构 + （负的）风险×座位权重
-  const scoreMove = (mv: string[]) => {
-    const sShape = shapeScore(ctx.hands, mv);
-    const sRisk  = - baseOvertakeRisk(mv) * seatRiskFactor;
-    return sShape + sRisk * 0.35; // 可调：风险权重
-  };
-
-  // ====== 选择逻辑 ======
-  if (ctx.require) {
-    if (!legal.length) return ctx.canPass ? { move:'pass' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'] };
-    const req = ctx.require as any;
-    const same = legal.filter(mv => { const c = classify(mv, four2)! as any; return c.type===req.type && (c.len??0)===(req.len??0); });
-    const pool = same.length ? same : legal;
-    let best = pool[0], bestScore = -Infinity;
-    for (const mv of pool) { const sc = scoreMove(mv); if (sc > bestScore) { bestScore=sc; best=mv; } }
-    return { move:'play', cards: best };
-  }
-
-  if (legal.length) {
-    const nonBombs = legal.filter(mv => { const t=(classify(mv, four2)! as any).type; return !isType(t,'bomb','rocket'); });
-    const pool = nonBombs.length ? nonBombs : legal;
-    let best = pool[0], bestScore = -Infinity;
-    for (const mv of pool) { const sc = scoreMove(mv); if (sc > bestScore) { bestScore=sc; best=mv; } }
-    return { move:'play', cards: best };
-  }
-
-  return ctx.canPass ? { move:'pass' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'] };
+  if (legal.length) return { move: 'play', cards: legal[0] };
+  // 兜底：首家且无 require 或 bot 乱回
+  const c = ctx.hands[0] ?? '♠3';
+  return { move: 'play', cards: [c] };
 };
 
 export const GreedyMin: BotFunc = (ctx) => {
@@ -644,6 +491,7 @@ export const GreedyMin: BotFunc = (ctx) => {
   const POS=Object.fromEntries(SEQ.map((r,i)=>[r,i])) as Record<string,number>;
   const ORDER=['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
   const POSALL=Object.fromEntries(ORDER.map((r,i)=>[r,i])) as Record<string,number>;
+
   const longestSingleChain=(cs:string[])=>{const cnt=countByRankLocal(cs);const rs=Array.from(cnt.keys()).filter(r=>r!=='2'&&r!=='x'&&r!=='X').sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));let best=0,i=0;while(i<rs.length){let j=i;while(j+1<rs.length&&(POS[rs[j+1]]??-1)===(POS[rs[j]]??-2)+1)j++;best=Math.max(best,j-i+1);i=j+1;}return best;};
   const longestPairChain=(cs:string[])=>{const cnt=countByRankLocal(cs);const rs=Array.from(cnt.entries()).filter(([r,n])=>n>=2&&r!=='2'&&r!=='x'&&r!=='X').map(([r])=>r).sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));let best=0,i=0;while(i<rs.length){let j=i;while(j+1<rs.length&&(POS[rs[j+1]]??-1)===(POS[rs[j]]??-2)+1)j++;best=Math.max(best,j-i+1);i=j+1;}return best;};
   const keyRankOfMove=(mv:string[])=>{const cls=classify(mv,four2)! as any;const cnt=countByRankLocal(mv);
@@ -654,7 +502,6 @@ export const GreedyMin: BotFunc = (ctx) => {
     if(isType(cls.type,'straight')){let best='3',bp=-1;for(const r of Object.keys(cnt))if(r!=='2'&&r!=='x'&&r!=='X'&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
     let best='3',bp=-1;for(const r of Object.keys(cnt)){const p=POSALL[r]??-1;if(p>bp){best=r;bp=p;}}return best;};
 
-  // Seen (全局 + 座位)
   const BASE:Record<string,number>=Object.fromEntries(ORDER.map(r=>[r,(r==='x'||r==='X')?1:4])) as Record<string,number>;
   const seenAll:string[]=(globalThis as any).__DDZ_SEEN ?? [];
   const unseen=new Map<string,number>(Object.entries(BASE));
@@ -673,14 +520,12 @@ export const GreedyMin: BotFunc = (ctx) => {
     return 1;
   };
 
-  // 座位风险系数
   const afterSeats=[(ctx.seat+1)%3,(ctx.seat+2)%3];
   const isOpp=(s:number)=> (ctx.seat===ctx.landlord) ? true : (s===ctx.landlord);
   const numOppAfter=afterSeats.filter(isOpp).length;
   const numAllyAfter=afterSeats.length - numOppAfter;
   const seatRiskFactor=(numOppAfter + 0.25*numAllyAfter)/2;
 
-  // 结构分
   const shapeScore=(before:string[],picked:string[])=>{
     const after=removeCards(before,picked);
     const pre=countByRankLocal(before), post=countByRankLocal(after);
@@ -695,7 +540,6 @@ export const GreedyMin: BotFunc = (ctx) => {
   };
   const keyPosOfMove=(mv:string[])=> (POSALL[keyRankOfMove(mv)] ?? -1);
 
-  // GreedyMin：偏小牌（负偏置）
   const scoreMove=(mv:string[])=>{
     const sShape=shapeScore(ctx.hands,mv);
     const sRisk = - baseOvertakeRisk(mv) * seatRiskFactor;
@@ -710,13 +554,18 @@ export const GreedyMin: BotFunc = (ctx) => {
 
     let best=pool[0], bestScore=-Infinity;
     for (const mv of pool){ const sc=scoreMove(mv); if (sc>bestScore){bestScore=sc; best=mv;} }
-    return { move:'play', cards: best };
+
+    // reason
+    const all: string[] = Array.isArray((globalThis as any).__DDZ_SEEN) ? (globalThis as any).__DDZ_SEEN : [];
+    const lens = ((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]).map((a:any)=>Array.isArray(a)?a.length:0).join('/');
+    const t=(classify(best,four2) as any)?.type; const key=keyRankOfMove(best);
+    const reason = ['GreedyMin', `seat=${ctx.seat} landlord=${ctx.landlord}`, `seen=${all.length} seatSeen=${lens}`, `type=${t} key=${key}`, `score=${bestScore.toFixed(2)}`].join(' | ');
+
+    return { move:'play', cards: best, reason };
   }
 
   return ctx.canPass ? { move:'pass' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'] };
 };
-
-
 
 
 export const GreedyMax: BotFunc = (ctx) => {
@@ -732,6 +581,7 @@ export const GreedyMax: BotFunc = (ctx) => {
   const POS=Object.fromEntries(SEQ.map((r,i)=>[r,i])) as Record<string,number>;
   const ORDER=['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
   const POSALL=Object.fromEntries(ORDER.map((r,i)=>[r,i])) as Record<string,number>;
+
   const longestSingleChain=(cs:string[])=>{const cnt=countByRankLocal(cs);const rs=Array.from(cnt.keys()).filter(r=>r!=='2'&&r!=='x'&&r!=='X').sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));let best=0,i=0;while(i<rs.length){let j=i;while(j+1<rs.length&&(POS[rs[j+1]]??-1)===(POS[rs[j]]??-2)+1)j++;best=Math.max(best,j-i+1);i=j+1;}return best;};
   const longestPairChain=(cs:string[])=>{const cnt=countByRankLocal(cs);const rs=Array.from(cnt.entries()).filter(([r,n])=>n>=2&&r!=='2'&&r!=='x'&&r!=='X').map(([r])=>r).sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));let best=0,i=0;while(i<rs.length){let j=i;while(j+1<rs.length&&(POS[rs[j+1]]??-1)===(POS[rs[j]]??-2)+1)j++;best=Math.max(best,j-i+1);i=j+1;}return best;};
   const keyRankOfMove=(mv:string[])=>{const cls=classify(mv,four2)! as any;const cnt=countByRankLocal(mv);
@@ -742,7 +592,6 @@ export const GreedyMax: BotFunc = (ctx) => {
     if(isType(cls.type,'straight')){let best='3',bp=-1;for(const r of Object.keys(cnt))if(r!=='2'&&r!=='x'&&r!=='X'&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
     let best='3',bp=-1;for(const r of Object.keys(cnt)){const p=POSALL[r]??-1;if(p>bp){best=r;bp=p;}}return best;};
 
-  // Seen (全局)
   const BASE:Record<string,number>=Object.fromEntries(ORDER.map(r=>[r,(r==='x'||r==='X')?1:4])) as Record<string,number>;
   const seenAll:string[]=(globalThis as any).__DDZ_SEEN ?? [];
   const unseen=new Map<string,number>(Object.entries(BASE));
@@ -761,14 +610,12 @@ export const GreedyMax: BotFunc = (ctx) => {
     return 1;
   };
 
-  // 座位风险系数
   const afterSeats=[(ctx.seat+1)%3,(ctx.seat+2)%3];
   const isOpp=(s:number)=> (ctx.seat===ctx.landlord) ? true : (s===ctx.landlord);
   const numOppAfter=afterSeats.filter(isOpp).length;
   const numAllyAfter=afterSeats.length - numOppAfter;
   const seatRiskFactor=(numOppAfter + 0.25*numAllyAfter)/2;
 
-  // 结构分
   const shapeScore=(before:string[],picked:string[])=>{
     const after=removeCards(before,picked);
     const pre=countByRankLocal(before), post=countByRankLocal(after);
@@ -783,7 +630,6 @@ export const GreedyMax: BotFunc = (ctx) => {
   };
   const keyPosOfMove=(mv:string[])=> (POSALL[keyRankOfMove(mv)] ?? -1);
 
-  // GreedyMax：偏大牌（正偏置）
   const scoreMove=(mv:string[])=>{
     const sShape=shapeScore(ctx.hands,mv);
     const sRisk = - baseOvertakeRisk(mv) * seatRiskFactor;
@@ -798,12 +644,18 @@ export const GreedyMax: BotFunc = (ctx) => {
 
     let best=pool[0], bestScore=-Infinity;
     for (const mv of pool){ const sc=scoreMove(mv); if (sc>bestScore){bestScore=sc; best=mv;} }
-    return { move:'play', cards: best };
+
+    // reason
+    const all: string[] = Array.isArray((globalThis as any).__DDZ_SEEN) ? (globalThis as any).__DDZ_SEEN : [];
+    const lens = ((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]).map((a:any)=>Array.isArray(a)?a.length:0).join('/');
+    const t=(classify(best,four2) as any)?.type; const key=keyRankOfMove(best);
+    const reason = ['GreedyMax', `seat=${ctx.seat} landlord=${ctx.landlord}`, `seen=${all.length} seatSeen=${lens}`, `type=${t} key=${key}`, `score=${bestScore.toFixed(2)}`].join(' | ');
+
+    return { move:'play', cards: best, reason };
   }
 
   return ctx.canPass ? { move:'pass' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'] };
 };
-
 
 
 // ========== 发牌 / 抢地主 ==========
