@@ -25,7 +25,7 @@ export const HttpBot = (o: {
         ...(o.token ? { authorization: `Bearer ${o.token}` } : {}),
         ...(o.headers || {}),
       },
-      body: JSON.stringify({ ctx }),
+      body: JSON.stringify({ ctx, seen: (Array.isArray((ctx as any)?.seen) ? (ctx as any).seen : []) }),
     });
 
     const txt = await r.text();

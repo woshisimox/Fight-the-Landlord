@@ -35,6 +35,8 @@ export const GeminiBot = (o: { apiKey: string; model?: string }): BotFunc =>
               `需跟：${ctx.require?JSON.stringify(ctx.require):'null'}\n`+
               `可过：${ctx.canPass?'true':'false'}\n`+
               `策略：${ctx.policy}\n`+
+              `已出牌：${(Array.isArray((ctx as any).seen) && (ctx as any).seen.length) ? (ctx as any).seen.join('') : '无'}\n`+
+              
               `只能出完全合法的牌型；若必须跟牌则给出能压住的最优解。`
             }]
           }]
