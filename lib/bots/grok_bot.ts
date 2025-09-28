@@ -37,6 +37,9 @@ export const GrokBot = (o: { apiKey: string; model?: string }): BotFunc =>
               `需跟：${ctx.require?JSON.stringify(ctx.require):'null'}\n`+
               `可过：${ctx.canPass?'true':'false'}\n`+
               `策略：${ctx.policy}\n`+
+              `座位：我=${(ctx as any).seat} 地主=${(ctx as any).landlord} 首家=${(ctx as any).leader} 轮次=${(ctx as any).trick}\n`+
+              `按座位已出牌：S0=${(Array.isArray((ctx as any).seenBySeat) && (ctx as any).seenBySeat[0]?.join('')) || ''} | S1=${(Array.isArray((ctx as any).seenBySeat) && (ctx as any).seenBySeat[1]?.join('')) || ''} | S2=${(Array.isArray((ctx as any).seenBySeat) && (ctx as any).seenBySeat[2]?.join('')) || ''}\n`+
+
               `已出牌：${(Array.isArray((ctx as any).seen) && (ctx as any).seen.length) ? (ctx as any).seen.join('') : '无'}\n`+
               
               `只能出完全合法的牌型；若必须跟牌则给出能压住的最优解。`

@@ -28,7 +28,9 @@ ${JSON.stringify({
   lead: ctx?.lead,
   lastTrick: ctx?.lastTrick ?? null,
   candidates: cands,
-  seen: (Array.isArray((ctx as any).seen)?(ctx as any).seen:[]),
+  \1
+              , seenBySeat: (Array.isArray((ctx as any).seenBySeat)?(ctx as any).seenBySeat:[[],[],[]])
+              , seatInfo: { seat:(ctx as any).seat, landlord:(ctx as any).landlord, leader:(ctx as any).leader, trick:(ctx as any).trick }
 }).slice(0, 6000)}
 
 Rules:

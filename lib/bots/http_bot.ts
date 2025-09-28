@@ -25,7 +25,7 @@ export const HttpBot = (o: {
         ...(o.token ? { authorization: `Bearer ${o.token}` } : {}),
         ...(o.headers || {}),
       },
-      body: JSON.stringify({ ctx, seen: (Array.isArray((ctx as any)?.seen) ? (ctx as any).seen : []) }),
+      body: JSON.stringify({ ctx, seen: (Array.isArray((ctx as any)?.seen)?(ctx as any).seen:[]), seenBySeat: (Array.isArray((ctx as any)?.seenBySeat)?(ctx as any).seenBySeat:[[],[],[]]), seatInfo: { seat:(ctx as any).seat, landlord:(ctx as any).landlord, leader:(ctx as any).leader, trick:(ctx as any).trick } }),
     });
 
     const txt = await r.text();

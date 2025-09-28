@@ -5,3 +5,18 @@ export function formatSeenLine(ctx:any): string {
   const arr = Array.isArray((ctx as any)?.seen) ? (ctx as any).seen as string[] : [];
   return `已出牌：${arr.length ? arr.join('') : '无'}`;
 }
+
+
+/** 返回一行“座位：我=… 地主=… 首家=… 轮次=…”；零依赖类型 */
+export function formatSeatLine(ctx:any): string {
+  return `座位：我=${ctx?.seat} 地主=${ctx?.landlord} 首家=${ctx?.leader} 轮次=${ctx?.trick}`;
+}
+
+/** 返回一行“按座位已出牌：S0=… | S1=… | S2=…”；零依赖类型 */
+export function formatSeenBySeatLine(ctx:any): string {
+  const arr: string[][] = Array.isArray(ctx?.seenBySeat) ? ctx.seenBySeat : [[],[],[]];
+  const s0 = arr[0]?.join('') || '';
+  const s1 = arr[1]?.join('') || '';
+  const s2 = arr[2]?.join('') || '';
+  return `按座位已出牌：S0=${s0} | S1=${s1} | S2=${s2}`;
+}
