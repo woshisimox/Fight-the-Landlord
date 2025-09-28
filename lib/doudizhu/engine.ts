@@ -19,8 +19,8 @@ export type Classified = {
   key: number;       // 比较强度键（如最大牌的 rank）
 };
 
-export type Require = Classified & { // 需要“同型同长且更大”的参考
-  // 可选其它上下文字段（例如上一手座位、是否不可过等），这里只保留必要键
+export type Require = Classified & {
+  // 可扩展其它上下文
 };
 
 export type Four2Policy = 'both' | '2singles' | '2pairs';
@@ -43,6 +43,7 @@ export type BotCtx = {
   landlord: number;    // 地主座位
   policy?: Policy;     // 策略
   dipai?: Card[];      // 底牌（亮底后可见）
+  // 可扩展：allHands 等
 };
 
 export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
@@ -181,7 +182,6 @@ export function classify(cards: Card[], four2: Four2Policy='both'): Classified |
   }
 
   // 飞机不带 / 带翅（简化：要求等张数三顺 + 等数量附加牌）
-  // 先检测三顺
   if (byCount[3].length >= 2) {
     const triRanks = byCount[3];
     if (isSequential(triRanks, 2)) {
@@ -190,10 +190,11 @@ export function classify(cards: Card[], four2: Four2Policy='both'): Classified |
       if (n === 3*L) {
         return { type: 'plane', len: L, key: rankIndex[triRanks[triRanks.length-1]] };
       }
-      // 带翅（+L 个单，或 +L 对）
+      // 带翅（+L 个单）
       if (n === 4*L && byCount[1].length === L) {
         return { type: 'plane', len: L, key: rankIndex[triRanks[triRanks.length-1]] };
       }
+      // 带翅（+L 对）
       if (n === 5*L && byCount[2].length === L) {
         return { type: 'plane', len: L, key: rankIndex[triRanks[triRanks.length-1]] };
       }
@@ -208,12 +209,12 @@ export function classify(cards: Card[], four2: Four2Policy='both'): Classified |
 export function generateMoves(hands: Card[], require?: Require, four2: Four2Policy='both'): Card[][] {
   // 生成“全部可能”的思路会很重；这里采用“足够好 & 可用”的启发式生成：
   // 1) 当 require 存在：筛选出“同型同长且更大”的组合；若没有，再给出炸弹/王炸
-  // 2) 当 require 不存在：给出若干小牌开局候选，避免爆炸式组合（已满足内置 bot 的需要）
+  // 2) 当 require 不存在：给出一组升序的候选，避免爆炸式组合（已满足内置 bot 的需要）
 
   const hand = sortCardsAsc(hands);
   const groups = countByRank(hand);
 
-  const ret: Card[][] = [];
+  const seqCandidates: Card[][] = [];
 
   // ===== 工具：从同 rank 抽 n 张（若足够） =====
   const takeN = (r: string, n: number): Card[] | null => {
@@ -226,7 +227,6 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
   const buildSinglesSequential = (minLen=5) => {
     const ranks = [...groups.keys()].filter(r => (groups.get(r)!.length>=1 && r!=='2' && r!=='x' && r!=='X'))
       .sort((a,b)=>rankIndex[a]-rankIndex[b]);
-    // 扫描所有顺子区间
     for (let i=0;i<ranks.length;i++){
       let j=i;
       while (j+1<ranks.length && rankIndex[ranks[j+1]] === rankIndex[ranks[j]]+1) j++;
@@ -234,7 +234,7 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
       if (seg.length >= minLen) {
         for (let L=minLen; L<=seg.length; L++){
           const window = seg.slice(0, L);
-          ret.push(window.flatMap(r => takeN(r,1)!));
+          seqCandidates.push(window.flatMap(r => takeN(r,1)!));
         }
       }
       i = j;
@@ -251,7 +251,7 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
       if (seg.length >= minPairs) {
         for (let L=minPairs; L<=seg.length; L++){
           const window = seg.slice(0, L);
-          ret.push(window.flatMap(r => takeN(r,2)!));
+          seqCandidates.push(window.flatMap(r => takeN(r,2)!));
         }
       }
       i = j;
@@ -268,19 +268,16 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
       if (seg.length >= minTri) {
         const L = seg.length;
         // 飞机不带
-        ret.push(seg.flatMap(r=>takeN(r,3)!));
+        seqCandidates.push(seg.flatMap(r=>takeN(r,3)!));
         // 带翅（+L 单）
-        if ([...groups.values()].reduce((acc,arr)=>acc+(arr.length===1?1:0),0) >= L) {
+        const singleRanks = [...groups.entries()]
+          .filter(([rk,arr])=> arr.length===1 && !seg.includes(rk))
+          .map(([rk])=>rk)
+          .slice(0, L);
+        if (singleRanks.length===L) {
           const singles: Card[] = [];
-          // 收集 L 个单（不从飞机核心 rank 里拿，尽量不同 rank）
-          const ranks1 = [...groups.entries()]
-            .filter(([rk,arr])=> arr.length===1 && !seg.includes(rk))
-            .map(([rk])=>rk)
-            .slice(0, L);
-          if (ranks1.length===L) {
-            ranks1.forEach(rk => singles.push(...takeN(rk,1)!));
-            ret.push(seg.flatMap(r=>takeN(r,3)!).concat(singles));
-          }
+          singleRanks.forEach(rk => singles.push(...takeN(rk,1)!));
+          seqCandidates.push(seg.flatMap(r=>takeN(r,3)!).concat(singles));
         }
         // 带翅（+L 对）
         const pairRanks = [...groups.entries()]
@@ -289,7 +286,7 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
           .slice(0, L);
         if (pairRanks.length===L) {
           const pairs = pairRanks.flatMap(rk=>takeN(rk,2)!);
-          ret.push(seg.flatMap(r=>takeN(r,3)!).concat(pairs));
+          seqCandidates.push(seg.flatMap(r=>takeN(r,3)!).concat(pairs));
         }
       }
       i = j;
@@ -326,7 +323,7 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
   let candidates: Card[][] = [
     ...singles, ...pairs, ...triples,
     ...fourWithTwo, ...bombs, ...rockets,
-    ...ret, // 顺子、连对、飞机等
+    ...seqCandidates, // 顺子、连对、飞机等
   ];
 
   // 去重（按牌面字符串拼接）
@@ -380,7 +377,7 @@ export function generateMoves(hands: Card[], require?: Require, four2: Four2Poli
     smalls.push(...pairs.slice(0,2));
     smalls.push(...triples.slice(0,1));
     // 取一两个短顺、短连对（若有）
-    const seqs = ret
+    const seqs = seqCandidates
       .map(mv => ({ mv, c: classify(mv, four2)! }))
       .filter(x => x.c.type==='straight' || x.c.type==='pair-straight')
       .sort((a,b)=> (a.c.len||0)-(b.c.len||0) || a.c.key-b.c.key)
@@ -575,7 +572,7 @@ export async function* runOneGame(opts: RunOptions): AsyncGenerator<GameEvent> {
 
   while (true) {
     const myHand = hands[turn];
-    // 是否允许过牌
+    // 是否允许过牌：有 require 且本轮不是最后出牌者
     const canPass = !!require && lastPlayedSeat !== turn;
 
     const ctx: BotCtx = {
@@ -632,29 +629,19 @@ export async function* runOneGame(opts: RunOptions): AsyncGenerator<GameEvent> {
       }
     }
 
-    // 是否出完
+    // 出完了吗？
     if (hands[turn].length === 0) {
       const winner = turn;
       yield { type:'end', landlord, winner, lastMove: require };
       return;
     }
 
-    // trick reset：若两家连续 pass，则轮到上一手出牌者自由出牌
-    const next = (turn+1)%3;
-    const next2 = (turn+2)%3;
-    // 简化：当轮到“上一手出牌者”时且上两家都 pass 才 reset
-    // 这里只在“该上一手者再获行动权时”重置 require
-    if (lastPlayedSeat===next && peekIsPassEvent) {
-      // 留给外层逻辑处理；为简洁，这里不做复杂事件缓存；当轮换时自动判断
-    }
+    // 轮换到下家
+    turn = (turn + 1) % 3;
 
-    // 轮换
-    turn = (turn+1)%3;
-
-    // 如果新行动者等于最后出牌者，且上一轮两家都 pass，则 reset
+    // 如果轮回到“最后一次有出牌的座位”，表示另外两家都 pass 了 → 新一轮，自由出牌
     if (turn === lastPlayedSeat) {
-      // 重置：上一 trick 结束
-      require = undefined;
+      require = undefined; // 重置跟牌要求
     }
   }
 }
