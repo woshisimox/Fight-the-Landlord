@@ -760,6 +760,224 @@ export const GreedyMax: BotFunc = (ctx) => {
 };
 
 
+export const AllySupport: BotFunc = (ctx) => {
+  const four2 = ctx?.policy?.four2 || 'both';
+  const legal = generateMoves(ctx.hands, ctx.require, four2);
+  if (ctx.require && ctx.canPass && !legal.length) return { move:'pass', reason:'AllySupport: 需跟但无可接' };
+
+  // ---- 本地小工具（零外部依赖）----
+  const isType = (t:any,...n:string[])=>n.includes(String(t));
+  const rankOfLocal = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+  const removeCards=(h:string[],p:string[])=>{const a=h.slice();for(const c of p){const i=a.indexOf(c);if(i>=0)a.splice(i,1);}return a;};
+  const countByRankLocal=(cs:string[])=>{const m=new Map<string,number>();for(const c of cs){const r=rankOfLocal(c);m.set(r,(m.get(r)||0)+1);}return m;};
+  const SEQ=['3','4','5','6','7','8','9','T','J','Q','K','A'];
+  const POS=Object.fromEntries(SEQ.map((r,i)=>[r,i])) as Record<string,number>;
+  const ORDER=['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
+  const POSALL=Object.fromEntries(ORDER.map((r,i)=>[r,i])) as Record<string,number>;
+  const longestSingleChain=(cs:string[])=>{const cnt=countByRankLocal(cs);const rs=Array.from(cnt.keys()).filter(r=>r!=='2'&&r!=='x'&&r!=='X').sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));let best=0,i=0;while(i<rs.length){let j=i;while(j+1<rs.length&&(POS[rs[j+1]]??-1)===(POS[rs[j]]??-2)+1)j++;best=Math.max(best,j-i+1);i=j+1;}return best;};
+  const longestPairChain=(cs:string[])=>{const cnt=countByRankLocal(cs);const rs=Array.from(cnt.entries()).filter(([r,n])=>n>=2&&r!=='2'&&r!=='x'&&r!=='X').map(([r])=>r).sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));let best=0,i=0;while(i<rs.length){let j=i;while(j+1<rs.length&&(POS[rs[j+1]]??-1)===(POS[rs[j]]??-2)+1)j++;best=Math.max(best,j-i+1);i=j+1;}return best;};
+
+  const keyRankOfMove=(mv:string[])=>{const cls=classify(mv,four2)! as any;const cnt=countByRankLocal(mv);
+    if(isType(cls.type,'rocket'))return'X';
+    if(isType(cls.type,'bomb','four_two_singles','four_two_pairs')){for(const[r,n]of cnt.entries())if(n===4)return r;}
+    if(isType(cls.type,'pair','pair_seq')){let best='3',bp=-1;for(const[r,n]of cnt.entries())if(n>=2&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
+    if(isType(cls.type,'triple','triple_one','triple_pair','plane','plane_single','plane_pair')){let best='3',bp=-1;for(const[r,n]of cnt.entries())if(n>=3&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
+    if(isType(cls.type,'straight')){let best='3',bp=-1;for(const r of Object.keys(cnt))if(r!=='2'&&r!=='x'&&r!=='X'&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
+    let best='3',bp=-1;for(const r of Object.keys(cnt)){const p=POSALL[r]??-1;if(p>bp){best=r;bp=p;}}return best;};
+
+  // —— 未现牌估计
+  const BASE:Record<string,number>=Object.fromEntries(ORDER.map(r=>[r,(r==='x'||r==='X')?1:4])) as Record<string,number>;
+  const seenAll:string[]=(globalThis as any).__DDZ_SEEN ?? [];
+  const unseen=new Map<string,number>(Object.entries(BASE));
+  const sub=(arr:string[])=>{for(const c of arr){const r=rankOfLocal(c);unseen.set(r,Math.max(0,(unseen.get(r)||0)-1));}}; sub(ctx.hands); sub(seenAll);
+
+  const baseOvertakeRisk=(mv:string[])=>{const cls=classify(mv,four2)! as any;
+    if(isType(cls.type,'rocket'))return 0;
+    if(isType(cls.type,'bomb')){const rx=(unseen.get('x')||0)>0&&(unseen.get('X')||0)>0?1:0;return rx*3;}
+    const keyR=keyRankOfMove(mv); const kp=POSALL[keyR]??-1;
+    if(isType(cls.type,'single')){let h=0;for(const r of ORDER)if((POSALL[r]??-1)>kp)h+=(unseen.get(r)||0);return h*0.2+(((unseen.get('x')||0)&&(unseen.get('X')||0))?0.5:0);}
+    if(isType(cls.type,'pair')){let hp=0;for(const r of ORDER){const p=POSALL[r]??-1;if(p>kp&&(unseen.get(r)||0)>=2)hp++;}return hp+(((unseen.get('x')||0)&&(unseen.get('X')||0))?0.5:0);}
+    if(isType(cls.type,'triple','triple_one','triple_pair')){let ht=0;for(const r of ORDER){const p=POSALL[r]??-1;if(p>kp&&(unseen.get(r)||0)>=3)ht++;}return ht+0.5;}
+    if(isType(cls.type,'four_two_singles','four_two_pairs')){let hb=0;for(const r of ORDER){const p=POSALL[r]??-1;if(p>kp&&(unseen.get(r)||0)===4)hb++;}return hb*1.5+(((unseen.get('x')||0)&&(unseen.get('X')||0))?2:0);}
+    if(isType(cls.type,'straight','pair_seq','plane','plane_single','plane_pair')){let hm=0;for(const r of SEQ){const p=POSALL[r]??-1;if(p>kp)hm+=(unseen.get(r)||0);}return hm*0.1+0.6;}
+    return 1;
+  };
+
+  // —— 座位/队友信息
+  const teammate = [0,1,2].find(s => s!==ctx.seat && s!==ctx.landlord)!;
+  const afterSeats=[(ctx.seat+1)%3,(ctx.seat+2)%3];
+  const isOpp=(s:number)=> (ctx.seat===ctx.landlord) ? true : (s===ctx.landlord);
+  const numOppAfter=afterSeats.filter(isOpp).length;
+  const numAllyAfter=afterSeats.length - numOppAfter;
+  const seatRiskFactor=(numOppAfter + 0.25*numAllyAfter)/2;
+
+  const shapeScore=(before:string[],picked:string[])=>{
+    const after=removeCards(before,picked);
+    const pre=countByRankLocal(before), post=countByRankLocal(after);
+    let singles=0,lowSingles=0,pairs=0,triples=0,bombs=0,jokers=0;
+    for(const [r,n] of post.entries()){ if(n===1){singles++; if(r!=='2'&&r!=='x'&&r!=='X')lowSingles++;} else if(n===2)pairs++; else if(n===3)triples++; else if(n===4)bombs++; if(r==='x'||r==='X')jokers+=n; }
+    let breakPenalty=0; const used=countByRankLocal(picked);
+    for(const [r,k] of used.entries()){ const preN=pre.get(r)||0; if(preN>=2&&k<preN) breakPenalty += (preN===2?1.0:preN===3?0.8:1.2); }
+    const chain=longestSingleChain(after), pairSeq=longestPairChain(after);
+    const t=classify(picked,four2)! as any; const bombPenalty=isType(t.type,'bomb','rocket')?1.2:0;
+    const outReward=picked.length*0.4;
+    return outReward - singles*1.0 - lowSingles*0.3 + pairs*0.4 + triples*0.5 + bombs*0.6 + jokers*0.2 + chain*0.25 + pairSeq*0.25 - breakPenalty - bombPenalty;
+  };
+
+  const scoreMove=(mv:string[], riskWeight=0.35)=>{
+    const sShape=shapeScore(ctx.hands,mv);
+    const sRisk = - baseOvertakeRisk(mv) * seatRiskFactor;
+    return sShape + sRisk * riskWeight;
+  };
+
+  // ========= 决策 =========
+  const all:string[]=(globalThis as any).__DDZ_SEEN ?? [];
+  const lens=((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]).map((a:any)=>Array.isArray(a)?a.length:0).join('/');
+
+  if (ctx.require) {
+    if (!legal.length) return ctx.canPass ? { move:'pass', reason:'AllySupport: 需跟无可接' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'], reason:'AllySupport: 需跟无可接且不许过' };
+
+    // 若当前领先者是队友且允许过牌：尽量让队友继续控场
+    if (ctx.canPass && ctx.leader === teammate) {
+      return { move: 'pass', reason: `AllySupport: 队友${teammate}领先，选择让牌` };
+    }
+
+    // 需跟：优先同型同长度后评分挑选
+    const req = ctx.require as any;
+    const same = legal.filter(mv => { const c = classify(mv, four2)! as any; return c.type===req.type && (c.len??0)===(req.len??0); });
+    const pool = same.length ? same : legal;
+
+    let best = pool[0], bestScore = -Infinity;
+    for (const mv of pool) { const sc = scoreMove(mv, /*风险更看重*/0.45); if (sc>bestScore){bestScore=sc; best=mv;} }
+    const t=(classify(best,four2) as any)?.type; const key=keyRankOfMove(best);
+    const reason = ['AllySupport', `seat=${ctx.seat} landlord=${ctx.landlord}`, `leader=${ctx.leader} teammate=${teammate}`, `seen=${all.length} seatSeen=${lens}`, `follow`, `type=${t} key=${key}`, `score=${bestScore.toFixed(2)}`].join(' | ');
+    return { move:'play', cards: best, reason };
+  }
+
+  if (legal.length) {
+    const nonBombs = legal.filter(mv => { const t=(classify(mv, four2)! as any).type; return !isType(t,'bomb','rocket'); });
+    const pool = nonBombs.length ? nonBombs : legal;
+    let best = pool[0], bestScore = -Infinity;
+    for (const mv of pool) { const sc = scoreMove(mv, 0.35); if (sc>bestScore){bestScore=sc; best=mv;} }
+    const t=(classify(best,four2) as any)?.type; const key=keyRankOfMove(best);
+    const reason = ['AllySupport', `seat=${ctx.seat} landlord=${ctx.landlord}`, `leader=${ctx.leader} teammate=${teammate}`, `seen=${all.length} seatSeen=${lens}`, `lead`, `type=${t} key=${key}`, `score=${bestScore.toFixed(2)}`].join(' | ');
+    return { move:'play', cards: best, reason };
+  }
+
+  return ctx.canPass ? { move:'pass', reason:'AllySupport: 无合法可出' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'], reason:'AllySupport: 兜底' };
+};
+
+
+export const EndgameRush: BotFunc = (ctx) => {
+  const four2 = ctx?.policy?.four2 || 'both';
+  const legal = generateMoves(ctx.hands, ctx.require, four2);
+  if (ctx.require && ctx.canPass && !legal.length) return { move:'pass', reason:'EndgameRush: 需跟无可接' };
+
+  const HAND_SMALL = 5; // 认为进入收官的阈值
+  const inEndgame = (ctx.hands?.length || 0) <= HAND_SMALL;
+
+  // ---- 小工具同上（为自包含，拷贝一份）----
+  const isType = (t:any,...n:string[])=>n.includes(String(t));
+  const rankOfLocal = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+  const removeCards=(h:string[],p:string[])=>{const a=h.slice();for(const c of p){const i=a.indexOf(c);if(i>=0)a.splice(i,1);}return a;};
+  const countByRankLocal=(cs:string[])=>{const m=new Map<string,number>();for(const c of cs){const r=rankOfLocal(c);m.set(r,(m.get(r)||0)+1);}return m;};
+  const SEQ=['3','4','5','6','7','8','9','T','J','Q','K','A'];
+  const POS=Object.fromEntries(SEQ.map((r,i)=>[r,i])) as Record<string,number>;
+  const ORDER=['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'];
+  const POSALL=Object.fromEntries(ORDER.map((r,i)=>[r,i])) as Record<string,number>;
+  const longestSingleChain=(cs:string[])=>{const cnt=countByRankLocal(cs);const rs=Array.from(cnt.keys()).filter(r=>r!=='2'&&r!=='x'&&r!=='X').sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));let best=0,i=0;while(i<rs.length){let j=i;while(j+1<rs.length&&(POS[rs[j+1]]??-1)===(POS[rs[j]]??-2)+1)j++;best=Math.max(best,j-i+1);i=j+1;}return best;};
+  const longestPairChain=(cs:string[])=>{const cnt=countByRankLocal(cs);const rs=Array.from(cnt.entries()).filter(([r,n])=>n>=2&&r!=='2'&&r!=='x'&&r!=='X').map(([r])=>r).sort((a,b)=>(POS[a]??-1)-(POS[b]??-1));let best=0,i=0;while(i<rs.length){let j=i;while(j+1<rs.length&&(POS[rs[j+1]]??-1)===(POS[rs[j]]??-2)+1)j++;best=Math.max(best,j-i+1);i=j+1;}return best;};
+
+  const keyRankOfMove=(mv:string[])=>{const cls=classify(mv,four2)! as any;const cnt=countByRankLocal(mv);
+    if(isType(cls.type,'rocket'))return'X';
+    if(isType(cls.type,'bomb','four_two_singles','four_two_pairs')){for(const[r,n]of cnt.entries())if(n===4)return r;}
+    if(isType(cls.type,'pair','pair_seq')){let best='3',bp=-1;for(const[r,n]of cnt.entries())if(n>=2&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
+    if(isType(cls.type,'triple','triple_one','triple_pair','plane','plane_single','plane_pair')){let best='3',bp=-1;for(const[r,n]of cnt.entries())if(n>=3&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
+    if(isType(cls.type,'straight')){let best='3',bp=-1;for(const r of Object.keys(cnt))if(r!=='2'&&r!=='x'&&r!=='X'&&POS[r]!=null&&POS[r]>bp){best=r;bp=POS[r];}return best;}
+    let best='3',bp=-1;for(const r of Object.keys(cnt)){const p=POSALL[r]??-1;if(p>bp){best=r;bp=p;}}return best;};
+
+  // —— 未现牌估计
+  const BASE:Record<string,number>=Object.fromEntries(ORDER.map(r=>[r,(r==='x'||r==='X')?1:4])) as Record<string,number>;
+  const seenAll:string[]=(globalThis as any).__DDZ_SEEN ?? [];
+  const unseen=new Map<string,number>(Object.entries(BASE));
+  const sub=(arr:string[])=>{for(const c of arr){const r=rankOfLocal(c);unseen.set(r,Math.max(0,(unseen.get(r)||0)-1));}}; sub(ctx.hands); sub(seenAll);
+
+  const baseOvertakeRisk=(mv:string[])=>{const cls=classify(mv,four2)! as any;
+    if(isType(cls.type,'rocket'))return 0;
+    if(isType(cls.type,'bomb')){const rx=(unseen.get('x')||0)>0&&(unseen.get('X')||0)>0?1:0;return rx*3;}
+    const keyR=keyRankOfMove(mv); const kp=POSALL[keyR]??-1;
+    if(isType(cls.type,'single')){let h=0;for(const r of ORDER)if((POSALL[r]??-1)>kp)h+=(unseen.get(r)||0);return h*0.2+(((unseen.get('x')||0)&&(unseen.get('X')||0))?0.5:0);}
+    if(isType(cls.type,'pair')){let hp=0;for(const r of ORDER){const p=POSALL[r]??-1;if(p>kp&&(unseen.get(r)||0)>=2)hp++;}return hp+(((unseen.get('x')||0)&&(unseen.get('X')||0))?0.5:0);}
+    if(isType(cls.type,'triple','triple_one','triple_pair')){let ht=0;for(const r of ORDER){const p=POSALL[r]??-1;if(p>kp&&(unseen.get(r)||0)>=3)ht++;}return ht+0.5;}
+    if(isType(cls.type,'four_two_singles','four_two_pairs')){let hb=0;for(const r of ORDER){const p=POSALL[r]??-1;if(p>kp&&(unseen.get(r)||0)===4)hb++;}return hb*1.5+(((unseen.get('x')||0)&&(unseen.get('X')||0))?2:0);}
+    if(isType(cls.type,'straight','pair_seq','plane','plane_single','plane_pair')){let hm=0;for(const r of SEQ){const p=POSALL[r]??-1;if(p>kp)hm+=(unseen.get(r)||0);}return hm*0.1+0.6;}
+    return 1;
+  };
+
+  // —— 座位加权
+  const afterSeats=[(ctx.seat+1)%3,(ctx.seat+2)%3];
+  const isOpp=(s:number)=> (ctx.seat===ctx.landlord) ? true : (s===ctx.landlord);
+  const numOppAfter=afterSeats.filter(isOpp).length;
+  const numAllyAfter=afterSeats.length - numOppAfter;
+  const seatRiskFactor=(numOppAfter + 0.25*numAllyAfter)/2;
+
+  // —— 形状评分（收官时加大“出完/大幅减少”的权重）
+  const shapeScore=(before:string[],picked:string[])=>{
+    const after=removeCards(before,picked);
+    const pre=countByRankLocal(before), post=countByRankLocal(after);
+    let singles=0,lowSingles=0,pairs=0,triples=0,bombs=0,jokers=0;
+    for(const [r,n] of post.entries()){ if(n===1){singles++; if(r!=='2'&&r!=='x'&&r!=='X')lowSingles++;} else if(n===2)pairs++; else if(n===3)triples++; else if(n===4)bombs++; if(r==='x'||r==='X')jokers+=n; }
+    let breakPenalty=0; const used=countByRankLocal(picked);
+    for(const [r,k] of used.entries()){ const preN=pre.get(r)||0; if(preN>=2&&k<preN) breakPenalty += (preN===2?1.0:preN===3?0.8:1.2); }
+    const chain=longestSingleChain(after), pairSeq=longestPairChain(after);
+    const t=classify(picked,four2)! as any; const bombPenalty=isType(t.type,'bomb','rocket')?1.2:0;
+
+    const outRewardBase = picked.length*0.4;
+    const finishBonus = after.length===0 ? 6.0 : 0;            // 直接出完，强力奖励
+    const rushBonus   = inEndgame ? (picked.length>=2 ? 1.2 : 0.6) : 0; // 收官时鼓励多张输出
+
+    return outRewardBase + finishBonus + rushBonus
+         - singles*1.0 - lowSingles*0.3 + pairs*0.4 + triples*0.5 + bombs*0.6 + jokers*0.2
+         + chain*0.25 + pairSeq*0.25 - breakPenalty - (inEndgame ? bombPenalty*0.5 : bombPenalty);
+  };
+
+  const scoreMove=(mv:string[])=>{
+    const sShape=shapeScore(ctx.hands,mv);
+    const sRisk = - baseOvertakeRisk(mv) * seatRiskFactor;
+    const riskW = inEndgame ? 0.20 : 0.35; // 收官时适当降低对被压的恐惧
+    return sShape + sRisk * riskW;
+  };
+
+  // ========= 决策 =========
+  const all:string[]=(globalThis as any).__DDZ_SEEN ?? [];
+  const lens=((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]).map((a:any)=>Array.isArray(a)?a.length:0).join('/');
+
+  if (ctx.require) {
+    if (!legal.length) return ctx.canPass ? { move:'pass', reason:'EndgameRush: 需跟无可接' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'], reason:'EndgameRush: 需跟无可接且不许过' };
+    const req = ctx.require as any;
+    const same = legal.filter(mv => { const c = classify(mv, four2)! as any; return c.type===req.type && (c.len??0)===(req.len??0); });
+    const pool = same.length ? same : legal;
+    let best = pool[0], bestScore = -Infinity;
+    for (const mv of pool) { const sc = scoreMove(mv); if (sc>bestScore){bestScore=sc; best=mv;} }
+    const t=(classify(best,four2) as any)?.type; const key=keyRankOfMove(best);
+    const reason = ['EndgameRush', `seat=${ctx.seat} landlord=${ctx.landlord}`, `seen=${all.length} seatSeen=${lens}`, `follow`, `type=${t} key=${key}`, `score=${bestScore.toFixed(2)}`].join(' | ');
+    return { move:'play', cards: best, reason };
+  }
+
+  if (legal.length) {
+    const nonBombs = legal.filter(mv => { const t=(classify(mv, four2)! as any).type; return !isType(t,'bomb','rocket'); });
+    const pool = inEndgame ? legal : (nonBombs.length ? nonBombs : legal);
+    let best = pool[0], bestScore = -Infinity;
+    for (const mv of pool) { const sc = scoreMove(mv); if (sc>bestScore){bestScore=sc; best=mv;} }
+    const t=(classify(best,four2) as any)?.type; const key=keyRankOfMove(best);
+    const reason = ['EndgameRush', `seat=${ctx.seat} landlord=${ctx.landlord}`, `seen=${all.length} seatSeen=${lens}`, `lead`, `type=${t} key=${key}`, `score=${bestScore.toFixed(2)}`].join(' | ');
+    return { move:'play', cards: best, reason };
+  }
+
+  return ctx.canPass ? { move:'pass', reason:'EndgameRush: 无合法可出' } : { move:'play', cards:[ctx.hands[0] ?? '♠3'], reason:'EndgameRush: 兜底' };
+};
+
+
 // ========== 发牌 / 抢地主 ==========
 function freshDeck(): Label[] {
   const d: Label[] = [];

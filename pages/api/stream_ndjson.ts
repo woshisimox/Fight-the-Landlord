@@ -1,6 +1,6 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -10,17 +10,14 @@ import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
-// ==== Seen-cards buffers (global per-request) ====
+
+/* ========== 已出牌缓存（仅当前请求作用域） ========== */
 declare global {
-  // eslint-disable-next-line no-var
   var __DDZ_SEEN: string[] | undefined;
-  // eslint-disable-next-line no-var
   var __DDZ_SEEN_BY_SEAT: string[][] | undefined;
 }
 (globalThis as any).__DDZ_SEEN ??= [];
 (globalThis as any).__DDZ_SEEN_BY_SEAT ??= [[],[],[]];
-
-
 /* ========== 小工具 ========== */
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
 const writeLine = (res: NextApiResponse, obj: any) => { (res as any).write(JSON.stringify(obj) + '\n'); };
@@ -72,6 +69,8 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
+  | 'built-in:ally-support'
+  | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
@@ -102,6 +101,8 @@ function providerLabel(choice: BotChoice) {
     case 'built-in:greedy-max': return 'GreedyMax';
     case 'built-in:greedy-min': return 'GreedyMin';
     case 'built-in:random-legal': return 'RandomLegal';
+    case 'built-in:ally-support': return 'AllySupport';
+    case 'built-in:endgame-rush': return 'EndgameRush';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
     case 'ai:grok': return 'Grok';
@@ -117,6 +118,8 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
     case 'built-in:greedy-max': return GreedyMax;
     case 'built-in:greedy-min': return GreedyMin;
     case 'built-in:random-legal': return RandomLegal;
+    case 'built-in:ally-support': return AllySupport;
+    case 'built-in:endgame-rush': return EndgameRush;
     case 'ai:openai':  return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
     case 'ai:gemini':  return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-pro' });
     case 'ai:grok':    return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
@@ -153,8 +156,8 @@ function traceWrap(
     let result:any;
     const t0 = Date.now();
     try {
-      const ctxWithSeen = { ...ctx, seen: ((globalThis as any).__DDZ_SEEN || []), seenBySeat: ((globalThis as any).__DDZ_SEEN_BY_SEAT || [[],[],[]]) };
-      try { console.debug('[CTX]', `seat=${ctxWithSeen?.seat} landlord=${ctxWithSeen?.landlord} leader=${ctxWithSeen?.leader} trick=${ctxWithSeen?.trick}`, `seen=${ctxWithSeen?.seen?.length||0}`, `seatSeen=${(ctxWithSeen?.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
+      const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
+      try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
       result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
     } catch (e:any) {
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
@@ -165,7 +168,7 @@ function traceWrap(
         ? `[${label}] ${result.reason}`
         : `[${label}] ${(result?.move==='play' ? stringifyMove(result) : 'pass')}`;
 
-    try { const cardsStr = Array.isArray(result?.cards)?result.cards.join(''):''; console.debug('[DECISION]', `seat=${seatIndex}`, `move=${result?.move}`, `cards=${cardsStr}`, `reason=${reason}`); } catch {}
+    try { const cstr = Array.isArray(result?.cards)?result.cards.join(''):''; console.debug('[DECISION]', `seat=${seatIndex}`, `move=${result?.move}`, `cards=${cstr}`, `reason=${reason}`); } catch {}
     onReason(seatIndex, reason);
     try { writeLine(res, { type:'event', kind:'bot-done', seat: seatIndex, by: label, model: spec?.model||'', tookMs: Date.now()-t0, reason }); } catch {}
 
@@ -196,6 +199,13 @@ async function runOneRoundWithGuard(
   const countPlay = (seat:number, move:'play'|'pass', cards?:string[])=>{
     const cc: string[] = Array.isArray(cards) ? cards : [];
     if (move === 'play') {
+      try {
+        const seenA: string[] = (globalThis as any).__DDZ_SEEN ?? ((globalThis as any).__DDZ_SEEN = []);
+        const bySeat: string[][] = (globalThis as any).__DDZ_SEEN_BY_SEAT ?? ((globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]]);
+        seenA.push(...cc);
+        if (bySeat[seat]) bySeat[seat].push(...cc);
+      } catch {}
+
       stats[seat].plays++;
       stats[seat].cardsPlayed += cc.length;
       const isRocket = cc.length === 2 && cc.includes('x') && cc.includes('X');
@@ -212,9 +222,9 @@ async function runOneRoundWithGuard(
     if (!sentInit && ev?.type==='init') {
       sentInit = true;
       landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
-      try { (globalThis as any).__DDZ_SEEN && ((globalThis as any).__DDZ_SEEN.length = 0); } catch {}
-      try { (globalThis as any).__DDZ_SEEN_BY_SEAT && ((globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]]); } catch {}
       writeLine(res, { type:'init', landlordIdx, bottom: ev.bottom, hands: ev.hands });
+      (globalThis as any).__DDZ_SEEN.length = 0;
+      (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
       continue;
     }
 
@@ -222,7 +232,6 @@ async function runOneRoundWithGuard(
     if (ev?.type==='turn') {
       const { seat, move, cards, hand, totals } = ev;
       countPlay(seat, move, cards);
-      try { if (Array.isArray(cards) && cards.length) { (globalThis as any).__DDZ_SEEN!.push(...cards); (globalThis as any).__DDZ_SEEN_BY_SEAT && (globalThis as any).__DDZ_SEEN_BY_SEAT[seat]?.push(...cards);} } catch {}
       const moveStr = stringifyMove({ move, cards });
       const reason = lastReason[seat] || null;
       writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, totals });
@@ -231,7 +240,6 @@ async function runOneRoundWithGuard(
     if (ev?.type==='event' && ev?.kind==='play') {
       const { seat, move, cards } = ev;
       countPlay(seat, move, cards);
-      try { if (Array.isArray(cards) && cards.length) { (globalThis as any).__DDZ_SEEN!.push(...cards); (globalThis as any).__DDZ_SEEN_BY_SEAT && (globalThis as any).__DDZ_SEEN_BY_SEAT[seat]?.push(...cards);} } catch {}
       writeLine(res, ev);
       continue;
     }
