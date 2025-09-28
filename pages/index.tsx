@@ -247,7 +247,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
 }
 
 /* ================ 实时曲线：每手牌得分 ================= */
-function ScoreTimeline({ series, bands=[], labels=['甲','乙','丙'], height=220 }: { series:(number|null)[][]; bands?:number[]; labels?:string[]; height?:number }) {
+function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','丙'], height=220 }: { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number }) {
   const ref = useRef<HTMLDivElement|null>(null);
   const [w, setW] = useState(600);
   useEffect(()=>{
@@ -263,6 +263,11 @@ function ScoreTimeline({ series, bands=[], labels=['甲','乙','丙'], height=22
   cuts.sort((a,b)=>a-b);
   if (cuts[0] !== 0) cuts.unshift(0);
   if (cuts[cuts.length-1] !== n) cuts.push(n);
+  const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
+  while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
+  const colorLine = ['#ef4444', '#3b82f6', '#10b981'];
+  const colorBand = ['rgba(239,68,68,0.08)','rgba(59,130,246,0.08)','rgba(16,185,129,0.10)'];
+
 
   const values:number[] = [];
   for (const arr of data) for (const v of (arr||[])) if (typeof v==='number') values.push(v);
@@ -278,7 +283,7 @@ function ScoreTimeline({ series, bands=[], labels=['甲','乙','丙'], height=22
   const x = (i:number)=> (n<=1 ? 0 : (i/(n-1))*iw);
   const y = (v:number)=> ih - ( (v - y0) / (y1 - y0) ) * ih;
 
-  const colors = ['#ef4444', '#3b82f6', '#10b981']; // 甲/乙/丙
+  const colors = colorLine; // 甲/乙/丙
   const makePath = (arr:(number|null)[])=>{
     let d=''; let open=false;
     for (let i=0;i<n;i++){
@@ -305,14 +310,16 @@ function ScoreTimeline({ series, bands=[], labels=['甲','乙','丙'], height=22
       <svg width={width} height={heightPx} style={{ display:'block', width:'100%' }}>
         <g transform={`translate(${left},${top})`}>
           
-          {/* 局间底色交替 */}
+          
+          {/* 按地主上色的局间底色 */}
           {cuts.slice(0, Math.max(0, cuts.length-1)).map((st, i)=>{
             const ed = cuts[i+1];
             if (ed <= st) return null;
             const x0 = x(st);
             const x1 = x(Math.max(st, ed-1));
             const w  = Math.max(0.5, x1 - x0);
-            const fill = (i % 2 === 0) ? '#ffffff' : '#f0f7ff';
+            const lord = landlordsArr[i] ?? -1;
+            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
             return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
           })}
 {/* 网格 + 轴 */}
@@ -425,6 +432,9 @@ function LivePanel(props: LiveProps) {
   // —— 每手牌得分（动态曲线） ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
   const [roundCuts, setRoundCuts] = useState<number[]>([0]);
+  const [roundLords, setRoundLords] = useState<number[]>([]);
+  const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
+
   const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
 
   const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
@@ -999,6 +1009,8 @@ const start = async () => {
           let nextScores = scoreSeriesRef.current.map(x => [...x]);
           let sawAnyTurn = false;
           let nextCuts = roundCutsRef.current.slice();
+          let nextLords = roundLordsRef.current.slice();
+
 
           let nextFinished = finishedRef.current;
           let nextLog = [...logRef.current];
@@ -1079,6 +1091,7 @@ const start = async () => {
                 const rh = m.hands;
                 if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
                   nextPlays = [];
+                  
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     if (nextCuts.length === 0) nextCuts = [n0];
@@ -1323,7 +1336,8 @@ nextTotals     = [
             } catch (e) { console.error('[ingest:batch]', e, raw); }
           }
 
-                    setRoundCuts(nextCuts);
+                    setRoundLords(nextLords);
+          setRoundCuts(nextCuts);
           setScoreSeries(nextScores);
 setHands(nextHands); setPlays(nextPlays);
           setTotals(nextTotals); setFinishedCount(nextFinished);
@@ -1462,7 +1476,7 @@ setHands(nextHands); setPlays(nextPlays);
 </div>
 
         <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始自动清零；出牌（含过牌）按时间推进绘制。过牌没有分数会留空。</div>
-        <ScoreTimeline series={scoreSeries} bands={roundCuts} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
+        <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
       </Section>
 </Section>
 
