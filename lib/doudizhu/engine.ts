@@ -537,8 +537,8 @@ export const RandomLegal: BotFunc = (ctx) => {
   };
 
   // —— softmax 加权随机选择（保持“随机”风格，但受策略影响）
-  function pickWeighted(pool:string[]): string[] {
-    const scores = pool.map(scoreMove);
+  function pickWeighted(pool:string[][]): string[] {
+    const scores = pool.map(mv => scoreMove(mv));
     const T = 0.6; // 温度：越小越贪心，越大越随机
     const exps = scores.map(s => Math.exp(s / T));
     const sum = exps.reduce((a,b)=>a+b,0) || 1;
@@ -575,6 +575,7 @@ export const RandomLegal: BotFunc = (ctx) => {
   const c = ctx.hands[0] ?? '♠3';
   return { move:'play', cards:[c], reason:'RandomLegal: 无可选，兜底打首张' };
 };
+
 
 
 export const GreedyMin: BotFunc = (ctx) => {
