@@ -1,8 +1,5 @@
 // pages/index.tsx
-import { useEffect, useRef, useState } from 're
-          let sawAnyTurn = false;
-act';
-
+import { useEffect, useRef, useState } from 'react';
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
@@ -919,6 +916,8 @@ function LivePanel(props: LiveProps) {
           let nextPlays = [...playsRef.current];
           let nextTotals = [...totalsRef.current] as [number, number, number];
           let nextScores = scoreSeriesRef.current.map(x => [...x]);
+          let sawAnyTurn = false;
+
           let nextFinished = finishedRef.current;
           let nextLog = [...logRef.current];
           let nextLandlord = landlordRef.current;
