@@ -1087,16 +1087,14 @@ const start = async () => {
               }
 
               // -------- 初始发牌（仅限 init 帧） --------
-              if (m.type === 'init') {
-                const rh = m.hands;
-                if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
-                  nextPlays = [];
-                  
+              if (m.type === 'init') 
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
-                    if (nextCuts.length === 0) nextCuts = [n0];
-                    else if (nextCuts[nextCuts.length-1] !== n0) nextCuts = [...nextCuts, n0];
+                    const lordPeek = (m.landlordIdx ?? m.landlord ?? nextLandlord ?? null) as number | null;
+                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordPeek ?? -1]; }
+                    else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, (lordPeek ?? -1)]; }
                   }
+
 
                   
                   nextWinner = null;
