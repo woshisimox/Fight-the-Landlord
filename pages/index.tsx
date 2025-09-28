@@ -6,8 +6,6 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'built-in:ally-support'
-  | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
@@ -216,8 +214,6 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:greedy-max': return 'Greedy Max';
     case 'built-in:greedy-min': return 'Greedy Min';
     case 'built-in:random-legal': return 'Random Legal';
-    case 'built-in:ally-support': return 'Ally Support';
-    case 'built-in:endgame-rush': return 'Endgame Rush';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
     case 'ai:grok':  return 'Grok';
@@ -225,7 +221,6 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':  return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
-    default: return '';
   }
 }
 
@@ -250,6 +245,101 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     eff:  a*curr.eff  + (1-a)*prev.eff,
     rob:  a*curr.rob  + (1-a)*prev.rob,
   };
+}
+
+/* ================ 实时曲线：每手牌得分 ================= */
+function ScoreTimeline({ series, height=220 }: { series:(number|null)[][]; height?:number }) {
+  const ref = useRef<HTMLDivElement|null>(null);
+  const [w, setW] = useState(600);
+  useEffect(()=>{
+    const el = ref.current; if(!el) return;
+    const ro = new ResizeObserver(()=> setW(el.clientWidth || 600));
+    ro.observe(el);
+    return ()=> ro.disconnect();
+  }, []);
+
+  const data = series || [[],[],[]];
+  const n = Math.max(data[0]?.length||0, data[1]?.length||0, data[2]?.length||0);
+  const values:number[] = [];
+  for (const arr of data) for (const v of (arr||[])) if (typeof v==='number') values.push(v);
+  const vmin = values.length ? Math.min(...values) : -5;
+  const vmax = values.length ? Math.max(...values) : 5;
+  const pad = (vmax-vmin) * 0.15 + 1e-6;
+  const y0 = vmin - pad, y1 = vmax + pad;
+  const width = Math.max(320, w);
+  const heightPx = height;
+  const left = 36, right = 10, top = 10, bottom = 22;
+  const iw = Math.max(10, width - left - right);
+  const ih = Math.max(10, heightPx - top - bottom);
+  const x = (i:number)=> (n<=1 ? 0 : (i/(n-1))*iw);
+  const y = (v:number)=> ih - ( (v - y0) / (y1 - y0) ) * ih;
+
+  const colors = ['#ef4444', '#3b82f6', '#10b981']; // 甲/乙/丙
+  const makePath = (arr:(number|null)[])=>{
+    let d=''; let open=false;
+    for (let i=0;i<n;i++){
+      const v = arr[i];
+      if (typeof v !== 'number') { open=false; continue; }
+      const px = x(i), py = y(v);
+      d += (open? ` L ${px} ${py}` : `M ${px} ${py}`);
+      open = true;
+    }
+    return d;
+  };
+
+  // x 轴刻度（最多 12 个）
+  const ticks = []; const maxTicks = 12;
+  for (let i=0;i<n;i++){
+    const step = Math.ceil(n / maxTicks);
+    if (i % step === 0) ticks.push(i);
+  }
+  // y 轴刻度（5 条）
+  const yTicks = []; for (let k=0;k<=4;k++){ yTicks.push(y0 + (k/4)*(y1-y0)); }
+
+  return (
+    <div ref={ref} style={{ width:'100%' }}>
+      <svg width={width} height={heightPx} style={{ display:'block', width:'100%' }}>
+        <g transform={`translate(${left},${top})`}>
+          {/* 网格 + 轴 */}
+          <line x1={0} y1={ih} x2={iw} y2={ih} stroke="#e5e7eb" />
+          <line x1={0} y1={0} x2={0} y2={ih} stroke="#e5e7eb" />
+          {yTicks.map((v,i)=>(
+            <g key={i} transform={`translate(0,${y(v)})`}>
+              <line x1={0} y1={0} x2={iw} y2={0} stroke="#f3f4f6" />
+              <text x={-6} y={4} fontSize={10} fill="#6b7280" textAnchor="end">{v.toFixed(1)}</text>
+            </g>
+          ))}
+          {ticks.map((i,idx)=>(
+            <g key={idx} transform={`translate(${x(i)},0)`}>
+              <line x1={0} y1={0} x2={0} y2={ih} stroke="#f8fafc" />
+              <text x={0} y={ih+14} fontSize={10} fill="#6b7280" textAnchor="middle">{i+1}</text>
+            </g>
+          ))}
+
+          {/* 三条曲线 */}
+          {data.map((arr, si)=>(
+            <>
+              <path key={'p'+si} d={makePath(arr)} fill="none" stroke={colors[si]} strokeWidth={2} />
+              {arr.map((v,i)=> (typeof v==='number') && (
+                <circle key={'c'+si+'-'+i} cx={x(i)} cy={y(v)} r={2.5} fill={colors[si]} />
+              ))}
+            </>
+          ))}
+        </g>
+      </svg>
+
+      {/* 图例 */}
+      <div style={{ display:'flex', gap:12, marginTop:6, fontSize:12, color:'#374151' }}>
+        {[0,1,2].map(i=>(
+          <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ width:10, height:10, borderRadius:5, background:colors[i], display:'inline-block' }} />
+            <span>{['甲','乙','丙'][i]}</span>
+          </div>
+        ))}
+        <div style={{ marginLeft:'auto', color:'#6b7280' }}>横轴：第几手牌 ｜ 纵轴：score</div>
+      </div>
+    </div>
+  );
 }
 function RadarChart({ title, scores }:{ title: string; scores: Score5; }) {
   const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
@@ -317,6 +407,10 @@ function LivePanel(props: LiveProps) {
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
+  // —— 每手牌得分（动态曲线） ——
+  const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
+  const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
+
 
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -822,6 +916,7 @@ function LivePanel(props: LiveProps) {
           let nextHands = handsRef.current.map(x => [...x]);
           let nextPlays = [...playsRef.current];
           let nextTotals = [...totalsRef.current] as [number, number, number];
+          let nextScores = scoreSeriesRef.current.map(x => [...x]);
           let nextFinished = finishedRef.current;
           let nextLog = [...logRef.current];
           let nextLandlord = landlordRef.current;
@@ -901,6 +996,8 @@ function LivePanel(props: LiveProps) {
                 const rh = m.hands;
                 if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
                   nextPlays = [];
+                  nextScores = [[],[],[]];
+
                   nextWinner = null;
                   nextDelta = null;
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
@@ -959,7 +1056,21 @@ function LivePanel(props: LiveProps) {
               }
 
               // -------- 出/过 --------
-              if (m.type === 'event' && m.kind === 'play') {
+              
+              // -------- 记录 turn（含 score） --------
+              if (m.type === 'turn') {
+                const s = (typeof m.seat === 'number') ? m.seat as number : -1;
+                if (s>=0 && s<3) {
+                  const val = (typeof m.score === 'number') ? (m.score as number) : null;
+                  // 扩展为全局“第几手”：同一索引处仅该 seat 有值，其它为 null
+                  for (let i=0;i<3;i++){
+                    if (!Array.isArray(nextScores[i])) nextScores[i]=[];
+                    nextScores[i] = [...nextScores[i], (i===s ? val : null)];
+                  }
+                }
+                continue;
+              }
+if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
                   lastReasonRef.current[m.seat] = null;
@@ -1106,7 +1217,8 @@ nextTotals     = [
             } catch (e) { console.error('[ingest:batch]', e, raw); }
           }
 
-          setHands(nextHands); setPlays(nextPlays);
+                    setScoreSeries(nextScores);
+setHands(nextHands); setPlays(nextPlays);
           setTotals(nextTotals); setFinishedCount(nextFinished);
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
@@ -1233,7 +1345,12 @@ nextTotals     = [
           onChangeMode={setAggMode}
           onChangeAlpha={setAlpha}
         />
+      
+      <Section title="出牌评分（每局动态）">
+        <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始自动清零；出牌（含过牌）按时间推进绘制。过牌没有分数会留空。</div>
+        <ScoreTimeline series={scoreSeries} height={240} />
       </Section>
+</Section>
 
       <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
@@ -1461,8 +1578,6 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
-                      <option value="built-in:ally-support">Ally Support</option>
-                      <option value="built-in:endgame-rush">Endgame Rush</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
