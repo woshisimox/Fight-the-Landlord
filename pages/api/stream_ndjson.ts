@@ -16,6 +16,11 @@ declare global {
   var __DDZ_SEEN: string[] | undefined;
   var __DDZ_SEEN_BY_SEAT: string[][] | undefined;
 
+
+
+}
+(globalThis as any).__DDZ_SEEN ??= [];
+(globalThis as any).__DDZ_SEEN_BY_SEAT ??= [[],[],[]];
 /* ========== 统一打分（与内置算法口径一致） ========== */
 const __SEQ = ['3','4','5','6','7','8','9','T','J','Q','K','A'];
 const __POS: Record<string, number> = Object.fromEntries(__SEQ.map((r,i)=>[r,i])) as any;
@@ -135,11 +140,6 @@ function unifiedScore(ctx:any, mv:string[]): number {
   const score = shape + (-risk * seatRiskFactor) * 0.35;
   return score;
 }
-
-
-}
-(globalThis as any).__DDZ_SEEN ??= [];
-(globalThis as any).__DDZ_SEEN_BY_SEAT ??= [[],[],[]];
 /* ========== 小工具 ========== */
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
 const writeLine = (res: NextApiResponse, obj: any) => { (res as any).write(JSON.stringify(obj) + '\n'); };
