@@ -152,7 +152,7 @@ const CHAIN_MIN = {
 };
 const MAX_SEQ_VALUE = ORDER['A']; // 顺子、连对、飞机核心不可含 '2' 与王
 
-function classify(cards: Label[], four2: Four2Policy = 'both'): Combo | null {
+export function classify(cards: Label[], four2: Four2Policy = 'both'): Combo | null {
   const N = cards.length;
   if (N <= 0) return null;
 
@@ -454,7 +454,7 @@ function generateAllMoves(hand: Label[], four2: Four2Policy): Label[][] {
   });
 }
 
-function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy): Label[][] {
+export function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy): Label[][] {
   const all = generateAllMoves(hand, four2);
   if (!require) return all;
 
