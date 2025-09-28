@@ -1,5 +1,7 @@
 // pages/index.tsx
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 're
+          let sawAnyTurn = false;
+act';
 
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
@@ -1061,6 +1063,7 @@ function LivePanel(props: LiveProps) {
               if (m.type === 'turn') {
                 const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                 if (s>=0 && s<3) {
+                  sawAnyTurn = true;
                   const val = (typeof m.score === 'number') ? (m.score as number) : null;
                   // 扩展为全局“第几手”：同一索引处仅该 seat 有值，其它为 null
                   for (let i=0;i<3;i++){
@@ -1071,6 +1074,23 @@ function LivePanel(props: LiveProps) {
                 continue;
               }
 if (m.type === 'event' && m.kind === 'play') {
+                // （fallback）若本批次没有收到 'turn' 行，则从 event:play 中恢复 score
+                if (!sawAnyTurn) {
+                  const s = (typeof m.seat === 'number') ? m.seat as number : -1;
+                  if (s>=0 && s<3) {
+                    let val: number|null = (typeof (m as any).score === 'number') ? (m as any).score as number : null;
+                    if (typeof val !== 'number') {
+                      const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
+                      const mm = /score=([+-]?\d+(?:\.\d+)?)/.exec(rr || '');
+                      if (mm) { val = parseFloat(mm[1]); }
+                    }
+                    for (let i=0;i<3;i++){
+                      if (!Array.isArray(nextScores[i])) nextScores[i]=[];
+                      nextScores[i] = [...nextScores[i], (i===s ? val : null)];
+                    }
+                  }
+                }
+
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
                   lastReasonRef.current[m.seat] = null;
