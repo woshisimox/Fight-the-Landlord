@@ -992,6 +992,7 @@ function LivePanel(props: LiveProps) {
           let nextTotals = [...totalsRef.current] as [number, number, number];
           let nextScores = scoreSeriesRef.current.map(x => [...x]);
           let sawAnyTurn = false;
+          let nextCuts = roundCutsRef.current.slice();
 
           let nextFinished = finishedRef.current;
           let nextLog = [...logRef.current];
