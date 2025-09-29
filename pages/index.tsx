@@ -1620,8 +1620,7 @@ nextTotals     = [
       <Section title="TrueSkill（实时）">
         {/* 上传 / 存档 / 刷新 */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-          <button onClick={()=>fileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
-          <div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
+<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
@@ -1685,8 +1684,7 @@ nextTotals     = [
       <Section title="战术画像（累计，0~5）">
         {/* Radar：上传 / 存档 / 刷新 */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-          <button onClick={()=>radarFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
-          <div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
+<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
         </div>
 
         <RadarPanel
@@ -1701,10 +1699,8 @@ nextTotals     = [
 
       
       <Section title="出牌评分（每局动态）">
-        <div style={{ display:'flex', gap:8, alignItems:'center', margin:'8px 0 12px' }}>
-          <button onClick={()=>scoreFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
-          </div>
-        <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
+        
+<div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
         <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
       </Section>
       <div style={{ marginTop:10 }}></div>
@@ -1991,11 +1987,7 @@ function Home() {
     <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
       统一： TrueSkill / 画像 / 出牌评分 / 评分统计
     </label>
-    <button
-      onClick={()=>allFileRef.current?.click()}
-      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-    >上传</button>
-    <button
+<button
       onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
       style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >存档</button>
@@ -2249,6 +2241,5 @@ function Home() {
     </div>
   );
 }
-
 
 export default Home;
