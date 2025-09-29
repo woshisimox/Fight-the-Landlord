@@ -1999,7 +1999,12 @@ function Home() {
       <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
     </label>
   </div>
-  <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8 }}>
+  <div style={{ fontSize:14, fontWeight:600, display:'flex', alignItems:'center', gap:8, marginTop:6 }}>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      统一：TrueSkill / 画像 / 出牌评分 / 评分统计
+    </label>
+  </div>
+  <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
     <input
       ref={allFileRef}
       type="file"
@@ -2024,11 +2029,13 @@ function Home() {
     </div>
   </div>
 </div>
-<label>初始分
+<div style={{ gridColumn:'2 / 3' }}>
+  <label>初始分
           <input type="number" step={10} value={startScore}
            onChange={e=>setStartScore(Number(e.target.value)||0)}
            style={{ width:'100%' }} />
           </label>
+</div>
 
 
 
