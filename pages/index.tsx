@@ -437,10 +437,8 @@ function LivePanel(props: LiveProps) {
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
   const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
   const [roundCuts, setRoundCuts] = useState<number[]>([0]);
-  const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts;
-  // 每局结束或数据变化时刷新统计
-  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
- }, [roundCuts]);
+  const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
+
   const [roundLords, setRoundLords] = useState<number[]>([]);
 
   /* ====== 评分统计（每局） ====== */
@@ -494,7 +492,10 @@ function LivePanel(props: LiveProps) {
       setScoreStats(stats);
       setScoreDists(perSeatRounds);
     } catch (e) { console.error('[stats] recompute error', e); }
-  };
+  }
+  // 每局结束或数据变化时刷新统计
+  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
+;
  }, [roundLords]);
 
 
