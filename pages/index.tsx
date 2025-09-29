@@ -438,7 +438,6 @@ function LivePanel(props: LiveProps) {
   const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
   const [roundCuts, setRoundCuts] = useState<number[]>([0]);
   const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
- }, [roundCuts]);
 
   const [roundLords, setRoundLords] = useState<number[]>([]);
 
@@ -494,6 +493,9 @@ function LivePanel(props: LiveProps) {
       setScoreDists(perSeatRounds);
     } catch (e) { console.error('[stats] recompute error', e); }
   }
+  // 每局结束或数据变化时刷新统计
+  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
+
   // 每局结束或数据变化时刷新统计
   useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
 ;
