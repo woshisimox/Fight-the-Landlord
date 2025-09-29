@@ -6,7 +6,6 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -228,7 +227,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
   }
-}}
+}
 
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
@@ -1859,7 +1858,7 @@ function RadarPanel({
               onChange={e=>{
                 const v = Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35));
                 setA(v); onChangeAlpha(v);
-              }}
+              }
               style={{ width:80, marginLeft:6 }}
             />
           </label>
@@ -1983,7 +1982,7 @@ function Home() {
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
     <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
-      TrueSkill / 画像 / 出牌评分 / 评分统计
+      统一： TrueSkill / 画像 / 出牌评分 / 评分统计
     <input
       ref={allFileRef}
       type="file"
