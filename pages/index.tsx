@@ -6,6 +6,7 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
+  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -215,9 +216,11 @@ function choiceLabel(choice: BotChoice): string {
   switch (choice) {
     case 'built-in:greedy-max': return 'Greedy Max';
     case 'built-in:greedy-min': return 'Greedy Min';
-    case 'built-in:random-legal': return 'Random Legal';
+    case 'built-in:random-legal'
+  | 'built-in:mininet': return 'Random Legal';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'built-in:mininet': return 'MiniNet';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
     case 'ai:grok':  return 'Grok';
@@ -1890,7 +1893,8 @@ const DEFAULTS = {
   four2: 'both' as Four2Policy,
   farmerCoop: true,
   seatDelayMs: [1000,1000,1000] as number[],
-  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
+  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'
+  | 'built-in:mininet'] as BotChoice[],
   // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
   seatModels: ['', '', ''],
   seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
@@ -1980,8 +1984,8 @@ function Home() {
     </label>
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-      TrueSkill / 画像 / 出牌评分 / 评分统计
+    <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
+      统一： TrueSkill / 画像 / 出牌评分 / 评分统计
     <input
       ref={allFileRef}
       type="file"
@@ -2052,6 +2056,7 @@ function Home() {
                       <option value="built-in:random-legal">Random Legal</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:mininet">MiniNet</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
