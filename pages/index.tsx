@@ -438,6 +438,7 @@ function LivePanel(props: LiveProps) {
   const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
   const [roundCuts, setRoundCuts] = useState<number[]>([0]);
   const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
+ }, [roundCuts]);
 
   const [roundLords, setRoundLords] = useState<number[]>([]);
 
