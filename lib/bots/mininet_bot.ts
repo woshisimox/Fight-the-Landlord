@@ -117,6 +117,12 @@ function getSeat(ctx:any): number|undefined {
   return (typeof k === 'number') ? k : undefined;
 }
 function getHandFromCtx(ctx:any): AnyCard[] {
+  const direct = ctx?.hands;
+  // 1) qwen-style: hands is a flat array for the current player
+  if (Array.isArray(direct) && (direct.length===0 || !Array.isArray(direct[0]))) {
+    return direct as AnyCard[];
+  }
+  // 2) other direct paths
   const tryPaths = [
     (c:any)=> c?.hand,
     (c:any)=> c?.myHand,
@@ -129,6 +135,26 @@ function getHandFromCtx(ctx:any): AnyCard[] {
     const v = f(ctx);
     if (Array.isArray(v) && v.length) return v as AnyCard[];
   }
+  // 3) array-of-arrays form
+  const seatNum = getSeat(ctx);
+  const hands = ctx?.hands ?? ctx?.state?.hands;
+  if (Array.isArray(hands)) {
+    if (typeof seatNum === 'number' && Array.isArray(hands[seatNum])) return hands[seatNum] as AnyCard[];
+    for (const arr of hands){ if (Array.isArray(arr) && arr.length) return arr as AnyCard[]; }
+  } else if (hands && typeof hands === 'object') {
+    const seatKey = getSeatKey(ctx);
+    if (seatKey!=null && Array.isArray(hands[seatKey])) return hands[seatKey] as AnyCard[];
+    const seatAliases = [seatKey, ctx?.role, ctx?.seat, '甲','乙','丙','地主','农民A','农民B','landlord','farmerA','farmerB'];
+    for (const k of seatAliases) {
+      if (k!=null && Array.isArray((hands as any)[k])) return (hands as any)[k] as AnyCard[];
+    }
+    for (const k of Object.keys(hands)) {
+      const v = (hands as any)[k];
+      if (Array.isArray(v) && v.length) return v as AnyCard[];
+    }
+  }
+  return [];
+}
   const seatNum = getSeat(ctx);
   const seatKey = getSeatKey(ctx);
   const hands = ctx?.hands ?? ctx?.state?.hands;
@@ -322,6 +348,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   };
 
   const rawHand: AnyCard[] = getHandFromCtx(ctx);
+  const handsShape = Array.isArray((ctx as any)?.hands) ? (Array.isArray(((ctx as any).hands||[])[0])?'nested':'flat') : (typeof (ctx as any)?.hands==='object'?'object':'none');
   const { cands: policyCands, source } = extractCandidatesFromCtx(ctx);
   let candidates: AnyCard[][] = policyCands;
 
@@ -337,7 +364,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   if (!candidates.length) {
     const sk = getSeatKey(ctx);
     const handLen = Array.isArray(rawHand) ? rawHand.length : -1;
-    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v5: no candidates (source=${source}, seatKey=${String(sk)}, handLen=${handLen})` };
+    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v6: no candidates (source=${source}, seatKey=${String(sk)}, handLen=${handLen})` };
     const lowest = Array.isArray(rawHand) && rawHand.length ? [...rawHand].sort((a,b)=>rankIndex(a)-rankIndex(b))[0] : undefined;
     if (lowest!=null) candidates = [[lowest]];
   }
@@ -350,7 +377,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
     score += (Math.random()-0.5)*0.01;
     if (score > bestScore) { bestScore = score; best = m; }
   }
-  return { move:'play', cards: best, reason:`MiniNet v5: cands=${candidates.length} from=${source} score=${bestScore.toFixed(3)}` };
+  return { move:'play', cards: best, reason:`MiniNet v6: cands=${candidates.length} from=${source} score=${bestScore.toFixed(3)}` };
 }
 
 export function loadMiniNetWeights(json: {l1:Dense; l2:Dense}) {
