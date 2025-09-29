@@ -228,7 +228,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
   }
-
+}}
 
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
@@ -1892,8 +1892,7 @@ const DEFAULTS = {
   four2: 'both' as Four2Policy,
   farmerCoop: true,
   seatDelayMs: [1000,1000,1000] as number[],
-  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'
-  | 'built-in:mininet'] as BotChoice[],
+  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
   // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
   seatModels: ['', '', ''],
   seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
@@ -1984,7 +1983,7 @@ function Home() {
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
     <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
-      统一： TrueSkill / 画像 / 出牌评分 / 评分统计
+      TrueSkill / 画像 / 出牌评分 / 评分统计
     <input
       ref={allFileRef}
       type="file"
