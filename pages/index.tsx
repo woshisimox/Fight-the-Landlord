@@ -1621,9 +1621,9 @@ nextTotals     = [
         {/* 上传 / 存档 / 刷新 */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
           <input ref={fileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleUploadFile} />
-          <button onClick={()=>fileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
-          <button onClick={handleSaveArchive} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
-          <button onClick={handleRefreshApply} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
+          <button onClick={()=>fileRef.current?.click()} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
+          <button onClick={handleSaveArchive} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+          <button onClick={handleRefreshApply} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
           <div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
         </div>
 
@@ -1689,9 +1689,9 @@ nextTotals     = [
         {/* Radar：上传 / 存档 / 刷新 */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
           <input ref={radarFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleRadarUpload} />
-          <button onClick={()=>radarFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
-          <button onClick={handleRadarSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
-          <button onClick={handleRadarRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
+          <button onClick={()=>radarFileRef.current?.click()} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
+          <button onClick={handleRadarSave} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+          <button onClick={handleRadarRefresh} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
           <div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
         </div>
 
@@ -1709,9 +1709,9 @@ nextTotals     = [
       <Section title="出牌评分（每局动态）">
         <div style={{ display:'flex', gap:8, alignItems:'center', margin:'8px 0 12px' }}>
           <input ref={scoreFileRef} type="file" accept="application/json" style={{ display:'none' }} onChange={handleScoreUpload} />
-          <button onClick={()=>scoreFileRef.current?.click()} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
-          <button onClick={handleScoreSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
-          <button onClick={handleScoreRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
+          <button onClick={()=>scoreFileRef.current?.click()} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>上传</button>
+          <button onClick={handleScoreSave} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+          <button onClick={handleScoreRefresh} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
         </div>
         <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
         <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
@@ -1719,8 +1719,8 @@ nextTotals     = [
       <div style={{ marginTop:10 }}></div>
       <Section title="评分统计（每局汇总）">
         <div style={{ display:'flex', gap:8, marginBottom:8 }}>
-          <button onClick={handleStatsSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
-          <button onClick={handleStatsRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
+          <button onClick={handleStatsSave} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+          <button onClick={handleStatsRefresh} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
           <label style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'0 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff', cursor:'pointer' }}>
             上传<input ref={statsFileRef} onChange={handleStatsUpload} type="file" accept=".json,application/json" style={{ display:'none' }} />
           </label>
@@ -1969,14 +1969,14 @@ function Home() {
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12, gridAutoFlow:'row dense' }}>
           <div>
             <div style={{ display:'flex', alignItems:'center', gap:10 }}>
               <label style={{ display:'flex', alignItems:'center', gap:8 }}>
                 启用对局
                 <input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} />
               </label>
-              <button onClick={doResetAll} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+              <button onClick={doResetAll} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
                 清空
               </button>
             </div>
@@ -1988,7 +1988,7 @@ function Home() {
           </label>
 		  
           
-<div style={{ gridColumn:'1 / -1' }}>
+<div style={{ gridColumn:'1 / 2' }}>
   <div style={{ display:'flex', alignItems:'center', gap:24 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       可抢地主
@@ -1999,13 +1999,11 @@ function Home() {
       <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
     </label>
   </div>
-  <div style={{ fontSize:14, fontWeight:600, display:'flex', alignItems:'center', gap:8, marginTop:6 }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-      统一：TrueSkill / 画像 / 出牌评分 / 评分统计
-    </label>
-  </div>
-  <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
-    <input
+  <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
+  <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
+    统一： TrueSkill / 画像 / 出牌评分 / 评分统计
+  </label>
+<input
       ref={allFileRef}
       type="file"
       accept="application/json"
@@ -2014,15 +2012,15 @@ function Home() {
     />
     <button
       onClick={()=>allFileRef.current?.click()}
-      style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >上传</button>
     <button
       onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
-      style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >存档</button>
     <button
       onClick={()=>window.dispatchEvent(new Event('ddz-all-refresh'))}
-      style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >刷新</button>
 </div>
 </div>
