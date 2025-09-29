@@ -1,16 +1,11 @@
-// lib/bots/mininet_bot.ts (v4 - rule-aware)
-// MiniNet: tiny MLP scorer + LEGAL candidate generator for Dou Dizhu (斗地主).
-// - Respects require/type when following: same type & size, bigger core; bombs/rocket allowed anytime.
-// - If require not present, infers from last non-pass trick; if still unknown -> free lead.
-// - Returns raw tokens (whatever your engine uses), only normalizes ranks for features/scoring.
-
+// lib/bots/mininet_bot.ts (v4 seatfix - rule-aware)
 type AnyCard = any;
 type BotMove = { move: 'play' | 'pass'; cards?: AnyCard[]; reason?: string };
 
 const RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const;
 type RankChar = typeof RANKS[number];
 const RANK_IDX = Object.fromEntries(RANKS.map((r,i)=>[r,i])) as Record<string, number>;
-const STRAIGHT_RANKS: RankChar[] = ['3','4','5','6','7','8','9','T','J','Q','K','A']; // no 2 / jokers
+const STRAIGHT_RANKS: RankChar[] = ['3','4','5','6','7','8','9','T','J','Q','K','A']; // straight can't include 2/jokers
 
 const MOVE_TYPES = [
   'pass','single','pair','triple','straight','pair-straight','plane',
@@ -25,11 +20,9 @@ function isBigJokerToken(s: string){ return s==='X' || s==='BJ' || s==='LJ' || s
 function toRankChar(raw:any): RankChar {
   if (raw==null) return '3';
   const s = String(raw);
-  // Keep 'x' small, 'X' big if explicitly given
   if (s==='x' || s==='X') return s as RankChar;
   const up = s.toUpperCase();
   if (['3','4','5','6','7','8','9','T','J','Q','K','A','2'].includes(up)) return up as RankChar;
-  // Heuristics for tokens like '7H', '♦7'
   if (s.length>1){
     const last = s[s.length-1].toUpperCase();
     if (['3','4','5','6','7','8','9','T','J','Q','K','A','2'].includes(last)) return last as RankChar;
@@ -40,13 +33,12 @@ function toRankChar(raw:any): RankChar {
 }
 function rankIndex(raw:any): number { const r = toRankChar(raw); return RANK_IDX[r] ?? 0; }
 
-// ========= Feature builder (same MLP as before) =========
+// ========= Feature builder =========
 function hist15(cards: AnyCard[]|undefined): number[] {
   const h = new Array(15).fill(0);
   if (cards) for (const c of cards) h[rankIndex(c)]++;
   return h;
 }
-
 function classifyMove(cards?: AnyCard[]): MoveType {
   if (!cards || cards.length === 0) return 'pass';
   const n = cards.length;
@@ -64,19 +56,12 @@ function classifyMove(cards?: AnyCard[]): MoveType {
   if (n === 2 && uniq === 1) return 'pair';
   if (n === 3 && uniq === 1) return 'triple';
 
-  // Naive straight checks (we'll use stricter checks in candidate builder)
   const run = h.map(v=>v>0?1:0);
   let best=0, cur=0;
-  for (let i=0;i<13;i++){ // include '2' here just for continuity; rule disallows 2/jokers later
-    cur = run[i]?cur+1:0; best = Math.max(best, cur);
-  }
+  for (let i=0;i<13;i++){ cur = run[i]?cur+1:0; best = Math.max(best, cur); }
   if (best>=5 && uniq===n) return 'straight';
-
-  // We won't try to perfectly classify complex combos here.
-  // The legal candidate generator will produce properly-typed combos.
   return 'single';
 }
-
 type MiniState = {
   role: 0|1|2;
   landlord: 0|1|2;
@@ -154,10 +139,15 @@ function mlpScore(x:number[]): number {
 }
 
 // ========= Hand + trick utilities =========
-function getSeat(ctx:any): number|undefined {
-  if (typeof ctx?.seat==='number') return ctx.seat;
-  if (typeof ctx?.role==='number') return ctx.role;
+function getSeatKey(ctx:any): any {
+  if (ctx && ('seat' in ctx)) return ctx.seat;
+  if (ctx && ('role' in ctx)) return ctx.role;
+  if (ctx && ('player' in ctx)) return (ctx as any).player;
   return undefined;
+}
+function getSeat(ctx:any): number|undefined {
+  const k = getSeatKey(ctx);
+  return (typeof k === 'number') ? k : undefined;
 }
 function getHandFromCtx(ctx:any): AnyCard[] {
   const tryPaths = [
@@ -172,16 +162,30 @@ function getHandFromCtx(ctx:any): AnyCard[] {
     const v = f(ctx);
     if (Array.isArray(v) && v.length) return v as AnyCard[];
   }
-  const seat = getSeat(ctx);
-  if (Array.isArray(ctx?.hands) && seat!=null && Array.isArray(ctx.hands[seat])) return ctx.hands[seat] as AnyCard[];
-  if (Array.isArray(ctx?.state?.hands) && seat!=null && Array.isArray(ctx.state.hands[seat])) return ctx.state.hands[seat] as AnyCard[];
+  const seatNum = getSeat(ctx);
+  const seatKey = getSeatKey(ctx);
+  const hands = ctx?.hands ?? ctx?.state?.hands;
+  if (Array.isArray(hands)) {
+    if (typeof seatNum === 'number' && Array.isArray(hands[seatNum])) return hands[seatNum] as AnyCard[];
+    for (const arr of hands){ if (Array.isArray(arr) && arr.length) return arr as AnyCard[]; }
+  } else if (hands && typeof hands === 'object') {
+    if (seatKey!=null && Array.isArray(hands[seatKey])) return hands[seatKey] as AnyCard[];
+    const seatAliases = [seatKey, ctx?.role, ctx?.seat, '甲','乙','丙','地主','农民A','农民B','landlord','farmerA','farmerB'];
+    for (const k of seatAliases) {
+      if (k!=null && Array.isArray((hands as any)[k])) return (hands as any)[k] as AnyCard[];
+    }
+    for (const k of Object.keys(hands)) {
+      const v = (hands as any)[k];
+      if (Array.isArray(v) && v.length) return v as AnyCard[];
+    }
+  }
   return [];
 }
 type Req = {
   type: MoveType|'lead'|'any';
-  len?: number;     // straight length / number of pairs / number of triples for plane
+  len?: number;
   wings?: 'single'|'pair'|null;
-  baseIdx?: number; // rank index for core comparison
+  baseIdx?: number;
 };
 function lastNonPassFrom(ctx:any): AnyCard[]|undefined {
   const sources = [ctx?.currentTrick, ctx?.trick, ctx?.history];
@@ -204,24 +208,20 @@ function analyzeMove(cards: AnyCard[]): {type:MoveType, len?:number, baseIdx?:nu
   if (type==='pair')   return {type, baseIdx: rankIndex(cards[0])};
   if (type==='triple') return {type, baseIdx: rankIndex(cards[0])};
 
-  // Detect bomb
   if (h.find(x=>x===4) && cards.length===4) {
     const idx = h.findIndex(x=>x===4);
     return {type:'bomb', baseIdx: idx};
   }
   if (ranks.includes('x') && ranks.includes('X') && cards.length===2) return {type:'rocket', baseIdx: 99};
 
-  // Straight-like
   const idxs = ranks.map(r=>RANK_IDX[r]).sort((a,b)=>a-b);
   const uniq = Array.from(new Set(idxs));
   const isStraight = uniq.every(i=>i<=RANK_IDX['A']) && uniq.length>=5 && uniq.length===cards.length && uniq.every((v,i)=> i===0 || v-uniq[i-1]===1);
   if (isStraight) return {type:'straight', len: uniq.length, baseIdx: uniq[uniq.length-1]};
 
-  // Pair-straight
   const pairIdxs: number[] = [];
   for (let i=0;i<13;i++){ if (h[i]>=2) pairIdxs.push(i); }
   pairIdxs.sort((a,b)=>a-b);
-  // Find longest run that equals cards.length/2
   const needPairs = cards.length/2;
   for (let i=0;i+needPairs-1<pairIdxs.length;i++){
     const window = pairIdxs.slice(i,i+needPairs);
@@ -229,16 +229,13 @@ function analyzeMove(cards: AnyCard[]): {type:MoveType, len?:number, baseIdx?:nu
     if (ok && needPairs>=3) return {type:'pair-straight', len: needPairs, baseIdx: window[window.length-1]};
   }
 
-  // Triple-based
   const tripleIdxs: number[] = []; for (let i=0;i<13;i++){ if (h[i]===3) tripleIdxs.push(i); }
   if (tripleIdxs.length>=2){
-    // assume pure plane (no wings) if counts match
     if (tripleIdxs.length*3 === cards.length) {
       tripleIdxs.sort((a,b)=>a-b);
       if (tripleIdxs.every((v,k)=>k===0 || v-tripleIdxs[k-1]===1))
         return {type:'plane', len: tripleIdxs.length, baseIdx: tripleIdxs[tripleIdxs.length-1]};
     } else {
-      // with wings: we cannot reliably infer wings type only from raw cards; try to guess
       tripleIdxs.sort((a,b)=>a-b);
       const width = tripleIdxs.length;
       const rest = cards.length - width*3;
@@ -246,15 +243,12 @@ function analyzeMove(cards: AnyCard[]): {type:MoveType, len?:number, baseIdx?:nu
       if (rest===width*2) return {type:'triple-with-pair', len: width, baseIdx: tripleIdxs[tripleIdxs.length-1], wings:'pair'};
     }
   }
-
-  // Four-with-two (two singles)
   const fourIdx = h.findIndex(x=>x===4);
   if (fourIdx>=0){
     return {type:'four-with-two', baseIdx: fourIdx};
   }
   return {type:'single', baseIdx: rankIndex(cards[0])};
 }
-
 function parseRequire(ctx:any): Req {
   const r = ctx?.require;
   if (r && typeof r==='object'){
@@ -271,14 +265,38 @@ function parseRequire(ctx:any): Req {
       'bomb':'bomb','rocket':'rocket'
     };
     const type = map[t] ?? 'any';
-    const len  = r.len ?? r.length ?? r.size ?? r.width ?? undefined;
-    const baseIdx = (r.baseIdx!=null) ? Number(r.baseIdx) :
-                    (r.baseRank!=null) ? rankIndex(r.baseRank) :
-                    (r.rank!=null) ? rankIndex(r.rank) : undefined;
-    const wings = (r.wings==='pair' || r.wings==='single') ? r.wings : undefined;
+    const len  = (r as any).len ?? (r as any).length ?? (r as any).size ?? (r as any).width ?? undefined;
+    const baseIdx = (r as any).baseIdx!=null ? Number((r as any).baseIdx) :
+                    (r as any).baseRank!=null ? rankIndex((r as any).baseRank) :
+                    (r as any).rank!=null ? rankIndex((r as any).rank) : undefined;
+    const wings = ((r as any).wings==='pair' || (r as any).wings==='single') ? (r as any).wings : undefined;
     return { type, len, baseIdx, wings: wings??null };
   }
-
+  // Extra shapes nested
+  const p = (r as any)?.pattern || (r as any)?.shape || (r as any)?.follow || (r as any)?.sameAs || (r as any)?.expected || (r as any)?.need;
+  if (p && typeof p==='object'){
+    const t2 = (p.type || p.kind || p.name)?.toString()?.toLowerCase();
+    if (t2) {
+      const map2: Record<string, MoveType|'lead'|'any'> = {
+        'lead':'lead','any':'any',
+        'single':'single','pair':'pair','triple':'triple',
+        'straight':'straight','shunzi':'straight',
+        'pair-straight':'pair-straight','liandui':'pair-straight',
+        'plane':'plane','feiji':'plane',
+        'triple-with-single':'triple-with-single',
+        'triple-with-pair':'triple-with-pair',
+        'four-with-two':'four-with-two',
+        'bomb':'bomb','rocket':'rocket'
+      };
+      const type = map2[t2] ?? 'any';
+      const len  = (p as any).len ?? (p as any).length ?? (p as any).size ?? (p as any).width ?? undefined;
+      const baseIdx = (p as any).baseIdx!=null ? Number((p as any).baseIdx) :
+                      (p as any).baseRank!=null ? rankIndex((p as any).baseRank) :
+                      (p as any).rank!=null ? rankIndex((p as any).rank) : undefined;
+      const wings = ((p as any).wings==='pair' || (p as any).wings==='single') ? (p as any).wings : undefined;
+      return { type, len, baseIdx, wings: wings??null };
+    }
+  }
   // Infer from last non-pass trick
   const last = lastNonPassFrom(ctx);
   if (Array.isArray(last)) {
@@ -288,7 +306,7 @@ function parseRequire(ctx:any): Req {
   return { type: 'lead' };
 }
 
-// ========= Candidate generator respecting rules =========
+// ========= Candidate generator =========
 function byRankBuckets(hand: AnyCard[]): Record<RankChar, AnyCard[]> {
   const buckets: Record<RankChar, AnyCard[]> = Object.fromEntries(RANKS.map(r=>[r, []])) as any;
   for (const c of hand) buckets[toRankChar(c)].push(c);
@@ -330,7 +348,6 @@ function pickRocket(b: Record<RankChar,AnyCard[]>): AnyCard[][] {
   if (b['x'].length>=1 && b['X'].length>=1) return [[b['x'][0], b['X'][0]]];
   return [];
 }
-
 function pickStraight(b: Record<RankChar,AnyCard[]>, len:number, minIdx:number): AnyCard[][] {
   const out: AnyCard[][] = [];
   const idxs = STRAIGHT_RANKS.map(r=>RANK_IDX[r]);
@@ -384,7 +401,6 @@ function pickPlane(b: Record<RankChar,AnyCard[]>, width:number, minIdx:number): 
 function addWingsSingles(core: AnyCard[][], b: Record<RankChar,AnyCard[]>, width:number): AnyCard[][] {
   const out: AnyCard[][] = [];
   for (const c of core){
-    // remove core tokens from a temp copy
     const used = new Set(c);
     const singles: AnyCard[] = [];
     for (const r of RANKS){
@@ -403,8 +419,7 @@ function addWingsPairs(core: AnyCard[][], b: Record<RankChar,AnyCard[]>, width:n
     const pairs: AnyCard[] = [];
     for (const r of RANKS){
       const arr = b[r].filter(x=>!used.has(x));
-      if (arr.length>=2) pairs.push(arr[0], arr[1]);
-      if (pairs.length>=width*2) break;
+      if (arr.length>=2) { pairs.push(arr[0], arr[1]); if (pairs.length>=width*2) break; }
     }
     if (pairs.length>=width*2){
       out.push([...c, ...pairs.slice(0,width*2)]);
@@ -420,12 +435,10 @@ function pickFourWithTwo(b: Record<RankChar,AnyCard[]>, minIdx:number, usePairs:
       const core = [b[r][0],b[r][1],b[r][2],b[r][3]];
       const used = new Set(core);
       if (!usePairs){
-        // two singles
         const singles: AnyCard[] = [];
         for (const rr of RANKS) for (const t of b[rr]) if (!used.has(t)) singles.push(t);
         if (singles.length>=2) out.push([...core, singles[0], singles[1]]);
       } else {
-        // two pairs
         const pairs: AnyCard[] = [];
         for (const rr of RANKS){
           const arr = b[rr].filter(x=>!used.has(x));
@@ -441,26 +454,17 @@ function pickFourWithTwo(b: Record<RankChar,AnyCard[]>, minIdx:number, usePairs:
 function buildLegalCandidates(hand: AnyCard[], ctx:any): AnyCard[][] {
   const req = parseRequire(ctx);
   const buckets = byRankBuckets(hand);
-  const canPass = !!ctx?.canPass;
   const cands: AnyCard[][] = [];
 
-  // Rocket & Bombs are always allowed to beat anything (rule). We'll add them later if needed.
   const bombsAny = pickBombsAbove(buckets, -1);
   const rocketAny = pickRocket(buckets);
 
   if (req.type==='lead' || req.type==='any'){
-    // free lead: allow many shapes; to keep small, include straights (>=5), pairs, triples, singles; keep bombs as last-resort
-    // Straights of length 5..8
     for (let L=8; L>=5; L--) cands.push(...pickStraight(buckets, L, -1));
-    // Pair-straights (3..5 pairs)
     for (let L=5; L>=3; L--) cands.push(...pickPairStraight(buckets, L, -1));
-    // Triples (prefer)
     cands.push(...pickTriplesAbove(buckets, -1));
-    // Pairs
     cands.push(...pickPairsAbove(buckets, -1));
-    // Singles
     cands.push(...pickSinglesAbove(buckets, -1));
-    // Optional: avoid always exposing bombs on lead; we add them at the end as low-priority
     cands.push(...bombsAny);
     cands.push(...rocketAny);
     return cands.slice(0,200);
@@ -499,7 +503,6 @@ function buildLegalCandidates(hand: AnyCard[], ctx:any): AnyCard[][] {
       break;
     }
     case 'four-with-two': {
-      // 默认两单；若 r.wings==='pair' 则两对
       const usePairs = (ctx?.require?.wings==='pair');
       cands.push(...pickFourWithTwo(buckets, base, !!usePairs));
       break;
@@ -513,7 +516,6 @@ function buildLegalCandidates(hand: AnyCard[], ctx:any): AnyCard[][] {
       break;
     }
   }
-  // If we are following a non-bomb, allow bombs/rocket as override
   if (req.type!=='bomb' && req.type!=='rocket'){
     cands.push(...bombsAny, ...rocketAny);
   }
@@ -525,7 +527,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   const state: MiniState = {
     role: Number(ctx?.role ?? 0) as 0|1|2,
     landlord: Number(ctx?.landlord ?? 0) as 0|1|2,
-    lastMove: undefined, // not strictly used in scoring; kept for feature completeness
+    lastMove: undefined,
     myHand: getHandFromCtx(ctx).map(toRankChar),
     counts: ctx?.counts,
     bombsUsed: ctx?.stats?.bombs ?? ctx?.bombsUsed ?? 0,
@@ -535,13 +537,13 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   let candidates = buildLegalCandidates(rawHand, ctx);
 
   if (!candidates.length) {
-    // No legal follow-up; if canPass=true, pass; else try single lowest as a fallback
-    if (ctx?.canPass) return { move:'pass', reason:`MiniNet: no legal candidates (keys=${Object.keys(ctx||{}).join(',')})` };
-    const lowest = [...rawHand].sort((a,b)=>rankIndex(a)-rankIndex(b))[0];
+    const sk = getSeatKey(ctx);
+    const handLen = Array.isArray(rawHand) ? rawHand.length : -1;
+    if (ctx?.canPass) return { move:'pass', reason:`MiniNet: no legal candidates (keys=${Object.keys(ctx||{}).join(',')}, seatKey=${String(sk)}, handLen=${handLen})` };
+    const lowest = Array.isArray(rawHand) && rawHand.length ? [...rawHand].sort((a,b)=>rankIndex(a)-rankIndex(b))[0] : undefined;
     if (lowest!=null) candidates = [[lowest]];
   }
 
-  // Score & pick
   let best = candidates[0];
   let bestScore = -1e9;
   for (const m of candidates) {
@@ -552,7 +554,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   }
   const req = parseRequire(ctx);
   const reqDesc = `${req.type}${req.len?`(${req.len})`:''}${req.baseIdx!=null?`>${req.baseIdx}`:''}`;
-  return { move:'play', cards: best, reason:`MiniNet(v4): cands=${candidates.length} req=${reqDesc} score=${bestScore.toFixed(3)}` };
+  return { move:'play', cards: best, reason:`MiniNet(v4 seatfix): cands=${candidates.length} req=${reqDesc} score=${bestScore.toFixed(3)}` };
 }
 
 export function loadMiniNetWeights(json: MLP) {
