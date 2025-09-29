@@ -1483,6 +1483,60 @@ nextTotals     = [
         <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
         <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
       </Section>
+
+      <Section title="评分统计（直方图｜每手score汇总）">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
+          {[0,1,2].map(i=>{
+            const samples = (scoreSeries[i] || []).filter(v => typeof v === 'number' && !Number.isNaN(v)) as number[];
+            if (!samples.length) return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
+                <div style={{ fontWeight:700, marginBottom:6 }}>{['甲','乙','丙'][i]}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>暂无数据</div>
+              </div>
+            );
+            const pad = 6, W = 260, H = 96;
+            const mu = samples.reduce((a,b)=>a+b,0) / samples.length;
+            const sigma = Math.sqrt(Math.max(0, samples.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / samples.length));
+            const sMin = Math.min(...samples), sMax = Math.max(...samples);
+            const bins = Math.max(8, Math.min(32, Math.ceil(Math.log2(samples.length + 1)) + 1));
+            const lo = sMin, hi = sMax === sMin ? sMin + 1 : sMax;
+            const x = (v:number)=> pad + (hi>lo ? (v-lo)/(hi-lo) : 0.5) * (W - 2*pad);
+            const barW = (W - 2*pad) / bins;
+            const counts = new Array(bins).fill(0);
+            for (const v of samples) {
+              let k = Math.floor((v - lo) / (hi - lo) * bins);
+              if (k < 0) k = 0; if (k >= bins) k = bins - 1;
+              counts[k]++;
+            }
+            const maxC = Math.max(...counts) || 1;
+            const bars = counts.map((c, k) => {
+              const x0 = pad + k * barW + 0.5;
+              const h = (H - 2*pad) * (c / maxC);
+              const y0 = H - pad - h;
+              return <rect key={k} x={x0} y={y0} width={Math.max(1, barW - 1)} height={Math.max(0, h)} fill="#9ca3af" opacity={0.45} />;
+            });
+            const meanX = x(mu);
+            const sigL = x(mu - sigma);
+            const sigR = x(mu + sigma);
+            return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
+                <div style={{ fontWeight:700, marginBottom:6 }}>{['甲','乙','丙'][i]}</div>
+                <svg width={W} height={H} style={{ display:'block' }}>
+                  <rect x={0} y={0} width={W} height={H} fill="#ffffff" stroke="#e5e7eb" />
+                  {bars}
+                  <line x1={meanX} y1={pad} x2={meanX} y2={H-pad} stroke="#ef4444" strokeDasharray="4 3" />
+                  <line x1={sigL} y1={pad} x2={sigL} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
+                  <line x1={sigR} y1={pad} x2={sigR} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
+                  <text x={meanX+4} y={12} fontSize={10} fill="#ef4444">μ={mu.toFixed(2)}</text>
+                  <text x={sigL+4} y={24} fontSize={10} fill="#60a5fa">-1σ</text>
+                  <text x={sigR+4} y={24} fontSize={10} fill="#60a5fa">+1σ</text>
+                </svg>
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
 <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
           {[0,1,2].map(i=>(
