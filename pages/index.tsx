@@ -226,24 +226,6 @@ function choiceLabel(choice: BotChoice): string {
 
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
-
-
-/* ====== 日志重写（按轮次打标签） ====== */
-function makeRewriteRoundLabel(roundNo: number) {
-  // 返回一个对字符串做轻量处理的函数：
-  // - 将以 “AI调用｜” “系统” 等前缀的行前面加上“[第N局] ”标签
-  // - 其他文本保持不变
-  const prefix = Number.isFinite(roundNo) && roundNo > 0 ? `[第${roundNo}局] ` : '';
-  return (line: string) => {
-    try {
-      if (!prefix) return line;
-      if (typeof line !== 'string') return String(line);
-      // 若已有标签，则不重复添加
-      if (/^\[第\d+局\]/.test(line)) return line;
-      return prefix + line;
-    } catch { return line as any; }
-  };
-}
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
   if (mode === 'mean') {
     const c = Math.max(0, count);
@@ -306,7 +288,10 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
 
   const makePath = (arr:(number|null)[])=>{
     let d=''; let open=false;
+    const cutSet = new Set(cuts);
     for (let i=0;i<n;i++){
+      // 在每局起始断开一次路径，避免跨局连线
+      if (cutSet.has(i) && i!==0) { open = false; }
       const v = arr[i];
       if (typeof v !== 'number') { open=false; continue; }
       const px = x(i), py = y(v);
@@ -315,124 +300,6 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
     }
     return d;
   };
-
-  // x 轴刻度（最多 12 个）
-  const ticks = []; const maxTicks = 12;
-  for (let i=0;i<n;i++){
-    const step = Math.ceil(n / maxTicks);
-    if (i % step === 0) ticks.push(i);
-  }
-  // y 轴刻度（5 条）
-  const yTicks = []; for (let k=0;k<=4;k++){ yTicks.push(y0 + (k/4)*(y1-y0)); }
-
-  return (
-    <div ref={ref} style={{ width:'100%' }}>
-      <svg width={width} height={heightPx} style={{ display:'block', width:'100%' }}>
-        <g transform={`translate(${left},${top})`}>
-          {/* 按地主上色的局间底色 */}
-          {cuts.slice(0, Math.max(0, cuts.length-1)).map((st, i)=>{
-            const ed = cuts[i+1];
-            if (ed <= st) return null;
-            const x0 = x(st);
-            const x1 = x(Math.max(st, ed-1));
-            const w  = Math.max(0.5, x1 - x0);
-            const lord = landlordsArr[i] ?? -1;
-            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
-            return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
-          })}
-
-          {/* 网格 + 轴 */}
-          <line x1={0} y1={ih} x2={iw} y2={ih} stroke="#e5e7eb" />
-          <line x1={0} y1={0} x2={0} y2={ih} stroke="#e5e7eb" />
-          {yTicks.map((v,i)=>(
-            <g key={i} transform={`translate(0,${y(v)})`}>
-              <line x1={0} y1={0} x2={iw} y2={0} stroke="#f3f4f6" />
-              <text x={-6} y={4} fontSize={10} fill="#6b7280" textAnchor="end">{v.toFixed(1)}</text>
-            </g>
-          ))}
-          {ticks.map((i,idx)=>(
-            <g key={idx} transform={`translate(${x(i)},0)`}>
-              <line x1={0} y1={0} x2={0} y2={ih} stroke="#f8fafc" />
-              <text x={0} y={ih+14} fontSize={10} fill="#6b7280" textAnchor="middle">{i+1}</text>
-            </g>
-          ))}
-
-          {/* 三条曲线 */}
-          {data.map((arr, si)=>(
-            <>
-              <path key={'p'+si} d={makePath(arr)} fill="none" stroke={colors[si]} strokeWidth={2} />
-              {arr.map((v,i)=> (typeof v==='number') && (
-                <circle key={'c'+si+'-'+i} cx={x(i)} cy={y(v)} r={2.5} fill={colors[si]} />
-              ))}
-            </>
-          ))}
-        </g>
-      </svg>
-
-      {/* 图例 */}
-      <div style={{ display:'flex', gap:12, marginTop:6, fontSize:12, color:'#374151' }}>
-        {[0,1,2].map(i=>(
-          <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ width:10, height:10, borderRadius:5, background:colors[i], display:'inline-block' }} />
-            <span>{labels?.[i] ?? ['甲','乙','丙'][i]}</span>
-          </div>
-        ))}
-        <div style={{ marginLeft:'auto', color:'#6b7280' }}>横轴：第几手牌 ｜ 纵轴：score</div>
-      </div>
-    </div>
-  );
-}
-
-function RadarChart({ title, scores }:{ title: string; scores: Score5; }) {
-  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
-  const size = 180, R = 70, cx = size/2, cy = size/2;
-  const pts = vals.map((v, i)=>{
-    const ang = (-90 + i*(360/5)) * Math.PI/180;
-    const r = (Math.max(0, Math.min(5, v)) / 5) * R;
-    return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
-  }).join(' ');
-  return (
-    <div style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
-      <div style={{ fontWeight:700, marginBottom:6 }}>{title}</div>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {[1,2,3,4,5].map(k=>{
-          const r = (k/5)*R;
-          const polygon = Array.from({length:5}, (_,i)=>{
-            const ang = (-90 + i*(360/5)) * Math.PI/180;
-            return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
-          }).join(' ');
-          return <polygon key={k} points={polygon} fill="none" stroke="#e5e7eb"/>;
-        })}
-        {Array.from({length:5}, (_,i)=>{
-          const ang = (-90 + i*(360/5)) * Math.PI/180;
-          return <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang)} y2={cy + R * Math.sin(ang)} stroke="#e5e7eb"/>;
-        })}
-        <polygon points={pts} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
-        {(['配合','激进','保守','效率','抢地主']).map((lab, i)=>{
-          const ang = (-90 + i*(360/5)) * Math.PI/180;
-          return <text key={i} x={cx + (R+14) * Math.cos(ang)} y={cy + (R+14) * Math.sin(ang)} fontSize="12" textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
-        })}
-      </svg>
-      <div style={{ fontSize:12, color:'#6b7280' }}>
-        分数（0~5）：Coop {scores.coop} / Agg {scores.agg} / Cons {scores.cons} / Eff {scores.eff} / Rob {scores.rob}
-      </div>
-    </div>
-  );
-}
-
-/* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
-const makeRewriteRoundLabel = (n: number) => (msg: string) => {
-  if (typeof msg !== 'string') return msg;
-  let out = msg;
-  out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
-  out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-  out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
-  out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-  out = out.replace(/开始连打\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
-  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
-  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
-  return out;
-};
 
 /* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
@@ -1147,6 +1014,28 @@ for (const raw of batch) {
                   if (lord2 != null) nextLandlord = lord2;
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
+                {
+                  // —— 兜底：没有 init 帧也要推进 roundCuts / roundLords ——
+                  const n0 = Math.max(
+                    nextScores[0]?.length||0,
+                    nextScores[1]?.length||0,
+                    nextScores[2]?.length||0
+                  );
+                  const lordVal = (nextLandlord ?? -1) as number | -1;
+                  if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
+                  else if (nextCuts[nextCuts.length-1] !== n0) {
+                    nextCuts = [...nextCuts, n0];
+                    nextLords = [...nextLords, lordVal];
+                  }
+                  // 回填当前段的地主，避免底色为空白
+                  if (nextCuts.length > 0) {
+                    const idxBand = Math.max(0, nextCuts.length - 1);
+                    if (nextLords[idxBand] !== lordVal) {
+                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
+                    }
+                  }
+                }
+        
                 }
               }
 
