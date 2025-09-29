@@ -118,7 +118,7 @@ function genNaiveCandidatesFromHand(hand:any[]): any[][] {
   const ranks = hand.map(toRankChar);
   if (ranks.includes('X') && ranks.filter(x=>x==='X').length>=2) {
     // If jokers are both represented as 'X' variants; try to find two raw jokers
-    const jokers = hand.filter(c => ['x','X','joker','JOKER','🃏','Jk','JK'].includes(String(c)) or toRankChar(c)==='X');
+    const jokers = hand.filter(c => ['x','X','joker','JOKER','🃏','Jk','JK'].includes(String(c)), or toRankChar(c)==='X');
     if (jokers.length>=2) cands.push([jokers[0], jokers[1]]);
   }
   return cands;
