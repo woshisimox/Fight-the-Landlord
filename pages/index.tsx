@@ -9,48 +9,6 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
-
-  const recomputeScoreStats = () => {
-    try {
-      const series = scoreSeriesRef.current;
-      const cuts = roundCutsRef.current;
-      const n = Math.max(series[0]?.length||0, series[1]?.length||0, series[2]?.length||0);
-      const bands = (cuts && cuts.length ? [...cuts] : [0]).sort((a,b)=>a-b);
-      if (bands[0] !== 0) bands.unshift(0);
-      if (bands[bands.length-1] !== n) bands.push(n);
-      const perSeatRounds:number[][] = [[],[],[]];
-      for (let b=0;b<bands.length-1;b++){
-        const st = bands[b], ed = bands[b+1];
-        const len = Math.max(0, ed - st);
-        if (len <= 0) continue;
-        for (let s=0;s<3;s++){
-          const arr = series[s]||[];
-          let sum = 0, cnt = 0;
-          for (let i=st;i<ed;i++){
-            const v = arr[i];
-            if (typeof v === 'number') { sum += v; cnt++; }
-          }
-          if (cnt>0) perSeatRounds[s].push(sum/cnt);
-        }
-      }
-      const stats = [0,1,2].map(s=>{
-        const rs = perSeatRounds[s];
-        const rounds = rs.length;
-        if (rounds===0) return { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-        const sum = rs.reduce((a,b)=>a+b,0);
-        const overall = sum/rounds;
-        const last = rs[rounds-1];
-        const best = Math.max(...rs);
-        const worst = Math.min(...rs);
-        const mu = overall;
-        const varv = rs.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / rounds;
-        const sigma = Math.sqrt(Math.max(0, varv));
-        return { rounds, overallAvg: overall, lastAvg: last, best, worst, mean: mu, sigma };
-      });
-      setScoreStats(stats);
-      setScoreDists(perSeatRounds);
-    } catch (e) { console.error('[stats] recompute error', e); }
-  };
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
 type Rating = { mu:number; sigma:number };
 const TS_DEFAULT: Rating = { mu:25, sigma:25/3 };
@@ -462,17 +420,7 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 
 /* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
-  
-  /* ====== 评分统计 ====== */
-  type SeatStat = { rounds:number; overallAvg:number; lastAvg:number; best:number; worst:number; mean:number; sigma:number };
-  const [scoreStats, setScoreStats] = useState<SeatStat[]>([
-    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-  ]);
-  const [scoreDists, setScoreDists] = useState<number[][]>([[],[],[]]);
-  const statsFileRef = useRef<HTMLInputElement|null>(null);
-const [running, setRunning] = useState(false);
+  const [running, setRunning] = useState(false);
 
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
   const [landlord, setLandlord] = useState<number|null>(null);
@@ -494,7 +442,60 @@ const [running, setRunning] = useState(false);
   useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
  }, [roundCuts]);
   const [roundLords, setRoundLords] = useState<number[]>([]);
-  const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
+
+  /* ====== 评分统计（每局） ====== */
+  type SeatStat = { rounds:number; overallAvg:number; lastAvg:number; best:number; worst:number; mean:number; sigma:number };
+  const [scoreStats, setScoreStats] = useState<SeatStat[]>([
+    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+  ]);
+  const [scoreDists, setScoreDists] = useState<number[][]>([[],[],[]]);
+  const statsFileRef = useRef<HTMLInputElement|null>(null);
+  const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords;
+  // 依据 scoreSeries（每手评分）与 roundCuts（每局切点）计算每局均值，并汇总到席位统计
+  const recomputeScoreStats = () => {
+    try {
+      const series = scoreSeriesRef.current;   // number[][]
+      const cuts = roundCutsRef.current;       // number[]
+      const n = Math.max(series[0]?.length||0, series[1]?.length||0, series[2]?.length||0);
+      const bands = (cuts && cuts.length ? [...cuts] : [0]).sort((a,b)=>a-b);
+      if (bands[0] !== 0) bands.unshift(0);
+      if (bands[bands.length-1] !== n) bands.push(n);
+      const perSeatRounds:number[][] = [[],[],[]];
+      for (let b=0;b<bands.length-1;b++){
+        const st = bands[b], ed = bands[b+1];
+        const len = Math.max(0, ed - st);
+        if (len <= 0) continue;
+        for (let s=0;s<3;s++){
+          const arr = series[s]||[];
+          let sum = 0, cnt = 0;
+          for (let i=st;i<ed;i++){
+            const v = arr[i];
+            if (typeof v === 'number') { sum += v; cnt++; }
+          }
+          if (cnt>0) perSeatRounds[s].push(sum/cnt);
+        }
+      }
+      const stats = [0,1,2].map(s=>{
+        const rs = perSeatRounds[s];
+        const rounds = rs.length;
+        if (rounds===0) return { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
+        const sum = rs.reduce((a,b)=>a+b,0);
+        const overall = sum/rounds;
+        const last = rs[rounds-1];
+        const best = Math.max(...rs);
+        const worst = Math.min(...rs);
+        const mu = overall;
+        const varv = rs.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / rounds;
+        const sigma = Math.sqrt(Math.max(0, varv));
+        return { rounds, overallAvg: overall, lastAvg: last, best, worst, mean: mu, sigma };
+      });
+      setScoreStats(stats);
+      setScoreDists(perSeatRounds);
+    } catch (e) { console.error('[stats] recompute error', e); }
+  };
+ }, [roundLords]);
 
 
   // —— TrueSkill（前端实时） —— //
@@ -917,7 +918,35 @@ const [running, setRunning] = useState(false);
     }
   };
 
-  const handleScoreRefresh = () => {
+  
+  const handleStatsSave = () => {
+    try {
+      const payload = { when: new Date().toISOString(), stats: scoreStats, dists: scoreDists };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'score-stats.json';
+      a.click();
+      setTimeout(()=> URL.revokeObjectURL(a.href), 0);
+    } catch (e) { console.error('[stats] save error', e); }
+  };
+  const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const f = e.target.files?.[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const obj = JSON.parse(String(rd.result||'{}'));
+          if (Array.isArray(obj.stats) && obj.stats.length===3) setScoreStats(obj.stats as any);
+          if (Array.isArray(obj.dists) && obj.dists.length===3) setScoreDists(obj.dists as any);
+        } catch (err) { console.error('[stats upload] parse error', err); }
+      };
+      rd.readAsText(f);
+    } catch (err) { console.error('[stats upload] error', err); }
+    finally { if (statsFileRef.current) statsFileRef.current.value = ''; }
+  };
+  const handleStatsRefresh = () => { recomputeScoreStats(); };
+const handleScoreRefresh = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
@@ -1186,6 +1215,29 @@ for (const raw of batch) {
                   if (lord2 != null) nextLandlord = lord2;
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
+                  {
+                    // —— 兜底：没有 init 帧也要推进 roundCuts / roundLords ——
+                    const n0 = Math.max(
+                      nextScores[0]?.length||0,
+                      nextScores[1]?.length||0,
+                      nextScores[2]?.length||0
+                    );
+                    const lordVal = (nextLandlord ?? -1) as number | -1;
+                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
+                    else if (nextCuts[nextCuts.length-1] !== n0) {
+                      nextCuts = [...nextCuts, n0];
+                      nextLords = [...nextLords, lordVal];
+                    }
+                    // 若本局地主刚刚确认，回填最近一段的 roundLords，避免底色为白
+                    if (nextCuts.length > 0) {
+                      const idxBand = Math.max(0, nextCuts.length - 1);
+                      const lordVal2 = (nextLandlord ?? -1) as number | -1;
+                      if (nextLords[idxBand] !== lordVal2) {
+                        nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
+                      }
+                    }
+                  }
+
                 }
               }
 
@@ -1560,53 +1612,53 @@ nextTotals     = [
                 <div style={{ fontSize:12, color:'#6b7280' }}>最近一局均值：{st.lastAvg.toFixed(3)}</div>
                 <div style={{ fontSize:12, color:'#6b7280' }}>最好局均值：{st.best.toFixed(3)}</div>
                 <div style={{ fontSize:12, color:'#6b7280' }}>最差局均值：{st.worst.toFixed(3)}</div>
-              
-          {/* 分布曲线（每局均值的分布） */}
-          {(() => {
-            const vals = (scoreDists[i]||[]).slice();
-            if (!vals.length) return null;
-            const pad = 6, W = 220, H = 72;
-            const mu = scoreStats[i]?.mean ?? 0;
-            const sg = scoreStats[i]?.sigma ?? 0;
-            const min = Math.min(...vals), max = Math.max(...vals);
-            const lo = Math.min(min, mu - sg*1.5), hi = Math.max(max, mu + sg*1.5);
-            const x = (v:number)=> pad + (hi>lo ? (v-lo)/(hi-lo) : 0.5) * (W - 2*pad);
-            const bins = 24;
-            const counts = new Array(bins).fill(0);
-            for (const v of vals) {
-              const t = hi>lo ? Math.max(0, Math.min(bins-1, Math.floor((v-lo)/(hi-lo)*bins))) : Math.floor(bins/2);
-              counts[t]++;
-            }
-            const maxC = Math.max(...counts) || 1;
-            const y = (c:number)=> H - pad - (c/maxC) * (H - 2*pad);
-            let d = '';
-            for (let b=0;b<bins;b++){
-              const cx = x(lo + (b+0.5)*(hi-lo)/bins);
-              const cy = y(counts[b]);
-              d += (b===0 ? `M ${cx} ${cy}` : ` L ${cx} ${cy}`);
-            }
-            const meanX = x(mu);
-            const sigL = x(mu - sg);
-            const sigR = x(mu + sg);
-            return (
-              <svg width={W} height={H} style={{ display:'block', marginTop:6 }}>
-                <rect x={0} y={0} width={W} height={H} fill="#ffffff" stroke="#e5e7eb"/>
-                <path d={d} fill="none" stroke="#4b5563" strokeWidth={1.25} />
-                <line x1={meanX} y1={pad} x2={meanX} y2={H-pad} stroke="#ef4444" strokeDasharray="4 3" />
-                <line x1={sigL} y1={pad} x2={sigL} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
-                <line x1={sigR} y1={pad} x2={sigR} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
-                <text x={meanX+4} y={12} fontSize="10" fill="#ef4444">μ={(mu).toFixed(2)}</text>
-                <text x={sigL+4} y={24} fontSize="10" fill="#60a5fa">-1σ</text>
-                <text x={sigR+4} y={24} fontSize="10" fill="#60a5fa">+1σ</text>
-              </svg>
-            );
-          })()}
-            </div>
+                {/* 分布曲线（每局均值的分布） */}
+                {(() => {
+                  const vals = (scoreDists[i]||[]).slice();
+                  if (!vals.length) return null;
+                  const pad = 6, W = 220, H = 72; // 小卡图尺寸
+                  const mu = st?.mean ?? 0;
+                  const sg = st?.sigma ?? 0;
+                  const min = Math.min(...vals), max = Math.max(...vals);
+                  const lo = Math.min(min, mu - sg*1.5), hi = Math.max(max, mu + sg*1.5);
+                  const x = (v:number)=> pad + (hi>lo ? (v-lo)/(hi-lo) : 0.5) * (W - 2*pad);
+                  const bins = 24;
+                  const counts = new Array(bins).fill(0);
+                  for (const v of vals) {
+                    const t = hi>lo ? Math.max(0, Math.min(bins-1, Math.floor((v-lo)/(hi-lo)*bins))) : Math.floor(bins/2);
+                    counts[t]++;
+                  }
+                  const maxC = Math.max(...counts) || 1;
+                  const y = (c:number)=> H - pad - (c/maxC) * (H - 2*pad);
+                  let d = '';
+                  for (let b=0;b<bins;b++){
+                    const cx = x(lo + (b+0.5)*(hi-lo)/bins);
+                    const cy = y(counts[b]);
+                    d += (b===0 ? `M ${cx} ${cy}` : ` L ${cx} ${cy}`);
+                  }
+                  const meanX = x(mu);
+                  const sigL = x(mu - sg);
+                  const sigR = x(mu + sg);
+                  return (
+                    <svg width={W} height={H} style={{ display:'block', marginTop:6 }}>
+                      <rect x={0} y={0} width={W} height={H} fill="#ffffff" stroke="#e5e7eb"/>
+                      <path d={d} fill="none" stroke="#4b5563" strokeWidth={1.25} />
+                      {/* μ 和 ±1σ 标注 */}
+                      <line x1={meanX} y1={pad} x2={meanX} y2={H-pad} stroke="#ef4444" strokeDasharray="4 3" />
+                      <line x1={sigL} y1={pad} x2={sigL} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
+                      <line x1={sigR} y1={pad} x2={sigR} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
+                      <text x={meanX+4} y={12} fontSize="10" fill="#ef4444">μ={(mu).toFixed(2)}</text>
+                      <text x={sigL+4} y={24} fontSize="10" fill="#60a5fa">-1σ</text>
+                      <text x={sigR+4} y={24} fontSize="10" fill="#60a5fa">+1σ</text>
+                    </svg>
+                  );
+                })()}
+              </div>
             );
           })}
         </div>
       </Section>
-    
+
 <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
           {[0,1,2].map(i=>(
