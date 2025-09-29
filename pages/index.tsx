@@ -1705,10 +1705,6 @@ nextTotals     = [
       </Section>
       <div style={{ marginTop:10 }}></div>
       <Section title="评分统计（每局汇总）">
-        <div style={{ display:'flex', gap:8, marginBottom:8 }}>
-          <label style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'0 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff', cursor:'pointer' }}>
-            上传</label>
-        </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
           {[0,1,2].map(i=>{
             const st = scoreStats[i];
@@ -1986,6 +1982,18 @@ function Home() {
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
     <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
       统一： TrueSkill / 画像 / 出牌评分 / 评分统计
+    <input
+      ref={allFileRef}
+      type="file"
+      accept="application/json"
+      style={{ display:'none' }}
+      onChange={handleAllFileUploadHome}
+    />
+    <button
+      onClick={()=>allFileRef.current?.click()}
+      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >上传</button>
+    
     </label>
 <button
       onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
