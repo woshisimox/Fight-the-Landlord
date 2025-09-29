@@ -1,4 +1,4 @@
-// lib/bots/mininet_bot.ts (v7.1 - compile-safe + counts fix)
+// lib/bots/mininet_bot.ts (v8 - full follow logic + qwen hands + counts fix)
 type AnyCard = any;
 type BotMove = { move: 'play' | 'pass'; cards?: AnyCard[]; reason?: string };
 
@@ -45,6 +45,7 @@ function classifyMove(cards?: AnyCard[]): MoveType {
   if (n === 1) return 'single';
   if (n === 2 && uniq === 1) return 'pair';
   if (n === 3 && uniq === 1) return 'triple';
+
   const run = h.map(v => v > 0 ? 1 : 0);
   let best = 0, cur = 0;
   for (let i = 0; i < 13; i++) { cur = run[i] ? cur + 1 : 0; best = Math.max(best, cur); }
@@ -192,7 +193,7 @@ function getHandFromCtx(c:any): AnyCard[] {
   return [];
 }
 
-// ===== Require & policy scan =====
+// ===== Require & move analysis =====
 type Req = { type: MoveType|'lead'|'any'; len?: number; wings?: 'single'|'pair'|null; baseIdx?: number; };
 function lastNonPassFrom(c:any): AnyCard[] | undefined {
   const sources = [c?.currentTrick, c?.trick, c?.history];
@@ -206,6 +207,52 @@ function lastNonPassFrom(c:any): AnyCard[] | undefined {
     }
   }
   return undefined;
+}
+function analyzeMove(cards: AnyCard[]): {type:MoveType, len?:number, baseIdx?:number, wings?:'single'|'pair'|null} {
+  const h = hist15(cards);
+  const ranks = cards.map(toRankChar);
+  const type = classifyMove(cards);
+  if (type==='single') return {type, baseIdx: rankIndex(cards[0])};
+  if (type==='pair')   return {type, baseIdx: rankIndex(cards[0])};
+  if (type==='triple') return {type, baseIdx: rankIndex(cards[0])};
+  if (h.find(x=>x===4) && cards.length===4) {
+    const idx = h.findIndex(x=>x===4);
+    return {type:'bomb', baseIdx: idx};
+  }
+  if (ranks.includes('x') && ranks.includes('X') && cards.length===2) return {type:'rocket', baseIdx: 99};
+
+  const idxs = ranks.map(r=>RANK_IDX[r]).sort((a,b)=>a-b);
+  const uniq = Array.from(new Set(idxs));
+  const isStraight = uniq.every(i=>i<=RANK_IDX['A']) && uniq.length>=5 && uniq.length===cards.length && uniq.every((v,i)=> i===0 || v-uniq[i-1]===1);
+  if (isStraight) return {type:'straight', len: uniq.length, baseIdx: uniq[uniq.length-1]};
+
+  const pairIdxs: number[] = [];
+  for (let i=0;i<13;i++){ if (h[i]>=2) pairIdxs.push(i); }
+  pairIdxs.sort((a,b)=>a-b);
+  const needPairs = cards.length/2;
+  for (let i=0;i+needPairs-1<pairIdxs.length;i++){
+    const window = pairIdxs.slice(i,i+needPairs);
+    const ok = window.every((v,k)=>k===0 || v-window[k-1]===1);
+    if (ok && needPairs>=3) return {type:'pair-straight', len: needPairs, baseIdx: window[window.length-1]};
+  }
+
+  const tripleIdxs: number[] = []; for (let i=0;i<13;i++){ if (h[i]===3) tripleIdxs.push(i); }
+  if (tripleIdxs.length>=2){
+    if (tripleIdxs.length*3 === cards.length) {
+      tripleIdxs.sort((a,b)=>a-b);
+      if (tripleIdxs.every((v,k)=>k===0 || v-tripleIdxs[k-1]===1))
+        return {type:'plane', len: tripleIdxs.length, baseIdx: tripleIdxs[tripleIdxs.length-1]};
+    } else {
+      tripleIdxs.sort((a,b)=>a-b);
+      const width = tripleIdxs.length;
+      const rest = cards.length - width*3;
+      if (rest===width) return {type:'triple-with-single', len: width, baseIdx: tripleIdxs[tripleIdxs.length-1], wings:'single'};
+      if (rest===width*2) return {type:'triple-with-pair', len: width, baseIdx: tripleIdxs[tripleIdxs.length-1], wings:'pair'};
+    }
+  }
+  const fourIdx = h.findIndex(x=>x===4);
+  if (fourIdx>=0){ return {type:'four-with-two', baseIdx: fourIdx}; }
+  return {type:'single', baseIdx: rankIndex(cards[0])};
 }
 function parseRequire(c:any): Req {
   const r = c?.require;
@@ -227,82 +274,219 @@ function parseRequire(c:any): Req {
     return { type, len, baseIdx, wings: wings??null };
   }
   const last = lastNonPassFrom(c);
-  if (Array.isArray(last)) return { type:'any' };
+  if (Array.isArray(last)) {
+    const a = analyzeMove(last);
+    return { type:a.type, len:a.len, baseIdx:a.baseIdx, wings:a.wings??null };
+  }
   return { type:'lead' };
 }
-function looksLikeCandidatesArray(a:any): boolean {
-  return Array.isArray(a) && a.some(x => Array.isArray(x) || (x && typeof x === 'object' && Array.isArray((x as any).cards)));
-}
-function normalizeCandidates(a:any): AnyCard[][] {
-  const out: AnyCard[][] = [];
-  if (!Array.isArray(a)) return out;
-  for (const it of a) {
-    if (Array.isArray(it)) { if (it.length) out.push(it as AnyCard[]); }
-    else if (it && typeof it==='object' && Array.isArray((it as any).cards)) {
-      const c = (it as any).cards as AnyCard[];
-      if (c.length) out.push(c);
-    }
-  }
-  return out;
-}
-const POLICY_KEYS = ['legal','candidates','moves','options','plays','follow','followups','list','actions','choices','combos','legalMoves','legal_cards'];
-function extractFromPolicy(pol:any, depth=0): AnyCard[][] {
-  if (!pol || depth>4) return [];
-  if (looksLikeCandidatesArray(pol)) return normalizeCandidates(pol);
-  if (Array.isArray(pol) && pol.length && looksLikeCandidatesArray(pol[0])) {
-    return extractFromPolicy(pol[0], depth+1);
-  }
-  if (typeof pol==='object') {
-    for (const k of POLICY_KEYS) {
-      if (k in pol) {
-        const cand = normalizeCandidates((pol as any)[k]);
-        if (cand.length) return cand;
-      }
-    }
-    for (const k of Object.keys(pol)) {
-      const v = (pol as any)[k];
-      const cand = extractFromPolicy(v, depth+1);
-      if (cand.length) return cand;
-    }
-  }
-  if (typeof pol === 'function') {
-    try { const ret = pol(); const cand = normalizeCandidates(ret); if (cand.length) return cand; } catch {}
-  }
-  return [];
-}
-function extractCandidatesFromCtx(c:any): {cands: AnyCard[][], source: string} {
-  if ('policy' in (c||{})) {
-    const pc = extractFromPolicy((c as any).policy, 0);
-    if (pc.length) return { cands: pc, source: 'policy' };
-  }
-  const keys = ['legalMoves','candidates','cands','moves','options','legal','legal_cards'];
-  for (const k of keys) {
-    const v = (c as any)[k];
-    const norm = normalizeCandidates(v);
-    if (norm.length) return { cands: norm, source: k };
-  }
-  return { cands: [], source: 'none' };
-}
 
-// ===== Simple lead candidates =====
+// ===== Candidate generators =====
 function byRankBuckets(hand: AnyCard[]): Record<RankChar, AnyCard[]> {
   const buckets: Record<RankChar, AnyCard[]> = Object.fromEntries(RANKS.map(r=>[r, []])) as any;
   for (const card of hand) buckets[toRankChar(card)].push(card);
   return buckets;
 }
-function leadCandidatesFromHand(hand: AnyCard[]): AnyCard[][] {
-  const b = byRankBuckets(hand), out: AnyCard[][] = [];
-  for (let L=8; L>=5; L--) {
-    const idxs = STRAIGHT_RANKS.map(r=>RANK_IDX[r]);
-    for (let i=0;i+L-1<idxs.length;i++){
-      const window = idxs.slice(i, i+L);
-      if (window.every(idx => Object.values(b)[idx]?.length>=1)) out.push(window.map(idx => Object.values(b)[idx][0]));
+function pickSinglesAbove(b: Record<RankChar,AnyCard[]>, minIdx:number): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  for (const r of RANKS){
+    const idx = RANK_IDX[r];
+    if (idx>minIdx && b[r].length>=1) out.push([b[r][0]]);
+  }
+  return out;
+}
+function pickPairsAbove(b: Record<RankChar,AnyCard[]>, minIdx:number): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  for (const r of RANKS){
+    const idx = RANK_IDX[r];
+    if (idx>minIdx && b[r].length>=2) out.push([b[r][0], b[r][1]]);
+  }
+  return out;
+}
+function pickTriplesAbove(b: Record<RankChar,AnyCard[]>, minIdx:number): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  for (const r of RANKS){
+    const idx = RANK_IDX[r];
+    if (idx>minIdx && b[r].length>=3) out.push([b[r][0], b[r][1], b[r][2]]);
+  }
+  return out;
+}
+function pickBombsAbove(b: Record<RankChar,AnyCard[]>, minIdx:number): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  for (const r of RANKS){
+    const idx = RANK_IDX[r];
+    if (b[r].length>=4 && (minIdx<0 || idx>minIdx)) out.push([b[r][0], b[r][1], b[r][2], b[r][3]]);
+  }
+  return out;
+}
+function pickRocket(b: Record<RankChar,AnyCard[]>): AnyCard[][] {
+  if (b['x'].length>=1 && b['X'].length>=1) return [[b['x'][0], b['X'][0]]];
+  return [];
+}
+function pickStraight(b: Record<RankChar,AnyCard[]>, len:number, minIdx:number): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  for (let i=0;i+len-1<STRAIGHT_RANKS.length;i++){
+    const seq = STRAIGHT_RANKS.slice(i, i+len);
+    const maxIdx = RANK_IDX[seq[seq.length-1]];
+    if (maxIdx <= RANK_IDX['A'] && seq.every(ch => b[ch].length>=1)) {
+      if (maxIdx > minIdx) out.push(seq.map(ch => b[ch][0]));
     }
   }
-  for (const r of RANKS) if (b[r].length>=3) out.push([b[r][0],b[r][1],b[r][2]]);
-  for (const r of RANKS) if (b[r].length>=2) out.push([b[r][0],b[r][1]]);
-  for (const r of RANKS) if (b[r].length>=1) out.push([b[r][0]]);
-  return out.slice(0,200);
+  return out;
+}
+function pickPairStraight(b: Record<RankChar,AnyCard[]>, len:number, minIdx:number): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  for (let i=0;i+len-1<STRAIGHT_RANKS.length;i++){
+    const seq = STRAIGHT_RANKS.slice(i, i+len);
+    const maxIdx = RANK_IDX[seq[seq.length-1]];
+    if (seq.every(ch => b[ch].length>=2)) {
+      if (maxIdx > minIdx) {
+        const cand: AnyCard[] = [];
+        for (const ch of seq) { cand.push(b[ch][0], b[ch][1]); }
+        out.push(cand);
+      }
+    }
+  }
+  return out;
+}
+function pickPlane(b: Record<RankChar,AnyCard[]>, width:number, minIdx:number): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  for (let i=0;i+width-1<STRAIGHT_RANKS.length;i++){
+    const seq = STRAIGHT_RANKS.slice(i, i+width);
+    const maxIdx = RANK_IDX[seq[seq.length-1]];
+    if (seq.every(ch => b[ch].length>=3)) {
+      if (maxIdx > minIdx) {
+        const cand: AnyCard[] = [];
+        for (const ch of seq) { cand.push(b[ch][0], b[ch][1], b[ch][2]); }
+        out.push(cand);
+      }
+    }
+  }
+  return out;
+}
+function addWingsSingles(core: AnyCard[][], b: Record<RankChar,AnyCard[]>, width:number): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  for (const c of core){
+    const used = new Set(c);
+    const singles: AnyCard[] = [];
+    for (const r of RANKS){
+      for (const t of b[r]) if (!used.has(t)) singles.push(t);
+    }
+    if (singles.length>=width){
+      out.push([...c, ...singles.slice(0,width)]);
+    }
+  }
+  return out;
+}
+function addWingsPairs(core: AnyCard[][], b: Record<RankChar,AnyCard[]>, width:number): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  for (const c of core){
+    const used = new Set(c);
+    const pairs: AnyCard[] = [];
+    for (const r of RANKS){
+      const arr = b[r].filter(x=>!used.has(x));
+      if (arr.length>=2) { pairs.push(arr[0], arr[1]); if (pairs.length>=width*2) break; }
+    }
+    if (pairs.length>=width*2){
+      out.push([...c, ...pairs.slice(0, width*2)]);
+    }
+  }
+  return out;
+}
+function pickFourWithTwo(b: Record<RankChar,AnyCard[]>, minIdx:number, usePairs:boolean): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  for (const r of RANKS){
+    const idx = RANK_IDX[r];
+    if (b[r].length>=4 && idx>minIdx){
+      const core = [b[r][0],b[r][1],b[r][2],b[r][3]];
+      const used = new Set(core);
+      if (!usePairs){
+        const singles: AnyCard[] = [];
+        for (const rr of RANKS) for (const t of b[rr]) if (!used.has(t)) singles.push(t);
+        if (singles.length>=2) out.push([...core, singles[0], singles[1]]);
+      } else {
+        const pairs: AnyCard[] = [];
+        for (const rr of RANKS){
+          const arr = b[rr].filter(x=>!used.has(x));
+          if (arr.length>=2) { pairs.push(arr[0], arr[1]); if (pairs.length>=4) break; }
+        }
+        if (pairs.length>=4) out.push([...core, ...pairs.slice(0,4)]);
+      }
+    }
+  }
+  return out;
+}
+
+// Build by rules according to require
+function buildRuleCandidates(hand: AnyCard[], ctx:any): AnyCard[][] {
+  const req = parseRequire(ctx);
+  const b = byRankBuckets(hand);
+  let cands: AnyCard[][] = [];
+
+  // bombs/rocket always allowed as overcall (common rule)
+  const bombsAny = pickBombsAbove(b, -1);
+  const rocketAny = pickRocket(b);
+
+  if (req.type==='lead' || req.type==='any'){
+    for (let L=8; L>=5; L--) cands.push(...pickStraight(b, L, -1));
+    for (let L=5; L>=3; L--) cands.push(...pickPairStraight(b, L, -1));
+    cands.push(...pickTriplesAbove(b, -1));
+    cands.push(...pickPairsAbove(b, -1));
+    cands.push(...pickSinglesAbove(b, -1));
+    cands.push(...bombsAny, ...rocketAny);
+    return cands.slice(0,200);
+  }
+
+  const base = req.baseIdx ?? -1;
+  switch (req.type){
+    case 'single': cands.push(...pickSinglesAbove(b, base)); break;
+    case 'pair':   cands.push(...pickPairsAbove  (b, base)); break;
+    case 'triple': cands.push(...pickTriplesAbove(b, base)); break;
+    case 'straight': {
+      const L = Math.max(5, req.len ?? 5);
+      cands.push(...pickStraight(b, L, base));
+      break;
+    }
+    case 'pair-straight': {
+      const L = Math.max(3, req.len ?? 3);
+      cands.push(...pickPairStraight(b, L, base));
+      break;
+    }
+    case 'plane': {
+      const W = Math.max(2, req.len ?? 2);
+      cands.push(...pickPlane(b, W, base));
+      break;
+    }
+    case 'triple-with-single': {
+      const W = Math.max(1, req.len ?? 1);
+      const core = pickPlane(b, W, base);
+      cands.push(...addWingsSingles(core, b, W));
+      break;
+    }
+    case 'triple-with-pair': {
+      const W = Math.max(1, req.len ?? 1);
+      const core = pickPlane(b, W, base);
+      cands.push(...addWingsPairs(core, b, W));
+      break;
+    }
+    case 'four-with-two': {
+      const usePairs = (ctx?.require?.wings==='pair');
+      cands.push(...pickFourWithTwo(b, base, !!usePairs));
+      break;
+    }
+    case 'bomb': {
+      cands.push(...pickBombsAbove(b, base));
+      break;
+    }
+    case 'rocket': {
+      cands.push(...pickRocket(b));
+      break;
+    }
+  }
+  if (req.type!=='bomb' && req.type!=='rocket'){
+    cands.push(...bombsAny, ...rocketAny);
+  }
+  return cands.slice(0,200);
 }
 
 // ======== Bot main ========
@@ -318,26 +502,21 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
 
   const rawHand: AnyCard[] = getHandFromCtx(ctx);
   const handsShape = Array.isArray((ctx as any)?.hands) ? (Array.isArray(((ctx as any).hands || [])[0]) ? 'nested' : 'flat') : (typeof (ctx as any)?.hands === 'object' ? 'object' : 'none');
-  const { cands: policyCands, source } = extractCandidatesFromCtx(ctx);
-  let candidates: AnyCard[][] = policyCands;
-
-  if (!candidates.length) {
-    if (Array.isArray(rawHand) && rawHand.length) {
-      const req = parseRequire(ctx);
-      if (req.type === 'lead' || req.type === 'any') {
-        candidates = leadCandidatesFromHand(rawHand);
-      }
-    }
-  }
+  // 1) policy
+  const policyData = ('policy' in (ctx||{})) ? extractFromPolicy((ctx as any).policy, 0) : [];
+  // 2) rules
+  const ruleCands = buildRuleCandidates(rawHand, ctx);
+  let candidates: AnyCard[][] = policyData.length ? policyData : ruleCands;
 
   if (!candidates.length) {
     const sk = getSeatKey(ctx);
     const handLen = Array.isArray(rawHand) ? rawHand.length : -1;
-    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v7.1: no candidates (source=${source}, seatKey=${String(sk)}, handLen=${handLen}, handsShape=${handsShape})` };
+    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v8: no candidates (seatKey=${String(sk)}, handLen=${handLen}, handsShape=${handsShape})` };
     const lowest = Array.isArray(rawHand) && rawHand.length ? [...rawHand].sort((a,b)=>rankIndex(a)-rankIndex(b))[0] : undefined;
     if (lowest!=null) candidates = [[lowest]];
   }
 
+  // Choose by heuristic
   let best = candidates[0];
   let bestScore = -1e9;
   for (const m of candidates) {
@@ -346,7 +525,11 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
     score += (Math.random()-0.5)*0.01;
     if (score > bestScore) { bestScore = score; best = m; }
   }
-  return { move:'play', cards: best, reason:`MiniNet v7.1: cands=${candidates.length} from=${source} score=${bestScore.toFixed(3)}` };
+
+  const req = parseRequire(ctx);
+  const reqStr = `${req.type}${req.len?`(${req.len})`:''}${req.baseIdx!=null?`>${req.baseIdx}`:''}${req.wings?`[${req.wings}]`:''}`;
+  const srcStr = policyData.length ? 'policy' : 'rule';
+  return { move:'play', cards: best, reason:`MiniNet v8: cands=${candidates.length} src=${srcStr} req=${reqStr} score=${bestScore.toFixed(3)}` };
 }
 
 export function loadMiniNetWeights(json: {l1:Dense; l2:Dense}) {
