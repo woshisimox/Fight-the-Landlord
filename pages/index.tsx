@@ -288,6 +288,9 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
 
   const makePath = (arr:(number|null)[])=>{
     let d=''; let open=false;
+    const cutSet = new Set
+      if (cutSet.has(i) && i!==0) { open = false; }
+      (cuts);
     for (let i=0;i<n;i++){
       const v = arr[i];
       if (typeof v !== 'number') { open=false; continue; }
@@ -1498,7 +1501,7 @@ nextTotals     = [
             const mu = samples.reduce((a,b)=>a+b,0) / samples.length;
             const sigma = Math.sqrt(Math.max(0, samples.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / samples.length));
             const sMin = Math.min(...samples), sMax = Math.max(...samples);
-            const bins = Math.max(8, Math.min(32, Math.ceil(Math.log2(samples.length + 1)) + 1));
+            const bins = 20;
             const lo = sMin, hi = sMax === sMin ? sMin + 1 : sMax;
             const x = (v:number)=> pad + (hi>lo ? (v-lo)/(hi-lo) : 0.5) * (W - 2*pad);
             const barW = (W - 2*pad) / bins;
