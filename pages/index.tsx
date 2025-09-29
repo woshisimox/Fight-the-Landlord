@@ -6,6 +6,7 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
+  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -213,12 +214,11 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
 }
 function choiceLabel(choice: BotChoice): string {
   switch (choice) {
-    case 'built-in:greedy-max': return 'GreedyMax';
-    case 'built-in:greedy-min': return 'GreedyMin';
-    case 'built-in:random-legal': return 'RandomLegal';
+    case 'built-in:greedy-max': return 'Greedy Max';
+    case 'built-in:greedy-min': return 'Greedy Min';
+    case 'built-in:random-legal': return 'Random Legal';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
-    case 'built-in:mininet': return 'MiniNet';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
     case 'ai:grok':  return 'Grok';
@@ -1858,7 +1858,7 @@ function RadarPanel({
               onChange={e=>{
                 const v = Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35));
                 setA(v); onChangeAlpha(v);
-              }
+              }}
               style={{ width:80, marginLeft:6 }}
             />
           </label>
@@ -2053,7 +2053,6 @@ function Home() {
                       <option value="built-in:random-legal">Random Legal</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
-                      <option value="built-in:mininet">MiniNet</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
