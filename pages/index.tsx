@@ -6,6 +6,8 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
+  | 'built-in:ally-support'
+  | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
@@ -214,6 +216,8 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:greedy-max': return 'Greedy Max';
     case 'built-in:greedy-min': return 'Greedy Min';
     case 'built-in:random-legal': return 'Random Legal';
+    case 'built-in:ally-support': return 'AllySupport';
+    case 'built-in:endgame-rush': return 'EndgameRush';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
     case 'ai:grok':  return 'Grok';
@@ -284,15 +288,20 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
   if (cuts[cuts.length-1] !== n) cuts.push(n);
 
   const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
-    // 补齐缺失的地主标记（若 roundLords 比 roundCuts 少一段，延用上一段的地主，用于底色）
-    const landlordsFilled = landlordsArr.slice();
-    for (let j=0; j<landlordsFilled.length; j++) {
-      if (landlordsFilled[j] === undefined || landlordsFilled[j] === null || landlordsFilled[j] === -1) {
-        landlordsFilled[j] = j>0 ? (landlordsFilled[j-1] ?? -1) : -1;
-      }
-    }
-
   while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
+  // —— 底色兜底：填补缺失的地主（用上一段/首个已知地主） ——
+  const landlordsFilled = landlordsArr.slice();
+  for (let j=0; j<landlordsFilled.length; j++) {
+    const v = landlordsFilled[j];
+    if (!(v===0 || v===1 || v===2)) {
+      landlordsFilled[j] = j>0 ? landlordsFilled[j-1] : landlordsFilled[j];
+    }
+  }
+  if (landlordsFilled.length && !(landlordsFilled[0]===0 || landlordsFilled[0]===1 || landlordsFilled[0]===2)) {
+    const k = landlordsFilled.findIndex(v => v===0 || v===1 || v===2);
+    if (k > 0) { for (let j=0; j<k; j++) landlordsFilled[j] = landlordsFilled[k]; }
+  }
+
 
   const makePath = (arr:(number|null)[])=>{
     let d=''; let open=false;
@@ -1506,7 +1515,7 @@ nextTotals     = [
               </div>
             );
             const pad = 6, W = 260, H = 96;
-            // 统计量（μ & σ 基于所有出牌评分样本）
+            // μ & σ 基于所有出牌评分样本
             const mu = samples.reduce((a,b)=>a+b,0) / samples.length;
             const sigma = Math.sqrt(Math.max(0, samples.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / samples.length));
             // 固定 20 桶
@@ -1777,6 +1786,8 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
+                      <option value="built-in:ally-support">AllySupport</option>
+                      <option value="built-in:endgame-rush">EndgameRush</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
