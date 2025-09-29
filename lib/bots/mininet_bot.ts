@@ -1,4 +1,4 @@
-// lib/bots/mininet_bot.ts (v8 - full follow logic + qwen hands + counts fix)
+// lib/bots/mininet_bot.ts (v8.1 - use extractCandidatesFromCtx in main; follow-logic + qwen hands + counts fix)
 type AnyCard = any;
 type BotMove = { move: 'play' | 'pass'; cards?: AnyCard[]; reason?: string };
 
@@ -281,6 +281,61 @@ function parseRequire(c:any): Req {
   return { type:'lead' };
 }
 
+// ===== Policy scan =====
+function looksLikeCandidatesArray(a:any): boolean {
+  return Array.isArray(a) && a.some(x => Array.isArray(x) || (x && typeof x === 'object' && Array.isArray((x as any).cards)));
+}
+function normalizeCandidates(a:any): AnyCard[][] {
+  const out: AnyCard[][] = [];
+  if (!Array.isArray(a)) return out;
+  for (const it of a) {
+    if (Array.isArray(it)) { if (it.length) out.push(it as AnyCard[]); }
+    else if (it && typeof it==='object' && Array.isArray((it as any).cards)) {
+      const c = (it as any).cards as AnyCard[];
+      if (c.length) out.push(c);
+    }
+  }
+  return out;
+}
+const POLICY_KEYS = ['legal','candidates','moves','options','plays','follow','followups','list','actions','choices','combos','legalMoves','legal_cards'];
+function extractFromPolicy(pol:any, depth=0): AnyCard[][] {
+  if (!pol || depth>4) return [];
+  if (looksLikeCandidatesArray(pol)) return normalizeCandidates(pol);
+  if (Array.isArray(pol) && pol.length && looksLikeCandidatesArray(pol[0])) {
+    return extractFromPolicy(pol[0], depth+1);
+  }
+  if (typeof pol==='object') {
+    for (const k of POLICY_KEYS) {
+      if (k in pol) {
+        const cand = normalizeCandidates((pol as any)[k]);
+        if (cand.length) return cand;
+      }
+    }
+    for (const k of Object.keys(pol)) {
+      const v = (pol as any)[k];
+      const cand = extractFromPolicy(v, depth+1);
+      if (cand.length) return cand;
+    }
+  }
+  if (typeof pol === 'function') {
+    try { const ret = pol(); const cand = normalizeCandidates(ret); if (cand.length) return cand; } catch {}
+  }
+  return [];
+}
+function extractCandidatesFromCtx(c:any): {cands: AnyCard[][], source: string} {
+  if ('policy' in (c||{})) {
+    const pc = extractFromPolicy((c as any).policy, 0);
+    if (pc.length) return { cands: pc, source: 'policy' };
+  }
+  const keys = ['legalMoves','candidates','cands','moves','options','legal','legal_cards'];
+  for (const k of keys) {
+    const v = (c as any)[k];
+    const norm = normalizeCandidates(v);
+    if (norm.length) return { cands: norm, source: k };
+  }
+  return { cands: [], source: 'none' };
+}
+
 // ===== Candidate generators =====
 function byRankBuckets(hand: AnyCard[]): Record<RankChar, AnyCard[]> {
   const buckets: Record<RankChar, AnyCard[]> = Object.fromEntries(RANKS.map(r=>[r, []])) as any;
@@ -502,8 +557,8 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
 
   const rawHand: AnyCard[] = getHandFromCtx(ctx);
   const handsShape = Array.isArray((ctx as any)?.hands) ? (Array.isArray(((ctx as any).hands || [])[0]) ? 'nested' : 'flat') : (typeof (ctx as any)?.hands === 'object' ? 'object' : 'none');
-  // 1) policy
-  const policyData = ('policy' in (ctx||{})) ? extractFromPolicy((ctx as any).policy, 0) : [];
+  // 1) policy via helper
+  const { cands: policyData, source } = extractCandidatesFromCtx(ctx);
   // 2) rules
   const ruleCands = buildRuleCandidates(rawHand, ctx);
   let candidates: AnyCard[][] = policyData.length ? policyData : ruleCands;
@@ -511,7 +566,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   if (!candidates.length) {
     const sk = getSeatKey(ctx);
     const handLen = Array.isArray(rawHand) ? rawHand.length : -1;
-    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v8: no candidates (seatKey=${String(sk)}, handLen=${handLen}, handsShape=${handsShape})` };
+    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v8.1: no candidates (source=${source}, seatKey=${String(sk)}, handLen=${handLen}, handsShape=${handsShape})` };
     const lowest = Array.isArray(rawHand) && rawHand.length ? [...rawHand].sort((a,b)=>rankIndex(a)-rankIndex(b))[0] : undefined;
     if (lowest!=null) candidates = [[lowest]];
   }
@@ -529,7 +584,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   const req = parseRequire(ctx);
   const reqStr = `${req.type}${req.len?`(${req.len})`:''}${req.baseIdx!=null?`>${req.baseIdx}`:''}${req.wings?`[${req.wings}]`:''}`;
   const srcStr = policyData.length ? 'policy' : 'rule';
-  return { move:'play', cards: best, reason:`MiniNet v8: cands=${candidates.length} src=${srcStr} req=${reqStr} score=${bestScore.toFixed(3)}` };
+  return { move:'play', cards: best, reason:`MiniNet v8.1: cands=${candidates.length} src=${srcStr} req=${reqStr} score=${bestScore.toFixed(3)}` };
 }
 
 export function loadMiniNetWeights(json: {l1:Dense; l2:Dense}) {
