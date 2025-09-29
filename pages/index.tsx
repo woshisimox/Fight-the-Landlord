@@ -1666,6 +1666,10 @@ nextTotals     = [
               </svg>
             );
           })()}
+              </div>
+            );
+          })}
+
         
         </div>
       </Section>
