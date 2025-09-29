@@ -2024,10 +2024,7 @@ function Home() {
       onClick={()=>window.dispatchEvent(new Event('ddz-all-refresh'))}
       style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >刷新</button>
-    <div style={{ fontSize:12, color:'#6b7280' }}>
-      统一：TrueSkill / 画像 / 出牌评分 / 评分统计
-    </div>
-  </div>
+</div>
 </div>
 <div style={{ gridColumn:'2 / 3' }}>
   <label>初始分
@@ -2039,13 +2036,15 @@ function Home() {
 
 
 
-          <label>4带2 规则
+          <div style={{ gridColumn:'2 / 3' }}>
+  <label>4带2 规则
             <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
               <option value="both">都可</option>
               <option value="2singles">两张单牌</option>
               <option value="2pairs">两对</option>
             </select>
           </label>
+</div>
         </div>
 
         <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
