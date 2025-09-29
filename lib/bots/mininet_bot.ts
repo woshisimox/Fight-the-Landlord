@@ -63,6 +63,52 @@ function buildX(s: MiniState, m?: Card[]): number[] {
   return v;
 }
 
+
+function getHandFromCtx(ctx:any): string[] {
+  const tryPaths = [
+    (c:any)=> c?.hand,
+    (c:any)=> c?.myHand,
+    (c:any)=> c?.cards,
+    (c:any)=> c?.myCards,
+    (c:any)=> c?.state?.hand,
+    (c:any)=> c?.state?.myHand,
+  ];
+  for (const f of tryPaths) {
+    const v = f(ctx);
+    if (Array.isArray(v) && v.every(x=>typeof x==='string')) return v as string[];
+  }
+  // hands[seat]
+  const seat = (typeof ctx?.seat==='number') ? ctx.seat : (typeof ctx?.role==='number' ? ctx.role : null);
+  if (Array.isArray(ctx?.hands) && seat!=null && Array.isArray(ctx.hands[seat])) {
+    return ctx.hands[seat] as string[];
+  }
+  if (Array.isArray(ctx?.state?.hands) && seat!=null && Array.isArray(ctx.state.hands[seat])) {
+    return ctx.state.hands[seat] as string[];
+  }
+  return [];
+}
+
+function genNaiveCandidatesFromHand(hand:string[]): string[][] {
+  if (!Array.isArray(hand) || hand.length===0) return [];
+  const byRank: Record<string,string[]> = {};
+  for (const c of hand) {
+    (byRank[c] ||= []).push(c);
+  }
+  const cands: string[][] = [];
+  // singles
+  for (const c of hand) cands.push([c]);
+  // pairs / triples / bombs
+  for (const r in byRank) {
+    const arr = byRank[r];
+    if (arr.length>=2) cands.push(arr.slice(0,2));
+    if (arr.length>=3) cands.push(arr.slice(0,3));
+    if (arr.length>=4) cands.push(arr.slice(0,4)); // bomb
+  }
+  // rocket
+  if (hand.includes('x') && hand.includes('X')) cands.push(['x','X']);
+  return cands;
+}
+
 type Dense={W:number[][]; b:number[]}; type MLP={l1:Dense; l2:Dense};
 function relu(x:number){ return x>0?x:0; }
 function matVec(W:number[][], x:number[], b:number[]): number[]{ const y=new Array(W.length).fill(0); for(let i=0;i<W.length;i++){ let s=b[i]||0; const row=W[i]; for(let j=0;j<row.length;j++) s+=row[j]*x[j]; y[i]=s; } return y; }
@@ -90,21 +136,38 @@ function mlpScore(x:number[]): number { const h1=matVec(M.l1.W,x,M.l1.b).map(rel
 // -------- Robust candidate extractor --------
 function extractCandidates(ctx:any): string[][] {
   const fields = ['legalMoves','candidates','cands','moves','options','legal','legal_cards'];
-  for(const key of fields){
+  for (const key of fields) {
     const v = ctx?.[key];
-    if(Array.isArray(v) && v.length){
-      const norm:string[][]=[];
-      for(const it of v){
-        if(Array.isArray(it)) norm.push(it as string[]);
-        else if(it && typeof it==='object'){
-          if(Array.isArray((it as any).cards)) norm.push((it as any).cards as string[]);
+    if (Array.isArray(v) && v.length) {
+      const norm: string[][] = [];
+      for (const it of v) {
+        if (Array.isArray(it)) norm.push(it as string[]);
+        else if (it && typeof it==='object' && Array.isArray((it as any).cards)) {
+          norm.push((it as any).cards as string[]);
         }
       }
-      if(norm.length) return norm;
+      if (norm.length) return norm;
+    }
+    const f = ctx && typeof ctx[key]==='function' ? ctx[key] : null;
+    // If there is a function like getLegalMoves, try calling it safely
+    if (typeof f === 'function') {
+      try {
+        const got = f.call(ctx);
+        if (Array.isArray(got) && got.length) {
+          const norm: string[][] = [];
+          for (const it of got) {
+            if (Array.isArray(it)) norm.push(it as string[]);
+            else if (it && typeof it==='object' && Array.isArray((it as any).cards)) {
+              norm.push((it as any).cards as string[]);
+            }
+          }
+          if (norm.length) return norm;
+        }
+      } catch {}
     }
   }
-  const hand:string[]|undefined = ctx?.hand ?? ctx?.myHand;
-  if(Array.isArray(hand) && hand.length){ return hand.map(c=>[c]); }
+  const hand = getHandFromCtx(ctx);
+  if (hand.length) return genNaiveCandidatesFromHand(hand);
   return [];
 }
 
@@ -120,7 +183,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
 
   const moves = extractCandidates(ctx);
   if(!moves.length){
-    return { move:'pass', reason:'MiniNet: no candidates' };
+    return { move:'pass', reason:`MiniNet: no candidates (keys=${Object.keys(ctx||{}).join(',')})` };
   }
 
   let best=moves[0], bestScore=-1e9;
