@@ -6,6 +6,8 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
+  | 'built-in:ally-support'
+  | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
@@ -214,6 +216,8 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:greedy-max': return 'Greedy Max';
     case 'built-in:greedy-min': return 'Greedy Min';
     case 'built-in:random-legal': return 'Random Legal';
+    case 'built-in:ally-support': return 'Ally Support';
+    case 'built-in:endgame-rush': return 'Endgame Rush';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
     case 'ai:grok':  return 'Grok';
@@ -288,10 +292,7 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
 
   const makePath = (arr:(number|null)[])=>{
     let d=''; let open=false;
-    const cutSet = new Set(cuts);
     for (let i=0;i<n;i++){
-      // 在每局起始断开一次路径，避免跨局连线
-      if (cutSet.has(i) && i!==0) { open = false; }
       const v = arr[i];
       if (typeof v !== 'number') { open=false; continue; }
       const px = x(i), py = y(v);
@@ -322,7 +323,7 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
             const x1 = x(Math.max(st, ed-1));
             const w  = Math.max(0.5, x1 - x0);
             const lord = landlordsArr[i] ?? -1;
-            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#fffffff' : '#f8fafc');
+            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
             return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
           })}
 
@@ -1132,28 +1133,6 @@ for (const raw of batch) {
                   if (lord2 != null) nextLandlord = lord2;
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
-                {
-                  // —— 兜底：没有 init 帧也要推进 roundCuts / roundLords ——
-                  const n0 = Math.max(
-                    nextScores[0]?.length||0,
-                    nextScores[1]?.length||0,
-                    nextScores[2]?.length||0
-                  );
-                  const lordVal = (nextLandlord ?? -1) as number | -1;
-                  if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
-                  else if (nextCuts[nextCuts.length-1] !== n0) {
-                    nextCuts = [...nextCuts, n0];
-                    nextLords = [...nextLords, lordVal];
-                  }
-                  // 回填最近一段的地主，避免白段
-                  if (nextCuts.length > 0) {
-                    const idxBand = Math.max(0, nextCuts.length - 1);
-                    if (nextLords[idxBand] !== lordVal) {
-                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
-                    }
-                  }
-                }
-        
                 }
               }
 
@@ -1734,6 +1713,8 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
+                      <option value="built-in:ally-support">Ally Support</option>
+                      <option value="built-in:endgame-rush">Endgame Rush</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
