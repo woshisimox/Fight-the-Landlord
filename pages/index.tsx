@@ -6,8 +6,6 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'built-in:ally-support'
-  | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
@@ -216,8 +214,6 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:greedy-max': return 'Greedy Max';
     case 'built-in:greedy-min': return 'Greedy Min';
     case 'built-in:random-legal': return 'Random Legal';
-    case 'built-in:ally-support': return 'Ally Support';
-    case 'built-in:endgame-rush': return 'Endgame Rush';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
     case 'ai:grok':  return 'Grok';
@@ -293,8 +289,6 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
   const makePath = (arr:(number|null)[])=>{
     let d=''; let open=false;
     for (let i=0;i<n;i++){
-      const cutSet = new Set(cuts);
-      if (cutSet.has(i) && i!==0) { open = false; }
       const v = arr[i];
       if (typeof v !== 'number') { open=false; continue; }
       const px = x(i), py = y(v);
@@ -325,7 +319,7 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
             const x1 = x(Math.max(st, ed-1));
             const w  = Math.max(0.5, x1 - x0);
             const lord = landlordsArr[i] ?? -1;
-            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#fffffff' : '#f8fafc');
+            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
             return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
           })}
 
@@ -424,7 +418,54 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 
 /* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
-  const [running, setRunning] = useState(false);
+  
+  /* ====== 评分统计（每局） ====== */
+  type SeatStat = { rounds:number; overallAvg:number; lastAvg:number; best:number; worst:number };
+  const [scoreStats, setScoreStats] = useState<SeatStat[]>([
+    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0 },
+    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0 },
+    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0 },
+  ]);
+  const statsFileRef = useRef<HTMLInputElement|null>(null);
+
+  // 依据 scoreSeries（每手评分）与 roundCuts（每局切点）计算每局均值，并汇总到席位统计
+  const recomputeScoreStats = () => {
+    try {
+      const series = scoreSeriesRef.current;   // number[][]
+      const cuts = roundCutsRef.current;       // number[] (含0与末尾n)
+      const n = Math.max(series[0]?.length||0, series[1]?.length||0, series[2]?.length||0);
+      const bands = (cuts && cuts.length ? [...cuts] : [0]).sort((a,b)=>a-b);
+      if (bands[0] !== 0) bands.unshift(0);
+      if (bands[bands.length-1] !== n) bands.push(n);
+      const perSeatRounds:number[][] = [[],[],[]];
+      for (let b=0;b<bands.length-1;b++){
+        const st = bands[b], ed = bands[b+1];
+        const len = Math.max(0, ed - st);
+        if (len <= 0) continue;
+        for (let s=0;s<3;s++){
+          const arr = series[s]||[];
+          let sum = 0, cnt = 0;
+          for (let i=st;i<ed;i++){
+            const v = arr[i];
+            if (typeof v === 'number') { sum += v; cnt++; }
+          }
+          if (cnt>0) perSeatRounds[s].push(sum/cnt);
+        }
+      }
+      const stats = [0,1,2].map(s=>{
+        const rs = perSeatRounds[s];
+        const rounds = rs.length;
+        if (rounds===0) return { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0 };
+        const overall = rs.reduce((a,b)=>a+b,0)/rounds;
+        const last = rs[rounds-1];
+        const best = Math.max(...rs);
+        const worst = Math.min(...rs);
+        return { rounds, overallAvg: overall, lastAvg: last, best, worst };
+      });
+      setScoreStats(stats);
+    } catch (e) { console.error('[stats] recompute error', e); }
+  };
+const [running, setRunning] = useState(false);
 
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
   const [landlord, setLandlord] = useState<number|null>(null);
@@ -439,7 +480,10 @@ function LivePanel(props: LiveProps) {
   const [finishedCount, setFinishedCount] = useState(0);
   // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
-  const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
+  const scoreSeriesRef = useRef(scoreSeries); 
+  // 每局结束或数据变化时刷新统计
+  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
+useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
   const [roundCuts, setRoundCuts] = useState<number[]>([0]);
   const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
   const [roundLords, setRoundLords] = useState<number[]>([]);
@@ -866,7 +910,39 @@ function LivePanel(props: LiveProps) {
     }
   };
 
-  const handleScoreRefresh = () => {
+  
+  const handleStatsSave = () => {
+    try {
+      const payload = { when: new Date().toISOString(), stats: scoreStats };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'score-stats.json';
+      a.click();
+      setTimeout(()=> URL.revokeObjectURL(a.href), 0);
+    } catch (e) { console.error('[stats] save error', e); }
+  };
+  const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const f = e.target.files?.[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const obj = JSON.parse(String(rd.result||'{}'));
+          if (Array.isArray(obj.stats) && obj.stats.length===3) {
+            setScoreStats(obj.stats as any);
+          }
+        } catch (err) { console.error('[stats upload] parse error', err); }
+      };
+      rd.readAsText(f);
+    } catch (err) {
+      console.error('[stats upload] error', err);
+    } finally {
+      if (statsFileRef.current) statsFileRef.current.value = '';
+    }
+  };
+  const handleStatsRefresh = () => { recomputeScoreStats(); };
+const handleScoreRefresh = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
@@ -1135,28 +1211,6 @@ for (const raw of batch) {
                   if (lord2 != null) nextLandlord = lord2;
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
-                  {
-                    // —— 兜底：没有 init 帧也要推进 roundCuts / roundLords ——
-                    const n0 = Math.max(
-                      nextScores[0]?.length||0,
-                      nextScores[1]?.length||0,
-                      nextScores[2]?.length||0
-                    );
-                    const lordVal = (nextLandlord ?? -1) as number | -1;
-                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
-                    else if (nextCuts[nextCuts.length-1] !== n0) {
-                      nextCuts = [...nextCuts, n0];
-                      nextLords = [...nextLords, lordVal];
-                    }
-                    // 回填最近一段的地主，避免白段
-                    if (nextCuts.length > 0) {
-                      const idxBand = Math.max(0, nextCuts.length - 1);
-                      if (nextLords[idxBand] !== lordVal) {
-                        nextLords = Object.assign([], nextLords, { [idxBand]: lordVal });
-                      }
-                    }
-                  }
-
                 }
               }
 
@@ -1511,6 +1565,32 @@ nextTotals     = [
         <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
         <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
       </Section>
+      <div style={{ marginTop:10 }}></div>
+      <Section title="评分统计（每局汇总）">
+        <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+          <button onClick={handleStatsSave} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>
+          <button onClick={handleStatsRefresh} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>刷新</button>
+          <label style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'0 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff', cursor:'pointer' }}>
+            上传<input ref={statsFileRef} onChange={handleStatsUpload} type="file" accept=".json,application/json" style={{ display:'none' }} />
+          </label>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+          {[0,1,2].map(i=>{
+            const st = scoreStats[i];
+            return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, background:'#fff' }}>
+                <div style={{ fontWeight:700, marginBottom:6 }}><SeatTitle i={i} /></div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>局数：{st.rounds}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>总体均值：{st.overallAvg.toFixed(3)}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>最近一局均值：{st.lastAvg.toFixed(3)}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>最好局均值：{st.best.toFixed(3)}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>最差局均值：{st.worst.toFixed(3)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
 <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
           {[0,1,2].map(i=>(
@@ -1737,8 +1817,6 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
-                      <option value="built-in:ally-support">Ally Support</option>
-                      <option value="built-in:endgame-rush">Endgame Rush</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
