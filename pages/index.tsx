@@ -1508,6 +1508,106 @@ nextTotals     = [
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
+  // ===== 统一统计打包（All-in-One） =====
+  type AllBundle = {
+    schema: 'ddz-all@1';
+    createdAt: string;
+    agents: string[];
+    trueskill?: TsStore;
+    radar?: RadarStore;
+    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
+    scoreStats?: { stats: SeatStat[]; dists: number[][] };
+  };
+
+  const buildAllBundle = (): AllBundle => {
+    const agents = [0,1,2].map(agentIdForIndex);
+    const n = Math.max(
+      scoreSeriesRef.current[0]?.length||0,
+      scoreSeriesRef.current[1]?.length||0,
+      scoreSeriesRef.current[2]?.length||0
+    );
+    return {
+      schema: 'ddz-all@1',
+      createdAt: new Date().toISOString(),
+      agents,
+      trueskill: tsStoreRef.current,
+      radar: radarStoreRef.current as any,
+      scoreTimeline: {
+        n,
+        rounds: roundCutsRef.current.slice(),
+        seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
+        landlords: roundLordsRef.current.slice(),
+      },
+      scoreStats: {
+        stats: scoreStats,
+        dists: scoreDists,
+      },
+    };
+  };
+
+  const handleAllSaveInner = () => {
+    const payload = buildAllBundle();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'ddz_all_stats.json'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+    setLog(l => [...l, '【ALL】已导出统一统计文件。']);
+  };
+
+  const applyAllBundleInner = (obj:any) => {
+    try {
+      if (obj?.trueskill?.players) {
+        tsStoreRef.current = obj.trueskill as TsStore;
+        writeStore(tsStoreRef.current);
+        applyTsFromStoreByRole(landlordRef.current, '统一上传');
+      }
+      if (obj?.radar?.players) {
+        radarStoreRef.current = obj.radar as any;
+        writeRadarStore(radarStoreRef.current);
+        applyRadarFromStoreByRole(landlordRef.current, '统一上传');
+      }
+      if (obj?.scoreTimeline?.seriesBySeat) {
+        const tl = obj.scoreTimeline;
+        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
+        if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
+        if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
+      }
+      if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
+        setScoreStats(obj.scoreStats.stats as any);
+        setScoreDists(obj.scoreStats.dists as any);
+      }
+      setLog(l => [...l, '【ALL】统一上传完成。']);
+    } catch (e:any) {
+      setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
+    }
+  };
+
+  const handleAllRefreshInner = () => {
+    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+    applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
+    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+    setRoundCuts(prev => [...prev]);
+    setRoundLords(prev => [...prev]);
+    setLog(l => [...l, '【ALL】已刷新面板数据。']);
+  };
+
+  useEffect(()=>{
+    const onSave = () => handleAllSaveInner();
+    const onRefresh = () => handleAllRefreshInner();
+    const onUpload = (e: Event) => {
+      const ce = e as CustomEvent<any>;
+      applyAllBundleInner(ce.detail);
+    };
+    window.addEventListener('ddz-all-save', onSave as any);
+    window.addEventListener('ddz-all-refresh', onRefresh as any);
+    window.addEventListener('ddz-all-upload', onUpload as any);
+    return () => {
+      window.removeEventListener('ddz-all-save', onSave as any);
+      window.removeEventListener('ddz-all-refresh', onRefresh as any);
+      window.removeEventListener('ddz-all-upload', onUpload as any);
+    };
+  }, []);
+
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
@@ -1844,6 +1944,24 @@ function Home() {
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
   };
+  // —— 统一统计（TS + Radar + 出牌评分 + 评分统计）外层上传入口 ——
+  const allFileRef = useRef<HTMLInputElement|null>(null);
+  const handleAllFileUploadHome = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const obj = JSON.parse(String(rd.result || '{}'));
+        window.dispatchEvent(new CustomEvent('ddz-all-upload', { detail: obj }));
+      } catch (err) {
+        console.error('[ALL-UPLOAD] parse error', err);
+      } finally {
+        if (allFileRef.current) allFileRef.current.value = '';
+      }
+    };
+    rd.readAsText(f);
+  };
+
 
   return (
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
@@ -1869,22 +1987,50 @@ function Home() {
             <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
           </label>
 		  
-          <label>可抢地主
-          <div><input type="checkbox" checked={rob}
-           onChange={e=>setRob(e.target.checked)} /></div>
-          </label>
-		  
-          <label>初始分
+          
+<div style={{ gridColumn:'1 / -1' }}>
+  <div style={{ display:'flex', alignItems:'center', gap:24 }}>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      可抢地主
+      <input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} />
+    </label>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      农民配合
+      <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
+    </label>
+  </div>
+  <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8 }}>
+    <input
+      ref={allFileRef}
+      type="file"
+      accept="application/json"
+      style={{ display:'none' }}
+      onChange={handleAllFileUploadHome}
+    />
+    <button
+      onClick={()=>allFileRef.current?.click()}
+      style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >上传</button>
+    <button
+      onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
+      style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >存档</button>
+    <button
+      onClick={()=>window.dispatchEvent(new Event('ddz-all-refresh'))}
+      style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >刷新</button>
+    <div style={{ fontSize:12, color:'#6b7280' }}>
+      统一：TrueSkill / 画像 / 出牌评分 / 评分统计
+    </div>
+  </div>
+</div>
+<label>初始分
           <input type="number" step={10} value={startScore}
            onChange={e=>setStartScore(Number(e.target.value)||0)}
            style={{ width:'100%' }} />
           </label>
 
 
-
-          <label>农民配合
-            <div><input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} /></div>
-          </label>
 
           <label>4带2 规则
             <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
