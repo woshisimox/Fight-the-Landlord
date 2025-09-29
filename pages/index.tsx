@@ -284,20 +284,15 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
   if (cuts[cuts.length-1] !== n) cuts.push(n);
 
   const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
-  while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
-  // —— 底色兜底：填补缺失的地主（用上一段/首个已知地主） ——
-  const landlordsFilled = landlordsArr.slice();
-  for (let j=0; j<landlordsFilled.length; j++) {
-    const v = landlordsFilled[j];
-    if (!(v===0 || v===1 || v===2)) {
-      landlordsFilled[j] = j>0 ? landlordsFilled[j-1] : landlordsFilled[j];
+    // 补齐缺失的地主标记（若 roundLords 比 roundCuts 少一段，延用上一段的地主，用于底色）
+    const landlordsFilled = landlordsArr.slice();
+    for (let j=0; j<landlordsFilled.length; j++) {
+      if (landlordsFilled[j] === undefined || landlordsFilled[j] === null || landlordsFilled[j] === -1) {
+        landlordsFilled[j] = j>0 ? (landlordsFilled[j-1] ?? -1) : -1;
+      }
     }
-  }
-  if (landlordsFilled.length && !(landlordsFilled[0]===0 || landlordsFilled[0]===1 || landlordsFilled[0]===2)) {
-    const k = landlordsFilled.findIndex(v => v===0 || v===1 || v===2);
-    if (k > 0) { for (let j=0; j<k; j++) landlordsFilled[j] = landlordsFilled[k]; }
-  }
 
+  while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
 
   const makePath = (arr:(number|null)[])=>{
     let d=''; let open=false;
@@ -1500,6 +1495,62 @@ nextTotals     = [
         <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
         <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
       </Section>
+      <Section title="评分统计（直方图｜每手score汇总）">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
+          {[0,1,2].map(i=>{
+            const samples = (scoreSeries[i] || []).filter(v => typeof v === 'number' && !Number.isNaN(v)) as number[];
+            if (!samples.length) return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
+                <div style={{ fontWeight:700, marginBottom:6 }}>{['甲','乙','丙'][i]}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>暂无数据</div>
+              </div>
+            );
+            const pad = 6, W = 260, H = 96;
+            // 统计量（μ & σ 基于所有出牌评分样本）
+            const mu = samples.reduce((a,b)=>a+b,0) / samples.length;
+            const sigma = Math.sqrt(Math.max(0, samples.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / samples.length));
+            // 固定 20 桶
+            const bins = 20;
+            const sMin = Math.min(...samples), sMax = Math.max(...samples);
+            const lo = sMin, hi = sMax === sMin ? sMin + 1 : sMax;
+            const x = (v:number)=> pad + (hi>lo ? (v-lo)/(hi-lo) : 0.5) * (W - 2*pad);
+            const yBase = H - pad; const hMax = H - 2*pad;
+            const barW = (W - 2*pad) / bins;
+            const counts = new Array(bins).fill(0);
+            for (const v of samples) {
+              let k = Math.floor((v - lo) / (hi - lo) * bins);
+              if (k < 0) k = 0; if (k >= bins) k = bins - 1;
+              counts[k]++;
+            }
+            const maxC = Math.max(...counts) || 1;
+            const bars = counts.map((c, k) => {
+              const x0 = pad + k * barW + 0.5;
+              const h = hMax * (c / maxC);
+              const y0 = yBase - h;
+              return <rect key={k} x={x0} y={y0} width={Math.max(1, barW - 1)} height={Math.max(0, h)} fill="#9ca3af" opacity={0.45} />;
+            });
+            const meanX = x(mu);
+            const sigL = x(mu - sigma);
+            const sigR = x(mu + sigma);
+            return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, background:'#fff' }}>
+                <div style={{ fontWeight:700, marginBottom:6 }}>{['甲','乙','丙'][i]}</div>
+                <svg width={W} height={H} style={{ display:'block' }}>
+                  <rect x={0} y={0} width={W} height={H} fill="#ffffff" stroke="#e5e7eb" />
+                  {bars}
+                  <line x1={meanX} y1={pad} x2={meanX} y2={H-pad} stroke="#ef4444" strokeDasharray="4 3" />
+                  <line x1={sigL} y1={pad} x2={sigL} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
+                  <line x1={sigR} y1={pad} x2={sigR} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
+                  <text x={meanX+4} y={12} fontSize={10} fill="#ef4444">μ={mu.toFixed(2)}</text>
+                  <text x={sigL+4} y={24} fontSize={10} fill="#60a5fa">-1σ</text>
+                  <text x={sigR+4} y={24} fontSize={10} fill="#60a5fa">+1σ</text>
+                </svg>
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
 <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
           {[0,1,2].map(i=>(
