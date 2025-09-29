@@ -450,7 +450,8 @@ function LivePanel(props: LiveProps) {
   ]);
   const [scoreDists, setScoreDists] = useState<number[][]>([[],[],[]]);
   const statsFileRef = useRef<HTMLInputElement|null>(null);
-  const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords;
+  const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
+
   // 依据 scoreSeries（每手评分）与 roundCuts（每局切点）计算每局均值，并汇总到席位统计
   const recomputeScoreStats = () => {
     try {
@@ -498,8 +499,10 @@ function LivePanel(props: LiveProps) {
 
   // 每局结束或数据变化时刷新统计
   useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
+
+  // 每局结束或数据变化时刷新统计
+  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
 ;
- }, [roundLords]);
 
 
   // —— TrueSkill（前端实时） —— //
