@@ -284,6 +284,14 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
   if (cuts[cuts.length-1] !== n) cuts.push(n);
 
   const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
+    // 补齐缺失的地主标记（若 roundLords 比 roundCuts 少一段，延用上一段的地主，用于底色）
+    const landlordsFilled = landlordsArr.slice();
+    for (let j=0; j<landlordsFilled.length; j++) {
+      if (landlordsFilled[j] === undefined || landlordsFilled[j] === null || landlordsFilled[j] === -1) {
+        landlordsFilled[j] = j>0 ? (landlordsFilled[j-1] ?? -1) : -1;
+      }
+    }
+
   while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
 
   const makePath = (arr:(number|null)[])=>{
@@ -322,7 +330,7 @@ function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','�
             const x0 = x(st);
             const x1 = x(Math.max(st, ed-1));
             const w  = Math.max(0.5, x1 - x0);
-            const lord = landlordsArr[i] ?? -1;
+            const lord = landlordsFilled[i] ?? -1;
             const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
             return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
           })}
