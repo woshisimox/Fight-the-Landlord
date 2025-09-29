@@ -1980,8 +1980,8 @@ function Home() {
     </label>
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
-      统一： TrueSkill / 画像 / 出牌评分 / 评分统计
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      TrueSkill / 画像 / 出牌评分 / 评分统计
     <input
       ref={allFileRef}
       type="file"
