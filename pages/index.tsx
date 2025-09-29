@@ -1619,50 +1619,54 @@ nextTotals     = [
                 <div style={{ fontSize:12, color:'#6b7280' }}>最近一局均值：{st.lastAvg.toFixed(3)}</div>
                 <div style={{ fontSize:12, color:'#6b7280' }}>最好局均值：{st.best.toFixed(3)}</div>
                 <div style={{ fontSize:12, color:'#6b7280' }}>最差局均值：{st.worst.toFixed(3)}</div>
-                {/* 分布曲线（每局均值的分布） */}
-                {(() => {
-                  const vals = (scoreDists[i]||[]).slice();
-                  if (!vals.length) return null;
-                  const pad = 6, W = 220, H = 72; // 小卡图尺寸
-                  const mu = st?.mean ?? 0;
-                  const sg = st?.sigma ?? 0;
-                  const min = Math.min(...vals), max = Math.max(...vals);
-                  const lo = Math.min(min, mu - sg*1.5), hi = Math.max(max, mu + sg*1.5);
-                  const x = (v:number)=> pad + (hi>lo ? (v-lo)/(hi-lo) : 0.5) * (W - 2*pad);
-                  const bins = 24;
-                  const counts = new Array(bins).fill(0);
-                  for (const v of vals) {
-                    const t = hi>lo ? Math.max(0, Math.min(bins-1, Math.floor((v-lo)/(hi-lo)*bins))) : Math.floor(bins/2);
-                    counts[t]++;
-                  }
-                  const maxC = Math.max(...counts) || 1;
-                  const y = (c:number)=> H - pad - (c/maxC) * (H - 2*pad);
-                  let d = '';
-                  for (let b=0;b<bins;b++){
-                    const cx = x(lo + (b+0.5)*(hi-lo)/bins);
-                    const cy = y(counts[b]);
-                    d += (b===0 ? `M ${cx} ${cy}` : ` L ${cx} ${cy}`);
-                  }
-                  const meanX = x(mu);
-                  const sigL = x(mu - sg);
-                  const sigR = x(mu + sg);
-                  return (
-                    <svg width={W} height={H} style={{ display:'block', marginTop:6 }}>
-                      <rect x={0} y={0} width={W} height={H} fill="#ffffff" stroke="#e5e7eb"/>
-                      <path d={d} fill="none" stroke="#4b5563" strokeWidth={1.25} />
-                      {/* μ 和 ±1σ 标注 */}
-                      <line x1={meanX} y1={pad} x2={meanX} y2={H-pad} stroke="#ef4444" strokeDasharray="4 3" />
-                      <line x1={sigL} y1={pad} x2={sigL} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
-                      <line x1={sigR} y1={pad} x2={sigR} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
-                      <text x={meanX+4} y={12} fontSize="10" fill="#ef4444">μ={(mu).toFixed(2)}</text>
-                      <text x={sigL+4} y={24} fontSize="10" fill="#60a5fa">-1σ</text>
-                      <text x={sigR+4} y={24} fontSize="10" fill="#60a5fa">+1σ</text>
-                    </svg>
-                  );
-                })()}
-              </div>
+                
+          {/* 分布曲线（每局均值的分布，直方图汇总） */}
+          {(() => {
+            const vals = (scoreDists[i]||[]).slice();
+            if (!vals.length) return null;
+            // 画直方图（汇总，而不是逐局连线）
+            const pad = 6, W = 220, H = 88; // 小卡图尺寸
+            const mu = scoreStats[i]?.mean ?? 0;
+            const sg = scoreStats[i]?.sigma ?? 0;
+            const min = Math.min(...vals), max = Math.max(...vals);
+            // 自适应桶数：Sturges，但限制在 [8, 24]
+            const bins = Math.max(8, Math.min(24, Math.ceil(Math.log2(vals.length + 1)) + 1));
+            const lo = Math.min(min, mu - sg*1.5), hi = Math.max(max, mu + sg*1.5);
+            const x = (v:number)=> pad + (hi>lo ? (v-lo)/(hi-lo) : 0.5) * (W - 2*pad);
+            const bw = (hi - lo) / bins; // bin width in value space
+            const counts = new Array(bins).fill(0);
+            for (const v of vals) {
+              let k = hi>lo ? Math.floor((v - lo) / (hi - lo) * bins) : Math.floor(bins/2);
+              if (k < 0) k = 0; if (k >= bins) k = bins - 1;
+              counts[k]++;
+            }
+            const maxC = Math.max(...counts) || 1;
+            const y = (c:number)=> H - pad - (c/maxC) * (H - 2*pad);
+            const barW = (W - 2*pad) / bins;
+            const bars = counts.map((c, k) => {
+              const x0 = pad + k * barW + 0.5;
+              const h = (H - 2*pad) * (c / maxC);
+              const y0 = H - pad - h;
+              return <rect key={k} x={x0} y={y0} width={Math.max(1, barW - 1)} height={Math.max(0, h)} fill="#9ca3af" opacity={0.45} />;
+            });
+            const meanX = x(mu);
+            const sigL = x(mu - sg);
+            const sigR = x(mu + sg);
+            return (
+              <svg width={W} height={H} style={{ display:'block', marginTop:6 }}>
+                <rect x={0} y={0} width={W} height={H} fill="#ffffff" stroke="#e5e7eb"/>
+                {bars}
+                {/* μ 和 ±1σ 标注 */}
+                <line x1={meanX} y1={pad} x2={meanX} y2={H-pad} stroke="#ef4444" strokeDasharray="4 3" />
+                <line x1={sigL} y1={pad} x2={sigL} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
+                <line x1={sigR} y1={pad} x2={sigR} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
+                <text x={meanX+4} y={12} fontSize="10" fill="#ef4444">μ={(mu).toFixed(2)}</text>
+                <text x={sigL+4} y={24} fontSize="10" fill="#60a5fa">-1σ</text>
+                <text x={sigR+4} y={24} fontSize="10" fill="#60a5fa">+1σ</text>
+              </svg>
             );
-          })}
+          })()}
+        
         </div>
       </Section>
 
