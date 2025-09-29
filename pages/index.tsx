@@ -228,7 +228,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
   }
-}}
+
 
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
