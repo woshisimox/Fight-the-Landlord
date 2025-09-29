@@ -952,7 +952,7 @@ function LivePanel(props: LiveProps) {
     } catch (err) { console.error('[stats upload] error', err); }
     finally { if (statsFileRef.current) statsFileRef.current.value = ''; }
   };
-  const handleStatsRefresh = () => { recomputeScoreStats(); };
+  const handleStatsRefresh = () => { setRoundCuts(prev => [...prev]); };
 const handleScoreRefresh = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
