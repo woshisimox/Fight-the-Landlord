@@ -116,12 +116,70 @@ function getSeat(ctx:any): number|undefined {
   const k = getSeatKey(ctx);
   return (typeof k === 'number') ? k : undefined;
 }
+function normalizeHandTokens(raw:any): AnyCard[] {
+  // Accept array of tokens, string like "3456789TJQKA2xX", or array of numbers/objects
+  if (Array.isArray(raw)) return raw as AnyCard[];
+  if (typeof raw === 'string') {
+    const s = raw.replace(/\s+/g,'').replace(/10/gi,'T');
+    return s.split('').map(c=>c);
+  }
+  if (raw && typeof raw==='object') {
+    // common wrappers like {hand:[...]}, {cards:[...]}, {list:[...]}
+    const inner = (raw as any).hand ?? (raw as any).cards ?? (raw as any).list;
+    if (Array.isArray(inner)) return inner as AnyCard[];
+  }
+  return [];
+}
 function getHandFromCtx(ctx:any): AnyCard[] {
-  const direct = ctx?.hands;
+  const direct = (ctx as any)?.hands;
   // 1) qwen-style: hands is a flat array for the current player
   if (Array.isArray(direct) && (direct.length===0 || !Array.isArray(direct[0]))) {
-    return direct as AnyCard[];
+    return normalizeHandTokens(direct);
   }
+  // 2) other direct paths
+  const tryPaths = [
+    (c:any)=> c?.hand,
+    (c:any)=> c?.myHand,
+    (c:any)=> c?.cards,
+    (c:any)=> c?.myCards,
+    (c:any)=> c?.state?.hand,
+    (c:any)=> c?.state?.myHand,
+  ];
+  for (const f of tryPaths) {
+    const v = f(ctx);
+    const norm = normalizeHandTokens(v);
+    if (norm.length) return norm;
+  }
+  // 3) array-of-arrays form
+  const seatNum = getSeat(ctx);
+  const hands = (ctx as any)?.hands ?? (ctx as any)?.state?.hands;
+  if (Array.isArray(hands)) {
+    if (typeof seatNum === 'number') {
+      const v = (hands as any)[seatNum];
+      const norm = normalizeHandTokens(v);
+      if (norm.length) return norm;
+    }
+    for (const v of hands){
+      const norm = normalizeHandTokens(v);
+      if (norm.length) return norm;
+    }
+  } else if (hands && typeof hands === 'object') {
+    // 4) object map: keys may be numeric strings, Chinese seat names, or roles
+    const seatKey = getSeatKey(ctx);
+    const candidateKeys = [seatKey, String(seatKey), (ctx as any)?.role, (ctx as any)?.seat, '甲','乙','丙','地主','农民A','农民B','landlord','farmerA','farmerB','0','1','2'];
+    for (const k of candidateKeys) {
+      if (k!=null && k in hands) {
+        const norm = normalizeHandTokens((hands as any)[k]);
+        if (norm.length) return norm;
+      }
+    }
+    for (const k of Object.keys(hands)) {
+      const norm = normalizeHandTokens((hands as any)[k]);
+      if (norm.length) return norm;
+    }
+  }
+  return [];
+}
   // 2) other direct paths
   const tryPaths = [
     (c:any)=> c?.hand,
@@ -364,7 +422,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   if (!candidates.length) {
     const sk = getSeatKey(ctx);
     const handLen = Array.isArray(rawHand) ? rawHand.length : -1;
-    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v6: no candidates (source=${source}, seatKey=${String(sk)}, handLen=${handLen})` };
+    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v7: no candidates (source=${source}, seatKey=${String(sk)}, handLen=${handLen})` };
     const lowest = Array.isArray(rawHand) && rawHand.length ? [...rawHand].sort((a,b)=>rankIndex(a)-rankIndex(b))[0] : undefined;
     if (lowest!=null) candidates = [[lowest]];
   }
@@ -377,7 +435,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
     score += (Math.random()-0.5)*0.01;
     if (score > bestScore) { bestScore = score; best = m; }
   }
-  return { move:'play', cards: best, reason:`MiniNet v6: cands=${candidates.length} from=${source} score=${bestScore.toFixed(3)}` };
+  return { move:'play', cards: best, reason:`MiniNet v7: cands=${candidates.length} from=${source} score=${bestScore.toFixed(3)}` };
 }
 
 export function loadMiniNetWeights(json: {l1:Dense; l2:Dense}) {
