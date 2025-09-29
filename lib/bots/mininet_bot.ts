@@ -1,13 +1,10 @@
-// lib/bots/mininet_bot.ts (v5 policy-scan + seatfix)
-// Generates legal candidates by (1) scanning ctx.policy deeply, (2) falling back to hand-based rule generator.
-// Returns raw tokens to engine; uses tiny MLP to score.
-
+// lib/bots/mininet_bot.ts (v7 - qwen-style hands + policy scan + rule fallback, compile-safe)
 type AnyCard = any;
 type BotMove = { move: 'play' | 'pass'; cards?: AnyCard[]; reason?: string };
 
 const RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const;
 type RankChar = typeof RANKS[number];
-const RANK_IDX = Object.fromEntries(RANKS.map((r,i)=>[r,i])) as Record<string, number>;
+const RANK_IDX: Record<string, number> = Object.fromEntries(RANKS.map((r, i) => [r, i])) as Record<string, number>;
 const STRAIGHT_RANKS: RankChar[] = ['3','4','5','6','7','8','9','T','J','Q','K','A'];
 
 const MOVE_TYPES = [
@@ -16,22 +13,22 @@ const MOVE_TYPES = [
 ] as const;
 type MoveType = typeof MOVE_TYPES[number];
 
-function toRankChar(raw:any): RankChar {
-  if (raw==null) return '3';
+function toRankChar(raw: any): RankChar {
+  if (raw == null) return '3';
   const s = String(raw);
-  if (s==='x' || s==='X') return s as RankChar;
+  if (s === 'x' || s === 'X') return s as RankChar;
   const up = s.toUpperCase();
   if (['3','4','5','6','7','8','9','T','J','Q','K','A','2'].includes(up)) return up as RankChar;
-  if (s.length>1){
-    const last = s[s.length-1].toUpperCase();
+  if (s.length > 1) {
+    const last = s[s.length - 1].toUpperCase();
     if (['3','4','5','6','7','8','9','T','J','Q','K','A','2'].includes(last)) return last as RankChar;
   }
   return '3';
 }
-function rankIndex(raw:any): number { const r = toRankChar(raw); return RANK_IDX[r] ?? 0; }
+function rankIndex(raw: any): number { const r = toRankChar(raw); return RANK_IDX[r] ?? 0; }
 
-// ===== tiny MLP (same as v4) =====
-function hist15(cards: AnyCard[]|undefined): number[] {
+// ===== tiny MLP =====
+function hist15(cards: AnyCard[] | undefined): number[] {
   const h = new Array(15).fill(0);
   if (cards) for (const c of cards) h[rankIndex(c)]++;
   return h;
@@ -40,17 +37,18 @@ function classifyMove(cards?: AnyCard[]): MoveType {
   if (!cards || cards.length === 0) return 'pass';
   const n = cards.length;
   const h = hist15(cards);
-  const uniq = h.filter(x=>x>0).length;
+  const uniq = h.filter(x => x > 0).length;
   const ranks = cards.map(toRankChar);
-  const hasRocket = ranks.includes('x') && ranks.includes('X') && n===2;
+  const hasRocket = ranks.includes('x') && ranks.includes('X') && n === 2;
   if (hasRocket) return 'rocket';
-  if (h.find(x=>x===4) && n===4) return 'bomb';
-  if (n===1) return 'single';
-  if (n===2 && uniq===1) return 'pair';
-  if (n===3 && uniq===1) return 'triple';
-  const run=h.map(v=>v>0?1:0); let best=0,cur=0;
-  for (let i=0;i<13;i++){ cur=run[i]?cur+1:0; best=Math.max(best,cur); }
-  if (best>=5 && uniq===n) return 'straight';
+  if (h.find(x => x === 4) && n === 4) return 'bomb';
+  if (n === 1) return 'single';
+  if (n === 2 && uniq === 1) return 'pair';
+  if (n === 3 && uniq === 1) return 'triple';
+  const run = h.map(v => v > 0 ? 1 : 0);
+  let best = 0, cur = 0;
+  for (let i = 0; i < 13; i++) { cur = run[i] ? cur + 1 : 0; best = Math.max(best, cur); }
+  if (best >= 5 && uniq === n) return 'straight';
   return 'single';
 }
 type MiniState = {
@@ -58,115 +56,98 @@ type MiniState = {
   landlord: 0|1|2;
   lastMove?: { kind:'play'|'pass'; cards?: AnyCard[] };
   myHand?: AnyCard[];
-  counts?: [number,number,number];
+  counts?: [number, number, number];
   bombsUsed?: number;
 };
 function stateFeat(s: MiniState): number[] {
-  const roleOne=[0,0,0]; roleOne[s.role]=1;
-  const lordOne=[0,0,0]; lordOne[s.landlord]=1;
-  const counts=(s.counts??[17,17,17]).map(x=>Math.min(20,x)/20);
-  const bombs=[(s.bombsUsed??0)/6];
+  const roleOne = [0,0,0]; roleOne[s.role] = 1;
+  const lordOne = [0,0,0]; lordOne[s.landlord] = 1;
+  const counts = (s.counts ?? [17,17,17]).map(x => Math.min(20, x) / 20);
+  const bombs = [(s.bombsUsed ?? 0) / 6];
   const lastType = classifyMove(s.lastMove?.cards);
-  const lastOne = MOVE_TYPES.map(t=>t===lastType?1:0);
-  const handH = hist15(s.myHand??[]).map(x=>Math.min(4,x)/4);
-  return [...roleOne, ...lordOne, ...counts, ...bombs, ...lastOne, ...handH];
+  const lastOneHot = MOVE_TYPES.map(t => t === lastType ? 1 : 0);
+  const handH = hist15(s.myHand ?? []).map(x => Math.min(4, x) / 4);
+  return [...roleOne, ...lordOne, ...counts, ...bombs, ...lastOneHot, ...handH];
 }
 function moveFeat(cards?: AnyCard[]): number[] {
   const t = classifyMove(cards);
-  const one = MOVE_TYPES.map(x=>x===t?1:0);
-  const n = (cards?.length??0)/20;
-  let hi=0; if(cards&&cards.length>0){ hi = cards.map(rankIndex).reduce((a,b)=>Math.max(a,b),0)/14; }
-  return [...one, n, hi];
+  const onehot = MOVE_TYPES.map(x => x === t ? 1 : 0);
+  const n = (cards?.length ?? 0) / 20;
+  let hi = 0; if (cards && cards.length > 0) hi = cards.map(rankIndex).reduce((a, b) => Math.max(a, b), 0) / 14;
+  return [...onehot, n, hi];
 }
 function buildX(s: MiniState, m?: AnyCard[]): number[] {
-  const v=[...stateFeat(s), ...moveFeat(m)];
-  while(v.length<64) v.push(0);
+  const v = [...stateFeat(s), ...moveFeat(m)];
+  while (v.length < 64) v.push(0);
   return v;
 }
-type Dense={W:number[][]; b:number[]}; type MLP={l1:Dense; l2:Dense};
+type Dense = { W: number[][]; b: number[] };
+type MLP = { l1: Dense; l2: Dense };
 function relu(x:number){ return x>0?x:0; }
-function matVec(W:number[][], x:number[], b:number[]): number[]{ const y=new Array(W.length).fill(0); for(let i=0;i<W.length;i++){ let s=b[i]||0; const row=W[i]; for(let j=0;j<row.length;j++) s+=row[j]*x[j]; y[i]=s; } return y; }
+function matVec(W:number[][], x:number[], b:number[]): number[] { const y = new Array(W.length).fill(0); for (let i=0;i<W.length;i++){ let s=b[i]||0; const row=W[i]; for (let j=0;j<row.length;j++) s+=row[j]*x[j]; y[i]=s; } return y; }
 function initHeuristicMLP(): MLP {
   const inDim=64,h=48;
-  const z1=Array.from({length:h},(_,i)=>Array.from({length:inDim},(__,j)=>{
-    const isHand=(j>=(3+3+3+1+12))&&(j<(3+3+3+1+12+15));
-    const handIdx=j-(3+3+3+1+12);
-    const isMove=(j>=(3+3+3+1))&&(j<(3+3+3+1+12));
-    const moveIdx=j-(3+3+3+1);
-    if(isHand){ if(handIdx<=4) return 0.05; if(handIdx>=12) return -0.03; return 0.01; }
-    if(isMove){ const t=MOVE_TYPES[moveIdx]; if(t==='bomb'||t==='rocket') return -0.06; if(t==='straight') return 0.06; }
+  const z1 = Array.from({length:h}, (_,i)=> Array.from({length:inDim}, (__,j)=> {
+    const isHandHist = (j>= (3+3+3+1+12)) && (j < (3+3+3+1+12+15));
+    const handIdx = j - (3+3+3+1+12);
+    const isMoveTypeStart = (j>= (3+3+3+1)) && (j < (3+3+3+1+12));
+    const moveTypeIdx = j - (3+3+3+1);
+    if (isHandHist) { if (handIdx <= 4) return 0.05; if (handIdx >= 12) return -0.03; return 0.01; }
+    if (isMoveTypeStart) { if (['bomb','rocket'].includes(MOVE_TYPES[moveTypeIdx] as any)) return -0.06; if (MOVE_TYPES[moveTypeIdx]==='straight') return 0.06; }
     return 0.0;
   }));
-  const b1=new Array(h).fill(0);
-  const z2=[Array.from({length:h},(_,j)=>(j<8?0.1:0.02))];
-  const b2=[0];
-  return {l1:{W:z1,b:b1}, l2:{W:z2,b:b2}};
+  const b1 = new Array(h).fill(0);
+  const z2 = [ Array.from({length:h}, (_,j)=> (j<8?0.1:0.02)) ];
+  const b2 = [0];
+  return { l1:{W:z1,b:b1}, l2:{W:z2,b:b2} };
 }
-const M=initHeuristicMLP();
-function mlpScore(x:number[]): number { const h1=matVec(M.l1.W,x,M.l1.b).map(relu); return matVec(M.l2.W,h1,M.l2.b)[0]; }
+const M = initHeuristicMLP();
+function mlpScore(x:number[]): number { const h1 = matVec(M.l1.W, x, M.l1.b).map(relu); const y = matVec(M.l2.W, h1, M.l2.b)[0]; return y; }
 
-// ====== Seat & hand ======
-function getSeatKey(ctx:any): any {
-  if (ctx && ('seat' in ctx)) return ctx.seat;
-  if (ctx && ('role' in ctx)) return ctx.role;
-  if (ctx && ('player' in ctx)) return (ctx as any).player;
-  return undefined;
-}
-function getSeat(ctx:any): number|undefined {
-  const k = getSeatKey(ctx);
-  return (typeof k === 'number') ? k : undefined;
-}
+// ===== Seat & hand helpers =====
+function getSeatKey(c:any): any { if (c && ('seat' in c)) return c.seat; if (c && ('role' in c)) return c.role; if (c && ('player' in c)) return c.player; return undefined; }
+function getSeat(c:any): number | undefined { const k = getSeatKey(c); return (typeof k === 'number') ? k : undefined; }
+
 function normalizeHandTokens(raw:any): AnyCard[] {
-  // Accept array of tokens, string like "3456789TJQKA2xX", or array of numbers/objects
   if (Array.isArray(raw)) return raw as AnyCard[];
-  if (typeof raw === 'string') {
-    const s = raw.replace(/\s+/g,'').replace(/10/gi,'T');
-    return s.split('').map(c=>c);
-  }
-  if (raw && typeof raw==='object') {
-    // common wrappers like {hand:[...]}, {cards:[...]}, {list:[...]}
+  if (raw && typeof raw === 'object') {
+    // Common wrappers: {hand:[...]}, {cards:[...]}, {list:[...]}
     const inner = (raw as any).hand ?? (raw as any).cards ?? (raw as any).list;
     if (Array.isArray(inner)) return inner as AnyCard[];
   }
   return [];
 }
-function getHandFromCtx(ctx:any): AnyCard[] {
-  const direct = (ctx as any)?.hands;
-  // 1) qwen-style: hands is a flat array for the current player
-  if (Array.isArray(direct) && (direct.length===0 || !Array.isArray(direct[0]))) {
+
+function getHandFromCtx(c:any): AnyCard[] {
+  // 1) qwen-style: ctx.hands is a flat array = current player's hand
+  const direct = (c as any)?.hands;
+  if (Array.isArray(direct) && (direct.length === 0 || !Array.isArray(direct[0]))) {
     return normalizeHandTokens(direct);
   }
   // 2) other direct paths
-  const tryPaths = [
-    (c:any)=> c?.hand,
-    (c:any)=> c?.myHand,
-    (c:any)=> c?.cards,
-    (c:any)=> c?.myCards,
-    (c:any)=> c?.state?.hand,
-    (c:any)=> c?.state?.myHand,
+  const tryPaths: Array<(x:any)=>any> = [
+    (x:any)=> x?.hand,
+    (x:any)=> x?.myHand,
+    (x:any)=> x?.cards,
+    (x:any)=> x?.myCards,
+    (x:any)=> x?.state?.hand,
+    (x:any)=> x?.state?.myHand,
   ];
   for (const f of tryPaths) {
-    const v = f(ctx);
+    const v = f(c);
     const norm = normalizeHandTokens(v);
     if (norm.length) return norm;
   }
-  // 3) array-of-arrays form
-  const seatNum = getSeat(ctx);
-  const hands = (ctx as any)?.hands ?? (ctx as any)?.state?.hands;
+  // 3) hands as array-of-arrays (by seat)
+  const seatNum = getSeat(c);
+  const hands = (c as any)?.hands ?? (c as any)?.state?.hands;
   if (Array.isArray(hands)) {
-    if (typeof seatNum === 'number') {
-      const v = (hands as any)[seatNum];
-      const norm = normalizeHandTokens(v);
-      if (norm.length) return norm;
-    }
-    for (const v of hands){
-      const norm = normalizeHandTokens(v);
-      if (norm.length) return norm;
-    }
+    if (typeof seatNum === 'number' && Array.isArray(hands[seatNum])) return normalizeHandTokens(hands[seatNum]);
+    for (const arr of hands) { const norm = normalizeHandTokens(arr); if (norm.length) return norm; }
   } else if (hands && typeof hands === 'object') {
     // 4) object map: keys may be numeric strings, Chinese seat names, or roles
-    const seatKey = getSeatKey(ctx);
-    const candidateKeys = [seatKey, String(seatKey), (ctx as any)?.role, (ctx as any)?.seat, '甲','乙','丙','地主','农民A','农民B','landlord','farmerA','farmerB','0','1','2'];
+    const seatKey = getSeatKey(c);
+    const candidateKeys = [seatKey, String(seatKey), (c as any)?.role, (c as any)?.seat, '甲','乙','丙','地主','农民A','农民B','landlord','farmerA','farmerB','0','1','2'];
     for (const k of candidateKeys) {
       if (k!=null && k in hands) {
         const norm = normalizeHandTokens((hands as any)[k]);
@@ -180,78 +161,27 @@ function getHandFromCtx(ctx:any): AnyCard[] {
   }
   return [];
 }
-  // 2) other direct paths
-  const tryPaths = [
-    (c:any)=> c?.hand,
-    (c:any)=> c?.myHand,
-    (c:any)=> c?.cards,
-    (c:any)=> c?.myCards,
-    (c:any)=> c?.state?.hand,
-    (c:any)=> c?.state?.myHand,
-  ];
-  for (const f of tryPaths) {
-    const v = f(ctx);
-    if (Array.isArray(v) && v.length) return v as AnyCard[];
-  }
-  // 3) array-of-arrays form
-  const seatNum = getSeat(ctx);
-  const hands = ctx?.hands ?? ctx?.state?.hands;
-  if (Array.isArray(hands)) {
-    if (typeof seatNum === 'number' && Array.isArray(hands[seatNum])) return hands[seatNum] as AnyCard[];
-    for (const arr of hands){ if (Array.isArray(arr) && arr.length) return arr as AnyCard[]; }
-  } else if (hands && typeof hands === 'object') {
-    const seatKey = getSeatKey(ctx);
-    if (seatKey!=null && Array.isArray(hands[seatKey])) return hands[seatKey] as AnyCard[];
-    const seatAliases = [seatKey, ctx?.role, ctx?.seat, '甲','乙','丙','地主','农民A','农民B','landlord','farmerA','farmerB'];
-    for (const k of seatAliases) {
-      if (k!=null && Array.isArray((hands as any)[k])) return (hands as any)[k] as AnyCard[];
-    }
-    for (const k of Object.keys(hands)) {
-      const v = (hands as any)[k];
-      if (Array.isArray(v) && v.length) return v as AnyCard[];
-    }
-  }
-  return [];
-}
-  const seatNum = getSeat(ctx);
-  const seatKey = getSeatKey(ctx);
-  const hands = ctx?.hands ?? ctx?.state?.hands;
-  if (Array.isArray(hands)) {
-    if (typeof seatNum === 'number' && Array.isArray(hands[seatNum])) return hands[seatNum] as AnyCard[];
-    for (const arr of hands){ if (Array.isArray(arr) && arr.length) return arr as AnyCard[]; }
-  } else if (hands && typeof hands === 'object') {
-    if (seatKey!=null && Array.isArray(hands[seatKey])) return hands[seatKey] as AnyCard[];
-    const seatAliases = [seatKey, ctx?.role, ctx?.seat, '甲','乙','丙','地主','农民A','农民B','landlord','farmerA','farmerB'];
-    for (const k of seatAliases) {
-      if (k!=null && Array.isArray((hands as any)[k])) return (hands as any)[k] as AnyCard[];
-    }
-    for (const k of Object.keys(hands)) {
-      const v = (hands as any)[k];
-      if (Array.isArray(v) && v.length) return v as AnyCard[];
-    }
-  }
-  return [];
-}
 
-// ====== Require & rules (same as v4) ======
+// ===== Require & simple rules =====
 type Req = { type: MoveType|'lead'|'any'; len?: number; wings?: 'single'|'pair'|null; baseIdx?: number; };
-function lastNonPassFrom(ctx:any): AnyCard[]|undefined {
-  const sources = [ctx?.currentTrick, ctx?.trick, ctx?.history];
+function lastNonPassFrom(c:any): AnyCard[] | undefined {
+  const sources = [c?.currentTrick, c?.trick, c?.history];
   for (const s of sources) {
     if (Array.isArray(s) && s.length) {
-      for (let i=s.length-1;i>=0;i--){
+      for (let i=s.length-1; i>=0; i--) {
         const it = s[i];
-        const cards = it?.cards ?? it?.move?.cards ?? it?.play ?? it;
-        if (Array.isArray(cards) && cards.length>0) return cards as AnyCard[];
+        const cards = (it as any)?.cards ?? (it as any)?.move?.cards ?? (it as any)?.play ?? it;
+        if (Array.isArray(cards) && cards.length > 0) return cards as AnyCard[];
       }
     }
   }
   return undefined;
 }
-function parseRequire(ctx:any): Req {
-  const r = ctx?.require;
-  if (r && typeof r==='object'){
-    const t = (r.type || r.kind || r.moveType || r.name || r.expected)?.toString()?.toLowerCase() || 'any';
+function parseRequire(c:any): Req {
+  const r = c?.require;
+  if (r && typeof r === 'object') {
+    const t = (r as any).type ?? (r as any).kind ?? (r as any).moveType ?? (r as any).name ?? (r as any).expected ?? 'any';
+    const name = String(t).toLowerCase();
     const map: Record<string, MoveType|'lead'|'any'> = {
       'lead':'lead','any':'any',
       'single':'single','pair':'pair','triple':'triple',
@@ -263,7 +193,7 @@ function parseRequire(ctx:any): Req {
       'four-with-two':'four-with-two',
       'bomb':'bomb','rocket':'rocket'
     };
-    const type = map[t] ?? 'any';
+    const type = map[name] ?? 'any';
     const len  = (r as any).len ?? (r as any).length ?? (r as any).size ?? (r as any).width ?? undefined;
     const baseIdx = (r as any).baseIdx!=null ? Number((r as any).baseIdx) :
                     (r as any).baseRank!=null ? rankIndex((r as any).baseRank) :
@@ -271,45 +201,14 @@ function parseRequire(ctx:any): Req {
     const wings = ((r as any).wings==='pair' || (r as any).wings==='single') ? (r as any).wings : undefined;
     return { type, len, baseIdx, wings: wings??null };
   }
-  const p = (r as any)?.pattern || (r as any)?.shape || (r as any)?.follow || (r as any)?.sameAs || (r as any)?.expected || (r as any)?.need;
-  if (p && typeof p==='object'){
-    const t2 = (p.type || p.kind || p.name)?.toString()?.toLowerCase();
-    if (t2) {
-      const map2: Record<string, MoveType|'lead'|'any'> = {
-        'lead':'lead','any':'any',
-        'single':'single','pair':'pair','triple':'triple',
-        'straight':'straight','shunzi':'straight',
-        'pair-straight':'pair-straight','liandui':'pair-straight',
-        'plane':'plane','feiji':'plane',
-        'triple-with-single':'triple-with-single',
-        'triple-with-pair':'triple-with-pair',
-        'four-with-two':'four-with-two',
-        'bomb':'bomb','rocket':'rocket'
-      };
-      const type = map2[t2] ?? 'any';
-      const len  = (p as any).len ?? (p as any).length ?? (p as any).size ?? (p as any).width ?? undefined;
-      const baseIdx = (p as any).baseIdx!=null ? Number((p as any).baseIdx) :
-                      (p as any).baseRank!=null ? rankIndex((p as any).baseRank) :
-                      (p as any).rank!=null ? rankIndex((p as any).rank) : undefined;
-      const wings = ((p as any).wings==='pair' || (p as any).wings==='single') ? (p as any).wings : undefined;
-      return { type, len, baseIdx, wings: wings??null };
-    }
-  }
-  const last = lastNonPassFrom(ctx);
-  if (Array.isArray(last)) {
-    // basic inference (omitted for brevity in v5)
-    return { type:'any' };
-  }
-  return { type: 'lead' };
+  const last = lastNonPassFrom(c);
+  if (Array.isArray(last)) return { type:'any' };
+  return { type:'lead' };
 }
 
-// ====== Policy deep scan ======
-function looksLikeCardsArray(a:any): boolean {
-  return Array.isArray(a) && a.length>0;
-}
+// ===== Policy deep scan =====
 function looksLikeCandidatesArray(a:any): boolean {
-  // either array of arrays, or array of objects with .cards arrays
-  return Array.isArray(a) && a.some(x=>Array.isArray(x) || (x && typeof x==='object' && Array.isArray((x as any).cards)));
+  return Array.isArray(a) && a.some(x => Array.isArray(x) || (x && typeof x === 'object' && Array.isArray((x as any).cards)));
 }
 function normalizeCandidates(a:any): AnyCard[][] {
   const out: AnyCard[][] = [];
@@ -326,10 +225,8 @@ function normalizeCandidates(a:any): AnyCard[][] {
 const POLICY_KEYS = ['legal','candidates','moves','options','plays','follow','followups','list','actions','choices','combos','legalMoves','legal_cards'];
 function extractFromPolicy(pol:any, depth=0): AnyCard[][] {
   if (!pol || depth>4) return [];
-  // direct forms
   if (looksLikeCandidatesArray(pol)) return normalizeCandidates(pol);
   if (Array.isArray(pol) && pol.length && looksLikeCandidatesArray(pol[0])) {
-    // nested array
     return extractFromPolicy(pol[0], depth+1);
   }
   if (typeof pol==='object') {
@@ -339,7 +236,6 @@ function extractFromPolicy(pol:any, depth=0): AnyCard[][] {
         if (cand.length) return cand;
       }
     }
-    // recursive search
     for (const k of Object.keys(pol)) {
       const v = (pol as any)[k];
       const cand = extractFromPolicy(v, depth+1);
@@ -347,40 +243,33 @@ function extractFromPolicy(pol:any, depth=0): AnyCard[][] {
     }
   }
   if (typeof pol === 'function') {
-    try {
-      const ret = pol();
-      const cand = normalizeCandidates(ret);
-      if (cand.length) return cand;
-    } catch {}
+    try { const ret = pol(); const cand = normalizeCandidates(ret); if (cand.length) return cand; } catch {}
   }
   return [];
 }
-function extractCandidatesFromCtx(ctx:any): {cands: AnyCard[][], source: string} {
-  // 1) policy
-  if ('policy' in (ctx||{})) {
-    const pc = extractFromPolicy((ctx as any).policy, 0);
+function extractCandidatesFromCtx(c:any): {cands: AnyCard[][], source: string} {
+  if ('policy' in (c||{})) {
+    const pc = extractFromPolicy((c as any).policy, 0);
     if (pc.length) return { cands: pc, source: 'policy' };
   }
-  // 2) top-level keys (compat with v3)
   const keys = ['legalMoves','candidates','cands','moves','options','legal','legal_cards'];
   for (const k of keys) {
-    const v = (ctx as any)[k];
+    const v = (c as any)[k];
     const norm = normalizeCandidates(v);
     if (norm.length) return { cands: norm, source: k };
   }
   return { cands: [], source: 'none' };
 }
 
-// ====== Rule-based fallback (subset; re-use some v4 helpers) ======
+// ===== Simple lead candidates (fallback) =====
 function byRankBuckets(hand: AnyCard[]): Record<RankChar, AnyCard[]> {
   const buckets: Record<RankChar, AnyCard[]> = Object.fromEntries(RANKS.map(r=>[r, []])) as any;
-  for (const c of hand) buckets[toRankChar(c)].push(c);
+  for (const card of hand) buckets[toRankChar(card)].push(card);
   return buckets;
 }
-// simple lead generator if we have hand (omitting follow-up strictness due to unknown require encoding)
 function leadCandidatesFromHand(hand: AnyCard[]): AnyCard[][] {
   const b = byRankBuckets(hand), out: AnyCard[][] = [];
-  // prefer straights/pairs/triples then singles
+  // straights 8..5
   for (let L=8; L>=5; L--) {
     const idxs = STRAIGHT_RANKS.map(r=>RANK_IDX[r]);
     for (let i=0;i+L-1<idxs.length;i++){
@@ -388,13 +277,14 @@ function leadCandidatesFromHand(hand: AnyCard[]): AnyCard[][] {
       if (window.every(idx => Object.values(b)[idx]?.length>=1)) out.push(window.map(idx => Object.values(b)[idx][0]));
     }
   }
+  // triples, pairs, singles
   for (const r of RANKS) if (b[r].length>=3) out.push([b[r][0],b[r][1],b[r][2]]);
   for (const r of RANKS) if (b[r].length>=2) out.push([b[r][0],b[r][1]]);
   for (const r of RANKS) if (b[r].length>=1) out.push([b[r][0]]);
   return out.slice(0,200);
 }
 
-// ====== Bot main ======
+// ======== Bot main ========
 export async function MiniNetBot(ctx:any): Promise<BotMove> {
   const state: MiniState = {
     role: Number(ctx?.role ?? 0) as 0|1|2,
@@ -406,14 +296,14 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   };
 
   const rawHand: AnyCard[] = getHandFromCtx(ctx);
-  const handsShape = Array.isArray((ctx as any)?.hands) ? (Array.isArray(((ctx as any).hands||[])[0])?'nested':'flat') : (typeof (ctx as any)?.hands==='object'?'object':'none');
+  const handsShape = Array.isArray((ctx as any)?.hands) ? (Array.isArray(((ctx as any).hands || [])[0]) ? 'nested' : 'flat') : (typeof (ctx as any)?.hands === 'object' ? 'object' : 'none');
   const { cands: policyCands, source } = extractCandidatesFromCtx(ctx);
   let candidates: AnyCard[][] = policyCands;
 
   if (!candidates.length) {
     if (Array.isArray(rawHand) && rawHand.length) {
       const req = parseRequire(ctx);
-      if (req.type==='lead' || req.type==='any') {
+      if (req.type === 'lead' || req.type === 'any') {
         candidates = leadCandidatesFromHand(rawHand);
       }
     }
@@ -422,7 +312,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   if (!candidates.length) {
     const sk = getSeatKey(ctx);
     const handLen = Array.isArray(rawHand) ? rawHand.length : -1;
-    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v7: no candidates (source=${source}, seatKey=${String(sk)}, handLen=${handLen})` };
+    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v7: no candidates (source=${source}, seatKey=${String(sk)}, handLen=${handLen}, handsShape=${handsShape})` };
     const lowest = Array.isArray(rawHand) && rawHand.length ? [...rawHand].sort((a,b)=>rankIndex(a)-rankIndex(b))[0] : undefined;
     if (lowest!=null) candidates = [[lowest]];
   }
