@@ -6,6 +6,7 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
+  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -228,6 +229,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'http':     return 'HTTP';
     default: return '';
   }
+}
 }
 
 /* ====== 雷达图累计（0~5） ====== */
@@ -1982,8 +1984,8 @@ function Home() {
     </label>
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-      TrueSkill / 画像 / 出牌评分 / 评分统计
+    <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
+      统一： TrueSkill / 画像 / 出牌评分 / 评分统计
     <input
       ref={allFileRef}
       type="file"
@@ -2054,6 +2056,7 @@ function Home() {
                       <option value="built-in:random-legal">Random Legal</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:mininet">MiniNet</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
