@@ -221,29 +221,14 @@ type RunBody = {
 
 /* ========== Bot 工厂 ========== */
 function providerLabel(choice: BotChoice) {
-  switch (choice) {
-    case 'built-in:greedy-max': return 'GreedyMax';
-    case 'built-in:greedy-min': return 'GreedyMin';
-    case 'built-in:random-legal'
-  | 'built-in:mininet': return 'RandomLegal';
-    case 'built-in:ally-support': return 'AllySupport';
-    case 'built-in:endgame-rush': return 'EndgameRush';
-    case 'ai:openai': return 'OpenAI';
-    case 'ai:gemini': return 'Gemini';
-    case 'ai:grok': return 'Grok';
-    case 'ai:kimi': return 'Kimi';
-    case 'ai:qwen': return 'Qwen';
-    case 'ai:deepseek': return 'DeepSeek';
-    case 'http': return 'HTTP';
-  }
+  
 }
 
 function asBot(choice: BotChoice, spec?: SeatSpec) {
   switch (choice) {
     case 'built-in:greedy-max': return GreedyMax;
     case 'built-in:greedy-min': return GreedyMin;
-    case 'built-in:random-legal'
-  | 'built-in:mininet': return RandomLegal;
+    case 'built-in:random-legal': return RandomLegal;
     case 'built-in:ally-support': return AllySupport;
     case 'built-in:endgame-rush': return EndgameRush;
     case 'built-in:mininet': return MiniNetBot;
