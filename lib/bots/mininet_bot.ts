@@ -230,7 +230,7 @@ function analyzeMove(cards: AnyCard[]): {type:MoveType, len?:number, baseIdx?:nu
   }
 
   // Triple-based
-  const tripleIdxs = []; for (let i=0;i<13;i++){ if (h[i]===3) tripleIdxs.push(i); }
+  const tripleIdxs: number[] = []; for (let i=0;i<13;i++){ if (h[i]===3) tripleIdxs.push(i); }
   if (tripleIdxs.length>=2){
     // assume pure plane (no wings) if counts match
     if (tripleIdxs.length*3 === cards.length) {
