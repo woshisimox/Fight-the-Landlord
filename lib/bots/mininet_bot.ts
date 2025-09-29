@@ -1,4 +1,4 @@
-// lib/bots/mininet_bot.ts (v7 - qwen-style hands + policy scan + rule fallback, compile-safe)
+// lib/bots/mininet_bot.ts (v7.1 - compile-safe + counts fix)
 type AnyCard = any;
 type BotMove = { move: 'play' | 'pass'; cards?: AnyCard[]; reason?: string };
 
@@ -62,7 +62,8 @@ type MiniState = {
 function stateFeat(s: MiniState): number[] {
   const roleOne = [0,0,0]; roleOne[s.role] = 1;
   const lordOne = [0,0,0]; lordOne[s.landlord] = 1;
-  const counts = (s.counts ?? [17,17,17]).map(x => Math.min(20, x) / 20);
+  const countsArr = (Array.isArray(s.counts) ? s.counts : [17,17,17]) as number[];
+  const counts = countsArr.map(x => Math.min(20, Number(x)||0) / 20);
   const bombs = [(s.bombsUsed ?? 0) / 6];
   const lastType = classifyMove(s.lastMove?.cards);
   const lastOneHot = MOVE_TYPES.map(t => t === lastType ? 1 : 0);
@@ -104,6 +105,40 @@ function initHeuristicMLP(): MLP {
 const M = initHeuristicMLP();
 function mlpScore(x:number[]): number { const h1 = matVec(M.l1.W, x, M.l1.b).map(relu); const y = matVec(M.l2.W, h1, M.l2.b)[0]; return y; }
 
+// ===== Counts normalization (robust) =====
+function normalizeCountsFromCtx(c:any): [number,number,number] {
+  const srcs = [(c as any)?.counts, (c as any)?.handsCount, (c as any)?.state?.counts];
+  for (const s of srcs) {
+    if (Array.isArray(s) && s.length>=3 && s.every((x:any)=> typeof x==='number')) {
+      return [Number(s[0])||0, Number(s[1])||0, Number(s[2])||0];
+    }
+    if (s && typeof s==='object') {
+      const tryKeys:any[] = ['0','1','2',0,1,2,'甲','乙','丙','landlord','farmerA','farmerB','地主','农民A','农民B'];
+      const got:number[] = [];
+      for (const k of tryKeys) {
+        if ((s as any)[k] != null && typeof (s as any)[k] === 'number') got.push(Number((s as any)[k])||0);
+      }
+      if (got.length>=3) return [got[0],got[1],got[2]] as [number,number,number];
+      const vals = Object.values(s).filter(v=>typeof v==='number') as number[];
+      if (vals.length>=3) return [Number(vals[0])||0, Number(vals[1])||0, Number(vals[2])||0];
+    }
+    if (typeof s === 'number') return [s,s,s] as [number,number,number];
+  }
+  try {
+    const h = (c as any)?.hands;
+    if (Array.isArray(h) && Array.isArray(h[0])) {
+      const a = (h as any[]).map((x:any)=> Array.isArray(x)? x.length : 0);
+      if (a.length>=3) return [a[0]||0,a[1]||0,a[2]||0];
+    } else if (h && typeof h==='object') {
+      const tryKeys:any[] = ['0','1','2',0,1,2,'甲','乙','丙','landlord','farmerA','farmerB','地主','农民A','农民B'];
+      const arr:number[] = [];
+      for (const k of tryKeys) if (Array.isArray((h as any)[k])) arr.push(((h as any)[k] as any[]).length);
+      if (arr.length>=3) return [arr[0]||0,arr[1]||0,arr[2]||0];
+    }
+  } catch {}
+  return [17,17,17];
+}
+
 // ===== Seat & hand helpers =====
 function getSeatKey(c:any): any { if (c && ('seat' in c)) return c.seat; if (c && ('role' in c)) return c.role; if (c && ('player' in c)) return c.player; return undefined; }
 function getSeat(c:any): number | undefined { const k = getSeatKey(c); return (typeof k === 'number') ? k : undefined; }
@@ -111,7 +146,6 @@ function getSeat(c:any): number | undefined { const k = getSeatKey(c); return (t
 function normalizeHandTokens(raw:any): AnyCard[] {
   if (Array.isArray(raw)) return raw as AnyCard[];
   if (raw && typeof raw === 'object') {
-    // Common wrappers: {hand:[...]}, {cards:[...]}, {list:[...]}
     const inner = (raw as any).hand ?? (raw as any).cards ?? (raw as any).list;
     if (Array.isArray(inner)) return inner as AnyCard[];
   }
@@ -119,12 +153,10 @@ function normalizeHandTokens(raw:any): AnyCard[] {
 }
 
 function getHandFromCtx(c:any): AnyCard[] {
-  // 1) qwen-style: ctx.hands is a flat array = current player's hand
   const direct = (c as any)?.hands;
   if (Array.isArray(direct) && (direct.length === 0 || !Array.isArray(direct[0]))) {
     return normalizeHandTokens(direct);
   }
-  // 2) other direct paths
   const tryPaths: Array<(x:any)=>any> = [
     (x:any)=> x?.hand,
     (x:any)=> x?.myHand,
@@ -138,16 +170,14 @@ function getHandFromCtx(c:any): AnyCard[] {
     const norm = normalizeHandTokens(v);
     if (norm.length) return norm;
   }
-  // 3) hands as array-of-arrays (by seat)
   const seatNum = getSeat(c);
   const hands = (c as any)?.hands ?? (c as any)?.state?.hands;
   if (Array.isArray(hands)) {
     if (typeof seatNum === 'number' && Array.isArray(hands[seatNum])) return normalizeHandTokens(hands[seatNum]);
     for (const arr of hands) { const norm = normalizeHandTokens(arr); if (norm.length) return norm; }
   } else if (hands && typeof hands === 'object') {
-    // 4) object map: keys may be numeric strings, Chinese seat names, or roles
     const seatKey = getSeatKey(c);
-    const candidateKeys = [seatKey, String(seatKey), (c as any)?.role, (c as any)?.seat, '甲','乙','丙','地主','农民A','农民B','landlord','farmerA','farmerB','0','1','2'];
+    const candidateKeys:any[] = [seatKey, String(seatKey), (c as any)?.role, (c as any)?.seat, '甲','乙','丙','地主','农民A','农民B','landlord','farmerA','farmerB','0','1','2'];
     for (const k of candidateKeys) {
       if (k!=null && k in hands) {
         const norm = normalizeHandTokens((hands as any)[k]);
@@ -162,7 +192,7 @@ function getHandFromCtx(c:any): AnyCard[] {
   return [];
 }
 
-// ===== Require & simple rules =====
+// ===== Require & policy scan =====
 type Req = { type: MoveType|'lead'|'any'; len?: number; wings?: 'single'|'pair'|null; baseIdx?: number; };
 function lastNonPassFrom(c:any): AnyCard[] | undefined {
   const sources = [c?.currentTrick, c?.trick, c?.history];
@@ -183,15 +213,10 @@ function parseRequire(c:any): Req {
     const t = (r as any).type ?? (r as any).kind ?? (r as any).moveType ?? (r as any).name ?? (r as any).expected ?? 'any';
     const name = String(t).toLowerCase();
     const map: Record<string, MoveType|'lead'|'any'> = {
-      'lead':'lead','any':'any',
-      'single':'single','pair':'pair','triple':'triple',
-      'straight':'straight','shunzi':'straight',
-      'pair-straight':'pair-straight','liandui':'pair-straight',
-      'plane':'plane','feiji':'plane',
-      'triple-with-single':'triple-with-single',
-      'triple-with-pair':'triple-with-pair',
-      'four-with-two':'four-with-two',
-      'bomb':'bomb','rocket':'rocket'
+      'lead':'lead','any':'any','single':'single','pair':'pair','triple':'triple',
+      'straight':'straight','shunzi':'straight','pair-straight':'pair-straight','liandui':'pair-straight',
+      'plane':'plane','feiji':'plane','triple-with-single':'triple-with-single','triple-with-pair':'triple-with-pair',
+      'four-with-two':'four-with-two','bomb':'bomb','rocket':'rocket'
     };
     const type = map[name] ?? 'any';
     const len  = (r as any).len ?? (r as any).length ?? (r as any).size ?? (r as any).width ?? undefined;
@@ -205,8 +230,6 @@ function parseRequire(c:any): Req {
   if (Array.isArray(last)) return { type:'any' };
   return { type:'lead' };
 }
-
-// ===== Policy deep scan =====
 function looksLikeCandidatesArray(a:any): boolean {
   return Array.isArray(a) && a.some(x => Array.isArray(x) || (x && typeof x === 'object' && Array.isArray((x as any).cards)));
 }
@@ -261,7 +284,7 @@ function extractCandidatesFromCtx(c:any): {cands: AnyCard[][], source: string} {
   return { cands: [], source: 'none' };
 }
 
-// ===== Simple lead candidates (fallback) =====
+// ===== Simple lead candidates =====
 function byRankBuckets(hand: AnyCard[]): Record<RankChar, AnyCard[]> {
   const buckets: Record<RankChar, AnyCard[]> = Object.fromEntries(RANKS.map(r=>[r, []])) as any;
   for (const card of hand) buckets[toRankChar(card)].push(card);
@@ -269,7 +292,6 @@ function byRankBuckets(hand: AnyCard[]): Record<RankChar, AnyCard[]> {
 }
 function leadCandidatesFromHand(hand: AnyCard[]): AnyCard[][] {
   const b = byRankBuckets(hand), out: AnyCard[][] = [];
-  // straights 8..5
   for (let L=8; L>=5; L--) {
     const idxs = STRAIGHT_RANKS.map(r=>RANK_IDX[r]);
     for (let i=0;i+L-1<idxs.length;i++){
@@ -277,7 +299,6 @@ function leadCandidatesFromHand(hand: AnyCard[]): AnyCard[][] {
       if (window.every(idx => Object.values(b)[idx]?.length>=1)) out.push(window.map(idx => Object.values(b)[idx][0]));
     }
   }
-  // triples, pairs, singles
   for (const r of RANKS) if (b[r].length>=3) out.push([b[r][0],b[r][1],b[r][2]]);
   for (const r of RANKS) if (b[r].length>=2) out.push([b[r][0],b[r][1]]);
   for (const r of RANKS) if (b[r].length>=1) out.push([b[r][0]]);
@@ -291,7 +312,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
     landlord: Number(ctx?.landlord ?? 0) as 0|1|2,
     lastMove: undefined,
     myHand: getHandFromCtx(ctx).map(toRankChar),
-    counts: ctx?.counts,
+    counts: normalizeCountsFromCtx(ctx),
     bombsUsed: ctx?.stats?.bombs ?? ctx?.bombsUsed ?? 0,
   };
 
@@ -312,7 +333,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
   if (!candidates.length) {
     const sk = getSeatKey(ctx);
     const handLen = Array.isArray(rawHand) ? rawHand.length : -1;
-    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v7: no candidates (source=${source}, seatKey=${String(sk)}, handLen=${handLen}, handsShape=${handsShape})` };
+    if (ctx?.canPass) return { move:'pass', reason:`MiniNet v7.1: no candidates (source=${source}, seatKey=${String(sk)}, handLen=${handLen}, handsShape=${handsShape})` };
     const lowest = Array.isArray(rawHand) && rawHand.length ? [...rawHand].sort((a,b)=>rankIndex(a)-rankIndex(b))[0] : undefined;
     if (lowest!=null) candidates = [[lowest]];
   }
@@ -325,7 +346,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
     score += (Math.random()-0.5)*0.01;
     if (score > bestScore) { bestScore = score; best = m; }
   }
-  return { move:'play', cards: best, reason:`MiniNet v7: cands=${candidates.length} from=${source} score=${bestScore.toFixed(3)}` };
+  return { move:'play', cards: best, reason:`MiniNet v7.1: cands=${candidates.length} from=${source} score=${bestScore.toFixed(3)}` };
 }
 
 export function loadMiniNetWeights(json: {l1:Dense; l2:Dense}) {
