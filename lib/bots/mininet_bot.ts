@@ -1,6 +1,6 @@
 // lib/bots/mininet_bot.ts
 // 轻量内置AI：MiniNet（纯TS两层MLP对候选出牌打分）——健壮版候选提取
-type Card = string;
+type Card = any;
 type BotMove = { move: 'play' | 'pass'; cards?: Card[]; reason?: string };
 
 const RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const;
@@ -10,7 +10,20 @@ const MOVE_TYPES = [
 ] as const;
 type MoveType = typeof MOVE_TYPES[number];
 
-function rankIndex(c: Card): number { const i = RANKS.indexOf(c as any); return i>=0?i:0; }
+function toRankChar(raw:any): string {
+  if (raw==null) return '3';
+  // If already a typical rank string
+  const s = String(raw);
+  const t = s.length===1 ? s : s.slice(-1); // try last char if token like '7H' or '♦7'
+  const up = t.toUpperCase();
+  if (['3','4','5','6','7','8','9','T','J','Q','K','A','2','X'].includes(up)) return up;
+  if (up==='0') return 'T';
+  if (up==='小' || up==='S') return 'X'; // small joker heuristic
+  return '3';
+}
+
+
+function rankIndex(c: Card): number { const r = toRankChar(c); const i = RANKS.indexOf(r as any); return i>=0?i:0; }
 function hist15(cards: Card[]|undefined): number[] { const h=new Array(15).fill(0); if(cards)for(const c of cards)h[rankIndex(c)]++; return h; }
 
 function classifyMove(cards?: Card[]): MoveType {
@@ -64,7 +77,7 @@ function buildX(s: MiniState, m?: Card[]): number[] {
 }
 
 
-function getHandFromCtx(ctx:any): string[] {
+function getHandFromCtx(ctx:any): any[] {
   const tryPaths = [
     (c:any)=> c?.hand,
     (c:any)=> c?.myHand,
@@ -75,22 +88,41 @@ function getHandFromCtx(ctx:any): string[] {
   ];
   for (const f of tryPaths) {
     const v = f(ctx);
-    if (Array.isArray(v) && v.every(x=>typeof x==='string')) return v as string[];
+    if (Array.isArray(v) && v.length) return v as any[];
   }
   // hands[seat]
   const seat = (typeof ctx?.seat==='number') ? ctx.seat : (typeof ctx?.role==='number' ? ctx.role : null);
-  if (Array.isArray(ctx?.hands) && seat!=null && Array.isArray(ctx.hands[seat])) {
-    return ctx.hands[seat] as string[];
-  }
-  if (Array.isArray(ctx?.state?.hands) && seat!=null && Array.isArray(ctx.state.hands[seat])) {
-    return ctx.state.hands[seat] as string[];
-  }
+  if (Array.isArray(ctx?.hands) && seat!=null && Array.isArray(ctx.hands[seat])) { return ctx.hands[seat] as any[]; }
+  if (Array.isArray(ctx?.state?.hands) && seat!=null && Array.isArray(ctx.state.hands[seat])) { return ctx.state.hands[seat] as any[]; }
   return [];
 }
 
-function genNaiveCandidatesFromHand(hand:string[]): string[][] {
+function genNaiveCandidatesFromHand(hand:any[]): any[][] {
   if (!Array.isArray(hand) || hand.length===0) return [];
-  const byRank: Record<string,string[]> = {};
+  const byRank: Record<string, any[]> = {};
+  for (const c of hand) {
+    const r = toRankChar(c);
+    (byRank[r] ||= []).push(c);
+  }
+  const cands: any[][] = [];
+  // singles
+  for (const c of hand) cands.push([c]);
+  // pairs / triples / bombs using grouped raw tokens
+  for (const r in byRank) {
+    const arr = byRank[r];
+    if (arr.length>=2) cands.push(arr.slice(0,2));
+    if (arr.length>=3) cands.push(arr.slice(0,3));
+    if (arr.length>=4) cands.push(arr.slice(0,4)); // bomb
+  }
+  // rocket (use rank char detection)
+  const ranks = hand.map(toRankChar);
+  if (ranks.includes('X') && ranks.filter(x=>x==='X').length>=2) {
+    // If jokers are both represented as 'X' variants; try to find two raw jokers
+    const jokers = hand.filter(c => ['x','X','joker','JOKER','🃏','Jk','JK'].includes(String(c)) or toRankChar(c)==='X');
+    if (jokers.length>=2) cands.push([jokers[0], jokers[1]]);
+  }
+  return cands;
+};
   for (const c of hand) {
     (byRank[c] ||= []).push(c);
   }
@@ -134,8 +166,8 @@ const M=initHeuristicMLP();
 function mlpScore(x:number[]): number { const h1=matVec(M.l1.W,x,M.l1.b).map(relu); return matVec(M.l2.W,h1,M.l2.b)[0]; }
 
 // -------- Robust candidate extractor --------
-function extractCandidates(ctx:any): string[][] {
-  const fields = ['legalMoves','candidates','cands','moves','options','legal','legal_cards'];
+function extractCandidates(ctx:any): any[][] {
+  const fields = ['legalMoves','candidates','cands','moves','options','legal','legal_cards','getLegal','getCandidates','genMoves'];
   for (const key of fields) {
     const v = ctx?.[key];
     if (Array.isArray(v) && v.length) {
@@ -176,7 +208,7 @@ export async function MiniNetBot(ctx:any): Promise<BotMove> {
     role: Number(ctx?.role ?? 0) as 0|1|2,
     landlord: Number(ctx?.landlord ?? 0) as 0|1|2,
     lastMove: ctx?.lastMove,
-    myHand: ctx?.hand ?? ctx?.myHand,
+    myHand: getHandFromCtx(ctx).map(toRankChar),
     counts: ctx?.counts,
     bombsUsed: ctx?.stats?.bombs ?? ctx?.bombsUsed ?? 0,
   };
