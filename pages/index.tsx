@@ -256,42 +256,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
 }
 
 
-:{ title: string; scores: Score5; }) {
-  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
-  const size = 180, R = 70, cx = size/2, cy = size/2;
-  const pts = vals.map((v, i)=>{
-    const ang = (-90 + i*(360/5)) * Math.PI/180;
-    const r = (Math.max(0, Math.min(5, v)) / 5) * R;
-    return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
-  }).join(' ');
-  return (
-    <div style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
-      <div style={{ fontWeight:700, marginBottom:6 }}>{title}</div>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {[1,2,3,4,5].map(k=>{
-          const r = (k/5)*R;
-          const polygon = Array.from({length:5}, (_,i)=>{
-            const ang = (-90 + i*(360/5)) * Math.PI/180;
-            return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
-          }).join(' ');
-          return <polygon key={k} points={polygon} fill="none" stroke="#e5e7eb"/>;
-        })}
-        {Array.from({length:5}, (_,i)=>{
-          const ang = (-90 + i*(360/5)) * Math.PI/180;
-          return <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang)} y2={cy + R * Math.sin(ang)} stroke="#e5e7eb"/>;
-        })}
-        <polygon points={pts} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
-        {(['配合','激进','保守','效率','抢地主']).map((lab, i)=>{
-          const ang = (-90 + i*(360/5)) * Math.PI/180;
-          return <text key={i} x={cx + (R+14) * Math.cos(ang)} y={cy + (R+14) * Math.sin(ang)} fontSize="12" textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
-        })}
-      </svg>
-      <div style={{ fontSize:12, color:'#6b7280' }}>
-        分数（0~5）：Coop {scores.coop} / Agg {scores.agg} / Cons {scores.cons} / Eff {scores.eff} / Rob {scores.rob}
-      </div>
-    </div>
-  );
-}
+
 
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
 const makeRewriteRoundLabel = (n: number) => (msg: string) => {
