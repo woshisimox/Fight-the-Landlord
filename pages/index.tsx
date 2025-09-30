@@ -6,7 +6,6 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -214,10 +213,9 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
 }
 function choiceLabel(choice: BotChoice): string {
   switch (choice) {
-    case 'built-in:greedy-max': return 'GreedyMax';
-    case 'built-in:greedy-min': return 'GreedyMin';
-    case 'built-in:random-legal': return 'RandomLegal';
-    case 'built-in:mininet': return 'MiniNet';
+    case 'built-in:greedy-max': return 'Greedy Max';
+    case 'built-in:greedy-min': return 'Greedy Min';
+    case 'built-in:random-legal': return 'Random Legal';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
     case 'ai:openai': return 'OpenAI';
@@ -227,9 +225,9 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':  return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
-    default: return '';
   }
 }
+
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
@@ -2054,7 +2052,6 @@ function Home() {
                       <option value="built-in:random-legal">Random Legal</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
-                      <option value="built-in:mininet">MiniNet</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
