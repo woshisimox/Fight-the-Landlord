@@ -2091,6 +2091,7 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
+                      <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
                     </optgroup>
