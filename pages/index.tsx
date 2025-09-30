@@ -1,5 +1,5 @@
 
-// 读取“被选候选”的打分（取 reason 中第一个带标签的分数）。
+/* ===== Chosen-candidate score reader ===== */
 function readChosenScore(rr: string): number|null {
   if (!rr) return null;
   const pats = [
@@ -13,11 +13,6 @@ function readChosenScore(rr: string): number|null {
   for (const re of pats) {
     const m = re.exec(rr);
     if (m) { const v = parseFloat(m[1]); if (Number.isFinite(v)) return v; }
-  }
-  const nums = rr.match(/[+-]?\d+(?:\.\d+)?/g);
-  if (nums && nums.length) {
-    const v = parseFloat(nums[0]); // 若走到兜底，取“第一个”数字更像被选候选
-    if (Number.isFinite(v)) return v;
   }
   return null;
 }
@@ -1344,13 +1339,7 @@ for (const raw of batch) {
                 const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                 if (s>=0 && s<3) {
                   sawAnyTurn = true;
-                  let val: number|null = null;
-                  {
-                    const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
-                    const fromReason = readChosenScore(rr);
-                    const fromField  = (typeof (m as any).score === 'number' && Number.isFinite((m as any).score)) ? (m as any).score as number : null;
-                    val = (fromReason != null ? fromReason : fromField);
-                  }
+                  const val = (typeof m.score === 'number') ? (m.score as number) : null;
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];

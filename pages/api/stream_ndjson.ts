@@ -1,8 +1,9 @@
 // pages/api/stream_ndjson.ts
 
-function extractScoreFromReason(reason?: any): number|undefined {
+/* ===== Chosen-candidate score extractor ===== */
+function extractChosenScore(reason?: any): number|undefined {
   if (typeof reason !== 'string' || !reason) return undefined;
-  const patterns = [
+  const pats = [
     /score\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
     /mlp\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
     /eval(?:uation)?\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
@@ -10,15 +11,9 @@ function extractScoreFromReason(reason?: any): number|undefined {
     /评分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
     /估值\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
   ];
-  for (const re of patterns) {
+  for (const re of pats) {
     const m = re.exec(reason);
     if (m) { const v = parseFloat(m[1]); if (Number.isFinite(v)) return v; }
-  }
-  // fallback: take the last number in the string
-  const numAll = reason.match(/[+-]?\d+(?:\.\d+)?/g);
-  if (numAll && numAll.length) {
-    const v = parseFloat(numAll[numAll.length - 1]);
-    if (Number.isFinite(v)) return v;
   }
   return undefined;
 }
@@ -27,12 +22,12 @@ function extractScoreFromReason(reason?: any): number|undefined {
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
-import { MiniNetBot } from '../../lib/bots/mininet_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
 import { HttpBot } from '../../lib/bots/http_bot';
 import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
+import { MiniNetBot } from '../../lib/bots/mininet_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
@@ -246,20 +241,7 @@ type RunBody = {
 
 /* ========== Bot 工厂 ========== */
 function providerLabel(choice: BotChoice) {
-  switch (choice) {
-    case 'built-in:greedy-max': return 'GreedyMax';
-    case 'built-in:greedy-min': return 'GreedyMin';
-    case 'built-in:random-legal': return 'RandomLegal';
-    case 'built-in:ally-support': return 'AllySupport';
-    case 'built-in:endgame-rush': return 'EndgameRush';
-    case 'ai:openai': return 'OpenAI';
-    case 'ai:gemini': return 'Gemini';
-    case 'ai:grok': return 'Grok';
-    case 'ai:kimi': return 'Kimi';
-    case 'ai:qwen': return 'Qwen';
-    case 'ai:deepseek': return 'DeepSeek';
-    case 'http': return 'HTTP';
-  }
+  
 }
 
 function asBot(choice: BotChoice, spec?: SeatSpec) {
@@ -389,9 +371,9 @@ for await (const ev of (iter as any)) {
       countPlay(seat, move, cards);
       const moveStr = stringifyMove({ move, cards });
       const reason = lastReason[seat] || null;
-      let plotScore: number|undefined = extractScoreFromReason(reason);
-      if (plotScore === undefined) plotScore = (lastScore[seat] ?? undefined);
-      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: plotScore, totals });
+      const chosen = extractChosenScore(reason);
+      const unified = (lastScore[seat] ?? undefined);
+      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score_chosen: (chosen ?? undefined), score: (chosen ?? undefined), score_unified: (unified ?? undefined), totals });
       continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
