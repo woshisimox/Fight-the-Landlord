@@ -1,21 +1,3 @@
-
-function readChosenScore(rr: string): number|null {
-  if (!rr) return null;
-  const pats = [
-    /score\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
-    /mlp\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
-    /eval(?:uation)?\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
-    /打分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
-    /评分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
-    /估值\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
-  ];
-  for (const re of pats) {
-    const m = re.exec(rr);
-    if (m) { const v = parseFloat(m[1]); if (Number.isFinite(v)) return v; }
-  }
-  return null;
-}
-
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
@@ -24,7 +6,6 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -245,10 +226,10 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':  return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
-  }
     default: return String(choice);
-  
+  }
 }
+
 
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
@@ -1340,16 +1321,7 @@ for (const raw of batch) {
                 const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                 if (s>=0 && s<3) {
                   sawAnyTurn = true;
-                  let val: number|null = null;
-                  {
-                    const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
-                    const chosenField = (typeof (m as any).score_chosen === 'number' && Number.isFinite((m as any).score_chosen)) ? (m as any).score_chosen as number : null;
-                    const scoreField  = (typeof (m as any).score        === 'number' && Number.isFinite((m as any).score))        ? (m as any).score        as number : null;
-                    const parsed      = readChosenScore(rr);
-                    val = (chosenField ?? scoreField ?? parsed);
-                  }
-                  console.debug('[ScoreTimeline] push turn', { seat:s, val, chosenField:(m as any).score_chosen, scoreField:(m as any).score, rr:(m.reason ?? lastReasonRef.current?.[s] ?? '') });
-
+                  const val = (typeof m.score === 'number') ? (m.score as number) : null;
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
@@ -2011,8 +1983,8 @@ function Home() {
     </label>
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
-      统一： TrueSkill / 画像 / 出牌评分 / 评分统计
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      TrueSkill / 画像 / 出牌评分 / 评分统计
     <input
       ref={allFileRef}
       type="file"
@@ -2081,7 +2053,6 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
-                      <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
                     </optgroup>
