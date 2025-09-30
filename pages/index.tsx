@@ -212,8 +212,7 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
     default: return '';
   }
 }
-function choiceLabel(choice: BotChoice): string {
-  switch (choice) {
+function choiceLabel(choice: BotChoice): string {switch (choice) {
     case 'built-in:greedy-max': return 'Greedy Max';
     case 'built-in:greedy-min': return 'Greedy Min';
     case 'built-in:random-legal': return 'Random Legal';
@@ -227,9 +226,9 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':  return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
-  }
     default: return String(choice);
-  
+
+  }
 }
 
 /* ====== 雷达图累计（0~5） ====== */
