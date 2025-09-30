@@ -364,7 +364,12 @@ for await (const ev of (iter as any)) {
       countPlay(seat, move, cards);
       const moveStr = stringifyMove({ move, cards });
       const reason = lastReason[seat] || null;
-      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: (lastScore[seat] ?? undefined), totals });
+      let plotScore: number|undefined = (lastScore[seat] ?? undefined);
+      if (typeof reason === 'string') {
+        const mm = /score\s*(?:[=:]\s*)?([+-]?\d+(?:\.\d+)?)/i.exec(reason);
+        if (mm) { const v = parseFloat(mm[1]); if (Number.isFinite(v)) plotScore = v; }
+      }
+      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: plotScore, totals });
       continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
