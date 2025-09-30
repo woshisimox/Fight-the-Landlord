@@ -6,6 +6,7 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
+  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -216,7 +217,6 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:greedy-max': return 'Greedy Max';
     case 'built-in:greedy-min': return 'Greedy Min';
     case 'built-in:random-legal': return 'Random Legal';
-    case 'built-in:mininet': return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
     case 'ai:openai': return 'OpenAI';
@@ -226,10 +226,8 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':  return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
-    default: return String(choice);
   }
 }
-
 
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
@@ -1983,8 +1981,8 @@ function Home() {
     </label>
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-      TrueSkill / 画像 / 出牌评分 / 评分统计
+    <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
+      统一： TrueSkill / 画像 / 出牌评分 / 评分统计
     <input
       ref={allFileRef}
       type="file"
