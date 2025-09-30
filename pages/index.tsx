@@ -217,6 +217,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:greedy-max': return 'Greedy Max';
     case 'built-in:greedy-min': return 'Greedy Min';
     case 'built-in:random-legal': return 'Random Legal';
+    case 'built-in:mininet': return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
     case 'ai:openai': return 'OpenAI';
@@ -227,6 +228,8 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
   }
+    default: return String(choice);
+  
 }
 
 /* ====== 雷达图累计（0~5） ====== */
