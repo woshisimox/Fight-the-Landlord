@@ -1,5 +1,4 @@
 
-/* ===== Chosen-candidate score reader ===== */
 function readChosenScore(rr: string): number|null {
   if (!rr) return null;
   const pats = [
@@ -25,7 +24,6 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -233,10 +231,9 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
 }
 function choiceLabel(choice: BotChoice): string {
   switch (choice) {
-    case 'built-in:greedy-max': return 'GreedyMax';
-    case 'built-in:greedy-min': return 'GreedyMin';
-    case 'built-in:random-legal': return 'RandomLegal';
-    case 'built-in:mininet': return 'MiniNet';
+    case 'built-in:greedy-max': return 'Greedy Max';
+    case 'built-in:greedy-min': return 'Greedy Min';
+    case 'built-in:random-legal': return 'Random Legal';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
     case 'ai:openai': return 'OpenAI';
@@ -246,9 +243,9 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':  return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
-    default: return '';
   }
 }
+
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
@@ -1339,7 +1336,16 @@ for (const raw of batch) {
                 const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                 if (s>=0 && s<3) {
                   sawAnyTurn = true;
-                  const val = (typeof m.score === 'number') ? (m.score as number) : null;
+                  let val: number|null = null;
+                  {
+                    const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
+                    const chosenField = (typeof (m as any).score_chosen === 'number' && Number.isFinite((m as any).score_chosen)) ? (m as any).score_chosen as number : null;
+                    const scoreField  = (typeof (m as any).score        === 'number' && Number.isFinite((m as any).score))        ? (m as any).score        as number : null;
+                    const parsed      = readChosenScore(rr);
+                    val = (chosenField ?? scoreField ?? parsed);
+                  }
+                  console.debug('[ScoreTimeline] push turn', { seat:s, val, chosenField:(m as any).score_chosen, scoreField:(m as any).score, rr });
+
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
@@ -2073,7 +2079,6 @@ function Home() {
                       <option value="built-in:random-legal">Random Legal</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
-                      <option value="built-in:mininet">MiniNet</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
