@@ -1,4 +1,29 @@
 // pages/api/stream_ndjson.ts
+
+function extractScoreFromReason(reason?: any): number|undefined {
+  if (typeof reason !== 'string' || !reason) return undefined;
+  const patterns = [
+    /score\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
+    /mlp\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
+    /eval(?:uation)?\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
+    /打分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
+    /评分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
+    /估值\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(reason);
+    if (m) { const v = parseFloat(m[1]); if (Number.isFinite(v)) return v; }
+  }
+  // fallback: take the last number in the string
+  const numAll = reason.match(/[+-]?\d+(?:\.\d+)?/g);
+  if (numAll && numAll.length) {
+    const v = parseFloat(numAll[numAll.length - 1]);
+    if (Number.isFinite(v)) return v;
+  }
+  return undefined;
+}
+
+
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
@@ -364,7 +389,9 @@ for await (const ev of (iter as any)) {
       countPlay(seat, move, cards);
       const moveStr = stringifyMove({ move, cards });
       const reason = lastReason[seat] || null;
-      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: (lastScore[seat] ?? undefined), totals });
+      let plotScore: number|undefined = extractScoreFromReason(reason);
+      if (plotScore === undefined) plotScore = (lastScore[seat] ?? undefined);
+      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: plotScore, totals });
       continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {

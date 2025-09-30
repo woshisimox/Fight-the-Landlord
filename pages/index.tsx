@@ -1,3 +1,26 @@
+
+function readScoreFromReason(rr: string): number|null {
+  if (!rr) return null;
+  const pats = [
+    /score\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
+    /mlp\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
+    /eval(?:uation)?\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
+    /打分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
+    /评分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
+    /估值\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
+  ];
+  for (const re of pats) {
+    const m = re.exec(rr);
+    if (m) { const v = parseFloat(m[1]); if (Number.isFinite(v)) return v; }
+  }
+  const all = rr.match(/[+-]?\d+(?:\.\d+)?/g);
+  if (all && all.length) {
+    const v = parseFloat(all[all.length - 1]);
+    if (Number.isFinite(v)) return v;
+  }
+  return null;
+}
+
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
