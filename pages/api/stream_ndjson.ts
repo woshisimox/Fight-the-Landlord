@@ -1,5 +1,4 @@
 // pages/api/stream_ndjson.ts
-
 /* ===== Chosen-candidate score extractor ===== */
 function extractChosenScore(reason?: any): number|undefined {
   if (typeof reason !== 'string' || !reason) return undefined;
@@ -27,6 +26,7 @@ import { GrokBot } from '../../lib/bots/grok_bot';
 import { HttpBot } from '../../lib/bots/http_bot';
 import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
+import { MiniNetBot } from '../../lib/bots/mininet_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
@@ -211,6 +211,7 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
+  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -239,20 +240,7 @@ type RunBody = {
 
 /* ========== Bot 工厂 ========== */
 function providerLabel(choice: BotChoice) {
-  switch (choice) {
-    case 'built-in:greedy-max': return 'GreedyMax';
-    case 'built-in:greedy-min': return 'GreedyMin';
-    case 'built-in:random-legal': return 'RandomLegal';
-    case 'built-in:ally-support': return 'AllySupport';
-    case 'built-in:endgame-rush': return 'EndgameRush';
-    case 'ai:openai': return 'OpenAI';
-    case 'ai:gemini': return 'Gemini';
-    case 'ai:grok': return 'Grok';
-    case 'ai:kimi': return 'Kimi';
-    case 'ai:qwen': return 'Qwen';
-    case 'ai:deepseek': return 'DeepSeek';
-    case 'http': return 'HTTP';
-  }
+  
 }
 
 function asBot(choice: BotChoice, spec?: SeatSpec) {
@@ -262,6 +250,7 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
     case 'built-in:random-legal': return RandomLegal;
     case 'built-in:ally-support': return AllySupport;
     case 'built-in:endgame-rush': return EndgameRush;
+    case 'built-in:mininet': return MiniNetBot;
     case 'ai:openai':  return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
     case 'ai:gemini':  return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-pro' });
     case 'ai:grok':    return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
