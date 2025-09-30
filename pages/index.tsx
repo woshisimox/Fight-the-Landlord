@@ -1,5 +1,6 @@
 
-function readScoreFromReason(rr: string): number|null {
+// 读取“被选候选”的打分（取 reason 中第一个带标签的分数）。
+function readChosenScore(rr: string): number|null {
   if (!rr) return null;
   const pats = [
     /score\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
@@ -13,9 +14,9 @@ function readScoreFromReason(rr: string): number|null {
     const m = re.exec(rr);
     if (m) { const v = parseFloat(m[1]); if (Number.isFinite(v)) return v; }
   }
-  const all = rr.match(/[+-]?\d+(?:\.\d+)?/g);
-  if (all && all.length) {
-    const v = parseFloat(all[all.length - 1]);
+  const nums = rr.match(/[+-]?\d+(?:\.\d+)?/g);
+  if (nums && nums.length) {
+    const v = parseFloat(nums[0]); // 若走到兜底，取“第一个”数字更像被选候选
     if (Number.isFinite(v)) return v;
   }
   return null;
@@ -235,10 +236,11 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
     default: return '';
   }
 }
-function choiceLabel(choice: BotChoice): string {switch (choice) {
-    case 'built-in:greedy-max': return 'Greedy Max';
-    case 'built-in:greedy-min': return 'Greedy Min';
-    case 'built-in:random-legal': return 'Random Legal';
+function choiceLabel(choice: BotChoice): string {
+  switch (choice) {
+    case 'built-in:greedy-max': return 'GreedyMax';
+    case 'built-in:greedy-min': return 'GreedyMin';
+    case 'built-in:random-legal': return 'RandomLegal';
     case 'built-in:mininet': return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
@@ -249,11 +251,9 @@ function choiceLabel(choice: BotChoice): string {switch (choice) {
     case 'ai:qwen':  return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
-    default: return String(choice);
-
+    default: return '';
   }
 }
-
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
@@ -1347,8 +1347,7 @@ for (const raw of batch) {
                   let val: number|null = null;
                   {
                     const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
-                    const mm = /score\s*[:=]\s*([+-]?\d+(?:\.\d+)?)/i.exec(rr || '');
-                    const fromReason = mm ? parseFloat(mm[1]) : null;
+                    const fromReason = readChosenScore(rr);
                     const fromField  = (typeof (m as any).score === 'number' && Number.isFinite((m as any).score)) ? (m as any).score as number : null;
                     val = (fromReason != null ? fromReason : fromField);
                   }
@@ -2083,9 +2082,9 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
-                      <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:mininet">MiniNet</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
