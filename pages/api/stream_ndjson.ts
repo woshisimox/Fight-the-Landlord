@@ -369,7 +369,9 @@ for await (const ev of (iter as any)) {
       const { seat, move, cards, hand, totals } = ev;
       countPlay(seat, move, cards);
       const moveStr = stringifyMove({ move, cards });
-      const reason = lastReason[seat] || null;
+      const reason = (ev as any).reason ?? lastReason[seat] ?? null;
+      const chosen = extractChosenScore(reason);
+      const unified = (lastScore[seat] ?? undefined);
       const chosen = extractChosenScore(reason);
       const unified = (lastScore[seat] ?? undefined);
       writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score_chosen: (chosen ?? undefined), score: (chosen ?? undefined), score_unified: (unified ?? undefined), totals });
