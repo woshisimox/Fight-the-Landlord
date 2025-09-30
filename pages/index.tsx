@@ -1303,12 +1303,15 @@ for (const raw of batch) {
                 if (!sawAnyTurn) {
                   const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                   if (s>=0 && s<3) {
-                    let val: number|null = (typeof (m as any).score === 'number') ? (m as any).score as number : null;
-                    if (typeof val !== 'number') {
+                    let val: number|null = null;
+                    {
                       const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
-                      const mm = /score=([+-]?\d+(?:\.\d+)?)/.exec(rr || '');
-                      if (mm) { val = parseFloat(mm[1]); }
+                      const mm = /score[=:]\s*([+-]?\d+(?:\.\d+)?)/i.exec(rr || '');
+                      const fromReason = mm ? parseFloat(mm[1]) : null;
+                      const fromField  = (typeof (m as any).score === 'number' && Number.isFinite((m as any).score)) ? (m as any).score as number : null;
+                      val = (fromReason != null ? fromReason : fromField);
                     }
+
                     for (let i=0;i<3;i++){
                       if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                       nextScores[i] = [...nextScores[i], (i===s ? val : null)];
