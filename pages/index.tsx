@@ -227,9 +227,8 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':  return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
-  }
     default: return String(choice);
-  
+  }
 }
 
 /* ====== 雷达图累计（0~5） ====== */
