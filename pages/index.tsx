@@ -6,6 +6,7 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
+  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -213,20 +214,23 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
 }
 function choiceLabel(choice: BotChoice): string {
   switch (choice) {
-    case 'built-in:greedy-max': return 'Greedy Max';
-    case 'built-in:greedy-min': return 'Greedy Min';
+    case 'built-in:greedy-max':   return 'Greedy Max';
+    case 'built-in:greedy-min':   return 'Greedy Min';
     case 'built-in:random-legal': return 'Random Legal';
+    case 'built-in:mininet':      return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
-    case 'ai:openai': return 'OpenAI';
-    case 'ai:gemini': return 'Gemini';
-    case 'ai:grok':  return 'Grok';
-    case 'ai:kimi':  return 'Kimi';
-    case 'ai:qwen':  return 'Qwen';
-    case 'ai:deepseek': return 'DeepSeek';
-    case 'http':     return 'HTTP';
+    case 'ai:openai':             return 'OpenAI';
+    case 'ai:gemini':             return 'Gemini';
+    case 'ai:grok':               return 'Grok';
+    case 'ai:kimi':               return 'Kimi';
+    case 'ai:qwen':               return 'Qwen';
+    case 'ai:deepseek':           return 'DeepSeek';
+    case 'http':                  return 'HTTP';
+    default: return String(choice);
   }
 }
+
 
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
@@ -1271,16 +1275,7 @@ for (const raw of batch) {
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
-                // push chosen/unified score from bot-done if present
-if (typeof (m as any).score === 'number' && Number.isFinite((m as any).score)) {
-  const sSeat = (typeof m.seat === 'number') ? (m.seat as number) : -1;
-  if (sSeat >= 0 && sSeat < 3) {
-    for (let i=0;i<3;i++){ if (!Array.isArray(nextScores[i])) nextScores[i]=[]; }
-    for (let i=0;i<3;i++){ nextScores[i] = nextScores[i].slice(); }
-    for (let i=0;i<3;i++){ nextScores[i].push(i===sSeat ? (m as any).score as number : null); }
-  }
-}
-nextLog = [
+                nextLog = [
                   ...nextLog,
                   `AI完成｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
                   ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
@@ -2059,6 +2054,7 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
+                      <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
                     </optgroup>
