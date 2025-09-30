@@ -1,23 +1,4 @@
 // pages/api/stream_ndjson.ts
-/* ===== Chosen-candidate score extractor ===== */
-function extractChosenScore(reason?: any): number|undefined {
-  if (typeof reason !== 'string' || !reason) return undefined;
-  const pats = [
-    /score\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
-    /mlp\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
-    /eval(?:uation)?\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
-    /打分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
-    /评分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
-    /估值\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
-  ];
-  for (const re of pats) {
-    const m = re.exec(reason);
-    if (m) { const v = parseFloat(m[1]); if (Number.isFinite(v)) return v; }
-  }
-  return undefined;
-}
-
-
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
@@ -369,12 +350,8 @@ for await (const ev of (iter as any)) {
       const { seat, move, cards, hand, totals } = ev;
       countPlay(seat, move, cards);
       const moveStr = stringifyMove({ move, cards });
-      const reason = (ev as any).reason ?? lastReason[seat] ?? null;
-      const chosen = extractChosenScore(reason);
-      const unified = (lastScore[seat] ?? undefined);
-      const chosen = extractChosenScore(reason);
-      const unified = (lastScore[seat] ?? undefined);
-      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score_chosen: (chosen ?? undefined), score: (chosen ?? undefined), score_unified: (unified ?? undefined), totals });
+      const reason = lastReason[seat] || null;
+      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: (lastScore[seat] ?? undefined), totals });
       continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
