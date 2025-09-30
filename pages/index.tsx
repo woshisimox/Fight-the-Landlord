@@ -256,7 +256,177 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
 }
 
 /* ================ 实时曲线：每手牌得分（按地主淡色分局） ================= */
-function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','丙'], height=220 }: { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number }) {
+/* ================ 实时曲线：每手牌得分（按地主淡色分局） ================= */
+function ScoreTimeline(
+  { series, bands = [], landlords = [], labels = ['甲','乙','丙'], height = 220 }:
+  { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number }
+) {
+  const ref = useRef<HTMLDivElement|null>(null);
+  const [w, setW] = useState(600);
+  const [hover, setHover] = useState<null | { si:number; idx:number; x:number; y:number; v:number }>(null);
+
+  useEffect(()=>{
+    const el = ref.current; if(!el) return;
+    const ro = new ResizeObserver(()=> setW(el.clientWidth || 600));
+    ro.observe(el);
+    return ()=> ro.disconnect();
+  }, []);
+
+  const data = series || [[],[],[]];
+  const n = Math.max(data[0]?.length||0, data[1]?.length||0, data[2]?.length||0);
+  const values:number[] = [];
+  for (const arr of data) for (const v of (arr||[])) if (typeof v==='number') values.push(v);
+  const vmin = values.length ? Math.min(...values) : -5;
+  const vmax = values.length ? Math.max(...values) : 5;
+  const pad = (vmax - vmin) * 0.15 + 1e-6;
+  const y0 = vmin - pad, y1 = vmax + pad;
+
+  const width = Math.max(320, w);
+  const heightPx = height;
+  const left = 36, right = 10, top = 10, bottom = 22;
+  const iw = Math.max(10, width - left - right);
+  const ih = Math.max(10, heightPx - top - bottom);
+
+  const x = (i:number)=> (n<=1 ? 0 : (i/(n-1))*iw);
+  const y = (v:number)=> ih - ( (v - y0) / (y1 - y0) ) * ih;
+
+  const colorLine = ['#ef4444', '#3b82f6', '#10b981'];
+  const colorBand = ['rgba(239,68,68,0.08)','rgba(59,130,246,0.08)','rgba(16,185,129,0.10)'];
+  const colors = colorLine;
+
+  const cuts = Array.isArray(bands) && bands.length ? [...bands] : [0];
+  cuts.sort((a,b)=>a-b);
+  if (cuts[0] !== 0) cuts.unshift(0);
+  if (cuts[cuts.length-1] !== n) cuts.push(n);
+
+  const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
+  while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
+
+  // —— 底色兜底：把未知地主段回填为最近一次已知的地主（前向填充 + 首段回填） ——
+  const segCount = Math.max(0, cuts.length - 1);
+  const landlordsFilled = landlordsArr.slice(0, segCount);
+  while (landlordsFilled.length < segCount) landlordsFilled.push(-1);
+  for (let j=0; j<landlordsFilled.length; j++) {
+    const v = landlordsFilled[j];
+    if (!(v===0 || v===1 || v===2)) landlordsFilled[j] = j>0 ? landlordsFilled[j-1] : landlordsFilled[j];
+  }
+  if (landlordsFilled.length && !(landlordsFilled[0]===0 || landlordsFilled[0]===1 || landlordsFilled[0]===2)) {
+    const k = landlordsFilled.findIndex(v => v===0 || v===1 || v===2);
+    if (k >= 0) { for (let j=0; j<k; j++) landlordsFilled[j] = landlordsFilled[k]; }
+  }
+
+  const makePath = (arr:(number|null)[])=>{
+    let d=''; let open=false;
+    const cutSet = new Set(cuts);
+    for (let i=0;i<n;i++){
+      if (cutSet.has(i) && i!==0) { open = false; }
+      const v = arr[i];
+      if (typeof v !== 'number') { open=false; continue; }
+      const px = x(i), py = y(v);
+      d += (open? ` L ${px} ${py}` : `M ${px} ${py}`);
+      open = true;
+    }
+    return d;
+  };
+
+  // x 轴刻度（最多 12 个）
+  const ticks = []; const maxTicks = 12;
+  for (let i=0;i<n;i++){
+    const step = Math.ceil(n / maxTicks);
+    if (i % step === 0) ticks.push(i);
+  }
+  // y 轴刻度（5 条）
+  const yTicks = []; for (let k=0;k<=4;k++){ yTicks.push(y0 + (k/4)*(y1-y0)); }
+
+  // —— 悬浮处理 —— //
+  const seatName = (i:number)=> labels?.[i] ?? ['甲','乙','丙'][i];
+  const showTip = (si:number, idx:number, v:number) => {
+    setHover({ si, idx, v, x: x(idx), y: y(v) });
+  };
+  const hideTip = () => setHover(null);
+
+  // 估算文本宽度（无需测量 API）
+  const tipText = hover ? `${seatName(hover.si)} 第${hover.idx+1}手：${hover.v.toFixed(2)}` : '';
+  const tipW = 12 + tipText.length * 7;  // 近似
+  const tipH = 20;
+  const tipX = hover ? Math.min(Math.max(0, hover.x + 10), Math.max(0, iw - tipW)) : 0;
+  const tipY = hover ? Math.max(0, hover.y - (tipH + 10)) : 0;
+
+  return (
+    <div ref={ref} style={{ width:'100%' }}>
+      <svg width={width} height={heightPx} style={{ display:'block', width:'100%' }}>
+        <g transform={`translate(${left},${top})`} onMouseLeave={hideTip}>
+          {/* 按地主上色的局间底色 */}
+          {cuts.slice(0, Math.max(0, cuts.length-1)).map((st, i)=>{
+            const ed = cuts[i+1];
+            if (ed <= st) return null;
+            const x0 = x(st);
+            const x1 = x(Math.max(st, ed-1));
+            const w  = Math.max(0.5, x1 - x0);
+            const lord = landlordsFilled[i] ?? -1;
+            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
+            return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
+          })}
+
+          {/* 网格 + 轴 */}
+          <line x1={0} y1={ih} x2={iw} y2={ih} stroke="#e5e7eb" />
+          <line x1={0} y1={0} x2={0} y2={ih} stroke="#e5e7eb" />
+          {yTicks.map((v,i)=>(
+            <g key={i} transform={`translate(0,${y(v)})`}>
+              <line x1={0} y1={0} x2={iw} y2={0} stroke="#f3f4f6" />
+              <text x={-6} y={4} fontSize={10} fill="#6b7280" textAnchor="end">{v.toFixed(1)}</text>
+            </g>
+          ))}
+          {ticks.map((i,idx)=>(
+            <g key={idx} transform={`translate(${x(i)},0)`}>
+              <line x1={0} y1={0} x2={0} y2={ih} stroke="#f8fafc" />
+              <text x={0} y={ih+14} fontSize={10} fill="#6b7280" textAnchor="middle">{i+1}</text>
+            </g>
+          ))}
+
+          {/* 三条曲线 + 数据点 */}
+          {data.map((arr, si)=>(
+            <g key={'g'+si}>
+              <path d={makePath(arr)} fill="none" stroke={colors[si]} strokeWidth={2} />
+              {arr.map((v,i)=> (typeof v==='number') && (
+                <circle
+                  key={'c'+si+'-'+i}
+                  cx={x(i)} cy={y(v)} r={2.5} fill={colors[si]}
+                  style={{ cursor:'crosshair' }}
+                  onMouseEnter={()=>showTip(si, i, v)}
+                  onMouseMove={()=>showTip(si, i, v)}
+                  onMouseLeave={hideTip}
+                >
+                  {/* 备用：系统 tooltip（可保留） */}
+                  <title>{`${seatName(si)} 第${i+1}手：${v.toFixed(2)}`}</title>
+                </circle>
+              ))}
+            </g>
+          ))}
+
+          {/* 悬浮提示框 */}
+          {hover && (
+            <g transform={`translate(${tipX},${tipY})`} pointerEvents="none">
+              <rect x={0} y={0} width={tipW} height={tipH} rx={6} ry={6} fill="#111111" opacity={0.9} />
+              <text x={8} y={13} fontSize={11} fill="#ffffff">{tipText}</text>
+            </g>
+          )}
+        </g>
+      </svg>
+
+      {/* 图例 */}
+      <div style={{ display:'flex', gap:12, marginTop:6, fontSize:12, color:'#374151' }}>
+        {[0,1,2].map(i=>(
+          <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ width:10, height:10, borderRadius:5, background:colors[i], display:'inline-block' }} />
+            <span>{labels?.[i] ?? ['甲','乙','丙'][i]}</span>
+          </div>
+        ))}
+        <div style={{ marginLeft:'auto', color:'#6b7280' }}>横轴：第几手牌 ｜ 纵轴：score</div>
+      </div>
+    </div>
+  );
+}: { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number }) {
   const ref = useRef<HTMLDivElement|null>(null);
   const [w, setW] = useState(600);
   useEffect(()=>{
