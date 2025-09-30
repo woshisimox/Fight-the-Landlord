@@ -1344,7 +1344,7 @@ for (const raw of batch) {
                     const parsed      = readChosenScore(rr);
                     val = (chosenField ?? scoreField ?? parsed);
                   }
-                  console.debug('[ScoreTimeline] push turn', { seat:s, val, chosenField:(m as any).score_chosen, scoreField:(m as any).score, rr });
+                  console.debug('[ScoreTimeline] push turn', { seat:s, val, chosenField:(m as any).score_chosen, scoreField:(m as any).score, rr:(m.reason ?? lastReasonRef.current?.[s] ?? '') });
 
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
