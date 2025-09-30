@@ -1,4 +1,4 @@
-/* ===== Chosen-candidate score reader ===== */
+
 function readChosenScore(rr: string): number|null {
   if (!rr) return null;
   const pats = [
@@ -15,7 +15,8 @@ function readChosenScore(rr: string): number|null {
   }
   return null;
 }
-\n// pages/index.tsx
+
+// pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
 type Four2Policy = 'both' | '2singles' | '2pairs';
@@ -231,21 +232,22 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
 }
 function choiceLabel(choice: BotChoice): string {
   switch (choice) {
-    case 'built-in:greedy-max':  return 'Greedy Max';
-    case 'built-in:greedy-min':  return 'Greedy Min';
-    case 'built-in:random-legal':return 'Random Legal';
-    case 'built-in:mininet':     return 'MiniNet';
-    case 'built-in:ally-support':return 'AllySupport';
-    case 'built-in:endgame-rush':return 'EndgameRush';
-    case 'ai:openai':   return 'OpenAI';
-    case 'ai:gemini':   return 'Gemini';
-    case 'ai:grok':     return 'Grok';
-    case 'ai:kimi':     return 'Kimi';
-    case 'ai:qwen':     return 'Qwen';
+    case 'built-in:greedy-max': return 'Greedy Max';
+    case 'built-in:greedy-min': return 'Greedy Min';
+    case 'built-in:random-legal': return 'Random Legal';
+    case 'built-in:mininet': return 'MiniNet';
+    case 'built-in:ally-support': return 'AllySupport';
+    case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'ai:openai': return 'OpenAI';
+    case 'ai:gemini': return 'Gemini';
+    case 'ai:grok':  return 'Grok';
+    case 'ai:kimi':  return 'Kimi';
+    case 'ai:qwen':  return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
-    case 'http':        return 'HTTP';
-    default:            return String(choice);
+    case 'http':     return 'HTTP';
   }
+    default: return String(choice);
+  
 }
 
 /* ====== 雷达图累计（0~5） ====== */
@@ -1339,22 +1341,14 @@ for (const raw of batch) {
                 if (s>=0 && s<3) {
                   sawAnyTurn = true;
                   let val: number|null = null;
-{
-  const rrStr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
-  const chosenField = (typeof (m as any).score_chosen === 'number' && Number.isFinite((m as any).score_chosen))
-    ? (m as any).score_chosen as number : null;
-  const scoreField  = (typeof (m as any).score === 'number' && Number.isFinite((m as any).score))
-    ? (m as any).score as number : null;
-  const parsed      = readChosenScore(rrStr);
-  val = (chosenField ?? scoreField ?? parsed);
-}
-console.debug('[ScoreTimeline] push turn', {
-  seat: s,
-  val,
-  chosenField: (m as any).score_chosen,
-  scoreField:  (m as any).score,
-  rr: (m.reason ?? lastReasonRef.current?.[s] ?? '')
-});
+                  {
+                    const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
+                    const chosenField = (typeof (m as any).score_chosen === 'number' && Number.isFinite((m as any).score_chosen)) ? (m as any).score_chosen as number : null;
+                    const scoreField  = (typeof (m as any).score        === 'number' && Number.isFinite((m as any).score))        ? (m as any).score        as number : null;
+                    const parsed      = readChosenScore(rr);
+                    val = (chosenField ?? scoreField ?? parsed);
+                  }
+                  console.debug('[ScoreTimeline] push turn', { seat:s, val, chosenField:(m as any).score_chosen, scoreField:(m as any).score, rr:(m.reason ?? lastReasonRef.current?.[s] ?? '') });
 
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
@@ -2087,9 +2081,9 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
+                      <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
-                      <option value="built-in:mininet">MiniNet</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
