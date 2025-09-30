@@ -449,7 +449,7 @@ function LivePanel(props: LiveProps) {
   const [multiplier, setMultiplier] = useState(1);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
-  \1const isSettingsView = (typeof window !== 'undefined') && (new URLSearchParams(window.location.search).get('view') === 'settings');
+  const isSettingsView = (typeof window !== 'undefined') && (new URLSearchParams(window.location.search).get('view') === 'settings');
 const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
