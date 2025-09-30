@@ -1,21 +1,3 @@
-/* ===== Chosen-candidate score reader ===== */
-function readChosenScore(rr: string): number|null {
-  if (!rr) return null;
-  const pats = [
-    /score\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
-    /mlp\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
-    /eval(?:uation)?\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/i,
-    /打分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
-    /评分\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
-    /估值\s*[:=：]\s*([+-]?\d+(?:\.\d+)?)/,
-  ];
-  for (const re of pats) {
-    const m = re.exec(rr);
-    if (m) { const v = parseFloat(m[1]); if (Number.isFinite(v)) return v; }
-  }
-  return null;
-}
-
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
@@ -24,7 +6,6 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -232,26 +213,20 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
 }
 function choiceLabel(choice: BotChoice): string {
   switch (choice) {
-    case 'built-in:greedy-max':   return 'Greedy Max';
-    case 'built-in:greedy-min':   return 'Greedy Min';
+    case 'built-in:greedy-max': return 'Greedy Max';
+    case 'built-in:greedy-min': return 'Greedy Min';
     case 'built-in:random-legal': return 'Random Legal';
-    case 'built-in:mininet':      return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
-    case 'ai:openai':             return 'OpenAI';
-    case 'ai:gemini':             return 'Gemini';
-    case 'ai:grok':               return 'Grok';
-    case 'ai:kimi':               return 'Kimi';
-    case 'ai:qwen':               return 'Qwen';
-    case 'ai:deepseek':           return 'DeepSeek';
-    case 'http':                  return 'HTTP';
-    default:
-      return String(choice);
+    case 'ai:openai': return 'OpenAI';
+    case 'ai:gemini': return 'Gemini';
+    case 'ai:grok':  return 'Grok';
+    case 'ai:kimi':  return 'Kimi';
+    case 'ai:qwen':  return 'Qwen';
+    case 'ai:deepseek': return 'DeepSeek';
+    case 'http':     return 'HTTP';
   }
 }
-
-
-
 
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
@@ -1296,7 +1271,16 @@ for (const raw of batch) {
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
-                nextLog = [
+                // push chosen/unified score from bot-done if present
+if (typeof (m as any).score === 'number' && Number.isFinite((m as any).score)) {
+  const sSeat = (typeof m.seat === 'number') ? (m.seat as number) : -1;
+  if (sSeat >= 0 && sSeat < 3) {
+    for (let i=0;i<3;i++){ if (!Array.isArray(nextScores[i])) nextScores[i]=[]; }
+    for (let i=0;i<3;i++){ nextScores[i] = nextScores[i].slice(); }
+    for (let i=0;i<3;i++){ nextScores[i].push(i===sSeat ? (m as any).score as number : null); }
+  }
+}
+nextLog = [
                   ...nextLog,
                   `AI完成｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
                   ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
@@ -1343,24 +1327,7 @@ for (const raw of batch) {
                 const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                 if (s>=0 && s<3) {
                   sawAnyTurn = true;
-                  let val: number|null = null;
-{
-  const rrStr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
-  const chosenField = (typeof (m as any).score_chosen === 'number' && Number.isFinite((m as any).score_chosen))
-    ? (m as any).score_chosen as number : null;
-  const scoreField  = (typeof (m as any).score === 'number' && Number.isFinite((m as any).score))
-    ? (m as any).score as number : null;
-  const parsed      = readChosenScore(rrStr);
-  val = (chosenField ?? scoreField ?? parsed);
-}
-console.debug('[ScoreTimeline] push turn', {
-  seat: s,
-  val,
-  chosenField: (m as any).score_chosen,
-  scoreField:  (m as any).score,
-  rr: (m.reason ?? lastReasonRef.current?.[s] ?? '')
-});
-
+                  const val = (typeof m.score === 'number') ? (m.score as number) : null;
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
@@ -2092,7 +2059,6 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
-                      <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
                     </optgroup>
