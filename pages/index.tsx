@@ -6,7 +6,6 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -217,7 +216,6 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:greedy-max': return 'Greedy Max';
     case 'built-in:greedy-min': return 'Greedy Min';
     case 'built-in:random-legal': return 'Random Legal';
-    case 'built-in:mininet': return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
     case 'ai:openai': return 'OpenAI';
@@ -227,7 +225,6 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':  return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
     case 'http':     return 'HTTP';
-    default: return String(choice);
   }
 }
 
@@ -1303,15 +1300,12 @@ for (const raw of batch) {
                 if (!sawAnyTurn) {
                   const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                   if (s>=0 && s<3) {
-                    let val: number|null = null;
-                    {
+                    let val: number|null = (typeof (m as any).score === 'number') ? (m as any).score as number : null;
+                    if (typeof val !== 'number') {
                       const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
-                      const mm = /score[=:]\s*([+-]?\d+(?:\.\d+)?)/i.exec(rr || '');
-                      const fromReason = mm ? parseFloat(mm[1]) : null;
-                      const fromField  = (typeof (m as any).score === 'number' && Number.isFinite((m as any).score)) ? (m as any).score as number : null;
-                      val = (fromReason != null ? fromReason : fromField);
+                      const mm = /score=([+-]?\d+(?:\.\d+)?)/.exec(rr || '');
+                      if (mm) { val = parseFloat(mm[1]); }
                     }
-
                     for (let i=0;i<3;i++){
                       if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                       nextScores[i] = [...nextScores[i], (i===s ? val : null)];
@@ -1324,7 +1318,14 @@ for (const raw of batch) {
                 const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                 if (s>=0 && s<3) {
                   sawAnyTurn = true;
-                  const val = (typeof m.score === 'number') ? (m.score as number) : null;
+                  let val: number|null = null;
+                  {
+                    const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
+                    const mm = /score\s*[:=]\s*([+-]?\d+(?:\.\d+)?)/i.exec(rr || '');
+                    const fromReason = mm ? parseFloat(mm[1]) : null;
+                    const fromField  = (typeof (m as any).score === 'number' && Number.isFinite((m as any).score)) ? (m as any).score as number : null;
+                    val = (fromReason != null ? fromReason : fromField);
+                  }
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
@@ -2056,7 +2057,6 @@ function Home() {
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
-                      <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
                     </optgroup>

@@ -9,7 +9,6 @@ import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
-import { MiniNetBot } from '../../lib/bots/mininet_bot';
 
 
 /* ========== 已出牌缓存（仅当前请求作用域） ========== */
@@ -192,7 +191,6 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
-  | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
@@ -244,7 +242,6 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
     case 'built-in:random-legal': return RandomLegal;
     case 'built-in:ally-support': return AllySupport;
     case 'built-in:endgame-rush': return EndgameRush;
-    case 'built-in:mininet': return MiniNetBot;
     case 'ai:openai':  return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
     case 'ai:gemini':  return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-pro' });
     case 'ai:grok':    return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
@@ -364,12 +361,7 @@ for await (const ev of (iter as any)) {
       countPlay(seat, move, cards);
       const moveStr = stringifyMove({ move, cards });
       const reason = lastReason[seat] || null;
-      let plotScore: number|undefined = (lastScore[seat] ?? undefined);
-      if (typeof reason === 'string') {
-        const mm = /score\s*(?:[=:]\s*)?([+-]?\d+(?:\.\d+)?)/i.exec(reason);
-        if (mm) { const v = parseFloat(mm[1]); if (Number.isFinite(v)) plotScore = v; }
-      }
-      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: plotScore, totals });
+      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: (lastScore[seat] ?? undefined), totals });
       continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
