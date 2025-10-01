@@ -666,7 +666,7 @@ function LivePanel(props: LiveProps) {
   };
 
   /** 根据当前地主身份（已知/未知）把存档套到 UI 的 aggStats/aggCount */
-  c
+  
   /* ===== 天梯（活动积分 ΔR_event）本地存档（localStorage 直接读写） ===== */
   type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number };
   type LadderEntry = { id:string; label:string; current:LadderAgg; history?: { when:string; n:number; delta:number; deltaR:number }[] };
