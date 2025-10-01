@@ -699,7 +699,7 @@ function LivePanel(props: LiveProps) {
     writeLadder(st);
     try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
   }
-onst applyRadarFromStoreByRole = (lord: number | null, why: string) => {
+    const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
