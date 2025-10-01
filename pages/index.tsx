@@ -178,6 +178,83 @@ function LogLine({ text }: { text:string }) {
     </div>
   );
 }
+
+/* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
+function LadderPanel() {
+  const [tick, setTick] = React.useState(0);
+  React.useEffect(()=>{
+    const onAny = () => setTick(k=>k+1);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('ddz-all-refresh', onAny as any);
+    }
+    const t = setInterval(onAny, 2000);
+    return ()=> { if (typeof window!=='undefined') window.removeEventListener('ddz-all-refresh', onAny as any); clearInterval(t); };
+  }, []);
+
+  let store:any = { players:{} };
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem('ddz_ladder_store_v1');
+      if (raw) store = JSON.parse(raw) || { players:{} };
+    }
+  } catch {}
+
+  const CATALOG = [
+    'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
+    'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http'
+  ];
+  const catalogIds = CATALOG.map((choice)=>{
+    const model = defaultModelFor(choice as any) || '';
+    const base  = (choice === 'http') ? '' : '';
+    return `${choice}|${model}|${base}`;
+  });
+  const catalogLabels = (id:string)=>{
+    const [choice, model] = id.split('|');
+    const label = choiceLabel(choice as any);
+    if (choice.startsWith('ai:')) return `${label}:${model||defaultModelFor(choice as any)}`;
+    return label;
+  };
+
+  const players: Record<string, any> = (store?.players)||{};
+  const keys = Array.from(new Set([...Object.keys(players), ...catalogIds]));
+  const arr = keys.map((id)=>{
+    const ent = players[id];
+    const val = ent?.current?.deltaR ?? 0;
+    const n   = ent?.current?.n ?? 0;
+    const label = ent?.label || catalogLabels(id) || id;
+    return { id, label, val, n };
+  });
+
+  const K = Math.max(1, ...arr.map(x=> (players[x.id]?.current?.K ?? 20)), 20);
+  const items = arr.sort((a,b)=> b.val - a.val);
+
+  const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
+
+  return (
+    <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+        <div style={{ fontWeight:700 }}>天梯图（活动积分 ΔR）</div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）</div>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
+        {items.map((it:any)=>{
+          const pct = Math.min(1, Math.abs(it.val)/K);
+          const pos = it.val >= 0;
+          return (
+            <div key={it.id} style={{ display:'contents' }}>
+              <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.label}</div>
+              <div style={{ position:'relative', height:16, background:'#f9fafb', border:'1px solid #f3f4f6', borderRadius:8 }}>
+                <div style={axisStyle} />
+                <div style={{ position:'absolute', left: pos ? '50%' : `${50 - pct*50}%`, width: `${pct*50}%`, top:2, bottom:2, background: pos ? '#16a34a' : '#ef4444', borderRadius:6 }}/>
+              </div>
+              <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right' }}>{it.val.toFixed(2)}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 function Section({ title, children }:{title:string; children:React.ReactNode}) {
   return (
     <div style={{ marginBottom:16 }}>
@@ -589,7 +666,40 @@ function LivePanel(props: LiveProps) {
   };
 
   /** 根据当前地主身份（已知/未知）把存档套到 UI 的 aggStats/aggCount */
-  const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
+  c
+  /* ===== 天梯（活动积分 ΔR_event）本地存档（localStorage 直接读写） ===== */
+  type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number };
+  type LadderEntry = { id:string; label:string; current:LadderAgg; history?: { when:string; n:number; delta:number; deltaR:number }[] };
+  type LadderStore = { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, LadderEntry> };
+  const LADDER_KEY = 'ddz_ladder_store_v1';
+  const LADDER_EMPTY: LadderStore = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
+  const LADDER_DEFAULT: LadderAgg = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20 };
+
+  function readLadder(): LadderStore {
+    try { const raw = localStorage.getItem(LADDER_KEY); if (raw) { const j = JSON.parse(raw); if (j?.schema==='ddz-ladder@1') return j as LadderStore; } } catch {}
+    return { ...LADDER_EMPTY, updatedAt:new Date().toISOString() };
+  }
+  function writeLadder(s: LadderStore) {
+    try { s.updatedAt = new Date().toISOString(); localStorage.setItem(LADDER_KEY, JSON.stringify(s)); } catch {}
+  }
+  function ladderUpdateLocal(id:string, label:string, sWin:number, pExp:number, weight:number=1) {
+    const st = readLadder();
+    const ent = st.players[id] || { id, label, current: { ...LADDER_DEFAULT }, history: [] };
+    if (!ent.current) ent.current = { ...LADDER_DEFAULT };
+    if (!ent.label) ent.label = label;
+    const w = Math.max(0, Number(weight) || 0);
+    ent.current.n += w;
+    ent.current.sum += w * (sWin - pExp);
+    const N0 = ent.current.N0 ?? 20;
+    const K  = ent.current.K  ?? 20;
+    ent.current.delta = ent.current.n > 0 ? (ent.current.sum / ent.current.n) : 0;
+    const shrink = Math.sqrt(ent.current.n / (ent.current.n + Math.max(1, N0)));
+    ent.current.deltaR = K * ent.current.delta * shrink;
+    st.players[id] = ent;
+    writeLadder(st);
+    try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
+  }
+onst applyRadarFromStoreByRole = (lord: number | null, why: string) => {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
@@ -1240,7 +1350,35 @@ nextTotals     = [
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 }
 
-                // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
+                
+                // ✅ Ladder（活动积分 ΔR）：按本局分差幅度加权（独立于胜负方向）
+                try {
+                  const pre = tsRef.current.map(r => ({ ...r })); // 局前 TS 快照
+                  const farmers = [0,1,2].filter(x => x !== L);
+                  const farmerWin = (nextWinner === L) ? false : true;
+                  const teamWin = (seat:number) => (seat === L) ? (!farmerWin) : farmerWin;
+                  const teamP = (seat:number) => {
+                    const teamA = (seat === L) ? [L] : farmers;
+                    const teamB = (seat === L) ? farmers : [L];
+                    const muA = teamA.reduce((ss,i)=> ss + pre[i].mu, 0);
+                    const muB = teamB.reduce((ss,i)=> ss + pre[i].mu, 0);
+                    const vA  = teamA.reduce((ss,i)=> ss + pre[i].sigma*pre[i].sigma + TS_BETA*TS_BETA, 0);
+                    const vB  = teamB.reduce((ss,i)=> ss + pre[i].sigma*pre[i].sigma + TS_BETA*TS_BETA, 0);
+                    const c = Math.sqrt(vA + vB);
+                    return Phi( (muA - muB) / c );
+                  };
+                  const mag = Math.max(Math.abs(ds[0]||0), Math.abs(ds[1]||0), Math.abs(ds[2]||0));
+                  const base = 20, cap = 3, gamma = 1;
+                  const weight = 1 + gamma * Math.min(cap, mag / base);
+                  for (let i=0;i<3;i++) {
+                    const sWin = teamWin(i) ? 1 : 0;
+                    const pExp = teamP(i);
+                    const id = seatIdentity(i);
+                    const label = agentIdForIndex(i);
+                    ladderUpdateLocal(id, label, sWin, pExp, weight);
+                  }
+                } catch {}
+// ✅ TrueSkill：局后更新 + 写入“角色分档”存档
                 {
                   const updated = tsRef.current.map(r => ({ ...r }));
                   const farmers = [0,1,2].filter(s => s !== L);
@@ -1354,6 +1492,7 @@ nextTotals     = [
     radar?: RadarStore;
     scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
     scoreStats?: { stats: SeatStat[]; dists: number[][] };
+    ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
   };
 
   const buildAllBundle = (): AllBundle => {
@@ -1369,6 +1508,7 @@ nextTotals     = [
       agents,
       trueskill: tsStoreRef.current,
       radar: radarStoreRef.current as any,
+      ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
       scoreTimeline: {
         n,
         rounds: roundCutsRef.current.slice(),
@@ -1403,6 +1543,7 @@ nextTotals     = [
         writeRadarStore(radarStoreRef.current);
         applyRadarFromStoreByRole(landlordRef.current, '统一上传');
       }
+      if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
       if (obj?.scoreTimeline?.seriesBySeat) {
         const tl = obj.scoreTimeline;
         setScoreSeries(tl.seriesBySeat as (number|null)[][]);
@@ -1751,7 +1892,7 @@ function Home() {
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
     try { localStorage.removeItem('ddz_ladder_store_v1'); } catch {}
-    try { ladderStoreRef.current = { schema:'ddz-ladder@1', updatedAt: new Date().toISOString(), players:{} } as any; setLadderTick(k=>k+1); } catch {}
+    try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
   };
   // —— 统一统计（TS + Radar + 出牌评分 + 评分统计）外层上传入口 ——
   const allFileRef = useRef<HTMLInputElement|null>(null);
@@ -2058,7 +2199,9 @@ function Home() {
       </div>
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
-        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
+        {/* —— 天梯图 —— */}
+      <LadderPanel />
+<div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
         <LivePanel
           key={resetKey}
           rounds={rounds}
