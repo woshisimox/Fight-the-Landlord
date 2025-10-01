@@ -181,8 +181,8 @@ function LogLine({ text }: { text:string }) {
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
 function LadderPanel() {
-  const [tick, setTick] = React.useState(0);
-  React.useEffect(()=>{
+  const [tick, setTick] = useState(0);
+  useEffect(()=>{
     const onAny = () => setTick(k=>k+1);
     if (typeof window !== 'undefined') {
       window.addEventListener('ddz-all-refresh', onAny as any);
