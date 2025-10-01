@@ -1506,17 +1506,6 @@ nextTotals     = [
           说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。</div>
       </Section>
 
-      <Section title="积分（总分）">
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          {[0,1,2].map(i=>(
-            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-              <div><SeatTitle i={i}/></div>
-              <div style={{ fontSize:24, fontWeight:800 }}>{totals[i]}</div>
-            </div>
-          ))}
-        </div>
-      </Section>
-
       {/* ======= 积分下面、手牌上面：雷达图 ======= */}
       <Section title="战术画像（累计，0~5）">
         {/* Radar：上传 / 存档 / 刷新 */}
@@ -1613,8 +1602,9 @@ nextTotals     = [
 <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
           {[0,1,2].map(i=>(
-            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
-              <div style={{ marginBottom:6 }}>
+            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
+                            <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}</div>
+<div style={{ marginBottom:6 }}>
                 <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
               </div>
               <Hand cards={hands[i]} />
