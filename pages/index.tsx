@@ -719,19 +719,7 @@ function LivePanel(props: LiveProps) {
       }
     } catch {}
   }
-ll.count, ff.count),
-          agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
-          cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
-          eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
-          rob : w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
-        },
-        count: tot,
-      };
-    }
-    if (L) return ensureRadarAgg(L);
-    if (F) return ensureRadarAgg(F);
-    return null;
-  };
+
 
   /** 根据当前地主身份（已知/未知）把存档套到 UI 的 aggStats/aggCount */
   const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
