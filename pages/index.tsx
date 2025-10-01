@@ -449,8 +449,8 @@ function LivePanel(props: LiveProps) {
   const [multiplier, setMultiplier] = useState(1);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
-  const isSettingsView = (typeof window !== 'undefined') && (new URLSearchParams(window.location.search).get('view') === 'settings');
-const [totals, setTotals] = useState<[number,number,number]>([
+  const [log, setLog] = useState<string[]>([]);
+  const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
@@ -555,25 +555,22 @@ const [totals, setTotals] = useState<[number,number,number]>([
   };
 
   const applyTsFromStore = (why:string) => {
-    const ids = [0,1,2].map(seatIdentity);
-    const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
-    setTsArr(init);
-    setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
-  };
+  const ids = [0,1,2].map(seatIdentity);
+  const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
+  setTsArr(init);
+  setLog(l => [...l, `【TS】已从存档应用（${why}）`]);
+};;;
 
   // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = [0,1,2].map(seatIdentity);
-    const init = [0,1,2].map(i => {
-      const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
-      return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
-    });
-    setTsArr(init);
-    setLog(l => [...l,
-      `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
-      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
-    ]);
-  };
+  const ids = [0,1,2].map(seatIdentity);
+  const init = [0,1,2].map(i => {
+    const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
+    return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
+  });
+  setTsArr(init);
+  setLog(l => [...l, `【TS】已从存档应用（按角色，${why}）`]);
+};;;
 
   const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
     const ids = [0,1,2].map(seatIdentity);
@@ -1621,8 +1618,7 @@ nextTotals     = [
       </div>
 
       {/* ========= TrueSkill（实时） ========= */}
-      <div style={{ display: isSettingsView ? 'none' : 'block' }}>
-        <Section title="TrueSkill（实时）">
+      <Section title="TrueSkill（实时）">
         {/* 上传 / 存档 / 刷新 */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
 <div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
@@ -1829,8 +1825,6 @@ nextTotals     = [
           </div>
         </Section>
       </div>
-
-      </div>
     </div>
   );
 }
@@ -1953,12 +1947,8 @@ function Home() {
   return (
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Bot Arena</h1>
-      <div style={{ display:'flex', gap:8, margin:'4px 0 12px' }}>
-        <a href="/settings" style={{ padding:'6px 10px', border:'1px solid #eee', borderRadius:8, textDecoration:'none' }}>设置页面</a>
-        <a href="/arena" style={{ padding:'6px 10px', border:'1px solid #eee', borderRadius:8, textDecoration:'none' }}>对战页面</a>
-      </div>
 
-      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16, display: isSettingsView ? 'block' : 'none' }}>
+      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12, gridAutoFlow:'row dense' }}>
           <div>
