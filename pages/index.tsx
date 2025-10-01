@@ -719,7 +719,7 @@ function LivePanel(props: LiveProps) {
       }
     } catch {}
   }
-nt, ff.count),
+ll.count, ff.count),
           agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
           cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
           eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
