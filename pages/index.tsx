@@ -632,20 +632,36 @@ function LivePanel(props: LiveProps) {
   useEffect(()=>{ try { radarStoreRef.current = readRadarStore(); } catch {} }, []);
   const radarFileRef = useRef<HTMLInputElement|null>(null);
 
+
   /** 取指定座位的（按角色可选）Radar 累计 */
   const resolveRadarForIdentity = (id:string, role?: 'landlord'|'farmer'): RadarAgg | null => {
-    const p = radarStoreRef.current.players[id];
-    if (!p) return null;
-    if (role && p.roles?.[role]) return ensureRadarAgg(p.roles[role]);
-    if (p.overall) return ensureRadarAgg(p.overall);
-    const L = p.roles?.landlord, F = p.roles?.farmer;
-    if (L && F) {
-      const ll = ensureRadarAgg(L), ff = ensureRadarAgg(F);
-      const tot = Math.max(1, ll.count + ff.count);
-      const w = (a:number,b:number,ca:number,cb:number)=> (a*ca + b*cb)/tot;
-      return {
-        scores: {
-          coop: w(ll.scores.coop, ff.scores.coop, ll.cou
+    try {
+      const p = radarStoreRef.current.players?.[id];
+      if (!p) return null;
+      if (role && p.roles?.[role]) return ensureRadarAgg(p.roles[role]);
+      if (p.overall) return ensureRadarAgg(p.overall);
+      const L = p.roles?.landlord, F = p.roles?.farmer;
+      if (L && F) {
+        const ll = ensureRadarAgg(L), ff = ensureRadarAgg(F);
+        const cL = ll.count || 0, cF = ff.count || 0;
+        const tot = Math.max(1, cL + cF);
+        const w = (a:number,b:number,ca:number,cb:number)=> (a*ca + b*cb)/tot;
+        return {
+          scores: {
+            coop: w(ll.scores.coop, ff.scores.coop, cL, cF),
+            agg : w(ll.scores.agg , ff.scores.agg , cL, cF),
+            cons: w(ll.scores.cons, ff.scores.cons, cL, cF),
+            eff : w(ll.scores.eff , ff.scores.eff , cL, cF),
+            rob : w(ll.scores.rob , ff.scores.rob , cL, cF),
+          },
+          count: cL + cF,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
   /* ===== 天梯（活动积分 ΔR_event）本地存档 ===== */
   type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number };
   type LadderEntry = { id:string; label:string; current:LadderAgg; history?: { when:string; n:number; delta:number; deltaR:number }[] };
