@@ -178,69 +178,6 @@ function LogLine({ text }: { text:string }) {
     </div>
   );
 }
-
-
-/* ===== 天梯图组件（水平条形图，x=ΔR_event，y=各 AI/内置） ===== */
-function LadderPanel() {
-  const [tick, setTick] = useState(0);
-  useEffect(()=>{
-    const onRefresh = () => setTick(k=>k+1);
-    window.addEventListener('ddz-all-refresh', onRefresh as any);
-    return ()=> window.removeEventListener('ddz-all-refresh', onRefresh as any);
-  }, []);
-
-  const store = (window as any).__DDZ_LADDER__ || { players:{} };
-  const K = Math.max(1, ...Object.values(store.players).map(e=>e.current?.K||20), 20);
-  const items = Object.values(store.players)
-    .map(e=>({ id:e.id, label:e.label || e.id, val: e.current?.deltaR || 0, n: e.current?.n || 0 }))
-    .sort((a,b)=> b.val - a.val)
-    .slice(0, 50);
-
-  if (!items.length) {
-    return (
-      <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
-        <div style={{ fontWeight:700, marginBottom:6 }}>天梯图（活动积分 ΔR）</div>
-        <div style={{ fontSize:12, color:'#6b7280' }}>暂无数据：开始对局或上传“统一存档”后自动生成。</div>
-      </div>
-    );
-  }
-
-  const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
-
-  return (
-    <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
-        <div style={{ fontWeight:700 }}>天梯图（活动积分 ΔR）</div>
-        <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（当前 K≈{K}）</div>
-      </div>
-      <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
-        {items.map((it, idx)=>{
-          const pct = Math.min(1, Math.abs(it.val)/K);
-          const pos = it.val >= 0;
-          return (
-            <div key={it.id} style={{ display:'contents' }}>
-              <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.label}</div>
-              <div style={{ position:'relative', height:16, background:'#f9fafb', border:'1px solid #f3f4f6', borderRadius:8 }}>
-                <div style={axisStyle} />
-                <div style={{
-                  position:'absolute',
-                  left: pos ? '50%' : `${50 - pct*50}%`,
-                  width: `${pct*50}%`,
-                  top:2, bottom:2,
-                  background: pos ? '#16a34a' : '#ef4444',
-                  borderRadius:6
-                }}/>
-              </div>
-              <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right' }}>
-                {it.val.toFixed(2)}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 function Section({ title, children }:{title:string; children:React.ReactNode}) {
   return (
     <div style={{ marginBottom:16 }}>
@@ -622,87 +559,7 @@ function LivePanel(props: LiveProps) {
   // —— Radar 存档：读写/应用/上传/导出 —— //
   const radarStoreRef = useRef<RadarStore>(emptyRadarStore());
   useEffect(()=>{ try { radarStoreRef.current = readRadarStore(); } catch {} }, []);
-  
-  /* ===== 天梯（活动积分 ΔR_event）本地存档（新增） ===== */
-  type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number };
-  type LadderEntry = { id:string; label:string; current:LadderAgg; history?: { when:string; n:number; delta:number; deltaR:number }[] };
-  type LadderStore = { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, LadderEntry> };
-  const LADDER_STORE_KEY = 'ddz_ladder_store_v1';
-  const LADDER_DEFAULT: LadderAgg = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20 };
-
-  const readLadderStore = (): LadderStore => {
-    try {
-      const raw = localStorage.getItem(LADDER_STORE_KEY);
-      if (raw) {
-        const j = JSON.parse(raw);
-        if (j?.schema === 'ddz-ladder@1' && j?.players) return j as LadderStore;
-      }
-    } catch {}
-    return { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-  };
-  const writeLadderStore = (s: LadderStore) => {
-    try { s.updatedAt = new Date().toISOString(); localStorage.setItem(LADDER_STORE_KEY, JSON.stringify(s)); } catch {}
-  };
-
-  const ladderStoreRef = useRef<LadderStore>({ schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} });
-  const [ladderTick, setLadderTick] = useState(0);
-  useEffect(()=>{ try { ladderStoreRef.current = readLadderStore(); setLadderTick(k=>k+1); } catch {} }, []);
-  // —— 将 Ladder 存档暴露到 window，便于外层天梯图读取 ——
-  useEffect(()=>{
-    (window as any).__DDZ_LADDER__ = ladderStoreRef.current;
-  }, [ladderTick]);
-
-
-  function ladderEnsureEntry(id:string, label:string): LadderEntry {
-    const s = ladderStoreRef.current;
-    const e = s.players[id] || { id, label, current: { ...LADDER_DEFAULT }, history: [] };
-    if (!e.current) e.current = { ...LADDER_DEFAULT };
-    if (!e.label)  e.label = label;
-    s.players[id] = e;
-    return e;
-  }
-
-  function ladderUpdateOne(id:string, label:string, sWin:number, pExp:number) {
-    const st = ladderStoreRef.current;
-    const ent = ladderEnsureEntry(id, label);
-    ent.current.n += 1;
-    ent.current.sum += (sWin - pExp);
-    ent.current.delta = ent.current.n > 0 ? (ent.current.sum / ent.current.n) : 0;
-    const shrink = Math.sqrt(ent.current.n / (ent.current.n + Math.max(1, ent.current.N0)));
-    ent.current.deltaR = ent.current.K * ent.current.delta * shrink;
-    st.players[id] = ent;
-    writeLadderStore(st);
-    setLadderTick(k=>k+1);
-  }
-
-  function ladderSnapshotCurrent() {
-    // 将当前场视为一次历史记录，写入 history，并清零 current（可在“存档后归零”时调用，当前版本不自动清零）
-    const st = ladderStoreRef.current;
-    const when = new Date().toISOString();
-    for (const id of Object.keys(st.players)) {
-      const e = st.players[id];
-      if (!e) continue;
-      e.history = e.history || [];
-      e.history.push({ when, n: e.current.n, delta: e.current.delta, deltaR: e.current.deltaR });
-    }
-    writeLadderStore(st);
-    setLadderTick(k=>k+1);
-  }
-
-  function ladderApplyBundle(obj:any) {
-    try {
-      if (obj?.schema === 'ddz-ladder@1' && obj?.players) {
-        ladderStoreRef.current = obj as LadderStore;
-        writeLadderStore(ladderStoreRef.current);
-        setLadderTick(k=>k+1);
-      } else if (obj?.ladder?.schema === 'ddz-ladder@1') {
-        ladderStoreRef.current = obj.ladder as LadderStore;
-        writeLadderStore(ladderStoreRef.current);
-        setLadderTick(k=>k+1);
-      }
-    } catch {}
-  }
-const radarFileRef = useRef<HTMLInputElement|null>(null);
+  const radarFileRef = useRef<HTMLInputElement|null>(null);
 
   /** 取指定座位的（按角色可选）Radar 累计 */
   const resolveRadarForIdentity = (id:string, role?: 'landlord'|'farmer'): RadarAgg | null => {
@@ -954,7 +811,6 @@ const handleScoreRefresh = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
-    setLadderTick(k=>k+1);
   };
 const start = async () => {
     if (running) return;
@@ -1384,38 +1240,7 @@ nextTotals     = [
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 }
 
-               
-                // ✅ Ladder：基于 TrueSkill 期望胜率的“活动积分 ΔR”在线累计（按身份）
-                try {
-                  if (nextLandlord != null && nextWinner != null) {
-                    const lord = nextLandlord as number;
-                    const pre = tsRef.current.map(r => ({ ...r })); // 局前快照
-                    const winnersFarmers = [0,1,2].filter(x => x !== lord);
-                    const farmerWin = (nextWinner !== lord);
-                    const teamWin = (seat:number) => (seat === lord) ? (!farmerWin) : farmerWin;
-                    const teamP = (seat:number) => {
-                      const farmers = [0,1,2].filter(x => x !== lord);
-                      const teamA = (seat === lord) ? [lord] : farmers;
-                      const teamB = (seat === lord) ? farmers : [lord];
-                      const muA = teamA.reduce((ss,i)=> ss + pre[i].mu, 0);
-                      const muB = teamB.reduce((ss,i)=> ss + pre[i].mu, 0);
-                      const vA  = teamA.reduce((ss,i)=> ss + pre[i].sigma*pre[i].sigma + TS_BETA*TS_BETA, 0);
-                      const vB  = teamB.reduce((ss,i)=> ss + pre[i].sigma*pre[i].sigma + TS_BETA*TS_BETA, 0);
-                      const c = Math.sqrt(vA + vB);
-                      return Phi( (muA - muB) / c );
-                    };
-                    for (let i=0;i<3;i++) {
-                      const sWin = teamWin(i) ? 1 : 0;
-                      const pExp = teamP(i);
-                      const id = seatIdentity(i);
-                      const lab = agentIdForIndex(i);
-                      ladderUpdateOne(id, lab, sWin, pExp);
-                    }
-                  }
-                } catch (err) {
-                  try { setLog(l => [...l, `【Ladder】更新失败：${(err as any)?.message || err}`]); } catch {}
-                }
- // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
+                // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
                 {
                   const updated = tsRef.current.map(r => ({ ...r }));
                   const farmers = [0,1,2].filter(s => s !== L);
@@ -1529,7 +1354,6 @@ nextTotals     = [
     radar?: RadarStore;
     scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
     scoreStats?: { stats: SeatStat[]; dists: number[][] };
-    ladder?: LadderStore;
   };
 
   const buildAllBundle = (): AllBundle => {
@@ -1545,7 +1369,6 @@ nextTotals     = [
       agents,
       trueskill: tsStoreRef.current,
       radar: radarStoreRef.current as any,
-      ladder: ladderStoreRef.current as any,
       scoreTimeline: {
         n,
         rounds: roundCutsRef.current.slice(),
@@ -1580,7 +1403,6 @@ nextTotals     = [
         writeRadarStore(radarStoreRef.current);
         applyRadarFromStoreByRole(landlordRef.current, '统一上传');
       }
-      ladderApplyBundle(obj);
       if (obj?.scoreTimeline?.seriesBySeat) {
         const tl = obj.scoreTimeline;
         setScoreSeries(tl.seriesBySeat as (number|null)[][]);
@@ -1603,7 +1425,6 @@ nextTotals     = [
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
-    setLadderTick(k=>k+1);
     setLog(l => [...l, '【ALL】已刷新面板数据。']);
   };
 
@@ -1987,7 +1808,7 @@ function Home() {
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
     <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
-      统一： TrueSkill / 画像 / 出牌评分 / 评分统计 / 天梯
+      统一： TrueSkill / 画像 / 出牌评分 / 评分统计
     <input
       ref={allFileRef}
       type="file"
@@ -2236,9 +2057,6 @@ function Home() {
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
-      {/* —— 天梯图：所有 AI/内置 的活动积分 ΔR —— */}
-      <LadderPanel />
-
         <LivePanel
           key={resetKey}
           rounds={rounds}
