@@ -235,7 +235,7 @@ function LadderPanel() {
     <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
         <div style={{ fontWeight:700 }}>天梯图（活动积分 ΔR）</div>
-        <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（当前 K≈{K}；未参赛=0/历史沿用）</div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=0/历史沿用）</div>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
         {items.map((it:any)=>{
@@ -698,11 +698,11 @@ function LivePanel(props: LiveProps) {
     st.players[id] = ent;
     return ent;
   }
-  function ladderUpdateOne(id:string, label:string, sWin:number, pExp:number) {
+  function ladderUpdateOne(id:string, label:string, sWin:number, pExp:number, weight:number = 1) {
     const st = ladderStoreRef.current;
     const ent = ladderEnsureEntry(id, label);
-    ent.current.n += 1;
-    ent.current.sum += (sWin - pExp);
+    ent.current.n += Math.max(0, weight) || 0;
+    ent.current.sum += (Math.max(0, weight) || 0) * (sWin - pExp);
     ent.current.delta = ent.current.n>0 ? (ent.current.sum/ent.current.n) : 0;
     const shrink = Math.sqrt(ent.current.n / (ent.current.n + Math.max(1, ent.current.N0)));
     ent.current.deltaR = ent.current.K * ent.current.delta * shrink;
