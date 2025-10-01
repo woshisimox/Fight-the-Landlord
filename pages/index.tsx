@@ -1751,7 +1751,7 @@ function Home() {
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
     try { localStorage.removeItem('ddz_ladder_store_v1'); } catch {}
-    try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
+    try { ladderStoreRef.current = { schema:'ddz-ladder@1', updatedAt: new Date().toISOString(), players:{} } as any; setLadderTick(k=>k+1); } catch {}
   };
   // —— 统一统计（TS + Radar + 出牌评分 + 评分统计）外层上传入口 ——
   const allFileRef = useRef<HTMLInputElement|null>(null);
