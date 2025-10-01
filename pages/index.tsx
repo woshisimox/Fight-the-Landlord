@@ -255,8 +255,175 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
   };
 }
 
+/* ================ 实时曲线：每手牌得分（按地主淡色分局） ================= */
+function ScoreTimeline({ series, bands=[], landlords=[], labels=['甲','乙','丙'], height=220 }: { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number }) {
+  const ref = useRef<HTMLDivElement|null>(null);
+  const [w, setW] = useState(600);
+  useEffect(()=>{
+    const el = ref.current; if(!el) return;
+    const ro = new ResizeObserver(()=> setW(el.clientWidth || 600));
+    ro.observe(el);
+    return ()=> ro.disconnect();
+  }, []);
+
+  const data = series || [[],[],[]];
+  const n = Math.max(data[0]?.length||0, data[1]?.length||0, data[2]?.length||0);
+  const values:number[] = [];
+  for (const arr of data) for (const v of (arr||[])) if (typeof v==='number') values.push(v);
+  const vmin = values.length ? Math.min(...values) : -5;
+  const vmax = values.length ? Math.max(...values) : 5;
+  const pad = (vmax-vmin) * 0.15 + 1e-6;
+  const y0 = vmin - pad, y1 = vmax + pad;
+  const width = Math.max(320, w);
+  const heightPx = height;
+  const left = 36, right = 10, top = 10, bottom = 22;
+  const iw = Math.max(10, width - left - right);
+  const ih = Math.max(10, heightPx - top - bottom);
+  const x = (i:number)=> (n<=1 ? 0 : (i/(n-1))*iw);
+  const y = (v:number)=> ih - ( (v - y0) / (y1 - y0) ) * ih;
+
+  const colorLine = ['#ef4444', '#3b82f6', '#10b981'];
+  const colorBand = ['rgba(239,68,68,0.08)','rgba(59,130,246,0.08)','rgba(16,185,129,0.10)'];
+  const colors = colorLine;
+
+  const cuts = Array.isArray(bands) && bands.length ? [...bands] : [0];
+  cuts.sort((a,b)=>a-b);
+  if (cuts[0] !== 0) cuts.unshift(0);
+  if (cuts[cuts.length-1] !== n) cuts.push(n);
+
+  const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
+  while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
+  // —— 底色兜底：把未知地主段回填为最近一次已知的地主（前向填充 + 首段回填） ——
+  const segCount = Math.max(0, cuts.length - 1);
+  const landlordsFilled = landlordsArr.slice(0, segCount);
+  while (landlordsFilled.length < segCount) landlordsFilled.push(-1);
+  for (let j=0; j<landlordsFilled.length; j++) {
+    const v = landlordsFilled[j];
+    if (!(v===0 || v===1 || v===2)) landlordsFilled[j] = j>0 ? landlordsFilled[j-1] : landlordsFilled[j];
+  }
+  if (landlordsFilled.length && !(landlordsFilled[0]===0 || landlordsFilled[0]===1 || landlordsFilled[0]===2)) {
+    const k = landlordsFilled.findIndex(v => v===0 || v===1 || v===2);
+    if (k >= 0) { for (let j=0; j<k; j++) landlordsFilled[j] = landlordsFilled[k]; }
+  }
 
 
+  const makePath = (arr:(number|null)[])=>{
+    let d=''; let open=false;
+    for (let i=0;i<n;i++){
+      const cutSet = new Set(cuts);
+      if (cutSet.has(i) && i!==0) { open = false; }
+      const v = arr[i];
+      if (typeof v !== 'number') { open=false; continue; }
+      const px = x(i), py = y(v);
+      d += (open? ` L ${px} ${py}` : `M ${px} ${py}`);
+      open = true;
+    }
+    return d;
+  };
+
+  // x 轴刻度（最多 12 个）
+  const ticks = []; const maxTicks = 12;
+  for (let i=0;i<n;i++){
+    const step = Math.ceil(n / maxTicks);
+    if (i % step === 0) ticks.push(i);
+  }
+  // y 轴刻度（5 条）
+  const yTicks = []; for (let k=0;k<=4;k++){ yTicks.push(y0 + (k/4)*(y1-y0)); }
+
+  return (
+    <div ref={ref} style={{ width:'100%' }}>
+      <svg width={width} height={heightPx} style={{ display:'block', width:'100%' }}>
+        <g transform={`translate(${left},${top})`}>
+          {/* 按地主上色的局间底色 */}
+          {cuts.slice(0, Math.max(0, cuts.length-1)).map((st, i)=>{
+            const ed = cuts[i+1];
+            if (ed <= st) return null;
+            const x0 = x(st);
+            const x1 = x(Math.max(st, ed-1));
+            const w  = Math.max(0.5, x1 - x0);
+            const lord = landlordsFilled[i] ?? -1;
+            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
+            return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
+          })}
+
+          {/* 网格 + 轴 */}
+          <line x1={0} y1={ih} x2={iw} y2={ih} stroke="#e5e7eb" />
+          <line x1={0} y1={0} x2={0} y2={ih} stroke="#e5e7eb" />
+          {yTicks.map((v,i)=>(
+            <g key={i} transform={`translate(0,${y(v)})`}>
+              <line x1={0} y1={0} x2={iw} y2={0} stroke="#f3f4f6" />
+              <text x={-6} y={4} fontSize={10} fill="#6b7280" textAnchor="end">{v.toFixed(1)}</text>
+            </g>
+          ))}
+          {ticks.map((i,idx)=>(
+            <g key={idx} transform={`translate(${x(i)},0)`}>
+              <line x1={0} y1={0} x2={0} y2={ih} stroke="#f8fafc" />
+              <text x={0} y={ih+14} fontSize={10} fill="#6b7280" textAnchor="middle">{i+1}</text>
+            </g>
+          ))}
+
+          {/* 三条曲线 */}
+          {data.map((arr, si)=>(
+            <>
+              <path key={'p'+si} d={makePath(arr)} fill="none" stroke={colors[si]} strokeWidth={2} />
+              {arr.map((v,i)=> (typeof v==='number') && (
+                <circle key={'c'+si+'-'+i} cx={x(i)} cy={y(v)} r={2.5} fill={colors[si]} />
+              ))}
+            </>
+          ))}
+        </g>
+      </svg>
+
+      {/* 图例 */}
+      <div style={{ display:'flex', gap:12, marginTop:6, fontSize:12, color:'#374151' }}>
+        {[0,1,2].map(i=>(
+          <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ width:10, height:10, borderRadius:5, background:colors[i], display:'inline-block' }} />
+            <span>{labels?.[i] ?? ['甲','乙','丙'][i]}</span>
+          </div>
+        ))}
+        <div style={{ marginLeft:'auto', color:'#6b7280' }}>横轴：第几手牌 ｜ 纵轴：score</div>
+      </div>
+    </div>
+  );
+}
+
+function RadarChart({ title, scores }:{ title: string; scores: Score5; }) {
+  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
+  const size = 180, R = 70, cx = size/2, cy = size/2;
+  const pts = vals.map((v, i)=>{
+    const ang = (-90 + i*(360/5)) * Math.PI/180;
+    const r = (Math.max(0, Math.min(5, v)) / 5) * R;
+    return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
+  }).join(' ');
+  return (
+    <div style={{ border:'1px solid #eee', borderRadius:8, padding:8 }}>
+      <div style={{ fontWeight:700, marginBottom:6 }}>{title}</div>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {[1,2,3,4,5].map(k=>{
+          const r = (k/5)*R;
+          const polygon = Array.from({length:5}, (_,i)=>{
+            const ang = (-90 + i*(360/5)) * Math.PI/180;
+            return `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
+          }).join(' ');
+          return <polygon key={k} points={polygon} fill="none" stroke="#e5e7eb"/>;
+        })}
+        {Array.from({length:5}, (_,i)=>{
+          const ang = (-90 + i*(360/5)) * Math.PI/180;
+          return <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang)} y2={cy + R * Math.sin(ang)} stroke="#e5e7eb"/>;
+        })}
+        <polygon points={pts} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
+        {(['配合','激进','保守','效率','抢地主']).map((lab, i)=>{
+          const ang = (-90 + i*(360/5)) * Math.PI/180;
+          return <text key={i} x={cx + (R+14) * Math.cos(ang)} y={cy + (R+14) * Math.sin(ang)} fontSize="12" textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
+        })}
+      </svg>
+      <div style={{ fontSize:12, color:'#6b7280' }}>
+        分数（0~5）：Coop {scores.coop} / Agg {scores.agg} / Cons {scores.cons} / Eff {scores.eff} / Rob {scores.rob}
+      </div>
+    </div>
+  );
+}
 
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
 const makeRewriteRoundLabel = (n: number) => (msg: string) => {
@@ -283,6 +450,14 @@ function LivePanel(props: LiveProps) {
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [log, setLog] = useState<string[]>([]);
+  const [view, setView] = useState<'settings'|'arena'>('arena');
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const v = new URLSearchParams(window.location.search).get('view');
+      setView(v === 'settings' ? 'settings' : 'arena');
+    }
+  }, []);
+  const isSettingsView = view === 'settings';
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
@@ -388,25 +563,22 @@ function LivePanel(props: LiveProps) {
   };
 
   const applyTsFromStore = (why:string) => {
-    const ids = [0,1,2].map(seatIdentity);
-    const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
-    setTsArr(init);
-    setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
-  };
+  const ids = [0,1,2].map(seatIdentity);
+  const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
+  setTsArr(init);
+  setLog(l => [...l, `【TS】已从存档应用（${why}）`]);
+};;;
 
   // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = [0,1,2].map(seatIdentity);
-    const init = [0,1,2].map(i => {
-      const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
-      return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
-    });
-    setTsArr(init);
-    setLog(l => [...l,
-      `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
-      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
-    ]);
-  };
+  const ids = [0,1,2].map(seatIdentity);
+  const init = [0,1,2].map(i => {
+    const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
+    return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
+  });
+  setTsArr(init);
+  setLog(l => [...l, `【TS】已从存档应用（按角色，${why}）`]);
+};;;
 
   const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
     const ids = [0,1,2].map(seatIdentity);
@@ -1454,7 +1626,8 @@ nextTotals     = [
       </div>
 
       {/* ========= TrueSkill（实时） ========= */}
-      <Section title="TrueSkill（实时）">
+      <div style={{ display: isSettingsView ? 'none' : 'block' }}>
+        <Section title="TrueSkill（实时）">
         {/* 上传 / 存档 / 刷新 */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
 <div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
@@ -1661,6 +1834,7 @@ nextTotals     = [
           </div>
         </Section>
       </div>
+      </div>
     </div>
   );
 }
@@ -1733,7 +1907,7 @@ const DEFAULTS = {
   seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
 };
 
-function Home() {
+function Home(props: { forceView?: 'settings'|'arena' }) {
   const [resetKey, setResetKey] = useState<number>(0);
   const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
   const [rounds, setRounds] = useState<number>(DEFAULTS.rounds);
@@ -1783,8 +1957,7 @@ function Home() {
   return (
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Bot Arena</h1>
-
-      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16, display: isSettingsView ? 'block' : 'none' }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12, gridAutoFlow:'row dense' }}>
           <div>
@@ -2089,218 +2262,3 @@ function Home() {
 }
 
 export default Home;
-
-/* ================ 实时曲线：每手牌得分（按地主淡色分局） ================= */
-function ScoreTimeline(
-  { series, bands = [], landlords = [], labels = ['甲','乙','丙'], height = 220 }:
-  { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number }
-) {
-  const ref = useRef<HTMLDivElement|null>(null);
-  const [w, setW] = useState(600);
-  const [hover, setHover] = useState<null | { si:number; idx:number; x:number; y:number; v:number }>(null);
-
-  useEffect(()=>{
-    const el = ref.current; if(!el) return;
-    const ro = new ResizeObserver(()=> setW(el.clientWidth || 600));
-    ro.observe(el);
-    return ()=> ro.disconnect();
-  }, []);
-
-  const data = series || [[],[],[]];
-  const n = Math.max(data[0]?.length||0, data[1]?.length||0, data[2]?.length||0);
-  const values:number[] = [];
-  for (const arr of data) for (const v of (arr||[])) if (typeof v==='number') values.push(v);
-  const vmin = values.length ? Math.min(...values) : -5;
-  const vmax = values.length ? Math.max(...values) : 5;
-  const pad = (vmax - vmin) * 0.15 + 1e-6;
-  const y0 = vmin - pad, y1 = vmax + pad;
-
-  const width = Math.max(320, w);
-  const heightPx = height;
-  const left = 36, right = 10, top = 10, bottom = 22;
-  const iw = Math.max(10, width - left - right);
-  const ih = Math.max(10, heightPx - top - bottom);
-
-  const x = (i:number)=> (n<=1 ? 0 : (i/(n-1))*iw);
-  const y = (v:number)=> ih - ( (v - y0) / (y1 - y0) ) * ih;
-
-  const colorLine = ['#ef4444', '#3b82f6', '#10b981'];
-  const colorBand = ['rgba(239,68,68,0.08)','rgba(59,130,246,0.08)','rgba(16,185,129,0.10)'];
-  const colors = colorLine;
-
-  const cuts = Array.isArray(bands) && bands.length ? [...bands] : [0];
-  cuts.sort((a,b)=>a-b);
-  if (cuts[0] !== 0) cuts.unshift(0);
-  if (cuts[cuts.length-1] !== n) cuts.push(n);
-
-  const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
-  while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
-
-  // —— 底色兜底：把未知地主段回填为最近一次已知的地主（前向填充 + 首段回填） ——
-  const segCount = Math.max(0, cuts.length - 1);
-  const landlordsFilled = landlordsArr.slice(0, segCount);
-  while (landlordsFilled.length < segCount) landlordsFilled.push(-1);
-  for (let j=0; j<landlordsFilled.length; j++) {
-    const v = landlordsFilled[j];
-    if (!(v===0 || v===1 || v===2)) landlordsFilled[j] = j>0 ? landlordsFilled[j-1] : landlordsFilled[j];
-  }
-  if (landlordsFilled.length && !(landlordsFilled[0]===0 || landlordsFilled[0]===1 || landlordsFilled[0]===2)) {
-    const k = landlordsFilled.findIndex(v => v===0 || v===1 || v===2);
-    if (k >= 0) { for (let j=0; j<k; j++) landlordsFilled[j] = landlordsFilled[k]; }
-  }
-
-  const makePath = (arr:(number|null)[])=>{
-    let d=''; let open=false;
-    const cutSet = new Set(cuts);
-    for (let i=0;i<n;i++){
-      if (cutSet.has(i) && i!==0) { open = false; }
-      const v = arr[i];
-      if (typeof v !== 'number') { open=false; continue; }
-      const px = x(i), py = y(v);
-      d += (open? ` L ${px} ${py}` : `M ${px} ${py}`);
-      open = true;
-    }
-    return d;
-  };
-
-  // x 轴刻度（最多 12 个）
-  const ticks = []; const maxTicks = 12;
-  for (let i=0;i<n;i++){
-    const step = Math.ceil(n / maxTicks);
-    if (i % step === 0) ticks.push(i);
-  }
-  // y 轴刻度（5 条）
-  const yTicks = []; for (let k=0;k<=4;k++){ yTicks.push(y0 + (k/4)*(y1-y0)); }
-
-  // —— 悬浮处理 —— //
-  const seatName = (i:number)=> labels?.[i] ?? ['甲','乙','丙'][i];
-  const showTip = (si:number, idx:number, v:number) => {
-    setHover({ si, idx, v, x: x(idx), y: y(v) });
-  };
-  const hideTip = () => setHover(null);
-
-  // 估算文本宽度（无需测量 API）
-  const tipText = hover ? `${seatName(hover.si)} 第${hover.idx+1}手：${hover.v.toFixed(2)}` : '';
-  const tipW = 12 + tipText.length * 7;  // 近似
-  const tipH = 20;
-  const tipX = hover ? Math.min(Math.max(0, hover.x + 10), Math.max(0, iw - tipW)) : 0;
-  const tipY = hover ? Math.max(0, hover.y - (tipH + 10)) : 0;
-
-  return (
-    <div ref={ref} style={{ width:'100%' }}>
-      <svg width={width} height={heightPx} style={{ display:'block', width:'100%' }}>
-        <g transform={`translate(${left},${top})`} onMouseLeave={hideTip}>
-          {/* 按地主上色的局间底色 */}
-          {cuts.slice(0, Math.max(0, cuts.length-1)).map((st, i)=>{
-            const ed = cuts[i+1];
-            if (ed <= st) return null;
-            const x0 = x(st);
-            const x1 = x(Math.max(st, ed-1));
-            const w  = Math.max(0.5, x1 - x0);
-            const lord = landlordsFilled[i] ?? -1;
-            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
-            return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
-          })}
-
-          {/* 网格 + 轴 */}
-          <line x1={0} y1={ih} x2={iw} y2={ih} stroke="#e5e7eb" />
-          <line x1={0} y1={0} x2={0} y2={ih} stroke="#e5e7eb" />
-          {yTicks.map((v,i)=>(
-            <g key={i} transform={`translate(0,${y(v)})`}>
-              <line x1={0} y1={0} x2={iw} y2={0} stroke="#f3f4f6" />
-              <text x={-6} y={4} fontSize={10} fill="#6b7280" textAnchor="end">{v.toFixed(1)}</text>
-            </g>
-          ))}
-          {ticks.map((i,idx)=>(
-            <g key={idx} transform={`translate(${x(i)},0)`}>
-              <line x1={0} y1={0} x2={0} y2={ih} stroke="#f8fafc" />
-              <text x={0} y={ih+14} fontSize={10} fill="#6b7280" textAnchor="middle">{i+1}</text>
-            </g>
-          ))}
-
-          {/* 三条曲线 + 数据点 */}
-          {data.map((arr, si)=>(
-            <g key={'g'+si}>
-              <path d={makePath(arr)} fill="none" stroke={colors[si]} strokeWidth={2} />
-              {arr.map((v,i)=> (typeof v==='number') && (
-                <circle
-                  key={'c'+si+'-'+i}
-                  cx={x(i)} cy={y(v)} r={2.5} fill={colors[si]}
-                  style={{ cursor:'crosshair' }}
-                  onMouseEnter={()=>showTip(si, i, v)}
-                  onMouseMove={()=>showTip(si, i, v)}
-                  onMouseLeave={hideTip}
-                >
-                  {/* 备用：系统 tooltip（可保留） */}
-                  <title>{`${seatName(si)} 第${i+1}手：${v.toFixed(2)}`}</title>
-                </circle>
-              ))}
-            </g>
-          ))}
-
-          {/* 悬浮提示框 */}
-          {hover && (
-            <g transform={`translate(${tipX},${tipY})`} pointerEvents="none">
-              <rect x={0} y={0} width={tipW} height={tipH} rx={6} ry={6} fill="#111111" opacity={0.9} />
-              <text x={8} y={13} fontSize={11} fill="#ffffff">{tipText}</text>
-            </g>
-          )}
-        </g>
-      </svg>
-
-      {/* 图例 */}
-      <div style={{ display:'flex', gap:12, marginTop:6, fontSize:12, color:'#374151' }}>
-        {[0,1,2].map(i=>(
-          <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ width:10, height:10, borderRadius:5, background:colors[i], display:'inline-block' }} />
-            <span>{labels?.[i] ?? ['甲','乙','丙'][i]}</span>
-          </div>
-        ))}
-        <div style={{ marginLeft:'auto', color:'#6b7280' }}>横轴：第几手牌 ｜ 纵轴：score</div>
-      </div>
-    </div>
-  );
-}
-
-/* ================ 雷达图（0~5） ================= */
-function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
-  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
-  const labels = ['配合','激进','保守','效率','抢地主'];
-  const size = 180, R = 70, cx = size/2, cy = size/2;
-
-  const ang = (i:number)=> (-90 + i*(360/5)) * Math.PI/180;
-
-  const ringPoints = (r:number)=> Array.from({length:5}, (_,i)=> {
-    return `${cx + r * Math.cos(ang(i))},${cy + r * Math.sin(ang(i))}`;
-  }).join(' ');
-
-  const valuePoints = Array.from({length:5}, (_,i)=> {
-    const r = Math.max(0, Math.min(5, vals[i] ?? 0)) / 5 * R;
-    return `${cx + r * Math.cos(ang(i))},${cy + r * Math.sin(ang(i))}`;
-  }).join(' ');
-
-  return (
-    <div style={{ display:'flex', gap:10, alignItems:'center' }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {/* 环形网格 */}
-        {[1,2,3,4].map(k=>{
-          const r = (k/4) * R;
-          return <polygon key={k} points={ringPoints(r)} fill="none" stroke="#e5e7eb"/>;
-        })}
-        {/* 轴线 */}
-        {Array.from({length:5}, (_,i)=>{
-          return <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang(i))} y2={cy + R * Math.sin(ang(i))} stroke="#e5e7eb"/>;
-        })}
-        {/* 值多边形 */}
-        <polygon points={valuePoints} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
-        {/* 标签 */}
-        {labels.map((lab, i)=>{
-          const lx = cx + (R + 14) * Math.cos(ang(i));
-          const ly = cy + (R + 14) * Math.sin(ang(i));
-          return <text key={i} x={lx} y={ly} fontSize={11} textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
-        })}
-      </svg>
-      <div style={{ minWidth:60, fontSize:12, color:'#374151' }}>{title}</div>
-    </div>
-  );
-}
