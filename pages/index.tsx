@@ -1907,7 +1907,6 @@ const DEFAULTS = {
   seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
 };
 
-
 function Home(props: { forceView?: 'settings'|'arena' }) {
   const [resetKey, setResetKey] = useState<number>(0);
   const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
