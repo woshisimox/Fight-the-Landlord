@@ -1621,13 +1621,15 @@ nextTotals     = [
       } else {
         // 没有 identity 数据 → 全部置空（不使用 seat 兜底）
         setScoreSeries([[],[],[]]);
+        setRoundCuts([]);
+        setRoundLords([]);
       }
       if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
         const ids = [0,1,2].map(seatIdentity);
         const ss = obj.scoreStats;
         const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-        const statsArr = ids.map((id, i)=> (ss.byIdentity?.[id] ?? ss.stats?.[i] ?? defStat));
-        const distsArr = ids.map((id, i)=> Array.isArray(ss.distsByIdentity?.[id]) ? ss.distsByIdentity[id].slice() : (Array.isArray(ss.dists?.[i]) ? ss.dists[i] : []));
+        const statsArr = ids.map(id => (ss.byIdentity?.[id] ?? defStat));
+        const distsArr = ids.map(id => (Array.isArray(ss.distsByIdentity?.[id]) ? ss.distsByIdentity[id].slice() : []));
         setScoreStats(statsArr as any);
         setScoreDists(distsArr as any);
       } else {
