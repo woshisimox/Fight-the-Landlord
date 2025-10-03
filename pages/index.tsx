@@ -1,3 +1,26 @@
+// === Mapping helper: prefer seatIdentity ids, fallback to agents ===
+const mapFileIdxForCurrentSeats = (obj:any) => {
+  const fileIds: string[] =
+    Array.isArray(obj?.ids) ? obj.ids :
+    (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.id || s.identity) : []);
+  const fileAgents: string[] =
+    Array.isArray(obj?.agents) ? obj.agents :
+    (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.agent || s.label) : []);
+  const targetIds    = [0,1,2].map(seatIdentity);
+  const targetAgents = [0,1,2].map(agentIdForIndex);
+  const chooseIndex = (i:number) => {
+    const id = targetIds[i];
+    if (fileIds && fileIds.length) {
+      const idx = fileIds.indexOf(id);
+      if (idx >= 0) return idx;
+    }
+    const ag = targetAgents[i];
+    const idx2 = fileAgents.indexOf(ag);
+    return idx2 >= 0 ? idx2 : i;
+  };
+  return [0,1,2].map((_,i)=> chooseIndex(i));
+};
+
 
 // === Global safe-caller for applying TS + Radar (fallback to defaults) from anywhere ===
 function applyAllFromStoresNowSafe(why: string) {
@@ -1587,16 +1610,27 @@ nextTotals     = [
 
     // ===== Timeline mapping =====
     if (obj?.scoreTimeline?.seriesBySeat) {
-      const tl = obj.scoreTimeline;
-      const srcSeries = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
-      const mapped:(number|null)[][] = [0,1,2].map((_,i)=>
-        (fileIdxForTarget[i] >= 0 && Array.isArray(srcSeries[fileIdxForTarget[i]]))
-          ? srcSeries[fileIdxForTarget[i]]
-          : (Array.isArray(srcSeries[i]) ? srcSeries[i] : [])
-      );
+  const tl = obj.scoreTimeline;
+  const idxs = mapFileIdxForCurrentSeats(obj);
+  const src = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
+  const mapped:(number|null)[][] = [0,1,2].map((_,i)=> {
+    const j = idxs[i];
+    return (j >= 0 && Array.isArray(src[j])) ? src[j] : [];
+  });
 
-      // Write refs first so recompute reads latest
-      try { scoreSeriesRef.current = mapped as any; } catch {}
+  // refs first
+  try { scoreSeriesRef.current = mapped as any; } catch {}
+  if (Array.isArray(tl.rounds)) { try { roundCutsRef.current = tl.rounds.slice(); } catch {} }
+  if (Array.isArray(tl.landlords)) {
+    const inv: Record<number, number> = {}; idxs.forEach((f,i)=>{ if (f>=0) inv[f]=i; });
+    const mappedLords = tl.landlords.map((l:any)=> (typeof l==='number' && inv[l] != null) ? inv[l] : l);
+    try { roundLordsRef.current = mappedLords; } catch {}
+    setRoundLords(mappedLords);
+  }
+
+  setScoreSeries(mapped as any);
+  if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
+} catch {}
       if (Array.isArray(tl.rounds)) { try { roundCutsRef.current = tl.rounds.slice(); } catch {} }
       if (Array.isArray(tl.landlords)) {
         const mappedLords = tl.landlords.map((l:any)=> (typeof l==='number' && inv[l] != null) ? inv[l] : l);
