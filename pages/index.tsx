@@ -1662,13 +1662,6 @@ if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
     { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
   ]);
   setScoreDists([[],[],[]]);
-} else {
-        setScoreStats([
-          { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-          { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-          { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-        ]);
-        setScoreDists([[],[],[]]);
       }
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
     }
