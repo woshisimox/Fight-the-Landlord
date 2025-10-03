@@ -1534,7 +1534,7 @@ nextTotals     = [
     seriesBySeat?: (number|null)[][]; // 兼容旧字段
     landlords?: number[]
   };
-  scoreStats?: { stats: SeatStat[]; dists: number[][] };
+  scoreStats?: { stats: SeatStat[]; dists: number[][]; byIdentity?: Record<string, SeatStat>; distsByIdentity?: Record<string, number[]> };
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
 };
 
@@ -1546,6 +1546,17 @@ nextTotals     = [
       scoreSeriesRef.current[2]?.length||0
     );
     const identities = [0,1,2].map(seatIdentity);
+
+    // --- map scoreStats/dists by identity for ALL export ---
+    const scoreStatsByIdentity: Record<string, SeatStat> = {};
+    const distsByIdentity: Record<string, number[]> = {};
+    for (let i=0;i<3;i++){
+      const id = identities[i];
+      if (id!=null) {
+        scoreStatsByIdentity[id] = (scoreStats as any)[i];
+        distsByIdentity[id] = (scoreDists[i] || []).slice();
+      }
+    }
     const seriesByIdentity: Record<string,(number|null)[]> = {};
     for (let i=0;i<3;i++){
       seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice();
@@ -1567,10 +1578,7 @@ nextTotals     = [
       seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
       landlords: roundLordsRef.current.slice(),
     },
-      scoreStats: {
-        stats: scoreStats,
-        dists: scoreDists,
-      },
+      scoreStats: { stats: scoreStats, dists: scoreDists, byIdentity: scoreStatsByIdentity, distsByIdentity }
     };
   };
 
@@ -1596,13 +1604,32 @@ nextTotals     = [
         applyRadarFromStoreByRole(landlordRef.current, '统一上传');
       }
       if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
-      if (obj?.scoreTimeline?.seriesBySeat) {
+      if (obj?.scoreTimeline?.seriesByIdentity) {
+        const tl = obj.scoreTimeline;
+        const ids = [0,1,2].map(seatIdentity);
+        const mapped:(number|null)[][] = [[],[],[]];
+        for (let i=0;i<3;i++){
+          const arr = tl.seriesByIdentity[ids[i]];
+          mapped[i] = Array.isArray(arr) ? arr.slice() : [];
+        }
+        setScoreSeries(mapped);
+        if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds);
+        if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords);
+      } else if (obj?.scoreTimeline?.seriesBySeat) {
         const tl = obj.scoreTimeline;
         setScoreSeries(tl.seriesBySeat as (number|null)[][]);
-        if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
-        if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
+        if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds);
+        if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords);
       }
-      if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
+      if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
+        const ids = [0,1,2].map(seatIdentity);
+        const ss = obj.scoreStats;
+        const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
+        const statsArr = ids.map((id, i)=> (ss.byIdentity?.[id] ?? ss.stats?.[i] ?? defStat));
+        const distsArr = ids.map((id, i)=> Array.isArray(ss.distsByIdentity?.[id]) ? ss.distsByIdentity[id].slice() : (Array.isArray(ss.dists?.[i]) ? ss.dists[i] : []));
+        setScoreStats(statsArr as any);
+        setScoreDists(distsArr as any);
+      } else if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
         setScoreStats(obj.scoreStats.stats as any);
         setScoreDists(obj.scoreStats.dists as any);
       }
