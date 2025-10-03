@@ -1562,8 +1562,6 @@ nextTotals     = [
       writeRadarStore(radarStoreRef.current);
       applyRadarFromStoreByRole(landlordRef.current, '统一上传');
     }
-    if (obj?.ladder?.schema === 'ddz-ladder@1') {
-      try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {}
     }
     // ===== Seat-mapped parts (score timeline / stats): map by agents -> current seats =====
     const fileAgents: string[] =
@@ -1573,54 +1571,8 @@ nextTotals     = [
     const fileIdxForTarget = targetAgents.map(a => fileAgents.indexOf(a));
     const inv: Record<number, number> = {};
     fileIdxForTarget.forEach((fidx, i)=> { if (fidx >= 0) inv[fidx] = i; });
-    if (obj?.scoreTimeline?.seriesBySeat) {
-      const tl = obj.scoreTimeline;
-      const srcSeries = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
-      const mapped:(number|null)[][] = [0,1,2].map((_,i)=>
-        (fileIdxForTarget[i] >= 0 && Array.isArray(srcSeries[fileIdxForTarget[i]]))
-          ? srcSeries[fileIdxForTarget[i]]
-          : (Array.isArray(srcSeries[i]) ? srcSeries[i] : [])
-      );
-      setScoreSeries(mapped as (number|null)[][]);
-      if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
-      if (Array.isArray(tl.landlords)) {
-        const mappedLords = tl.landlords.map((l:any)=> (typeof l==='number' && inv[l] != null) ? inv[l] : l);
-        setRoundLords(mappedLords);
       }
     }
-    if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
-      const st = obj.scoreStats;
-      const statsMapped = [0,1,2].map((_,i)=> st.stats?.[ fileIdxForTarget[i] ] ?? st.stats?.[i]).filter(Boolean);
-      const distsMapped = [0,1,2].map((_,i)=> st.dists?.[ fileIdxForTarget[i] ] ?? st.dists?.[i]).filter(Boolean);
-      setScoreStats(statsMapped as any);
-      setScoreDists(distsMapped as any);
-    }
-    setLog(l => [...l, '【ALL】统一上传完成。']);
-  } catch (e:any) {
-    setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
-  }
-};
-    if (obj?.scoreTimeline?.seriesBySeat) {
-      const tl = obj.scoreTimeline;
-      const srcSeries = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
-      const mapped:(number|null)[][] = [0,1,2].map((_,i)=>
-        (fileIdxForTarget[i] >= 0 && Array.isArray(srcSeries[fileIdxForTarget[i]]))
-          ? srcSeries[fileIdxForTarget[i]]
-          : (Array.isArray(srcSeries[i]) ? srcSeries[i] : [])
-      );
-      setScoreSeries(mapped as (number|null)[][]);
-      if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
-      if (Array.isArray(tl.landlords)) {
-        const mappedLords = tl.landlords.map((l:any)=> (typeof l==='number' && inv[l] != null) ? inv[l] : l);
-        setRoundLords(mappedLords);
-      }
-    }
-    if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
-      const st = obj.scoreStats;
-      const statsMapped = [0,1,2].map((_,i)=> st.stats?.[ fileIdxForTarget[i] ] ?? st.stats?.[i]).filter(Boolean);
-      const distsMapped = [0,1,2].map((_,i)=> st.dists?.[ fileIdxForTarget[i] ] ?? st.dists?.[i]).filter(Boolean);
-      setScoreStats(statsMapped as any);
-      setScoreDists(distsMapped as any);
     }
     setLog(l => [...l, '【ALL】统一上传完成。']);
   } catch (e:any) {
