@@ -421,10 +421,10 @@ const mapFileIdxForCurrentSeats = (obj:any) => {
   // 依据 scoreSeries（每手评分）与 roundCuts（每局切点）计算每局均值，并汇总到席位统计
   const recomputeScoreStats = () => {// Use identity-aligned series to compute stats
 const ids = [0,1,2].map(seatIdentity);
-const getSeriesBySeat = (i:number) => {
+const getSeriesBySeat = (i:number): (number|null)[] => {
   const id = ids[i];
   const s = identitySeriesRef.current?.[id];
-  const seatSeries = Array.isArray(scoreSeriesRef.current?.[i]) ? getSeriesBySeat(i) : [];
+  const seatSeries = Array.isArray(scoreSeriesRef.current?.[i]) ? (scoreSeriesRef.current as any)[i] : [];
   return Array.isArray(s) && s.length ? s : seatSeries;
 };
 
