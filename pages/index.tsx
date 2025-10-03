@@ -1,9 +1,4 @@
-/* === AUTO PATCH NOTES (2025-10-03) ===
- - Add applyAllFromStoresNowSafe() to immediately apply TS + Radar with fallback-to-defaults for players with no archives
- - Call applyAllFromStoresNowSafe() after TS archive upload and Radar archive upload
- - This ensures MiniNet/new seats show default TrueSkill and Radar immediately after uploading or refresh
- - Edits are minimal and non-invasive to your existing UI/layout
-*/
+
 // === Global safe-caller for applying TS + Radar (fallback to defaults) from anywhere ===
 function applyAllFromStoresNowSafe(why: string) {
   try {
@@ -547,7 +542,7 @@ function LivePanel(props: LiveProps) {
 
       tsStoreRef.current = store; writeStore(store);
       setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
-applyAllFromStoresNowSafe('上传 TS 存档后');
+    applyAllFromStoresNowSafe('上传后立即应用');
 
     } catch (err:any) {
       setLog(l => [...l, `【TS】上传解析失败：${err?.message || err}`]);
@@ -789,7 +784,7 @@ applyAllFromStoresNowSafe('上传 TS 存档后');
 
       radarStoreRef.current = store; writeRadarStore(store);
       setLog(l => [...l, `【Radar】已上传存档（${Object.keys(store.players).length} 位）`]);
-applyAllFromStoresNowSafe('上传 Radar 存档后');
+    applyAllFromStoresNowSafe('上传后立即应用');
 
     } catch (err:any) {
       setLog(l => [...l, `【Radar】上传解析失败：${err?.message || err}`]);
@@ -1507,7 +1502,7 @@ nextTotals     = [
     schema: 'ddz-all@1';
     createdAt: string;
     agents: string[];
-    ids?: string[];
+  ids?: string[];
     trueskill?: TsStore;
     radar?: RadarStore;
     scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
@@ -1526,7 +1521,6 @@ nextTotals     = [
       schema: 'ddz-all@1',
       createdAt: new Date().toISOString(),
       agents,
-      
       ids: [0,1,2].map(seatIdentity),
       trueskill: tsStoreRef.current,
       radar: radarStoreRef.current as any,
@@ -1555,73 +1549,73 @@ nextTotals     = [
 
   const applyAllBundleInner = (obj:any) => {
   try {
-    // TrueSkill
+    // TrueSkill & Radar stores apply by role (with default fallback)
     if (obj?.trueskill?.players) {
       tsStoreRef.current = obj.trueskill as TsStore;
       writeStore(tsStoreRef.current);
       applyTsFromStoreByRole(landlordRef.current, '统一上传');
     }
-    // Radar
     if (obj?.radar?.players) {
       radarStoreRef.current = obj.radar as any;
       writeRadarStore(radarStoreRef.current);
       applyRadarFromStoreByRole(landlordRef.current, '统一上传');
     }
-    // ===== Seat-mapped parts by identity (prefer ids), fallback to agents =====
-const fileIds: string[] =
-  Array.isArray(obj?.ids) ? obj.ids :
-  (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.id || s.identity) : []);
-const fileAgents: string[] =
-  Array.isArray(obj?.agents) ? obj.agents :
-  (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.agent || s.label) : []);
-const targetIds = [0,1,2].map(seatIdentity);
-const targetAgents = [0,1,2].map(agentIdForIndex);
 
-const chooseIndex = (i:number) => {
-  const id = targetIds[i];
-  if (fileIds && fileIds.length) {
-    const idx = fileIds.indexOf(id);
-    if (idx >= 0) return idx;
-  }
-  const ag = targetAgents[i];
-  const idx2 = fileAgents.indexOf(ag);
-  return idx2 >= 0 ? idx2 : i;
-};
-const fileIdxForTarget = [0,1,2].map(i => chooseIndex(i));
-const inv: Record<number, number> = {};
-fileIdxForTarget.forEach((fidx, i)=> { if (fidx >= 0) inv[fidx] = i; });
+    // ===== Seat-mapped parts by identity (prefer ids), fallback to agents =====
+    const fileIds: string[] =
+      Array.isArray(obj?.ids) ? obj.ids :
+      (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.id || s.identity) : []);
+    const fileAgents: string[] =
+      Array.isArray(obj?.agents) ? obj.agents :
+      (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.agent || s.label) : []);
+    const targetIds = [0,1,2].map(seatIdentity);
+    const targetAgents = [0,1,2].map(agentIdForIndex);
+
+    const chooseIndex = (i:number) => {
+      const id = targetIds[i];
+      if (fileIds && fileIds.length) {
+        const idx = fileIds.indexOf(id);
+        if (idx >= 0) return idx;
+      }
+      const ag = targetAgents[i];
+      const idx2 = fileAgents.indexOf(ag);
+      return idx2 >= 0 ? idx2 : i;
+    };
+    const fileIdxForTarget = [0,1,2].map(i => chooseIndex(i));
+    const inv: Record<number, number> = {};
+    fileIdxForTarget.forEach((fidx, i)=> { if (fidx >= 0) inv[fidx] = i; });
+
+    // ===== Timeline mapping =====
     if (obj?.scoreTimeline?.seriesBySeat) {
       const tl = obj.scoreTimeline;
-const srcSeries = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
-const mapped:(number|null)[][] = [0,1,2].map((_,i)=>
-  (fileIdxForTarget[i] >= 0 && Array.isArray(srcSeries[fileIdxForTarget[i]]))
-    ? srcSeries[fileIdxForTarget[i]]
-    : (Array.isArray(srcSeries[i]) ? srcSeries[i] : [])
-);
+      const srcSeries = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
+      const mapped:(number|null)[][] = [0,1,2].map((_,i)=>
+        (fileIdxForTarget[i] >= 0 && Array.isArray(srcSeries[fileIdxForTarget[i]]))
+          ? srcSeries[fileIdxForTarget[i]]
+          : (Array.isArray(srcSeries[i]) ? srcSeries[i] : [])
+      );
 
-// 写 ref 再写 state，避免 recomputeScoreStats 读到旧值
-try { scoreSeriesRef.current = mapped as any; } catch {}
-if (Array.isArray(tl.rounds)) { try { roundCutsRef.current = tl.rounds.slice(); } catch {} }
-if (Array.isArray(tl.landlords)) {
-  const mappedLords = tl.landlords.map((l:any)=> (typeof l==='number' && inv[l] != null) ? inv[l] : l);
-  try { roundLordsRef.current = mappedLords; } catch {}
-  setRoundLords(mappedLords);
-}
+      // Write refs first so recompute reads latest
+      try { scoreSeriesRef.current = mapped as any; } catch {}
+      if (Array.isArray(tl.rounds)) { try { roundCutsRef.current = tl.rounds.slice(); } catch {} }
+      if (Array.isArray(tl.landlords)) {
+        const mappedLords = tl.landlords.map((l:any)=> (typeof l==='number' && inv[l] != null) ? inv[l] : l);
+        try { roundLordsRef.current = mappedLords; } catch {}
+        setRoundLords(mappedLords);
+      }
 
-setScoreSeries(mapped as (number|null)[][]);
-if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
-
-// 统一在这里重算评分统计（基于当前 refs/state）
-try { recomputeScoreStats(); } catch {}}
+      setScoreSeries(mapped as (number|null)[][]);
+      if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
     }
 
-    recomputeScoreStats();
+    // Always recompute score stats locally from timeline (ignore incoming scoreStats)
+    try { recomputeScoreStats(); } catch {}
+
     setLog(l => [...l, '【ALL】统一上传完成。']);
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
-};
-    
+};;
 
   const handleAllRefreshInner = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
@@ -1649,7 +1643,7 @@ const applyAllFromStoresNow = (why: string) => {
   try { applyRadarFromStoreByRole(lord, `${why}（含缺省回退）`); } catch {}
   try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
 };
-
+try { (window as any).ddz_applyAllFromStoresNow = applyAllFromStoresNow; } catch {}
 return () => {
       window.removeEventListener('ddz-all-save', onSave as any);
       window.removeEventListener('ddz-all-refresh', onRefresh as any);
