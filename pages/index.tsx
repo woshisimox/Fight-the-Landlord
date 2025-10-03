@@ -871,8 +871,7 @@ const handleScoreSave = () => {
     n,
     rounds,
     seriesByIdentity,
-    // 兼容字段（导入时不再使用）
-    seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
+     ? a.slice() : []),
   };
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
@@ -1615,6 +1614,7 @@ nextTotals     = [
       for (let i=0;i<3;i++){
         const arr = tl.seriesByIdentity[ids[i]];
         if (Array.isArray(arr)) { matched = true; mapped[i] = arr.slice(); } else { mapped[i] = []; }
+      else { setScoreSeries([[],[],[]]); setRoundCuts([]); setRoundLords([]); }
       }
       if (matched) {
         setScoreSeries(mapped);
@@ -1632,7 +1632,7 @@ nextTotals     = [
         setRoundCuts([]);
         setRoundLords([]);
       }
-      if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
+      if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.__removed_dists__ByIdentity) {
       const ids = [0,1,2].map(seatIdentity);
       const ss = obj.scoreStats;
       const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
