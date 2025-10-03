@@ -7,11 +7,6 @@ function setScoreSeriesIdentityMapped(arg: (number|null)[][] | ((prev: (number|n
     if (typeof fn === 'function') fn(arg as any);
   } catch {}
 }
-
-catch {}
-}
-
-
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
