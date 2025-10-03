@@ -1641,9 +1641,6 @@ if (obj?.scoreTimeline?.seriesByIdentity) {
   setRoundCuts([]);
   setRoundLords([]);
 }
-        setScoreSeries(mapped);
-        if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
-        if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords.slice());
       } else {
         setScoreSeries([[],[],[]]);
         setRoundCuts([]);
