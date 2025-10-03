@@ -1507,6 +1507,7 @@ nextTotals     = [
     schema: 'ddz-all@1';
     createdAt: string;
     agents: string[];
+    ids?: string[];
     trueskill?: TsStore;
     radar?: RadarStore;
     scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
