@@ -1601,13 +1601,6 @@ nextTotals     = [
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
 };
-    }
-    }
-    setLog(l => [...l, '【ALL】统一上传完成。']);
-  } catch (e:any) {
-    setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
-  }
-};
     
 
   const handleAllRefreshInner = () => {
