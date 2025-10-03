@@ -896,16 +896,31 @@ const recomputeStatsFromSeries = (series: (number|null)[][]): { stats: SeatStat[
   };
 
   const handleScoreSave = () => {
-    const agents = [0,1,2].map(agentIdForIndex);
-    const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
-    const payload = {
-      version: 1,
-      createdAt: new Date().toISOString(),
-      agents,
-      rounds: roundCutsRef.current,
-      n,
-      seriesBySeat: scoreSeriesRef.current,
-    };
+  const identities = activeIds();
+  const agents = [0,1,2].map(agentIdForIndex);
+  const n = Math.max(
+    scoreSeriesRef.current[0]?.length||0,
+    scoreSeriesRef.current[1]?.length||0,
+    scoreSeriesRef.current[2]?.length||0
+  );
+  const rounds = Array.isArray(roundCutsRef.current) ? roundCutsRef.current.slice() : [0];
+  const seriesByIdentity: Record<string,(number|null)[]> = {};
+  for (let i=0;i<3;i++){ seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice(); }
+  const payload = {
+    version: 2,
+    createdAt: new Date().toISOString(),
+    agents,
+    rounds,
+    n,
+    identities,
+    seriesByIdentity,
+    landlords: Array.isArray(roundLordsRef.current) ? roundLordsRef.current.slice() : undefined,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);
+};
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
@@ -1559,12 +1574,24 @@ nextTotals     = [
 
   // ===== 统一统计打包（All-in-One） =====
   type AllBundle = {
-    schema: 'ddz-all@1';
-    createdAt: string;
-    agents: string[];
-    trueskill?: TsStore;
-    radar?: RadarStore;
-    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
+  schema: 'ddz-all@1';
+  createdAt: string;
+  agents: string[];
+  trueskill?: TsStore;
+  radar?: RadarStore;
+  scoreTimeline?: {
+    n: number;
+    rounds: number[];
+    identities: string[];
+    seriesByIdentity: Record<string, (number|null)[]>;
+    landlords?: number[];
+  };
+  scoreStats?: {
+    byIdentity: Record<string, SeatStat>;
+    distsByIdentity: Record<string, number[]>;
+  };
+  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+};
     scoreStats?: { stats: SeatStat[]; dists: number[][] };
     ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
   };
