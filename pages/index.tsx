@@ -890,32 +890,91 @@ function LivePanel(props: LiveProps) {
   };
 
   
-  const handleStatsSave = () => {
-    try {
-      const payload = { when: new Date().toISOString(), stats: scoreStats, dists: scoreDists };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'score-stats.json';
-      a.click();
-      setTimeout(()=> URL.revokeObjectURL(a.href), 0);
-    } catch (e) { console.error('[stats] save error', e); }
-  };
-  const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    try {
-      const f = e.target.files?.[0]; if (!f) return;
-      const rd = new FileReader();
-      rd.onload = () => {
-        try {
-          const obj = JSON.parse(String(rd.result||'{}'));
-          if (Array.isArray(obj.stats) && obj.stats.length===3) setScoreStats(obj.stats as any);
-          if (Array.isArray(obj.dists) && obj.dists.length===3) setScoreDists(obj.dists as any);
-        } catch (err) { console.error('[stats upload] parse error', err); }
-      };
-      rd.readAsText(f);
-    } catch (err) { console.error('[stats upload] error', err); }
-    finally { if (statsFileRef.current) statsFileRef.current.value = ''; }
-  };
+  // 替换原 handleStatsSave
+const handleStatsSave = () => {
+  try {
+    const ids    = [0,1,2].map(seatIdentity);      // 身份：choice|model|base（与 TS/Radar 一致）
+    const labels = [0,1,2].map(agentIdForIndex);   // 仅用于显示的友好标签
+
+    const payload = {
+      version: 2,
+      createdAt: new Date().toISOString(),
+      agents: ids,
+      labels,
+      statsBySeat: scoreStats,   // SeatStat[]（UI 统计汇总）
+      distsBySeat: scoreDists,   // number[][]（每局均值序列，便于二次统计或画直方图）
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'score-stats.json';
+    a.click();
+    setTimeout(()=> URL.revokeObjectURL(a.href), 0);
+  } catch (e) { console.error('[stats] save error', e); }
+};;
+  // 替换原 handleStatsUpload
+const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  try {
+    const f = e.target.files?.[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const obj = JSON.parse(String(rd.result || '{}'));
+
+        // 目标（当前三席）的身份锚定：choice|model|base
+        const targetAgents: string[] = [0,1,2].map(seatIdentity);
+
+        // 兼容：v2 优先用 agents（seatIdentity），退化用 labels（友好名），再退化用旧格式（按座位）
+        const fileAgents: string[] | null =
+          (Array.isArray(obj.agents) && obj.agents.length === 3) ? obj.agents :
+          (Array.isArray(obj.labels) && obj.labels.length === 3) ? obj.labels :
+          null;
+
+        // 这两者在 v2 中分别叫 statsBySeat / distsBySeat；旧版是 stats / dists
+        const srcStats = (Array.isArray(obj.statsBySeat) ? obj.statsBySeat : obj.stats) || null;
+        const srcDists = (Array.isArray(obj.distsBySeat) ? obj.distsBySeat : obj.dists) || null;
+
+        if (fileAgents && srcStats && srcDists) {
+          // —— v2（或带 labels 的半 v2）路径：按“身份”重映射 —— //
+          const mappedStats: typeof scoreStats = [0,1,2].map(()=>({ rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 }));
+          const mappedDists: number[][] = [[],[],[]];
+
+          for (let i=0; i<3; i++) {
+            const idx = fileAgents.indexOf(targetAgents[i]);
+            if (idx >= 0) {
+              // 防御：stats 结构要像 SeatStat；dists 是 number[]
+              const s = srcStats[idx];
+              mappedStats[i] = {
+                rounds:   Number(s?.rounds)||0,
+                overallAvg: Number(s?.overallAvg)||0,
+                lastAvg:  Number(s?.lastAvg)||0,
+                best:     Number(s?.best)||0,
+                worst:    Number(s?.worst)||0,
+                mean:     Number(s?.mean)||0,
+                sigma:    Number(s?.sigma)||0,
+              };
+              mappedDists[i] = Array.isArray(srcDists[idx]) ? srcDists[idx].map((x:any)=> Number(x)) : [];
+            } else {
+              // 文件里没有这个目标身份：置空
+              mappedStats[i] = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
+              mappedDists[i] = [];
+            }
+          }
+
+          setScoreStats(mappedStats);
+          setScoreDists(mappedDists);
+        } else {
+          // —— 旧版兼容：没有 agents/labels，就按旧的“座位顺序”直接塞 —— //
+          if (Array.isArray(obj.stats) && obj.stats.length === 3) setScoreStats(obj.stats as any);
+          if (Array.isArray(obj.dists) && obj.dists.length === 3) setScoreDists(obj.dists as any);
+        }
+      } catch (err) { console.error('[stats upload] parse error', err); }
+    };
+    rd.readAsText(f);
+  } catch (err) { console.error('[stats upload] error', err); }
+  finally { if (statsFileRef.current) statsFileRef.current.value = ''; }
+};;
   const handleStatsRefresh = () => { setRoundCuts(prev => [...prev]); };
 const handleScoreRefresh = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
