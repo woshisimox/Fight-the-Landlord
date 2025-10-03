@@ -350,19 +350,7 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 };
 
 /* ==================== LivePanel（对局） ==================== */
-function LivePanel(props: LiveProps) {// === Score identity mapping memory (agent -> identity) ===
-const identitySeriesRef = useRef<Record<string, (number|null)[]>>({});
-
-// restore from localStorage once
-useEffect(() => {
-  try {
-    const raw = localStorage.getItem('ddz_score_identity_map_v1');
-    // this key stores agent->identity map, not series; only load if it's an object
-    if (raw && typeof JSON.parse(raw) === 'object') {/* ok */}
-  } catch {}
-}, []);
-
-
+function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
 
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
@@ -1591,53 +1579,7 @@ nextTotals     = [
     window.addEventListener('ddz-all-save', onSave as any);
     window.addEventListener('ddz-all-refresh', onRefresh as any);
     window.addEventListener('ddz-all-upload', onUpload as any);
-    // Allow alias mapping from agent labels to canonical identity keys
-const aliasToIdentity = (agent: string): string | null => {
-  const t = (agent || '').toLowerCase().trim();
-  const map: Record<string, string> = {
-    'greedy max': 'built-in:ally-support||',
-    'greedy-min': 'built-in:greedy-min||',
-    'greedy min': 'built-in:greedy-min||',
-    'random legal': 'built-in:random-legal||',
-    'random-legal': 'built-in:random-legal||',
-  };
-  return map[t] || null;
-};
-
-// Prefer explicit ids from file; else infer via cache/alias and TS/Radar players
-const computeIdsForUpload = (obj: any): string[] => {
-  if (Array.isArray(obj?.ids) && obj.ids.length === 3) return obj.ids as string[];
-
-  const agents: string[] =
-    Array.isArray(obj?.agents) ? obj.agents :
-    (Array.isArray(obj?.seats) ? obj.seats.map((s: any) => s.agent || s.label) : []);
-
-  const out = [0,1,2].map(() => '' as string);
-  const tsPlayers    = tsStoreRef.current?.players    ? Object.keys(tsStoreRef.current.players)    : [];
-  const radarPlayers = radarStoreRef.current?.players ? Object.keys(radarStoreRef.current.players) : [];
-  const allPlayers   = Array.from(new Set([...(tsPlayers||[]), ...(radarPlayers||[])]));
-
-  agents.forEach((ag, idx) => {
-    let id = aliasToIdentity(ag);
-    if (!id) {
-      const low = (ag||'').toLowerCase();
-      id = allPlayers.find(pid => pid.toLowerCase().includes(low)) || '';
-    }
-    out[idx] = id || '';
-  });
-
-  // Persist agent->identity mapping for future inference
-  try {
-    const raw = localStorage.getItem('ddz_score_identity_map_v1');
-    const cur = raw ? JSON.parse(raw) : {};
-    agents.forEach((ag, idx) => { if (ag && out[idx]) cur[ag] = out[idx]; });
-    localStorage.setItem('ddz_score_identity_map_v1', JSON.stringify(cur));
-  } catch {}
-
-  return out;
-};
-
-return () => {
+    return () => {
       window.removeEventListener('ddz-all-save', onSave as any);
       window.removeEventListener('ddz-all-refresh', onRefresh as any);
       window.removeEventListener('ddz-all-upload', onUpload as any);
