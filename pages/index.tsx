@@ -876,8 +876,7 @@ function LivePanel(props: LiveProps) {
 
   const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   try {
-    const f = e.target.files?.[0];
-    if (!f) return;
+    const f = e.target.files?.[0]; if (!f) return;
     const fr = new FileReader();
     fr.onload = () => {
       try {
@@ -901,18 +900,14 @@ function LivePanel(props: LiveProps) {
         setLog(l => [...l, '【Score】评分序列已按 identity 对齐加载。']);
       } catch (err:any) {
         setLog(l => [...l, `【Score】上传解析失败：${err?.message || err}`]);
-      } finally {
-        if (e.target) e.target.value = '';
-      }
+      } finally { if (e.target) e.target.value = ''; }
     };
     fr.onerror = () => {
       setLog(l => [...l, '【Score】文件读取失败']);
       if (e.target) e.target.value = '';
     };
     fr.readAsText(f);
-  } catch (err) {
-    console.error('[score upload] error', err);
-  }
+  } catch (err) { console.error('[score upload] error', err); }
 };
 
 
@@ -926,9 +921,9 @@ function LivePanel(props: LiveProps) {
     const payload = { when: new Date().toISOString(), byIdentity, distsByIdentity };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'score_stats.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1000);
-  } catch {}
+    const a = document.createElement('a'); a.href = url; a.download = 'score-stats.json'; a.click();
+    setTimeout(()=> URL.revokeObjectURL(url), 1000);
+  } catch (e) { console.error('[stats] save error', e); }
 };
 
   const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -938,35 +933,9 @@ function LivePanel(props: LiveProps) {
       rd.onload = () => {
         try {
           const obj = JSON.parse(String(rd.result||'{}'));
-          const targetIds = [0,1,2].map(seatIdentity);
-
-          let statsMapped:any[] = [null,null,null];
-          let distsMapped:any[] = [null,null,null];
-
-          // 1) identity-keyed
-          if (obj.statsByIdentity && obj.distsByIdentity) {
-            statsMapped = [0,1,2].map((i:number)=> obj.statsByIdentity[targetIds[i]] || { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 });
-            distsMapped = [0,1,2].map((i:number)=> obj.distsByIdentity[targetIds[i]] || []);
-          } else if (Array.isArray(obj.identities) && Array.isArray(obj.stats) && Array.isArray(obj.dists)) {
-            // 2) identities + arrays
-            statsMapped = [0,1,2].map((i:number)=> {
-              const k = obj.identities.indexOf(targetIds[i]);
-              return (k>=0 && obj.stats[k]) ? obj.stats[k] : { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-            });
-            distsMapped = [0,1,2].map((i:number)=> {
-              const k = obj.identities.indexOf(targetIds[i]);
-              return (k>=0 && Array.isArray(obj.dists[k])) ? obj.dists[k] : [];
-            });
-          } else if (Array.isArray(obj.stats) && Array.isArray(obj.dists) && obj.stats.length===3 && obj.dists.length===3) {
-            // 3) fallback: seat-order
-            statsMapped = obj.stats;
-            distsMapped = obj.dists;
-          }
-
-          setScoreStats(statsMapped as any);
-          setScoreDists(distsMapped as any);
+          if (Array.isArray(obj.stats) && obj.stats.length===3) setScoreStats(obj.stats as any);
+          if (Array.isArray(obj.dists) && obj.dists.length===3) setScoreDists(obj.dists as any);
         } catch (err) { console.error('[stats upload] parse error', err); }
-        finally { if (e.target) e.target.value = ''; }
       };
       rd.readAsText(f);
     } catch (err) { console.error('[stats upload] error', err); }
@@ -1569,19 +1538,13 @@ nextTotals     = [
     );
   const identities = [0,1,2].map(seatIdentity);
   const seriesByIdentity: Record<string,(number|null)[]> = {};
-  for (let i=0;i<3;i++){
-    seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice();
-  }
+  for (let i=0;i<3;i++){ seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice(); }
 
 
     
   const scoreStatsByIdentity: Record<string, SeatStat> = {};
   const distsByIdentity: Record<string, number[]> = {};
-  for (let i=0;i<3;i++){
-    const id = identities[i];
-    scoreStatsByIdentity[id] = (scoreStats as any)[i];
-    distsByIdentity[id] = (scoreDists[i] || []).slice();
-  }
+  for (let i=0;i<3;i++){ const id = identities[i]; scoreStatsByIdentity[id] = (scoreStats as any)[i]; distsByIdentity[id] = (scoreDists[i]||[]).slice(); }
 return {
       schema: 'ddz-all@1',
       createdAt: new Date().toISOString(),
@@ -1590,16 +1553,16 @@ return {
       radar: radarStoreRef.current as any,
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
       scoreTimeline: {
-      n,
-      rounds: roundCutsRef.current.slice(),
-      identities,
-      seriesByIdentity,
-      landlords: roundLordsRef.current.slice(),
-    },
+        n,
+        rounds: roundCutsRef.current.slice(),
+        identities,
+        seriesByIdentity,
+        landlords: roundLordsRef.current.slice(),
+      },
       scoreStats: {
-      byIdentity: scoreStatsByIdentity,
-      distsByIdentity: distsByIdentity,
-    },
+        byIdentity: scoreStatsByIdentity,
+        distsByIdentity: distsByIdentity,
+      },
     };
   };
 
@@ -1624,18 +1587,20 @@ return {
         writeRadarStore(radarStoreRef.current);
         applyRadarFromStoreByRole(landlordRef.current, '统一上传');
       }
+      if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
+
+      setLog(l => [...l, '【ALL】统一上传完成。']);
+    } catch (e:any) {
       
-    // === scoreTimeline：仅按 identity 导入（缺失则用缺省空序列）
-    if (obj?.scoreTimeline?.seriesByIdentity) {
-      const tl = obj.scoreTimeline;
-      const ids = [0,1,2].map(seatIdentity);
-      const mapped:(number|null)[][] = [[],[],[]];
-      let matched = false;
-      for (let i=0;i<3;i++){
-        const arr = tl.seriesByIdentity[ids[i]];
-        if (Array.isArray(arr)) { matched = true; mapped[i] = arr.slice(); } else { mapped[i] = []; }
-      }
-      if (matched) {
+      // === identity-only: scoreTimeline ===
+      if (obj?.scoreTimeline?.seriesByIdentity) {
+        const tl = obj.scoreTimeline;
+        const ids = [0,1,2].map(seatIdentity);
+        const mapped:(number|null)[][] = [[],[],[]];
+        for (let i=0;i<3;i++){
+          const arr = tl.seriesByIdentity[ids[i]];
+          mapped[i] = Array.isArray(arr) ? arr.slice() : [];
+        }
         setScoreSeries(mapped);
         if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
         if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords.slice());
@@ -1644,30 +1609,14 @@ return {
         setRoundCuts([]);
         setRoundLords([]);
       }
-    } else {
-      setScoreSeries([[],[],[]]);
-      setRoundCuts([]);
-      setRoundLords([]);
-    }
-if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
-      setLog(l => [...l, '【ALL】统一上传完成。']);
-    
-    // === scoreStats：仅按 identity 导入（缺失则用缺省值）
-    if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
-      const ids = [0,1,2].map(seatIdentity);
-      const ss = obj.scoreStats;
-      const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-      const statsArr = [];
-      const distsArr = [];
-      let matched = false;
-      for (let i=0;i<3;i++){
-        const id = ids[i];
-        const st = ss.byIdentity?.[id];
-        const ds = ss.distsByIdentity?.[id];
-        if (st) { matched = true; statsArr[i] = st; } else { statsArr[i] = defStat; }
-        distsArr[i] = Array.isArray(ds) ? ds.slice() : [];
-      }
-      if (matched) {
+
+      // === identity-only: scoreStats ===
+      if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
+        const ids = [0,1,2].map(seatIdentity);
+        const ss = obj.scoreStats;
+        const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
+        const statsArr = ids.map(id => (ss.byIdentity?.[id] ?? defStat));
+        const distsArr = ids.map(id => (Array.isArray(ss.distsByIdentity?.[id]) ? ss.distsByIdentity[id].slice() : []));
         setScoreStats(statsArr as any);
         setScoreDists(distsArr as any);
       } else {
@@ -1678,16 +1627,7 @@ if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_la
         ]);
         setScoreDists([[],[],[]]);
       }
-    } else {
-      setScoreStats([
-        { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-        { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-        { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-      ]);
-      setScoreDists([[],[],[]]);
-    }
-} catch (e:any) {
-      setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
+    setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
     }
   };
 
