@@ -1641,11 +1641,6 @@ if (obj?.scoreTimeline?.seriesByIdentity) {
   setRoundCuts([]);
   setRoundLords([]);
 }
-      } else {
-        setScoreSeries([[],[],[]]);
-        setRoundCuts([]);
-        setRoundLords([]);
-      }
 
       // === identity-only: scoreStats ===
       
