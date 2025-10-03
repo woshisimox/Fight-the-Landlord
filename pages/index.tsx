@@ -546,9 +546,7 @@ function LivePanel(props: LiveProps) {
     });
     writeStore(tsStoreRef.current);
     const blob = new Blob([JSON.stringify(tsStoreRef.current, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'trueskill_store.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1200);
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
 
@@ -792,9 +790,7 @@ function LivePanel(props: LiveProps) {
     }
 
     const blob = new Blob([JSON.stringify(radarStoreRef.current, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'radar_store.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1200);
     setLog(l => [...l, '【Radar】已导出当前存档。']);
   };
 
@@ -845,7 +841,8 @@ function LivePanel(props: LiveProps) {
     return `${label}:${model}`;
   };
 
-  const handleScoreSave = () => {
+  // === 保存“出牌评分”存档（严格：按 identity 导出）===
+const handleScoreSave = () => {
   const identities = [0,1,2].map(seatIdentity);
   const agents     = [0,1,2].map(agentIdForIndex);
 
@@ -881,7 +878,8 @@ function LivePanel(props: LiveProps) {
   setTimeout(()=>URL.revokeObjectURL(url), 1500);
 };
 
-  const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+// === 上传“出牌评分”存档（严格：只按 identity 对齐）===
+const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   try {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -915,7 +913,6 @@ function LivePanel(props: LiveProps) {
     };
   } catch (err) { console.error('[score upload] error', err); }
 };
-    } catch (err) { console.error('[score upload] error', err); }
   };
 
   
@@ -1610,6 +1607,14 @@ nextTotals     = [
         setScoreSeries(mapped);
         if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
         if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
+      } else if (obj?.scoreTimeline?.seriesByIdentity) {
+        const tl = obj.scoreTimeline;
+        const ids = [0,1,2].map(seatIdentity);
+        const mapped:(number|null)[][] = [[],[],[]];
+        for (let i=0;i<3;i++){ const arr = tl.seriesByIdentity?.[ids[i]]; mapped[i] = Array.isArray(arr)? arr.slice(): []; }
+        setScoreSeries(mapped);
+        if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
+        if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
       } else if (obj?.scoreTimeline?.seriesBySeat) {
         const tl = obj.scoreTimeline;
         setScoreSeries(tl.seriesBySeat as (number|null)[][]);
@@ -1617,6 +1622,12 @@ nextTotals     = [
         if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
       }
       if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
+        const ids = [0,1,2].map(seatIdentity);
+        const st = [0,1,2].map(i=> obj.scoreStats.byIdentity?.[ids[i]] ?? { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 });
+        const ds = [0,1,2].map(i=> obj.scoreStats.distsByIdentity?.[ids[i]] ?? []);
+        setScoreStats(st as any);
+        setScoreDists(ds as any);
+      } else if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
         const ids = [0,1,2].map(seatIdentity);
         const st = [0,1,2].map(i=> obj.scoreStats.byIdentity?.[ids[i]] ?? { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 });
         const ds = [0,1,2].map(i=> obj.scoreStats.distsByIdentity?.[ids[i]] ?? []);
