@@ -913,10 +913,8 @@ function LivePanel(props: LiveProps) {
       setLog(l => [...l, '【Score】文件读取失败']);
       if (e.target) e.target.value = '';
     };
-    fr.readAsText(f);
   } catch (err) { console.error('[score upload] error', err); }
 };
-      fr.readAsText(f);
     } catch (err) { console.error('[score upload] error', err); }
   };
 
@@ -969,7 +967,6 @@ function LivePanel(props: LiveProps) {
         } catch (err) { console.error('[stats upload] parse error', err); }
         finally { if (e.target) e.target.value = ''; }
       };
-      fr.readAsText(f);
     } catch (err) { console.error('[stats upload] error', err); }
     finally { if (statsFileRef.current) statsFileRef.current.value = ''; }
   };
