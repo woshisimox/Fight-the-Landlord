@@ -848,9 +848,11 @@ function LivePanel(props: LiveProps) {
     const agents = [0,1,2].map(agentIdForIndex);
     const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
     const payload = {
-      version: 1,
+      version: 2,
       createdAt: new Date().toISOString(),
       agents,
+      identities: [0,1,2].map(seatIdentity),
+      seriesByIdentity: (function(){ const ids=[0,1,2].map(seatIdentity); const src=scoreSeriesRef.current; const o:any={}; for(let i=0;i<3;i++){ o[ids[i]] = Array.isArray(src[i])? src[i].slice(): []; } return o; })(),
       rounds: roundCutsRef.current,
       n,
       seriesBySeat: scoreSeriesRef.current,
@@ -861,26 +863,52 @@ function LivePanel(props: LiveProps) {
     setTimeout(()=>URL.revokeObjectURL(url), 1500);
   };
 
-  const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  
+const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       const f = e.target.files?.[0]; if (!f) return;
       const rd = new FileReader();
       rd.onload = () => {
         try {
           const j = JSON.parse(String(rd.result||'{}'));
-          const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
+          const targetIds = [0,1,2].map(seatIdentity);
           const targetAgents = [0,1,2].map(agentIdForIndex);
+
           const mapped:(number|null)[][] = [[],[],[]];
           for (let i=0;i<3;i++){
-            const idx = fileAgents.indexOf(targetAgents[i]);
-            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
+            let arr:(number|null)[]|undefined;
+
+            // 1) identities -> seriesByIdentity
+            if (j.seriesByIdentity && typeof j.seriesByIdentity === 'object') {
+              const id = targetIds[i];
+              const cand = j.seriesByIdentity[id];
+              if (Array.isArray(cand)) arr = cand;
+            }
+
+            // 2) identities -> identities[] + seriesBySeat[]
+            if (!arr && Array.isArray(j.identities) && Array.isArray(j.seriesBySeat)) {
+              const idx = j.identities.indexOf(targetIds[i]);
+              if (idx >= 0 && Array.isArray(j.seriesBySeat[idx])) arr = j.seriesBySeat[idx];
+            }
+
+            // 3) agents label fallback
+            if (!arr) {
+              const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
+              const idx = fileAgents.indexOf(targetAgents[i]);
+              if (idx >= 0 && Array.isArray(j.seriesBySeat?.[idx])) arr = j.seriesBySeat[idx];
+            }
+
+            mapped[i] = Array.isArray(arr) ? arr : [];
           }
           setScoreSeries(mapped);
-          if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
-        } catch (err) {
-          console.error('[score upload] parse error', err);
-        }
+          if (Array.isArray(j.rounds)) setRoundCuts(j.rounds);
+          if (Array.isArray(j.landlords)) setRoundLords(j.landlords);
+        } catch (err) { console.error('[score upload] parse error', err); }
+        finally { if (e.target) e.target.value = ''; }
       };
+      rd.readAsText(f);
+    } catch (err) { console.error('[score upload] error', err); }
+  };
       rd.readAsText(f);
     } catch (err) {
       console.error('[score upload] error', err);
@@ -890,9 +918,17 @@ function LivePanel(props: LiveProps) {
   };
 
   
-  const handleStatsSave = () => {
+  
+const handleStatsSave = () => {
     try {
-      const payload = { when: new Date().toISOString(), stats: scoreStats, dists: scoreDists };
+      const ids = [0,1,2].map(seatIdentity);
+      const statsByIdentity:any = {};
+      const distsByIdentity:any = {};
+      for (let i=0;i<3;i++) {
+        statsByIdentity[ids[i]] = scoreStats[i];
+        distsByIdentity[ids[i]] = scoreDists[i];
+      }
+      const payload = { version: 2, when: new Date().toISOString(), identities: ids, statsByIdentity, distsByIdentity, stats: scoreStats, dists: scoreDists };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -901,17 +937,55 @@ function LivePanel(props: LiveProps) {
       setTimeout(()=> URL.revokeObjectURL(a.href), 0);
     } catch (e) { console.error('[stats] save error', e); }
   };
-  const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'score-stats.json';
+      a.click();
+      setTimeout(()=> URL.revokeObjectURL(a.href), 0);
+    } catch (e) { console.error('[stats] save error', e); }
+  };
+  
+const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       const f = e.target.files?.[0]; if (!f) return;
       const rd = new FileReader();
       rd.onload = () => {
         try {
           const obj = JSON.parse(String(rd.result||'{}'));
-          if (Array.isArray(obj.stats) && obj.stats.length===3) setScoreStats(obj.stats as any);
-          if (Array.isArray(obj.dists) && obj.dists.length===3) setScoreDists(obj.dists as any);
+          const targetIds = [0,1,2].map(seatIdentity);
+
+          let statsMapped:any[] = [null,null,null];
+          let distsMapped:any[] = [null,null,null];
+
+          // 1) identity-keyed
+          if (obj.statsByIdentity && obj.distsByIdentity) {
+            statsMapped = [0,1,2].map((i:number)=> obj.statsByIdentity[targetIds[i]] || { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 });
+            distsMapped = [0,1,2].map((i:number)=> obj.distsByIdentity[targetIds[i]] || []);
+          } else if (Array.isArray(obj.identities) && Array.isArray(obj.stats) && Array.isArray(obj.dists)) {
+            // 2) identities + arrays
+            statsMapped = [0,1,2].map((i:number)=> {
+              const k = obj.identities.indexOf(targetIds[i]);
+              return (k>=0 && obj.stats[k]) ? obj.stats[k] : { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
+            });
+            distsMapped = [0,1,2].map((i:number)=> {
+              const k = obj.identities.indexOf(targetIds[i]);
+              return (k>=0 && Array.isArray(obj.dists[k])) ? obj.dists[k] : [];
+            });
+          } else if (Array.isArray(obj.stats) && Array.isArray(obj.dists) && obj.stats.length===3 && obj.dists.length===3) {
+            // 3) fallback: seat-order
+            statsMapped = obj.stats;
+            distsMapped = obj.dists;
+          }
+
+          setScoreStats(statsMapped as any);
+          setScoreDists(distsMapped as any);
         } catch (err) { console.error('[stats upload] parse error', err); }
+        finally { if (e.target) e.target.value = ''; }
       };
+      rd.readAsText(f);
+    } catch (err) { console.error('[stats upload] error', err); }
+  };
       rd.readAsText(f);
     } catch (err) { console.error('[stats upload] error', err); }
     finally { if (statsFileRef.current) statsFileRef.current.value = ''; }
@@ -1490,7 +1564,7 @@ nextTotals     = [
     agents: string[];
     trueskill?: TsStore;
     radar?: RadarStore;
-    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
+    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; identities?: string[]; seriesByIdentity?: Record<string, (number|null)[]>; landlords?:number[] };
     scoreStats?: { stats: SeatStat[]; dists: number[][] };
     ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
   };
@@ -1513,6 +1587,8 @@ nextTotals     = [
         n,
         rounds: roundCutsRef.current.slice(),
         seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
+        identities: [0,1,2].map(seatIdentity),
+        seriesByIdentity: (function(){ const ids=[0,1,2].map(seatIdentity); const src=scoreSeriesRef.current; const o:any={}; for(let i=0;i<3;i++){ o[ids[i]] = Array.isArray(src[i])? src[i].slice(): []; } return o; })() ? a.slice() : []),
         landlords: roundLordsRef.current.slice(),
       },
       scoreStats: {
@@ -1544,12 +1620,32 @@ nextTotals     = [
         applyRadarFromStoreByRole(landlordRef.current, '统一上传');
       }
       if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
-      if (obj?.scoreTimeline?.seriesBySeat) {
+      
+      if (obj?.scoreTimeline) {
         const tl = obj.scoreTimeline;
-        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
+        const targetIds = [0,1,2].map(seatIdentity);
+        // 1) seriesByIdentity
+        if (tl.seriesByIdentity && typeof tl.seriesByIdentity === 'object') {
+          const mapped:(number|null)[][] = [0,1,2].map((i:number)=>{
+            const arr = tl.seriesByIdentity[targetIds[i]];
+            return Array.isArray(arr) ? arr : [];
+          });
+          setScoreSeries(mapped);
+        } else if (Array.isArray(tl.identities) && Array.isArray(tl.seriesBySeat)) {
+          // 2) identities + seriesBySeat
+          const mapped:(number|null)[][] = [0,1,2].map((i:number)=>{
+            const idx = tl.identities.indexOf(targetIds[i]);
+            return (idx>=0 && Array.isArray(tl.seriesBySeat[idx])) ? tl.seriesBySeat[idx] : [];
+          });
+          setScoreSeries(mapped);
+        } else if (Array.isArray(tl.seriesBySeat)) {
+          // 3) fallback
+          setScoreSeries(tl.seriesBySeat as (number|null)[][]);
+        }
         if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
         if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
       }
+    
       if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
         setScoreStats(obj.scoreStats.stats as any);
         setScoreDists(obj.scoreStats.dists as any);
