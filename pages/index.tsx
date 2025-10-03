@@ -845,34 +845,16 @@ function LivePanel(props: LiveProps) {
   };
 
   const handleScoreSave = () => {
-    // identities for current seats
-    const identities = [0,1,2].map(seatIdentity);
-    const agents     = [0,1,2].map(agentIdForIndex);
-    const n = Math.max(
-      scoreSeriesRef.current[0]?.length||0,
-      scoreSeriesRef.current[1]?.length||0,
-      scoreSeriesRef.current[2]?.length||0
-    );
-    const rounds = Array.isArray(roundCutsRef.current) ? roundCutsRef.current.slice() : [0];
-    const seriesByIdentity: Record<string,(number|null)[]> = {};
-    for (let i=0;i<3;i++){ seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice(); }
+    const agents = [0,1,2].map(agentIdForIndex);
+    const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
     const payload = {
-      schema: 'ddz-scores@1',
-      version: 2,
+      version: 1,
       createdAt: new Date().toISOString(),
-      identities,
       agents,
+      rounds: roundCutsRef.current,
       n,
-      rounds,
-      seriesByIdentity,
-      // legacy (for reference only; do not rely on when importing)
-      seriesBySeat: scoreSeriesRef.current.map(a=>Array.isArray(a)?a.slice():[])
+      seriesBySeat: scoreSeriesRef.current,
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1500);
-  };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
@@ -898,12 +880,17 @@ function LivePanel(props: LiveProps) {
           setScoreSeries(mapped);
           if (Array.isArray(j.rounds))     setRoundCuts(j.rounds.slice());
           if (Array.isArray(j.landlords))  setRoundLords(j.landlords.slice());
-        } catch (err) {
-          console.error('[score upload] parse error', err);
-        } finally { if (e.target) e.target.value = ''; }
+          setLog(l => [...l, '【Score】评分序列已按 identity 对齐加载。']);
+        } catch (err:any) {
+          setLog(l => [...l, `【Score】上传解析失败：${err?.message || err}`]);
+        } finally {
+          e.target.value = '';
+        }
       };
       rd.readAsText(f);
-    } catch (err) { console.error('[score upload] error', err); } 
+    } catch (err) {
+      console.error('[score upload] error', err);
+    }
   };
       rd.readAsText(f);
     } catch (err) { console.error('[score upload] error', err); }
@@ -1550,7 +1537,6 @@ nextTotals     = [
     );
     return {
       schema: 'ddz-all@1',
-      identities: [0,1,2].map(seatIdentity),
       createdAt: new Date().toISOString(),
       agents,
       trueskill: tsStoreRef.current,
@@ -1558,18 +1544,13 @@ nextTotals     = [
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
       scoreTimeline: {
         n,
-        identities: [0,1,2].map(seatIdentity),
         rounds: roundCutsRef.current.slice(),
-        seriesByIdentity: (function(){ const ids=[0,1,2].map(seatIdentity); const out:Record<string,(number|null)[]>={}; for(let i=0;i<3;i++){ out[ids[i]] = (scoreSeriesRef.current[i]||[]).slice(); } return out; })(),
-        landlords: roundLordsRef.current.slice(),
-        // legacy for compatibility only
         seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
+        landlords: roundLordsRef.current.slice(),
       },
       scoreStats: {
         stats: scoreStats,
         dists: scoreDists,
-        byIdentity: (function(){ const ids=[0,1,2].map(seatIdentity); const out:Record<string, any>={}; for(let i=0;i<3;i++){ out[ids[i]] = scoreStats[i]; } return out; })(),
-        distsByIdentity: (function(){ const ids=[0,1,2].map(seatIdentity); const out:Record<string, number[]>={}; for(let i=0;i<3;i++){ out[ids[i]] = (scoreDists[i]||[]).slice(); } return out; })(),
       },
     };
   };
@@ -1598,30 +1579,30 @@ nextTotals     = [
       if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
       if (obj?.scoreTimeline?.seriesByIdentity) {
         const tl = obj.scoreTimeline;
-        // map identities -> current seats
         const ids = [0,1,2].map(seatIdentity);
         const mapped:(number|null)[][] = [[],[],[]];
         for (let i=0;i<3;i++){
-          const arr = tl.seriesByIdentity[ids[i]] as (number|null)[] | undefined;
+          const arr = tl.seriesByIdentity[ids[i]];
           mapped[i] = Array.isArray(arr) ? arr.slice() : [];
         }
         setScoreSeries(mapped);
         if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
         if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
       } else if (obj?.scoreTimeline?.seriesBySeat) {
-        // legacy fallback (seat-based)
         const tl = obj.scoreTimeline;
         setScoreSeries(tl.seriesBySeat as (number|null)[][]);
         if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
         if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
       }
+      
       if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
         const ids = [0,1,2].map(seatIdentity);
         const st = [0,1,2].map(i=> (obj.scoreStats.byIdentity?.[ids[i]] ?? { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 }));
         const ds = [0,1,2].map(i=> (obj.scoreStats.distsByIdentity?.[ids[i]] ?? []));
         setScoreStats(st as any);
         setScoreDists(ds as any);
-      } else if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
+      }
+if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
         setScoreStats(obj.scoreStats.stats as any);
         setScoreDists(obj.scoreStats.dists as any);
       }
