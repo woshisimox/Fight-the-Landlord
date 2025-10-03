@@ -1592,18 +1592,27 @@ const inv: Record<number, number> = {};
 fileIdxForTarget.forEach((fidx, i)=> { if (fidx >= 0) inv[fidx] = i; });
     if (obj?.scoreTimeline?.seriesBySeat) {
       const tl = obj.scoreTimeline;
-      const srcSeries = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
-      const mapped:(number|null)[][] = [0,1,2].map((_,i)=>
-        (fileIdxForTarget[i] >= 0 && Array.isArray(srcSeries[fileIdxForTarget[i]]))
-          ? srcSeries[fileIdxForTarget[i]]
-          : (Array.isArray(srcSeries[i]) ? srcSeries[i] : [])
-      );
-      setScoreSeries(mapped as (number|null)[][]);
-      if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
-      if (Array.isArray(tl.landlords)) {
-        const mappedLords = tl.landlords.map((l:any)=> (typeof l==='number' && inv[l] != null) ? inv[l] : l);
-        setRoundLords(mappedLords);
-      }
+const srcSeries = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
+const mapped:(number|null)[][] = [0,1,2].map((_,i)=>
+  (fileIdxForTarget[i] >= 0 && Array.isArray(srcSeries[fileIdxForTarget[i]]))
+    ? srcSeries[fileIdxForTarget[i]]
+    : (Array.isArray(srcSeries[i]) ? srcSeries[i] : [])
+);
+
+// 写 ref 再写 state，避免 recomputeScoreStats 读到旧值
+try { scoreSeriesRef.current = mapped as any; } catch {}
+if (Array.isArray(tl.rounds)) { try { roundCutsRef.current = tl.rounds.slice(); } catch {} }
+if (Array.isArray(tl.landlords)) {
+  const mappedLords = tl.landlords.map((l:any)=> (typeof l==='number' && inv[l] != null) ? inv[l] : l);
+  try { roundLordsRef.current = mappedLords; } catch {}
+  setRoundLords(mappedLords);
+}
+
+setScoreSeries(mapped as (number|null)[][]);
+if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
+
+// 统一在这里重算评分统计（基于当前 refs/state）
+try { recomputeScoreStats(); } catch {}}
     }
 
     recomputeScoreStats();
