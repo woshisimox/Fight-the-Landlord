@@ -1610,22 +1610,18 @@ nextTotals     = [
     const inv: Record<number, number> = {};
     fileIdxForTarget.forEach((fidx, i)=> { if (fidx >= 0) inv[fidx] = i; });
 
-    // ===== Timeline mapping =====
-    if (obj?.scoreTimeline?.seriesBySeat) {
+    
+// ===== Timeline mapping =====
+if (obj?.scoreTimeline?.seriesBySeat) {
   const tl = obj.scoreTimeline;
   const idxs = mapFileIdxForCurrentSeats(obj);
   const src = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
   const mapped:(number|null)[][] = [0,1,2].map((_,i)=> {
     const j = idxs[i];
-    return [0,1,2].map((_,i)=> chooseIndex(i));
-};
-return [0,1,2].map((_,i)=> chooseIndex(i));
-};
-
-return (j >= 0 && Array.isArray(src[j])) ? src[j] : [];
+    return (j >= 0 && Array.isArray(src[j])) ? src[j] : [];
   });
 
-  // refs first
+  // refs first so recompute reads latest
   try { scoreSeriesRef.current = mapped as any; } catch {}
   if (Array.isArray(tl.rounds)) { try { roundCutsRef.current = tl.rounds.slice(); } catch {} }
   if (Array.isArray(tl.landlords)) {
@@ -1637,19 +1633,9 @@ return (j >= 0 && Array.isArray(src[j])) ? src[j] : [];
 
   setScoreSeries(mapped as any);
   if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
-} catch {}
-      if (Array.isArray(tl.rounds)) { try { roundCutsRef.current = tl.rounds.slice(); } catch {} }
-      if (Array.isArray(tl.landlords)) {
-        const mappedLords = tl.landlords.map((l:any)=> (typeof l==='number' && inv[l] != null) ? inv[l] : l);
-        try { roundLordsRef.current = mappedLords; } catch {}
-        setRoundLords(mappedLords);
-      }
+}
 
-      setScoreSeries(mapped as (number|null)[][]);
-      if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
-    }
-
-    // Always recompute score stats locally from timeline (ignore incoming scoreStats)
+// Always recompute score stats locally from timeline (ignore incoming scoreStats)
     try { recomputeScoreStats(); } catch {}
 
     setLog(l => [...l, '【ALL】统一上传完成。']);
