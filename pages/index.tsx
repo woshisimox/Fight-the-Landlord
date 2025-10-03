@@ -1608,31 +1608,57 @@ nextTotals     = [
       }
       if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
       if (obj?.scoreTimeline?.seriesByIdentity) {
-        const tl = obj.scoreTimeline;
-        const ids = [0,1,2].map(seatIdentity);
-        const mapped:(number|null)[][] = [[],[],[]];
-        for (let i=0;i<3;i++){
-          const arr = tl.seriesByIdentity[ids[i]];
-          mapped[i] = Array.isArray(arr) ? arr.slice() : [];
-        }
+      const tl = obj.scoreTimeline;
+      const ids = [0,1,2].map(seatIdentity);
+      const mapped:(number|null)[][] = [[],[],[]];
+      let matched = false;
+      for (let i=0;i<3;i++){
+        const arr = tl.seriesByIdentity[ids[i]];
+        if (Array.isArray(arr)) { matched = true; mapped[i] = arr.slice(); } else { mapped[i] = []; }
+      }
+      if (matched) {
         setScoreSeries(mapped);
-        if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds);
-        if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords);
+        if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
+        if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords.slice());
       } else {
+        // identity 一个都对不上 → 全部置空
+        setScoreSeries([[],[],[]]);
+        setRoundCuts([]);
+        setRoundLords([]);
+      }
+    } else {
         // 没有 identity 数据 → 全部置空（不使用 seat 兜底）
         setScoreSeries([[],[],[]]);
         setRoundCuts([]);
         setRoundLords([]);
       }
       if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
-        const ids = [0,1,2].map(seatIdentity);
-        const ss = obj.scoreStats;
-        const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-        const statsArr = ids.map(id => (ss.byIdentity?.[id] ?? defStat));
-        const distsArr = ids.map(id => (Array.isArray(ss.distsByIdentity?.[id]) ? ss.distsByIdentity[id].slice() : []));
+      const ids = [0,1,2].map(seatIdentity);
+      const ss = obj.scoreStats;
+      const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
+      const statsArr = [];
+      const distsArr = [];
+      let matched = false;
+      for (let i=0;i<3;i++){
+        const id = ids[i];
+        const st = ss.byIdentity?.[id];
+        const ds = ss.distsByIdentity?.[id];
+        if (st) { matched = true; statsArr[i] = st; } else { statsArr[i] = defStat; }
+        distsArr[i] = Array.isArray(ds) ? ds.slice() : [];
+      }
+      if (matched) {
         setScoreStats(statsArr as any);
         setScoreDists(distsArr as any);
       } else {
+        // identity 一个都对不上 → 全缺省
+        setScoreStats([
+          { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+          { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+          { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+        ]);
+        setScoreDists([[],[],[]]);
+      }
+    } else {
       // 没有 identity 统计 → 全缺省（不再使用 seat 兜底）
       setScoreStats([
         { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
