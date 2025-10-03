@@ -419,7 +419,15 @@ const mapFileIdxForCurrentSeats = (obj:any) => {
   const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
 
   // 依据 scoreSeries（每手评分）与 roundCuts（每局切点）计算每局均值，并汇总到席位统计
-  const recomputeScoreStats = () => {
+  const recomputeScoreStats = () => {// Use identity-aligned series to compute stats
+const ids = [0,1,2].map(seatIdentity);
+const getSeriesBySeat = (i:number) => {
+  const id = ids[i];
+  const s = identitySeriesRef.current?.[id];
+  const seatSeries = Array.isArray(scoreSeriesRef.current?.[i]) ? getSeriesBySeat(i) : [];
+  return Array.isArray(s) && s.length ? s : seatSeries;
+};
+
     try {
       const series = scoreSeriesRef.current;   // number[][]
       const cuts = roundCutsRef.current;       // number[]
@@ -1615,6 +1623,7 @@ nextTotals     = [
 if (obj?.scoreTimeline?.seriesBySeat) {
   const tl = obj.scoreTimeline;
   const idxs = mapFileIdxForCurrentSeats(obj);
+      const targetIds = [0,1,2].map(seatIdentity);
   const src = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
   const mapped:(number|null)[][] = [0,1,2].map((_,i)=> {
     const j = idxs[i];
