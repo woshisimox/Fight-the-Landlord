@@ -1618,12 +1618,11 @@ nextTotals     = [
         setScoreSeries(mapped);
         if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds);
         if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords);
-      } else if (obj?.scoreTimeline?.seriesBySeat) {
-        const tl = obj.scoreTimeline;
-        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
-        if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds);
-        if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords);
+      } else {
+        // 没有 identity 数据 → 全部置空（不使用 seat 兜底）
+        setScoreSeries([[],[],[]]);
       }
+      if (obj?}
       if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
         const ids = [0,1,2].map(seatIdentity);
         const ss = obj.scoreStats;
@@ -1632,10 +1631,15 @@ nextTotals     = [
         const distsArr = ids.map((id, i)=> Array.isArray(ss.distsByIdentity?.[id]) ? ss.distsByIdentity[id].slice() : (Array.isArray(ss.dists?.[i]) ? ss.dists[i] : []));
         setScoreStats(statsArr as any);
         setScoreDists(distsArr as any);
-      } else if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
-        setScoreStats(obj.scoreStats.stats as any);
-        setScoreDists(obj.scoreStats.dists as any);
-      }
+      } else {
+      // 没有 identity 统计 → 全缺省（不再使用 seat 兜底）
+      setScoreStats([
+        { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+        { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+        { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+      ]);
+      setScoreDists([[],[],[]]);
+    }
       setLog(l => [...l, '【ALL】统一上传完成。']);
     } catch (e:any) {
       setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
