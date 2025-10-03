@@ -1,7 +1,3 @@
-return [0,1,2].map((_,i)=> chooseIndex(i));
-};
-
-
 // === Global safe-caller for applying TS + Radar (fallback to defaults) from anywhere ===
 function applyAllFromStoresNowSafe(why: string) {
   try {
