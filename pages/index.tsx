@@ -1,3 +1,9 @@
+/* === AUTO PATCH NOTES (2025-10-03) ===
+ - Add applyAllFromStoresNow() to immediately apply TS + Radar with fallback-to-defaults for players with no archives
+ - Call applyAllFromStoresNow() after TS archive upload and Radar archive upload
+ - This ensures MiniNet/new seats show default TrueSkill and Radar immediately after uploading or refresh
+ - Edits are minimal and non-invasive to your existing UI/layout
+*/
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
@@ -532,6 +538,8 @@ function LivePanel(props: LiveProps) {
 
       tsStoreRef.current = store; writeStore(store);
       setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
+applyAllFromStoresNow('上传 TS 存档后');
+
     } catch (err:any) {
       setLog(l => [...l, `【TS】上传解析失败：${err?.message || err}`]);
     } finally { e.target.value = ''; }
@@ -772,6 +780,8 @@ function LivePanel(props: LiveProps) {
 
       radarStoreRef.current = store; writeRadarStore(store);
       setLog(l => [...l, `【Radar】已上传存档（${Object.keys(store.players).length} 位）`]);
+applyAllFromStoresNow('上传 Radar 存档后');
+
     } catch (err:any) {
       setLog(l => [...l, `【Radar】上传解析失败：${err?.message || err}`]);
     } finally { e.target.value = ''; }
@@ -1579,7 +1589,15 @@ nextTotals     = [
     window.addEventListener('ddz-all-save', onSave as any);
     window.addEventListener('ddz-all-refresh', onRefresh as any);
     window.addEventListener('ddz-all-upload', onUpload as any);
-    return () => {
+    // 统一应用一次 TS + Radar（按当前地主身份）；如某席位无存档 => 回退到缺省值
+const applyAllFromStoresNow = (why: string) => {
+  const lord = landlordRef.current;
+  try { applyTsFromStoreByRole(lord, `${why}（含缺省回退）`); } catch {}
+  try { applyRadarFromStoreByRole(lord, `${why}（含缺省回退）`); } catch {}
+  try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
+};
+
+return () => {
       window.removeEventListener('ddz-all-save', onSave as any);
       window.removeEventListener('ddz-all-refresh', onRefresh as any);
       window.removeEventListener('ddz-all-upload', onUpload as any);
