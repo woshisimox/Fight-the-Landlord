@@ -453,6 +453,16 @@ function LivePanel(props: LiveProps) {
     return `${choice}|${model}|${base}`; // 身份锚定
   };
 
+// === Identity order (from ALL/Score uploads) for charts/stats display ===
+const uploadIdentityOrderRef = useRef<string[] | null>(null);
+const activeIds = (): string[] => (
+  uploadIdentityOrderRef.current && uploadIdentityOrderRef.current.length === 3
+    ? uploadIdentityOrderRef.current
+    : [0,1,2].map(seatIdentity)
+);
+const identityOfIndex = (i:number) => (activeIds()[i] ?? seatIdentity(i));
+
+
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
     const p = tsStoreRef.current.players[id]; if (!p) return null;
     if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
@@ -465,7 +475,7 @@ function LivePanel(props: LiveProps) {
   };
 
   const applyTsFromStore = (why:string) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = activeIds();
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
     setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
@@ -473,7 +483,7 @@ function LivePanel(props: LiveProps) {
 
   // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = activeIds();
     const init = [0,1,2].map(i => {
       const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
       return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
@@ -486,7 +496,7 @@ function LivePanel(props: LiveProps) {
   };
 
   const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = activeIds();
     for (let i=0;i<3;i++){
       const id = ids[i];
       const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
@@ -538,7 +548,7 @@ function LivePanel(props: LiveProps) {
   };
 
   const handleSaveArchive = () => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = activeIds();
     ids.forEach((id,i)=>{
       const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
       entry.overall = { ...tsRef.current[i] };
@@ -700,7 +710,7 @@ function LivePanel(props: LiveProps) {
     try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
   }
     const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = activeIds();
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
       return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 }, count: 0 };
@@ -712,7 +722,7 @@ function LivePanel(props: LiveProps) {
 
   /** 在收到一帧“本局画像 s3[0..2]”后，写入 Radar 存档（overall + 角色分档） */
   const updateRadarStoreFromStats = (s3: Score5[], lord: number | null) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = activeIds();
     for (let i=0;i<3;i++){
       const id = ids[i];
       const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
@@ -780,7 +790,7 @@ function LivePanel(props: LiveProps) {
   /** 导出当前 Radar 存档 */
   const handleRadarSave = () => {
     if (aggStatsRef.current) {
-      const ids = [0,1,2].map(seatIdentity);
+      const ids = activeIds();
       for (let i=0;i<3;i++){
         const id = ids[i];
         const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
@@ -888,12 +898,10 @@ function LivePanel(props: LiveProps) {
           setLog(l => [...l, '【Score】上传文件缺少 seriesByIdentity，已清空。']);
           return;
         }
-        const ids = [0,1,2].map(seatIdentity);
+        const ids: string[] = Array.isArray(j.identities) ? j.identities.slice(0,3) : Object.keys(j.seriesByIdentity||{}).slice(0,3);
+        uploadIdentityOrderRef.current = ids.slice(0,3);
         const mapped:(number|null)[][] = [[],[],[]];
-        for (let i=0;i<3;i++) {
-          const arr = j.seriesByIdentity[ids[i]];
-          mapped[i] = Array.isArray(arr) ? arr.slice() : [];
-        }
+        for (let i=0;i<3;i++){ const id = ids[i]; const arr = id ? j.seriesByIdentity[id] : undefined; mapped[i] = Array.isArray(arr) ? arr.slice() : []; }
         setScoreSeries(mapped);
         if (Array.isArray(j.rounds)) setRoundCuts(j.rounds.slice());
         if (Array.isArray(j.landlords)) setRoundLords(j.landlords.slice());
@@ -914,33 +922,63 @@ function LivePanel(props: LiveProps) {
   
   const handleStatsSave = () => {
   try {
-    const ids = [0,1,2].map(seatIdentity);
-    const byIdentity: Record<string, SeatStat> = {};
+    const identities = activeIds();
+    const byIdentity: Record<string, any> = {};
     const distsByIdentity: Record<string, number[]> = {};
-    for (let i=0;i<3;i++){ const id = ids[i]; byIdentity[id] = (scoreStats as any)[i]; distsByIdentity[id] = (scoreDists[i]||[]).slice(); }
-    const payload = { when: new Date().toISOString(), byIdentity, distsByIdentity };
+    for (let i=0;i<3;i++){
+      byIdentity[identities[i]] = (scoreStats as any)[i];
+      distsByIdentity[identities[i]] = (scoreDists[i] || []).slice();
+    }
+    const payload = { when: new Date().toISOString(), identities, byIdentity, distsByIdentity };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'score-stats.json'; a.click();
     setTimeout(()=> URL.revokeObjectURL(url), 1000);
   } catch (e) { console.error('[stats] save error', e); }
 };
+;
 
   const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    try {
-      const f = e.target.files?.[0]; if (!f) return;
-      const rd = new FileReader();
-      rd.onload = () => {
-        try {
-          const obj = JSON.parse(String(rd.result||'{}'));
-          if (Array.isArray(obj.stats) && obj.stats.length===3) setScoreStats(obj.stats as any);
-          if (Array.isArray(obj.dists) && obj.dists.length===3) setScoreDists(obj.dists as any);
-        } catch (err) { console.error('[stats upload] parse error', err); }
-      };
-      rd.readAsText(f);
-    } catch (err) { console.error('[stats upload] error', err); }
-    finally { if (statsFileRef.current) statsFileRef.current.value = ''; }
-  };
+  try {
+    const f = e.target.files?.[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const obj = JSON.parse(String(rd.result||'{}'));
+        // 只接受 identity 版
+        const ids: string[] = Array.isArray(obj.identities)
+          ? obj.identities.slice(0,3)
+          : (obj.byIdentity ? Object.keys(obj.byIdentity).slice(0,3) : []);
+        if (!ids.length) {
+          setScoreStats([
+            { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+            { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+            { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+          ]);
+          setScoreDists([[],[],[]]);
+          setLog(l => [...l, '【Stats】上传未包含 identities/byIdentity，已清空。']);
+          return;
+        }
+        uploadIdentityOrderRef.current = ids.slice(0,3);
+        const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
+        const statsArr = [defStat,defStat,defStat].map(s=>({...s}));
+        const distsArr = [[],[],[]] as number[][];
+        for (let i=0;i<3;i++){
+          const id = ids[i];
+          if (obj.byIdentity?.[id]) statsArr[i] = obj.byIdentity[id];
+          if (Array.isArray(obj.distsByIdentity?.[id])) distsArr[i] = obj.distsByIdentity[id].slice();
+        }
+        setScoreStats(statsArr as any);
+        setScoreDists(distsArr as any);
+        setLog(l => [...l, '【Stats】已按 identities 对齐加载。']);
+      } catch (err) { console.error('[stats upload] parse error', err); }
+      finally { if (e.target) e.target.value = ''; }
+    };
+    rd.readAsText(f);
+  } catch (err) { console.error('[stats upload] error', err); }
+  finally { if (statsFileRef.current) statsFileRef.current.value = ''; }
+};
+;
   const handleStatsRefresh = () => { setRoundCuts(prev => [...prev]); };
 const handleScoreRefresh = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
@@ -1536,8 +1574,8 @@ nextTotals     = [
       scoreSeriesRef.current[1]?.length||0,
       scoreSeriesRef.current[2]?.length||0
     );
-  const identities = [0,1,2].map(seatIdentity);
-  const seriesByIdentity: Record<string,(number|null)[]> = {};
+  const identities = activeIds();
+  const seriesByIdentity: Record<string,(number|null)[]> = ((): any => { const m:any = {}; for (let i=0;i<3;i++){ m[identities[i]] = (scoreSeriesRef.current[i]||[]).slice(); } return m; })();
   for (let i=0;i<3;i++){ seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice(); }
 
 
@@ -1552,17 +1590,8 @@ return {
       trueskill: tsStoreRef.current,
       radar: radarStoreRef.current as any,
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
-      scoreTimeline: {
-        n,
-        rounds: roundCutsRef.current.slice(),
-        identities,
-        seriesByIdentity,
-        landlords: roundLordsRef.current.slice(),
-      },
-      scoreStats: {
-        byIdentity: scoreStatsByIdentity,
-        distsByIdentity: distsByIdentity,
-      },
+      scoreTimeline: { n, rounds: roundCutsRef.current.slice(), identities, seriesByIdentity, landlords: roundLordsRef.current.slice() },
+      scoreStats: { identities, byIdentity: scoreStatsByIdentity, distsByIdentity },
     };
   };
 
@@ -1593,14 +1622,28 @@ return {
     } catch (e:any) {
       
       // === identity-only: scoreTimeline ===
-      if (obj?.scoreTimeline?.seriesByIdentity) {
-        const tl = obj.scoreTimeline;
-        const ids = [0,1,2].map(seatIdentity);
-        const mapped:(number|null)[][] = [[],[],[]];
-        for (let i=0;i<3;i++){
-          const arr = tl.seriesByIdentity[ids[i]];
-          mapped[i] = Array.isArray(arr) ? arr.slice() : [];
-        }
+      
+if (obj?.scoreTimeline?.seriesByIdentity) {
+  const tl = obj.scoreTimeline;
+  const ids: string[] = Array.isArray(tl.identities)
+    ? tl.identities.slice(0,3)
+    : Object.keys(tl.seriesByIdentity||{}).slice(0,3);
+  uploadIdentityOrderRef.current = ids.slice(0,3);
+  const mapped:(number|null)[][] = [[],[],[]];
+  for (let i=0;i<3;i++) {
+    const id = ids[i];
+    const arr = id ? tl.seriesByIdentity[id] : undefined;
+    mapped[i] = Array.isArray(arr) ? arr.slice() : [];
+  }
+  setScoreSeries(mapped);
+  if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
+  if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords.slice());
+} else {
+  // 没有 identity 时间线：不再使用 seat 兜底
+  setScoreSeries([[],[],[]]);
+  setRoundCuts([]);
+  setRoundLords([]);
+}
         setScoreSeries(mapped);
         if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
         if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords.slice());
@@ -1611,15 +1654,26 @@ return {
       }
 
       // === identity-only: scoreStats ===
-      if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
-        const ids = [0,1,2].map(seatIdentity);
-        const ss = obj.scoreStats;
-        const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-        const statsArr = ids.map(id => (ss.byIdentity?.[id] ?? defStat));
-        const distsArr = ids.map(id => (Array.isArray(ss.distsByIdentity?.[id]) ? ss.distsByIdentity[id].slice() : []));
-        setScoreStats(statsArr as any);
-        setScoreDists(distsArr as any);
-      } else {
+      
+if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
+  const ss = obj.scoreStats;
+  const ids: string[] = Array.isArray(ss.identities)
+    ? ss.identities.slice(0,3)
+    : Object.keys(ss.byIdentity || ss.distsByIdentity || {}).slice(0,3);
+  if (ids && ids.length === 3) uploadIdentityOrderRef.current = ids.slice(0,3);
+  const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
+  const statsArr = [0,1,2].map(i => (ss.byIdentity?.[ids[i]] ?? defStat));
+  const distsArr = [0,1,2].map(i => (Array.isArray(ss.distsByIdentity?.[ids[i]]) ? ss.distsByIdentity[ids[i]].slice() : []));
+  setScoreStats(statsArr as any);
+  setScoreDists(distsArr as any);
+} else {
+  setScoreStats([
+    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+  ]);
+  setScoreDists([[],[],[]]);
+} else {
         setScoreStats([
           { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
           { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
