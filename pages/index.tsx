@@ -1491,6 +1491,7 @@ nextTotals     = [
     schema: 'ddz-all@1';
     createdAt: string;
     agents: string[];
+  ids?: string[];
     trueskill?: TsStore;
     radar?: RadarStore;
     scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
@@ -1509,6 +1510,7 @@ nextTotals     = [
       schema: 'ddz-all@1',
       createdAt: new Date().toISOString(),
       agents,
+      ids: [0,1,2].map(seatIdentity),
       trueskill: tsStoreRef.current,
       radar: radarStoreRef.current as any,
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
@@ -1582,7 +1584,32 @@ nextTotals     = [
     window.addEventListener('ddz-all-save', onSave as any);
     window.addEventListener('ddz-all-refresh', onRefresh as any);
     window.addEventListener('ddz-all-upload', onUpload as any);
-    return () => {
+    // === Mapping helper: prefer seatIdentity ids, fallback to agents (LivePanel scope) ===
+const mapFileIdxForCurrentSeats = (obj:any) => {
+  const fileIds: string[] =
+    Array.isArray(obj?.ids) ? obj.ids :
+    (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.id || s.identity) : []);
+  const fileAgents: string[] =
+    Array.isArray(obj?.agents) ? obj.agents :
+    (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.agent || s.label) : []);
+
+  const targetIds    = [0,1,2].map(seatIdentity);
+  const targetAgents = [0,1,2].map(agentIdForIndex);
+
+  const chooseIndex = (i:number) => {
+    const id = targetIds[i];
+    if (fileIds && fileIds.length) {
+      const idx = fileIds.indexOf(id);
+      if (idx >= 0) return idx;
+    }
+    const ag = targetAgents[i];
+    const idx2 = fileAgents.indexOf(ag);
+    return idx2 >= 0 ? idx2 : i; // fallback to same index
+  };
+  return [0,1,2].map((_,i)=> chooseIndex(i));
+};
+
+return () => {
       window.removeEventListener('ddz-all-save', onSave as any);
       window.removeEventListener('ddz-all-refresh', onRefresh as any);
       window.removeEventListener('ddz-all-upload', onUpload as any);
