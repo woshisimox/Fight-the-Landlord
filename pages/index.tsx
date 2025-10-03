@@ -1,5 +1,13 @@
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
+// === Global shim: callers anywhere can invoke this; LivePanel wires the real handler on window ===
+function setScoreSeriesIdentityMapped(mapped: (number|null)[][]): void {
+  try {
+    const fn = (typeof window !== 'undefined') ? (window as any).ddz_setScoreSeriesIdentityMapped : undefined;
+    if (typeof fn === 'function') fn(mapped);
+  } catch {}
+}
+
 
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
@@ -1583,7 +1591,7 @@ nextTotals     = [
     window.addEventListener('ddz-all-refresh', onRefresh as any);
     window.addEventListener('ddz-all-upload', onUpload as any);
     // Wrap setter: write identity series per current seatIdentity before updating state
-const setScoreSeriesIdentityMapped = (mapped: (number|null)[][]) => {
+(window as any).ddz_setScoreSeriesIdentityMapped = (mapped: (number|null)[][]) => {
   try {
     const ids = [0,1,2].map(seatIdentity);
     [0,1,2].forEach((i)=> { identitySeriesRef.current[ids[i]] = (mapped?.[i] || []) as any; });
