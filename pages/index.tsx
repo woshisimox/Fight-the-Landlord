@@ -1560,10 +1560,7 @@ nextTotals     = [
     seriesByIdentity: Record<string, (number|null)[]>;
     landlords?: number[];
   };
-  scoreStats?: {
-    byIdentity: Record<string, SeatStat>;
-    distsByIdentity: Record<string, number[]>;
-  };
+  scoreStats?: { byIdentity: Record<string, SeatStat>; distsByIdentity: Record<string, number[]> };
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
 };
 
@@ -1591,7 +1588,7 @@ return {
       radar: radarStoreRef.current as any,
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
       scoreTimeline: { n, rounds: roundCutsRef.current.slice(), identities, seriesByIdentity, landlords: roundLordsRef.current.slice() },
-      scoreStats: { identities, byIdentity: scoreStatsByIdentity, distsByIdentity },
+      scoreStats: { byIdentity: scoreStatsByIdentity, distsByIdentity },
     };
   };
 
