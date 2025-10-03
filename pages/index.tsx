@@ -1590,12 +1590,23 @@ nextTotals     = [
     }
 
     if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
-      const st = obj.scoreStats;
-      const statsMapped = [0,1,2].map((_,i)=> st.stats?.[ fileIdxForTarget[i] ] ?? st.stats?.[i]).filter(Boolean);
-      const distsMapped = [0,1,2].map((_,i)=> st.dists?.[ fileIdxForTarget[i] ] ?? st.dists?.[i]).filter(Boolean);
-      setScoreStats(statsMapped as any);
-      setScoreDists(distsMapped as any);
-    }
+  const st = obj.scoreStats;
+  const defaultStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
+  const statsMapped = [0,1,2].map((_,i)=> {
+    const idx = fileIdxForTarget[i];
+    return (idx >= 0 && st.stats && st.stats[idx] != null) ? st.stats[idx] :
+           (st.stats && st.stats[i] != null) ? st.stats[i] :
+           defaultStat;
+  });
+  const distsMapped = [0,1,2].map((_,i)=> {
+    const idx = fileIdxForTarget[i];
+    return (idx >= 0 && st.dists && st.dists[idx] != null) ? st.dists[idx] :
+           (st.dists && st.dists[i] != null) ? st.dists[i] :
+           [];
+  });
+  setScoreStats(statsMapped as any);
+  setScoreDists(distsMapped as any);
+}
     setLog(l => [...l, '【ALL】统一上传完成。']);
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
