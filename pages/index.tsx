@@ -1525,6 +1525,8 @@ nextTotals     = [
       schema: 'ddz-all@1',
       createdAt: new Date().toISOString(),
       agents,
+      
+      ids: [0,1,2].map(seatIdentity),
       trueskill: tsStoreRef.current,
       radar: radarStoreRef.current as any,
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
@@ -1564,15 +1566,29 @@ nextTotals     = [
       writeRadarStore(radarStoreRef.current);
       applyRadarFromStoreByRole(landlordRef.current, '统一上传');
     }
-    // ===== Seat-mapped parts (score timeline / stats): map by agents -> current seats =====
-    const fileAgents: string[] =
-      Array.isArray(obj?.agents) ? obj.agents :
-      (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.agent || s.label) : []);
-    const targetAgents = [0,1,2].map(agentIdForIndex);
-    const fileIdxForTarget = targetAgents.map(a => fileAgents.indexOf(a));
-    const inv: Record<number, number> = {};
-    fileIdxForTarget.forEach((fidx, i)=> { if (fidx >= 0) inv[fidx] = i; });
+    // ===== Seat-mapped parts by identity (prefer ids), fallback to agents =====
+const fileIds: string[] =
+  Array.isArray(obj?.ids) ? obj.ids :
+  (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.id || s.identity) : []);
+const fileAgents: string[] =
+  Array.isArray(obj?.agents) ? obj.agents :
+  (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.agent || s.label) : []);
+const targetIds = [0,1,2].map(seatIdentity);
+const targetAgents = [0,1,2].map(agentIdForIndex);
 
+const chooseIndex = (i:number) => {
+  const id = targetIds[i];
+  if (fileIds && fileIds.length) {
+    const idx = fileIds.indexOf(id);
+    if (idx >= 0) return idx;
+  }
+  const ag = targetAgents[i];
+  const idx2 = fileAgents.indexOf(ag);
+  return idx2 >= 0 ? idx2 : i;
+};
+const fileIdxForTarget = [0,1,2].map(i => chooseIndex(i));
+const inv: Record<number, number> = {};
+fileIdxForTarget.forEach((fidx, i)=> { if (fidx >= 0) inv[fidx] = i; });
     if (obj?.scoreTimeline?.seriesBySeat) {
       const tl = obj.scoreTimeline;
       const srcSeries = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
@@ -1589,24 +1605,7 @@ nextTotals     = [
       }
     }
 
-    if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
-  const st = obj.scoreStats;
-  const defaultStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-  const statsMapped = [0,1,2].map((_,i)=> {
-    const idx = fileIdxForTarget[i];
-    return (idx >= 0 && st.stats && st.stats[idx] != null) ? st.stats[idx] :
-           (st.stats && st.stats[i] != null) ? st.stats[i] :
-           defaultStat;
-  });
-  const distsMapped = [0,1,2].map((_,i)=> {
-    const idx = fileIdxForTarget[i];
-    return (idx >= 0 && st.dists && st.dists[idx] != null) ? st.dists[idx] :
-           (st.dists && st.dists[i] != null) ? st.dists[i] :
-           [];
-  });
-  setScoreStats(statsMapped as any);
-  setScoreDists(distsMapped as any);
-}
+    recomputeScoreStats();
     setLog(l => [...l, '【ALL】统一上传完成。']);
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
