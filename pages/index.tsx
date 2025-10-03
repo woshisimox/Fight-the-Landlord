@@ -703,12 +703,13 @@ function LivePanel(props: LiveProps) {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
-      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 }, count: 0 };
+      const r = resolveRadarForIdentity(ids[i], role);
+      return (r && r.count > 0) ? r : null;
     });
-    setAggStats(s3.map(x=>({ ...x.scores })));
-    setAggCount(Math.max(s3[0].count, s3[1].count, s3[2].count));
+    setAggStats(s3.map(x=> x ? ({ ...x.scores }) : null));
+    setAggCount(Math.max(s3[0]?.count||0, s3[1]?.count||0, s3[2]?.count||0));
     setLog(l => [...l, `【Radar】已从存档应用（${why}，地主=${lord ?? '未知'}）`]);
-  };
+  };;
 
   /** 在收到一帧“本局画像 s3[0..2]”后，写入 Radar 存档（overall + 角色分档） */
   const updateRadarStoreFromStats = (s3: Score5[], lord: number | null) => {
@@ -805,7 +806,7 @@ function LivePanel(props: LiveProps) {
   // 累计画像
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
   const [alpha, setAlpha] = useState<number>(0.35);
-  const [aggStats, setAggStats] = useState<Score5[] | null>(null);
+  const [aggStats, setAggStats] = useState<(Score5|null)[] | null>(null);
   const [aggCount, setAggCount] = useState<number>(0);
 
   useEffect(() => { props.onTotals?.(totals); }, [totals]);
@@ -846,14 +847,22 @@ function LivePanel(props: LiveProps) {
 
   const handleScoreSave = () => {
     const agents = [0,1,2].map(agentIdForIndex);
+    const identities = [0,1,2].map(seatIdentity);
     const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
+    const bySeat = scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []);
+    const seriesByIdentity: Record<string,(number|null)[]> = {};
+    identities.forEach((id, i)=>{ seriesByIdentity[id] = bySeat[i]; });
     const payload = {
-      version: 1,
+      schema: 'ddz-scores@1',
+      version: 2,
       createdAt: new Date().toISOString(),
       agents,
+      identities,
       rounds: roundCutsRef.current,
       n,
-      seriesBySeat: scoreSeriesRef.current,
+      seriesByIdentity,
+      // 兼容字段（建议今后仅用 seriesByIdentity 导入）
+      seriesBySeat: bySeat,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
@@ -869,38 +878,26 @@ function LivePanel(props: LiveProps) {
         try {
           const j = JSON.parse(String(rd.result||'{}'));
           const targetIds = [0,1,2].map(seatIdentity);
-          const targetAgents = [0,1,2].map(agentIdForIndex);
+
+          if (!j || typeof j.seriesByIdentity !== 'object') {
+            throw new Error('只接受包含 seriesByIdentity 的评分文件；为避免错位，不再支持按位次或仅 agents 的映射。');
+          }
 
           const mapped:(number|null)[][] = [[],[],[]];
           for (let i=0;i<3;i++){
-            let arr:(number|null)[]|undefined;
-
-            // 1) identities -> seriesByIdentity
-            if (j.seriesByIdentity && typeof j.seriesByIdentity === 'object') {
-              const id = targetIds[i];
-              const cand = j.seriesByIdentity[id];
-              if (Array.isArray(cand)) arr = cand;
-            }
-
-            // 2) identities -> identities[] + seriesBySeat[]
-            if (!arr && Array.isArray(j.identities) && Array.isArray(j.seriesBySeat)) {
-              const idx = j.identities.indexOf(targetIds[i]);
-              if (idx >= 0 && Array.isArray(j.seriesBySeat[idx])) arr = j.seriesBySeat[idx];
-            }
-
-            // 3) agents label fallback
-            if (!arr) {
-              const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
-              const idx = fileAgents.indexOf(targetAgents[i]);
-              if (idx >= 0 && Array.isArray(j.seriesBySeat?.[idx])) arr = j.seriesBySeat[idx];
-            }
-
-            mapped[i] = Array.isArray(arr) ? arr : [];
+            const id = targetIds[i];
+            const arr = j.seriesByIdentity?.[id];
+            mapped[i] = Array.isArray(arr) ? arr.slice() : [];
           }
+
           setScoreSeries(mapped);
           if (Array.isArray(j.rounds)) setRoundCuts(j.rounds);
           if (Array.isArray(j.landlords)) setRoundLords(j.landlords);
-        } catch (err) { console.error('[score upload] parse error', err); }
+          setLog(l => [...l, '【Score】已按 seriesByIdentity 对齐三席位；无匹配算法留空（不作图/不计统计）。']);
+        } catch (err:any) { 
+          console.error('[score upload] parse error', err); 
+          setLog(l => [...l, `【Score】上传解析失败：${err?.message || err}`]);
+        }
         finally { if (e.target) e.target.value = ''; }
       };
       rd.readAsText(f);
@@ -1556,6 +1553,15 @@ nextTotals     = [
       scoreTimeline: {
         n,
         rounds: roundCutsRef.current.slice(),
+        identities: [0,1,2].map(seatIdentity),
+        seriesByIdentity: (()=>{
+          const ids = [0,1,2].map(seatIdentity);
+          const bySeat = scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []);
+          const m: Record<string,(number|null)[]> = {};
+          ids.forEach((id, i)=>{ m[id] = bySeat[i]; });
+          return m;
+        })(),
+        // 兼容旧版（已不再用于导入）
         seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
         landlords: roundLordsRef.current.slice(),
       },
@@ -1588,9 +1594,11 @@ nextTotals     = [
         applyRadarFromStoreByRole(landlordRef.current, '统一上传');
       }
       if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
-      if (obj?.scoreTimeline?.seriesBySeat) {
+      if (obj?.scoreTimeline?.seriesByIdentity && typeof obj.scoreTimeline.seriesByIdentity === 'object') {
         const tl = obj.scoreTimeline;
-        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
+        const ids = [0,1,2].map(seatIdentity);
+        const mapped = ids.map((id:string)=> Array.isArray(tl.seriesByIdentity[id]) ? tl.seriesByIdentity[id] : []);
+        setScoreSeries(mapped as (number|null)[][]);
         if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
         if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
       }
@@ -1719,6 +1727,8 @@ nextTotals     = [
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
           {[0,1,2].map(i=>{
             const st = scoreStats[i];
+            const hasSamples = (scoreSeries[i]||[]).some(v => typeof v === 'number' && isFinite(v as number));
+            if (!hasSamples) return null;
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, background:'#fff' }}>
                 <div style={{ fontWeight:700, marginBottom:6 }}><SeatTitle i={i} /></div>
@@ -1882,9 +1892,9 @@ function RadarPanel({
       {aggStats
         ? (
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-            {[0,1,2].map(i=>(
-              <RadarChart key={i} title={`${['甲','乙','丙'][i]}（累计）`} scores={aggStats[i]} />
-            ))}
+            {[0,1,2].map(i=> aggStats[i] ? (
+              <RadarChart key={i} title={`${['甲','乙','丙'][i]}（累计）`} scores={aggStats[i] as Score5} />
+            ) : null)}
           </div>
         )
         : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
