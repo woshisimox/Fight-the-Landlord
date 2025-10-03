@@ -1,9 +1,18 @@
 /* === AUTO PATCH NOTES (2025-10-03) ===
- - Add applyAllFromStoresNow() to immediately apply TS + Radar with fallback-to-defaults for players with no archives
- - Call applyAllFromStoresNow() after TS archive upload and Radar archive upload
+ - Add applyAllFromStoresNowSafe() to immediately apply TS + Radar with fallback-to-defaults for players with no archives
+ - Call applyAllFromStoresNowSafe() after TS archive upload and Radar archive upload
  - This ensures MiniNet/new seats show default TrueSkill and Radar immediately after uploading or refresh
  - Edits are minimal and non-invasive to your existing UI/layout
 */
+// === Global safe-caller for applying TS + Radar (fallback to defaults) from anywhere ===
+function applyAllFromStoresNowSafe(why: string) {
+  try {
+    const anyWin: any = (typeof window !== 'undefined') ? (window as any) : undefined;
+    const fn = anyWin?.ddz_applyAllFromStoresNow;
+    if (typeof fn === 'function') fn(why);
+  } catch {}
+}
+
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
@@ -538,7 +547,7 @@ function LivePanel(props: LiveProps) {
 
       tsStoreRef.current = store; writeStore(store);
       setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
-applyAllFromStoresNow('上传 TS 存档后');
+applyAllFromStoresNowSafe('上传 TS 存档后');
 
     } catch (err:any) {
       setLog(l => [...l, `【TS】上传解析失败：${err?.message || err}`]);
@@ -780,7 +789,7 @@ applyAllFromStoresNow('上传 TS 存档后');
 
       radarStoreRef.current = store; writeRadarStore(store);
       setLog(l => [...l, `【Radar】已上传存档（${Object.keys(store.players).length} 位）`]);
-applyAllFromStoresNow('上传 Radar 存档后');
+applyAllFromStoresNowSafe('上传 Radar 存档后');
 
     } catch (err:any) {
       setLog(l => [...l, `【Radar】上传解析失败：${err?.message || err}`]);
