@@ -1,12 +1,6 @@
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
-// === Global shim: callers anywhere can invoke this; LivePanel wires the real handler on window ===
-function setScoreSeriesIdentityMapped(arg: (number|null)[][] | ((prev: (number|null)[][]) => (number|null)[][])): void {
-  try {
-    const fn = (typeof window !== 'undefined') ? (window as any).ddz_setScoreSeriesIdentityMapped : undefined;
-    if (typeof fn === 'function') fn(arg as any);
-  } catch {}
-}
+
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
@@ -356,7 +350,19 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 };
 
 /* ==================== LivePanel（对局） ==================== */
-function LivePanel(props: LiveProps) {
+function LivePanel(props: LiveProps) {// === Score identity mapping memory (agent -> identity) ===
+const identitySeriesRef = useRef<Record<string, (number|null)[]>>({});
+
+// restore from localStorage once
+useEffect(() => {
+  try {
+    const raw = localStorage.getItem('ddz_score_identity_map_v1');
+    // this key stores agent->identity map, not series; only load if it's an object
+    if (raw && typeof JSON.parse(raw) === 'object') {/* ok */}
+  } catch {}
+}, []);
+
+
   const [running, setRunning] = useState(false);
 
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
@@ -372,10 +378,7 @@ function LivePanel(props: LiveProps) {
   const [finishedCount, setFinishedCount] = useState(0);
   // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
-  const scoreSeriesRef = useRef(scoreSeries);
-  // Identity-aligned series store for stats (per player/algorithm)
-  const identitySeriesRef = useRef<Record<string, (number|null)[]>>({});
- useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
+  const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
   const [roundCuts, setRoundCuts] = useState<number[]>([0]);
   const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
 
@@ -884,7 +887,7 @@ function LivePanel(props: LiveProps) {
             const idx = fileAgents.indexOf(targetAgents[i]);
             mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
           }
-          setScoreSeriesIdentityMapped(mapped);
+          setScoreSeries(mapped);
           if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
         } catch (err) {
           console.error('[score upload] parse error', err);
@@ -927,7 +930,7 @@ function LivePanel(props: LiveProps) {
   };
   const handleStatsRefresh = () => { setRoundCuts(prev => [...prev]); };
 const handleScoreRefresh = () => {
-    setScoreSeriesIdentityMapped(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
   };
@@ -1459,7 +1462,7 @@ nextTotals     = [
 
           setRoundLords(nextLords);
           setRoundCuts(nextCuts);
-          setScoreSeriesIdentityMapped(nextScores);
+          setScoreSeries(nextScores);
           setHands(nextHands); setPlays(nextPlays);
           setTotals(nextTotals); setFinishedCount(nextFinished);
           setLog(nextLog); setLandlord(nextLandlord);
@@ -1555,7 +1558,7 @@ nextTotals     = [
       if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
       if (obj?.scoreTimeline?.seriesBySeat) {
         const tl = obj.scoreTimeline;
-        setScoreSeriesIdentityMapped(tl.seriesBySeat as (number|null)[][]);
+        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
         if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
         if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
       }
@@ -1572,7 +1575,7 @@ nextTotals     = [
   const handleAllRefreshInner = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
     applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
-    setScoreSeriesIdentityMapped(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
     setLog(l => [...l, '【ALL】已刷新面板数据。']);
@@ -1588,37 +1591,10 @@ nextTotals     = [
     window.addEventListener('ddz-all-save', onSave as any);
     window.addEventListener('ddz-all-refresh', onRefresh as any);
     window.addEventListener('ddz-all-upload', onUpload as any);
-    // Wrap setter: write identity series per current seatIdentity before updating state
-(window as any).ddz_setScoreSeriesIdentityMapped = (arg: (number|null)[][] | ((prev: (number|null)[][]) => (number|null)[][])) => {
-  if (typeof arg === 'function') {
-    setScoreSeries((prev: any) => {
-      const mapped = (arg as any)(prev as any);
-      try {
-        const ids = [0,1,2].map(seatIdentity);
-        [0,1,2].forEach((i)=> { identitySeriesRef.current[ids[i]] = (mapped?.[i] || []) as any; });
-      } catch {}
-      return mapped as any;
-    });
-  } else {
-    try {
-      const ids = [0,1,2].map(seatIdentity);
-      [0,1,2].forEach((i)=> { identitySeriesRef.current[ids[i]] = (arg?.[i] || []) as any; });
-    } catch {}
-    setScoreSeries(arg as any);
-  }
-};
-
-// === Score identity mapping memory (agent -> identity) ===
-const scoreIdentityMapRef = useRef<Record<string, string>>(() => {
-  try {
-    const raw = localStorage.getItem('ddz_score_identity_map_v1');
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-})() as React.MutableRefObject<Record<string, string>> as any;
-
-const aliasToIdentity = (agent:string): string | null => {
+    // Allow alias mapping from agent labels to canonical identity keys
+const aliasToIdentity = (agent: string): string | null => {
   const t = (agent || '').toLowerCase().trim();
-  const map: Record<string,string> = {
+  const map: Record<string, string> = {
     'greedy max': 'built-in:ally-support||',
     'greedy-min': 'built-in:greedy-min||',
     'greedy min': 'built-in:greedy-min||',
@@ -1628,31 +1604,36 @@ const aliasToIdentity = (agent:string): string | null => {
   return map[t] || null;
 };
 
-// Prefer ids from file; else infer from agents via alias or TS/Radar store players
-const computeIdsForUpload = (obj:any): string[] => {
+// Prefer explicit ids from file; else infer via cache/alias and TS/Radar players
+const computeIdsForUpload = (obj: any): string[] => {
   if (Array.isArray(obj?.ids) && obj.ids.length === 3) return obj.ids as string[];
+
   const agents: string[] =
     Array.isArray(obj?.agents) ? obj.agents :
-    (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.agent || s.label) : []);
-  const out = [0,1,2].map(()=> '' as string);
-  const tsPlayers = tsStoreRef.current?.players ? Object.keys(tsStoreRef.current.players) : [];
-  const radarPlayers = radarStoreRef.current?.players ? Object.keys(radarStoreRef.current.players) : [];
-  const allPlayers = Array.from(new Set([...(tsPlayers||[]), ...(radarPlayers||[])]));
+    (Array.isArray(obj?.seats) ? obj.seats.map((s: any) => s.agent || s.label) : []);
 
-  agents.forEach((ag, idx)=> {
-    let id = scoreIdentityMapRef.current?.[ag] || aliasToIdentity(ag);
+  const out = [0,1,2].map(() => '' as string);
+  const tsPlayers    = tsStoreRef.current?.players    ? Object.keys(tsStoreRef.current.players)    : [];
+  const radarPlayers = radarStoreRef.current?.players ? Object.keys(radarStoreRef.current.players) : [];
+  const allPlayers   = Array.from(new Set([...(tsPlayers||[]), ...(radarPlayers||[])]));
+
+  agents.forEach((ag, idx) => {
+    let id = aliasToIdentity(ag);
     if (!id) {
       const low = (ag||'').toLowerCase();
       id = allPlayers.find(pid => pid.toLowerCase().includes(low)) || '';
     }
     out[idx] = id || '';
   });
+
+  // Persist agent->identity mapping for future inference
   try {
-    const cur = scoreIdentityMapRef.current || {};
-    agents.forEach((ag, idx)=> { if (ag && out[idx]) cur[ag] = out[idx]; });
-    scoreIdentityMapRef.current = cur as any;
+    const raw = localStorage.getItem('ddz_score_identity_map_v1');
+    const cur = raw ? JSON.parse(raw) : {};
+    agents.forEach((ag, idx) => { if (ag && out[idx]) cur[ag] = out[idx]; });
     localStorage.setItem('ddz_score_identity_map_v1', JSON.stringify(cur));
   } catch {}
+
   return out;
 };
 
