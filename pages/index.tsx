@@ -1622,7 +1622,6 @@ nextTotals     = [
         // 没有 identity 数据 → 全部置空（不使用 seat 兜底）
         setScoreSeries([[],[],[]]);
       }
-      if (obj?}
       if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
         const ids = [0,1,2].map(seatIdentity);
         const ss = obj.scoreStats;
