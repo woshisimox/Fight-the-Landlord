@@ -1521,15 +1521,22 @@ nextTotals     = [
 
   // ===== 统一统计打包（All-in-One） =====
   type AllBundle = {
-    schema: 'ddz-all@1';
-    createdAt: string;
-    agents: string[];
-    trueskill?: TsStore;
-    radar?: RadarStore;
-    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
-    scoreStats?: { stats: SeatStat[]; dists: number[][] };
-    ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+  schema: 'ddz-all@1';
+  createdAt: string;
+  agents: string[];
+  trueskill?: TsStore;
+  radar?: RadarStore;
+  scoreTimeline?: {
+    n: number;
+    rounds: number[];
+    identities?: string[]; // 新增：按 identity 导出
+    seriesByIdentity?: Record<string, (number|null)[]>;
+    seriesBySeat?: (number|null)[][]; // 兼容旧字段
+    landlords?: number[]
   };
+  scoreStats?: { stats: SeatStat[]; dists: number[][] };
+  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+};
 
   const buildAllBundle = (): AllBundle => {
     const agents = [0,1,2].map(agentIdForIndex);
@@ -1538,6 +1545,12 @@ nextTotals     = [
       scoreSeriesRef.current[1]?.length||0,
       scoreSeriesRef.current[2]?.length||0
     );
+    const identities = [0,1,2].map(seatIdentity);
+    const seriesByIdentity: Record<string,(number|null)[]> = {};
+    for (let i=0;i<3;i++){
+      seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice();
+    }
+
     return {
       schema: 'ddz-all@1',
       createdAt: new Date().toISOString(),
@@ -1546,11 +1559,14 @@ nextTotals     = [
       radar: radarStoreRef.current as any,
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
       scoreTimeline: {
-        n,
-        rounds: roundCutsRef.current.slice(),
-        seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
-        landlords: roundLordsRef.current.slice(),
-      },
+      n,
+      rounds: roundCutsRef.current.slice(),
+      identities,
+      seriesByIdentity,
+      // 兼容旧版：保留 seat 导出
+      seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
+      landlords: roundLordsRef.current.slice(),
+    },
       scoreStats: {
         stats: scoreStats,
         dists: scoreDists,
