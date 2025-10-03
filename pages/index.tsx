@@ -784,7 +784,8 @@ function LivePanel(props: LiveProps) {
       for (let i=0;i<3;i++){
         const id = ids[i];
         const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
-        entry.overall = mergeRadarAgg(entry.overall, aggStatsRef.current[i]);
+        const inc = aggStatsRef.current?.[i] as (Score5 | null | undefined);
+        if (inc) { entry.overall = mergeRadarAgg(entry.overall, inc as Score5); }
         radarStoreRef.current.players[id] = entry;
       }
       writeRadarStore(radarStoreRef.current);
@@ -847,14 +848,20 @@ function LivePanel(props: LiveProps) {
   const handleScoreSave = () => {
   const identities = [0,1,2].map(seatIdentity);
   const agents     = [0,1,2].map(agentIdForIndex);
+
   const n = Math.max(
     scoreSeriesRef.current[0]?.length||0,
     scoreSeriesRef.current[1]?.length||0,
     scoreSeriesRef.current[2]?.length||0
   );
+
   const rounds = Array.isArray(roundCutsRef.current) ? roundCutsRef.current.slice() : [0];
+
   const seriesByIdentity: Record<string,(number|null)[]> = {};
-  for (let i=0;i<3;i++) seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice();
+  for (let i=0;i<3;i++) {
+    seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice();
+  }
+
   const payload = {
     schema: 'ddz-scores@1',
     version: 2,
@@ -864,15 +871,16 @@ function LivePanel(props: LiveProps) {
     n,
     rounds,
     seriesByIdentity,
-    // 兼容字段：不再用于导入
-    seriesBySeat: scoreSeriesRef.current.map(a=>Array.isArray(a)?a.slice():[]),
+    // 兼容：保留旧字段，但导入不再使用
+    seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
   };
+
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
   setTimeout(()=>URL.revokeObjectURL(url), 1500);
 };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+// [removed orphan JSON.stringify(payload) line]
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
     setTimeout(()=>URL.revokeObjectURL(url), 1500);
@@ -880,25 +888,35 @@ function LivePanel(props: LiveProps) {
 
   const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   try {
-    const f = e.target.files?.[0]; if (!f) return;
+    const f = e.target.files?.[0];
+    if (!f) return;
+
     const fr = new FileReader();
     fr.onload = () => {
       try {
-        const j:any = JSON.parse(String(fr.result||'{}'));
+        const j:any = JSON.parse(String(fr.result || '{}'));
         if (!j || typeof j.seriesByIdentity !== 'object') {
-          throw new Error('评分文件缺少 seriesByIdentity（按算法 ID 存储），为避免错位已拒绝导入。');
+          throw new Error('评分文件缺少 seriesByIdentity（按算法 ID 存储）。为避免错位，已拒绝导入。');
         }
         const ids = [0,1,2].map(seatIdentity);
         const mapped:(number|null)[][] = [[],[],[]];
-        for (let i=0;i<3;i++){
+        for (let i=0;i<3;i++) {
           const arr = j.seriesByIdentity[ids[i]];
           mapped[i] = Array.isArray(arr) ? arr.slice() : [];
         }
         setScoreSeries(mapped);
         if (Array.isArray(j.rounds))     setRoundCuts(j.rounds.slice());
         if (Array.isArray(j.landlords))  setRoundLords(j.landlords.slice());
-      } catch (err) { console.error('[score upload] parse error', err); }
-      finally { if (e.target) e.target.value = ''; }
+        setLog(l => [...l, '【Score】评分序列已按 identity 对齐加载。']);
+      } catch (err:any) {
+        setLog(l => [...l, `【Score】上传解析失败：${err?.message || err}`]);
+      } finally {
+        if (e.target) e.target.value = '';
+      }
+    };
+    fr.onerror = () => {
+      setLog(l => [...l, '【Score】文件读取失败']);
+      if (e.target) e.target.value = '';
     };
     fr.readAsText(f);
   } catch (err) { console.error('[score upload] error', err); }
@@ -1601,7 +1619,8 @@ nextTotals     = [
         if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
         if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
       } else if (obj?.scoreTimeline?.seriesBySeat) {
-        const tl = obj.scoreTimeline; setScoreSeries(tl.seriesBySeat as (number|null)[][]);
+        const tl = obj.scoreTimeline;
+        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
         if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
         if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
       }
