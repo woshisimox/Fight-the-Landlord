@@ -880,11 +880,6 @@ function LivePanel(props: LiveProps) {
   const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
   setTimeout(()=>URL.revokeObjectURL(url), 1500);
 };
-// [removed orphan JSON.stringify(payload) line]
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1500);
-  };
 
   const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   try {
