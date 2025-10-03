@@ -1,11 +1,14 @@
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 // === Global shim: callers anywhere can invoke this; LivePanel wires the real handler on window ===
-function setScoreSeriesIdentityMapped(mapped: (number|null)[][]): void {
+function setScoreSeriesIdentityMapped(arg: (number|null)[][] | ((prev: (number|null)[][]) => (number|null)[][])): void {
   try {
     const fn = (typeof window !== 'undefined') ? (window as any).ddz_setScoreSeriesIdentityMapped : undefined;
-    if (typeof fn === 'function') fn(mapped);
+    if (typeof fn === 'function') fn(arg as any);
   } catch {}
+}
+
+catch {}
 }
 
 
@@ -1591,12 +1594,23 @@ nextTotals     = [
     window.addEventListener('ddz-all-refresh', onRefresh as any);
     window.addEventListener('ddz-all-upload', onUpload as any);
     // Wrap setter: write identity series per current seatIdentity before updating state
-(window as any).ddz_setScoreSeriesIdentityMapped = (mapped: (number|null)[][]) => {
-  try {
-    const ids = [0,1,2].map(seatIdentity);
-    [0,1,2].forEach((i)=> { identitySeriesRef.current[ids[i]] = (mapped?.[i] || []) as any; });
-  } catch {}
-  setScoreSeriesIdentityMapped(mapped as any);
+(window as any).ddz_setScoreSeriesIdentityMapped = (arg: (number|null)[][] | ((prev: (number|null)[][]) => (number|null)[][])) => {
+  if (typeof arg === 'function') {
+    setScoreSeries((prev: any) => {
+      const mapped = (arg as any)(prev as any);
+      try {
+        const ids = [0,1,2].map(seatIdentity);
+        [0,1,2].forEach((i)=> { identitySeriesRef.current[ids[i]] = (mapped?.[i] || []) as any; });
+      } catch {}
+      return mapped as any;
+    });
+  } else {
+    try {
+      const ids = [0,1,2].map(seatIdentity);
+      [0,1,2].forEach((i)=> { identitySeriesRef.current[ids[i]] = (arg?.[i] || []) as any; });
+    } catch {}
+    setScoreSeries(arg as any);
+  }
 };
 
 return () => {
