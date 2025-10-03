@@ -1529,12 +1529,14 @@ nextTotals     = [
   scoreTimeline?: {
     n: number;
     rounds: number[];
-    identities?: string[]; // 新增：按 identity 导出
-    seriesByIdentity?: Record<string, (number|null)[]>;
-    seriesBySeat?: (number|null)[][]; // 兼容旧字段
+    identities: string[];
+    seriesByIdentity: Record<string, (number|null)[]>;
     landlords?: number[]
   };
-  scoreStats?: { stats: SeatStat[]; dists: number[][]; byIdentity?: Record<string, SeatStat>; distsByIdentity?: Record<string, number[]> };
+  scoreStats?: {
+    byIdentity: Record<string, SeatStat>;
+    distsByIdentity: Record<string, number[]>;
+  };
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
 };
 
@@ -1574,11 +1576,12 @@ nextTotals     = [
       rounds: roundCutsRef.current.slice(),
       identities,
       seriesByIdentity,
-      // 兼容旧版：保留 seat 导出
-      seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
       landlords: roundLordsRef.current.slice(),
     },
-      scoreStats: { stats: scoreStats, dists: scoreDists, byIdentity: scoreStatsByIdentity, distsByIdentity }
+      scoreStats: {
+      byIdentity: scoreStatsByIdentity,
+      distsByIdentity: distsByIdentity,
+    }
     };
   };
 
