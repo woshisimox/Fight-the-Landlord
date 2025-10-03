@@ -870,8 +870,7 @@ const handleScoreSave = () => {
     agents,
     n,
     rounds,
-    seriesByIdentity,
-     ? a.slice() : []),
+    seriesByIdentity, ? a.slice() : []),
   };
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
@@ -927,7 +926,11 @@ const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   
   const handleStatsSave = () => {
     try {
-      const payload = { when: new Date().toISOString(), stats: scoreStats, dists: scoreDists };
+      const ids = [0,1,2].map(seatIdentity);
+      const byIdentity: Record<string, SeatStat> = {};
+      const distsByIdentity: Record<string, number[]> = {};
+      for (let i=0;i<3;i++){ const id = ids[i]; byIdentity[id] = (scoreStats as any)[i]; distsByIdentity[id] = (scoreDists[i]||[]).slice(); }
+      const payload = { when: new Date().toISOString(), byIdentity, distsByIdentity };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -1526,12 +1529,12 @@ nextTotals     = [
   trueskill?: TsStore;
   radar?: RadarStore;
   scoreTimeline?: {
-    n: number;
-    rounds: number[];
-    identities: string[];
-    seriesByIdentity: Record<string, (number|null)[]>;
-    landlords?: number[]
-  };
+  n: number;
+  rounds: number[];
+  identities: string[];
+  seriesByIdentity: Record<string, (number|null)[]>;
+  landlords?: number[];
+};
   scoreStats?: {
     byIdentity: Record<string, SeatStat>;
     distsByIdentity: Record<string, number[]>;
@@ -1614,7 +1617,6 @@ nextTotals     = [
       for (let i=0;i<3;i++){
         const arr = tl.seriesByIdentity[ids[i]];
         if (Array.isArray(arr)) { matched = true; mapped[i] = arr.slice(); } else { mapped[i] = []; }
-      else { setScoreSeries([[],[],[]]); setRoundCuts([]); setRoundLords([]); }
       }
       if (matched) {
         setScoreSeries(mapped);
@@ -1632,7 +1634,7 @@ nextTotals     = [
         setRoundCuts([]);
         setRoundLords([]);
       }
-      if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.__removed_dists__ByIdentity) {
+      if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
       const ids = [0,1,2].map(seatIdentity);
       const ss = obj.scoreStats;
       const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
