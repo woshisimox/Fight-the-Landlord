@@ -360,6 +360,32 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 
 /* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
+
+// === Mapping helper: prefer seatIdentity ids, fallback to agents (LivePanel scope) ===
+const mapFileIdxForCurrentSeats = (obj:any) => {
+  const fileIds: string[] =
+    Array.isArray(obj?.ids) ? obj.ids :
+    (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.id || s.identity) : []);
+  const fileAgents: string[] =
+    Array.isArray(obj?.agents) ? obj.agents :
+    (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.agent || s.label) : []);
+
+  const targetIds    = [0,1,2].map(seatIdentity);
+  const targetAgents = [0,1,2].map(agentIdForIndex);
+
+  const chooseIndex = (i:number) => {
+    const id = targetIds[i];
+    if (fileIds && fileIds.length) {
+      const idx = fileIds.indexOf(id);
+      if (idx >= 0) return idx;
+    }
+    const ag = targetAgents[i];
+    const idx2 = fileAgents.indexOf(ag);
+    return idx2 >= 0 ? idx2 : i; // fallback to same index
+  };
+  return [0,1,2].map((_,i)=> chooseIndex(i));
+};
+
   const [running, setRunning] = useState(false);
 
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
@@ -1591,29 +1617,9 @@ nextTotals     = [
   const src = Array.isArray(tl.seriesBySeat) ? tl.seriesBySeat : [];
   const mapped:(number|null)[][] = [0,1,2].map((_,i)=> {
     const j = idxs[i];
-    // === Mapping helper: prefer seatIdentity ids, fallback to agents (LivePanel scope) ===
-const mapFileIdxForCurrentSeats = (obj:any) => {
-  const fileIds: string[] =
-    Array.isArray(obj?.ids) ? obj.ids :
-    (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.id || s.identity) : []);
-  const fileAgents: string[] =
-    Array.isArray(obj?.agents) ? obj.agents :
-    (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.agent || s.label) : []);
-
-  const targetIds    = [0,1,2].map(seatIdentity);
-  const targetAgents = [0,1,2].map(agentIdForIndex);
-
-  const chooseIndex = (i:number) => {
-    const id = targetIds[i];
-    if (fileIds && fileIds.length) {
-      const idx = fileIds.indexOf(id);
-      if (idx >= 0) return idx;
-    }
-    const ag = targetAgents[i];
-    const idx2 = fileAgents.indexOf(ag);
-    return idx2 >= 0 ? idx2 : i; // fallback to same index
-  };
-  return [0,1,2].map((_,i)=> chooseIndex(i));
+    return [0,1,2].map((_,i)=> chooseIndex(i));
+};
+return [0,1,2].map((_,i)=> chooseIndex(i));
 };
 
 return (j >= 0 && Array.isArray(src[j])) ? src[j] : [];
