@@ -908,7 +908,7 @@ const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       };
       rd.readAsText(f);
     } catch (err) { console.error('[score upload] error', err); }
-  };
+  }
       rd.readAsText(f);
     } catch (err) {
       console.error('[score upload] error', err);
@@ -936,7 +936,7 @@ const handleStatsSave = () => {
       a.click();
       setTimeout(()=> URL.revokeObjectURL(a.href), 0);
     } catch (e) { console.error('[stats] save error', e); }
-  };
+  }
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -985,7 +985,7 @@ const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       };
       rd.readAsText(f);
     } catch (err) { console.error('[stats upload] error', err); }
-  };
+  }
       rd.readAsText(f);
     } catch (err) { console.error('[stats upload] error', err); }
     finally { if (statsFileRef.current) statsFileRef.current.value = ''; }
