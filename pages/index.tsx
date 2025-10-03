@@ -1608,6 +1608,54 @@ nextTotals     = [
   }
 };
 
+// === Score identity mapping memory (agent -> identity) ===
+const scoreIdentityMapRef = useRef<Record<string, string>>(() => {
+  try {
+    const raw = localStorage.getItem('ddz_score_identity_map_v1');
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+})() as React.MutableRefObject<Record<string, string>> as any;
+
+const aliasToIdentity = (agent:string): string | null => {
+  const t = (agent || '').toLowerCase().trim();
+  const map: Record<string,string> = {
+    'greedy max': 'built-in:ally-support||',
+    'greedy-min': 'built-in:greedy-min||',
+    'greedy min': 'built-in:greedy-min||',
+    'random legal': 'built-in:random-legal||',
+    'random-legal': 'built-in:random-legal||',
+  };
+  return map[t] || null;
+};
+
+// Prefer ids from file; else infer from agents via alias or TS/Radar store players
+const computeIdsForUpload = (obj:any): string[] => {
+  if (Array.isArray(obj?.ids) && obj.ids.length === 3) return obj.ids as string[];
+  const agents: string[] =
+    Array.isArray(obj?.agents) ? obj.agents :
+    (Array.isArray(obj?.seats) ? obj.seats.map((s:any)=> s.agent || s.label) : []);
+  const out = [0,1,2].map(()=> '' as string);
+  const tsPlayers = tsStoreRef.current?.players ? Object.keys(tsStoreRef.current.players) : [];
+  const radarPlayers = radarStoreRef.current?.players ? Object.keys(radarStoreRef.current.players) : [];
+  const allPlayers = Array.from(new Set([...(tsPlayers||[]), ...(radarPlayers||[])]));
+
+  agents.forEach((ag, idx)=> {
+    let id = scoreIdentityMapRef.current?.[ag] || aliasToIdentity(ag);
+    if (!id) {
+      const low = (ag||'').toLowerCase();
+      id = allPlayers.find(pid => pid.toLowerCase().includes(low)) || '';
+    }
+    out[idx] = id || '';
+  });
+  try {
+    const cur = scoreIdentityMapRef.current || {};
+    agents.forEach((ag, idx)=> { if (ag && out[idx]) cur[ag] = out[idx]; });
+    scoreIdentityMapRef.current = cur as any;
+    localStorage.setItem('ddz_score_identity_map_v1', JSON.stringify(cur));
+  } catch {}
+  return out;
+};
+
 return () => {
       window.removeEventListener('ddz-all-save', onSave as any);
       window.removeEventListener('ddz-all-refresh', onRefresh as any);
