@@ -1529,28 +1529,6 @@ const buildAllBundle = (): AllBundle => {
     ladder: ladderAll,
   };
 };
-  } catch {
-    ladderAll = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-  }
-
-  // identities = 参赛三人 ∪ 本地存档已存在的所有人（去重）
-  const idsSet = new Set<string>();
-  const participants = [0,1,2].map(seatIdentity);
-  for (const id of participants) idsSet.add(id);
-  Object.keys(tsAll?.players || {}).forEach(id => idsSet.add(id));
-  Object.keys(radarAll?.players || {}).forEach(id => idsSet.add(id));
-  Object.keys(ladderAll?.players || {}).forEach(id => idsSet.add(id));
-  const identities = Array.from(idsSet);
-
-  return {
-    schema: 'ddz-all@1',
-    createdAt: new Date().toISOString(),
-    identities,
-    trueskill: tsAll ? JSON.parse(JSON.stringify(tsAll)) : { schema:'ddz-trueskill@1', updatedAt:new Date().toISOString(), players:{} },
-    radar: radarAll ? JSON.parse(JSON.stringify(radarAll)) : { schema:'ddz-radar@1', updatedAt:new Date().toISOString(), players:{} },
-    ladder: ladderAll,
-  };
-};
 
 const applyAllBundleInner = (obj:any) => {
   try {
