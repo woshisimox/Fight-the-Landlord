@@ -482,7 +482,7 @@ function LivePanel(props: LiveProps) {
   };
 
   const applyTsFromStore = (why:string) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = [ '0','1','2' ];
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
     setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
@@ -490,7 +490,7 @@ function LivePanel(props: LiveProps) {
 
   // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = [ '0','1','2' ];
     const init = [0,1,2].map(i => {
       const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
       return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
@@ -503,7 +503,7 @@ function LivePanel(props: LiveProps) {
   };
 
   const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = [ '0','1','2' ];
     for (let i=0;i<3;i++){
       const id = ids[i];
       const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
@@ -555,7 +555,7 @@ function LivePanel(props: LiveProps) {
   };
 
   const handleSaveArchive = () => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = [ '0','1','2' ];
     ids.forEach((id,i)=>{
       const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
       entry.overall = { ...tsRef.current[i] };
@@ -717,7 +717,7 @@ function LivePanel(props: LiveProps) {
     try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
   }
     const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = [ '0','1','2' ];
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
       return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 }, count: 0 };
@@ -729,7 +729,7 @@ function LivePanel(props: LiveProps) {
 
   /** 在收到一帧“本局画像 s3[0..2]”后，写入 Radar 存档（overall + 角色分档） */
   const updateRadarStoreFromStats = (s3: Score5[], lord: number | null) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = [ '0','1','2' ];
     for (let i=0;i<3;i++){
       const id = ids[i];
       const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
@@ -797,7 +797,7 @@ function LivePanel(props: LiveProps) {
   /** 导出当前 Radar 存档 */
   const handleRadarSave = () => {
     if (aggStatsRef.current) {
-      const ids = [0,1,2].map(seatIdentity);
+      const ids = [ '0','1','2' ];
       for (let i=0;i<3;i++){
         const id = ids[i];
         const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
@@ -862,8 +862,8 @@ function LivePanel(props: LiveProps) {
   };
 
   const handleScoreSave = () => {
-  const identities = [0,1,2].map(seatIdentity);
-  const agents     = [0,1,2].map(seatIdentity);
+  const identities = [ '0','1','2' ];
+  const agents = [ '0','1','2' ];
   const n = Math.max(
     scoreSeriesRef.current[0]?.length||0,
     scoreSeriesRef.current[1]?.length||0,
@@ -896,8 +896,8 @@ const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       rd.onload = () => {
         try {
           const j = JSON.parse(String(rd.result||'{}'));
-          const targetIds = [0,1,2].map(seatIdentity);
-          const targetAgents = [0,1,2].map(seatIdentity);
+          const targetIds = [ '0','1','2' ];
+          const targetAgents = [ '0','1','2' ];
 
           const mapped:(number|null)[][] = [[],[],[]];
           for (let i=0;i<3;i++){
@@ -954,7 +954,7 @@ const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       rd.onload = () => {
         try {
           const obj = JSON.parse(String(rd.result||'{}'));
-          const targetIds = [0,1,2].map(seatIdentity);
+          const targetIds = [ '0','1','2' ];
 
           let statsMapped:any[] = [null,null,null];
           let distsMapped:any[] = [null,null,null];
@@ -1560,7 +1560,7 @@ nextTotals     = [
   };
 
   const buildAllBundle = (): AllBundle => {
-    const agents = [0,1,2].map(seatIdentity);
+    const agents = [ '0','1','2' ];
     const n = Math.max(
       scoreSeriesRef.current[0]?.length||0,
       scoreSeriesRef.current[1]?.length||0,
