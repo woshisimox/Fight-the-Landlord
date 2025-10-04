@@ -308,7 +308,6 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 
-
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
@@ -331,9 +330,6 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     rob:  a*curr.rob  + (1-a)*prev.rob,
   };
 }
-
-
-
 
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
 const makeRewriteRoundLabel = (n: number) => (msg: string) => {
@@ -434,7 +430,6 @@ function LivePanel(props: LiveProps) {
   // 每局结束或数据变化时刷新统计
   useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
 ;
-
 
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -569,7 +564,6 @@ function LivePanel(props: LiveProps) {
       farmer: p?.roles?.farmer ? ensureRating(p.roles.farmer) : null,
     };
   };
-
 
   /* ===== Radar（战术画像）本地存档（新增） ===== */
   type RadarAgg = { scores: Score5; count: number };
@@ -1539,9 +1533,8 @@ nextTotals     = [
   };
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> } | null;
 };
-  scoreStats?: { stats: SeatStat[]; dists: number[][] };
-  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
-};
+
+  };
 
   const buildAllBundle = (): AllBundle => {
     const agents = [0,1,2].map(agentIdForIndex);
@@ -1550,12 +1543,6 @@ nextTotals     = [
       scoreSeriesRef.current[1]?.length||0,
       scoreSeriesRef.current[2]?.length||0
     );
-    const identities = [0,1,2].map(seatIdentity);
-    const seriesByIdentity: Record<string,(number|null)[]> = {};
-    for (let i=0;i<3;i++){
-      seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice();
-    }
-
     return {
       schema: 'ddz-all@1',
       createdAt: new Date().toISOString(),
@@ -1564,14 +1551,11 @@ nextTotals     = [
       radar: radarStoreRef.current as any,
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
       scoreTimeline: {
-      n,
-      rounds: roundCutsRef.current.slice(),
-      identities,
-      seriesByIdentity,
-      // 兼容旧版：保留 seat 导出
-      seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
-      landlords: roundLordsRef.current.slice(),
-    },
+        n,
+        rounds: roundCutsRef.current.slice(),
+        seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
+        landlords: roundLordsRef.current.slice(),
+      },
       scoreStats: {
         stats: scoreStats,
         dists: scoreDists,
@@ -1969,7 +1953,6 @@ function Home() {
     rd.readAsText(f);
   };
 
-
   return (
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Bot Arena</h1>
@@ -2039,8 +2022,6 @@ function Home() {
            style={{ width:'100%' }} />
           </label>
 </div>
-
-
 
           <div style={{ gridColumn:'2 / 3' }}>
   <label>4带2 规则
