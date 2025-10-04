@@ -1492,22 +1492,6 @@ nextTotals     = [
   radar?: RadarStore;
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
 };
-    
-    ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
-  };
-
-  const buildAllBundle = (): AllBundle => {
-  const agents = [0,1,2].map(agentIdForIndex);
-  return {
-    schema: 'ddz-all@1',
-    createdAt: new Date().toISOString(),
-    agents,
-    trueskill: tsStoreRef.current as any,
-    radar: radarStoreRef.current as any,
-    ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
-  };
-};
-;
 
   const handleAllSaveInner = () => {
     const payload = buildAllBundle();
@@ -1539,9 +1523,6 @@ nextTotals     = [
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
-};
-;
-
   const handleAllRefreshInner = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
     applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
