@@ -1,6 +1,15 @@
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
+type AllBundle = {
+  schema: 'ddz-all@1';
+  createdAt: string;
+  identities: string[];
+  trueskill?: TsStore;
+  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+};
+
+
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
@@ -1492,7 +1501,6 @@ nextTotals     = [
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
 };
 
-};
 const buildAllBundle = (): AllBundle => {
   // 导出“完整最新存档”：只包含 TrueSkill + 天梯（不含雷达图/出牌评分/评分统计）
   const tsAll = tsStoreRef.current as TsStore | undefined;
