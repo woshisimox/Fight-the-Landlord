@@ -373,6 +373,21 @@ function LivePanel_Impl(props: LiveProps) {
   return null as any;
 }
 
+// ===== 默认配置（用于初始化与一键重置） =====
+const DEFAULTS = {
+  enabled: true,
+  rounds: 10,
+  startScore: 0,
+  rob: true,
+  four2: 'both' as Four2Policy,           // 'both' | '2singles' | '2pairs'
+  farmerCoop: true,
+  seatDelayMs: [1000, 1000, 1000] as number[],
+  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
+  seatModels: ['', '', ''] as string[],
+  // 各家密钥/HTTP配置占位，避免未定义
+  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
+};
+
 function Home() {
 function _buildAllBundle_impl(): AllBundle {
   // 统一存档仅包含 TrueSkill / 雷达图 / 天梯，不含出牌评分与统计
