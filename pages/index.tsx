@@ -875,7 +875,7 @@ const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSe
     const payload = {
       version: 1,
       createdAt: new Date().toISOString(),
-      agents,
+//      agents,
       rounds: roundCutsRef.current,
       n,
       seriesBySeat: scoreSeriesRef.current,
