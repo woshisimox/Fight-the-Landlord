@@ -1485,17 +1485,14 @@ nextTotals     = [
 
   // ===== 统一统计打包（All-in-One） =====
   type AllBundle = {
-    schema: 'ddz-all@1';
-    createdAt: string;
-    agents: string[];
-    trueskill?: TsStore;
-    radar?: RadarStore;
-    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
-    scoreStats?: { stats: SeatStat[]; dists: number[][] };
-    ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
-  };
-
-  const buildAllBundle = (): AllBundle => {
+  schema: 'ddz-all@1';
+  createdAt: string;
+  identities: string[];
+  trueskill?: TsStore;
+  radar?: RadarStore;
+  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+};
+const buildAllBundle = (): AllBundle => {
   // 导出“完整最新存档”：包含所有已知算法（未参赛者不注入默认，不改写本地存储）
   const tsAll = tsStoreRef.current as TsStore | undefined;
   const radarAll = radarStoreRef.current as RadarStore | undefined;
