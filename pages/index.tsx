@@ -875,7 +875,7 @@ const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSe
     const payload = {
       version: 1,
       createdAt: new Date().toISOString(),
-//      agents,
+      agentIds,
       rounds: roundCutsRef.current,
       n,
       seriesBySeat: scoreSeriesRef.current,
@@ -893,9 +893,9 @@ const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSe
       rd.onload = () => {
         try {
           const j = JSON.parse(String(rd.result||'{}'));
-          const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
-          const targetAgents = [0,1,2].map(agentIdForIndex);
-          const mapped:(number|null)[][] = [[],[],[]];
+const fileIds = Array.isArray(j.agentIds) ? j.agentIds : [];
+const targetIds = [0,1,2].map(seatIdentity);
+const mapped:(number|null)[][] = [[],[],[]];
           for (let i=0;i<3;i++){
             const idx = fileAgents.indexOf(targetAgents[i]);
             mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
