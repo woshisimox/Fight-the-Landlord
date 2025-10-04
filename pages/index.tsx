@@ -1923,19 +1923,6 @@ function RadarPanel({
 }
 
 /* ========= 默认值（含“清空”按钮的重置） ========= */
-const DEFAULTS = {
-  enabled: true,
-  rounds: 10,
-  startScore: 100,
-  rob: true,
-  four2: 'both' as Four2Policy,
-  farmerCoop: true,
-  seatDelayMs: [1000,1000,1000] as number[],
-  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
-  // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
-  seatModels: ['', '', ''],
-  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
-};
 
 function Home() {
   const [resetKey, setResetKey] = useState<number>(0);
