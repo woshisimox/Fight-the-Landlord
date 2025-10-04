@@ -1213,7 +1213,7 @@ for (const raw of batch) {
 
 // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
-                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)
+                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)};
                   try { (window as any).ddzTraceStep?.({ kind:'bot-call', seat: m.seat, by: m.by, model: m.model, phase: (m as any).phase||'play' }); } catch {}
                 }｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
