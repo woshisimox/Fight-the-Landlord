@@ -13,6 +13,8 @@ type AllBundle = {
   trueskill?: any; // TsStore-like
   radar?: any;     // RadarStore-like
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+};
+
 // removed stray };
 
 // removed stray };
