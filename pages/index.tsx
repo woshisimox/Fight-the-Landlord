@@ -555,20 +555,26 @@ function LivePanel(props: LiveProps) {
 // === TS 刷新：虚拟发牌方式（不改变对局状态） ===
 const refreshTsVirtualDeal = () => {
   try {
-    let lord: any = landlordRef.current;
-    if (lord !== 0 && lord !== 1 && lord !== 2) {
-      try {
-        const last = JSON.parse(localStorage.getItem('ddz_last_lord_v1') || 'null');
-        if (last === 0 || last === 1 || last === 2) lord = last;
-      } catch {}
-      if (lord !== 0 && lord !== 1 && lord !== 2) lord = 0;
-    }
-    applyTsFromStoreByRole(lord as (0|1|2), '手动刷新（虚拟发牌）');
-    setLog((l:any[]) => [...l, `【TS】已按虚拟地主位 #${lord} 绑定当前三位选手（不影响对局）。`]);
-  } catch (e:any) {
-    console.error('[refreshTsVirtualDeal] error', e);
-    setLog((l:any[]) => [...l, `【TS】刷新失败：${e?.message || e}`]);
+  // Phase A: 先用 overall 绑定一遍，保证无论顺序如何都有基线
+  applyTsFromStoreByRole(null, '手动刷新（overall 基线）');
+
+  // Phase B: 再按“虚拟地主位”覆盖为角色分档
+  let lord: any = landlordRef.current;
+  if (lord !== 0 && lord !== 1 && lord !== 2) {
+    try {
+      const last = JSON.parse(localStorage.getItem('ddz_last_lord_v1') || 'null');
+      if (last === 0 || last === 1 || last === 2) lord = last;
+    } catch {}
+    if (lord !== 0 && lord !== 1 && lord !== 2) lord = 0;
   }
+  applyTsFromStoreByRole(lord as (0|1|2), '手动刷新（虚拟发牌 by role）');
+
+  // 触发一次轻量重渲染（多数情况下 setLog 就足够；保底还可以“抖动”一下某些状态）
+  setLog((l:any[]) => [...l, `【TS】刷新完成：先 overall，再以虚拟地主位 #${lord} 覆盖（不影响对局）。`]);
+} catch (e:any) {
+  console.error('[refreshTsVirtualDeal] error', e);
+  setLog((l:any[]) => [...l, `【TS】刷新失败：${e?.message || e}`]);
+}
 };
 
 
