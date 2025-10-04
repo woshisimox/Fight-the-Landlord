@@ -872,6 +872,7 @@ const handleScoreSave = () => {
     rounds,
     seriesByIdentity,
     // 兼容字段（导入时不再使用）
+    seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
   };
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
@@ -1538,10 +1539,7 @@ nextTotals     = [
   };
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> } | null;
 };
-  scoreStats?: {
-    byIdentity: Record<string, SeatStat>;
-    distsByIdentity: Record<string, number[]>;
-  };
+  scoreStats?: { stats: SeatStat[]; dists: number[][] };
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
 };
 
@@ -1552,61 +1550,43 @@ nextTotals     = [
       scoreSeriesRef.current[1]?.length||0,
       scoreSeriesRef.current[2]?.length||0
     );
-    const identities = activeIds ? activeIds() : [0,1,2].map(seatIdentity);
-
-    // --- map scoreStats/dists by identity for ALL export ---
-    const scoreStatsByIdentity: Record<string, SeatStat> = {};
-    const distsByIdentity: Record<string, number[]> = {};
-    for (let i=0;i<3;i++){
-      const id = identities[i];
-      if (id!=null) {
-        scoreStatsByIdentity[id] = (scoreStats as any)[i];
-        distsByIdentity[id] = (scoreDists[i] || []).slice();
-      }
-    }
+    const identities = [0,1,2].map(seatIdentity);
     const seriesByIdentity: Record<string,(number|null)[]> = {};
     for (let i=0;i<3;i++){
       seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice();
     }
 
-    const seriesByIdentity: Record<string,(number|null)[]> = ((): any => {
-  const m:any = {}; for (let i=0;i<3;i++) m[identities[i]] = (scoreSeriesRef.current[i]||[]).slice(); return m;
-})();
-const { stats: statsRecalc, dists: distsRecalc } = recomputeStatsFromSeries(scoreSeriesRef.current as any);
-const scoreStatsByIdentity: Record<string, SeatStat> = ((): any => {
-  const m:any = {}; for (let i=0;i<3;i++) m[identities[i]] = statsRecalc[i]; return m;
-})();
-const distsByIdentity: Record<string, number[]> = ((): any => {
-  const m:any = {}; for (let i=0;i<3;i++) m[identities[i]] = (distsRecalc[i]||[]).slice(); return m;
-})();
-return {
+    return {
       schema: 'ddz-all@1',
       createdAt: new Date().toISOString(),
       agents,
       trueskill: tsStoreRef.current,
       radar: radarStoreRef.current as any,
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
-      scoreTimeline: { n, rounds: roundCutsRef.current.slice(), identities, seriesByIdentity, landlords: roundLordsRef.current.slice() },
+      scoreTimeline: {
+      n,
+      rounds: roundCutsRef.current.slice(),
+      identities,
+      seriesByIdentity,
+      // 兼容旧版：保留 seat 导出
+      seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
+      landlords: roundLordsRef.current.slice(),
+    },
       scoreStats: {
-      byIdentity: scoreStatsByIdentity,
-      distsByIdentity: distsByIdentity,
-    }
+        stats: scoreStats,
+        dists: scoreDists,
+      },
     };
   };
 
-  const handleAllSave = () => {
-  try {
-    const bundle = buildAllBundle();
-    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type:'application/json' });
+  const handleAllSaveInner = () => {
+    const payload = buildAllBundle();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'ddz_all_stats.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
     setLog(l => [...l, '【ALL】已导出统一统计文件。']);
-  } catch (err) {
-    console.error('[ALL] export error', err);
-    setLog(l => [...l, '【ALL】导出失败。']);
-  }
-};;
+  };
 
   const applyAllBundleInner = (obj:any) => {
     try {
@@ -1621,69 +1601,16 @@ return {
         applyRadarFromStoreByRole(landlordRef.current, '统一上传');
       }
       if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
-      if (obj?.scoreTimeline?.seriesByIdentity) {
-      const tl = obj.scoreTimeline;
-      const ids = [0,1,2].map(seatIdentity);
-      const mapped:(number|null)[][] = [[],[],[]];
-      let matched = false;
-      for (let i=0;i<3;i++){
-        const arr = tl.seriesByIdentity[ids[i]];
-        if (Array.isArray(arr)) { matched = true; mapped[i] = arr.slice(); } else { mapped[i] = []; }
+      if (obj?.scoreTimeline?.seriesBySeat) {
+        const tl = obj.scoreTimeline;
+        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
+        if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
+        if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
       }
-      if (matched) {
-        setScoreSeries(mapped);
-const { stats, dists } = recomputeStatsFromSeries(mapped);
-setScoreStats(stats as any);
-setScoreDists(dists);
-if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice());
-        if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords.slice());
-      } else {
-        // identity 一个都对不上 → 全部置空
-        setScoreSeries([[],[],[]]);
-        setRoundCuts([]);
-        setRoundLords([]);
+      if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
+        setScoreStats(obj.scoreStats.stats as any);
+        setScoreDists(obj.scoreStats.dists as any);
       }
-    } else {
-        // 没有 identity 数据 → 全部置空（不使用 seat 兜底）
-        setScoreSeries([[],[],[]]);
-        setRoundCuts([]);
-        setRoundLords([]);
-      }
-      if (obj?.scoreStats?.byIdentity || obj?.scoreStats?.distsByIdentity) {
-      const ids = [0,1,2].map(seatIdentity);
-      const ss = obj.scoreStats;
-      const defStat = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-      const statsArr = [];
-      const distsArr = [];
-      let matched = false;
-      for (let i=0;i<3;i++){
-        const id = ids[i];
-        const st = ss.byIdentity?.[id];
-        const ds = ss.distsByIdentity?.[id];
-        if (st) { matched = true; statsArr[i] = st; } else { statsArr[i] = defStat; }
-        distsArr[i] = Array.isArray(ds) ? ds.slice() : [];
-      }
-      if (matched) {
-        setScoreStats(statsArr as any);
-        setScoreDists(distsArr as any);
-      } else {
-        // identity 一个都对不上 → 全缺省
-        setScoreStats([
-          { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-          { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-          { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-        ]);
-        setScoreDists([[],[],[]]);
-      }
-    } else {
-      // 没有 identity 统计 → 全缺省（不再使用 seat 兜底）
-      setScoreStats([
-        { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-        { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-        { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-      ]);
-      setScoreDists([[],[],[]]);
-    }
       setLog(l => [...l, '【ALL】统一上传完成。']);
     } catch (e:any) {
       setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
