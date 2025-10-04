@@ -1560,13 +1560,8 @@ nextTotals     = [
   };
 
   const buildAllBundle = (): AllBundle => {
-    const agents = [ '0','1','2' ];
-    const n = Math.max(
-      scoreSeriesRef.current[0]?.length||0,
-      scoreSeriesRef.current[1]?.length||0,
-      scoreSeriesRef.current[2]?.length||0
-    );
-    return {
+    const agents = ['0','1','2'];
+return {
       schema: 'ddz-all@1',
       createdAt: new Date().toISOString(),
       agents,
