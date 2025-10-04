@@ -98,11 +98,242 @@ type LiveProps = {
   onAllUpload?: (payload:any)=>void;
   onAllRefresh?: () => void;
 };
-const LivePanel = (_props: LiveProps) => {
+const LivePanel = (props: LiveProps) => {
+  const {
+    rounds,
+    startScore,
+    seatDelayMs,
+    enabled,
+    rob,
+    four2,
+    seats,
+    seatModels,
+    seatKeys,
+    farmerCoop,
+    turnTimeoutSecs,
+    onAllSave,
+    onAllUpload,
+    onAllRefresh,
+  } = props;
+
+  // --- simple Dou Dizhu helpers (rank-only model) ---
+  const RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const;
+  const RANK_ORDER = Object.fromEntries(RANKS.map((r,i)=>[r,i]));
+  type Rank = typeof RANKS[number];
+  type Play = { seat:number; move:'play'|'pass'; cards?:Rank[]; reason?:string };
+
+  const sortHand = (hand: Rank[]) => [...hand].sort((a,b)=>RANK_ORDER[a]-RANK_ORDER[b]);
+  const createDeck = (): Rank[] => {
+    const ranks: Rank[] = [];
+    // 4 copies of ranks 3..2
+    for (let i=0;i<13;i++) for (let k=0;k<4;k++) ranks.push(RANKS[i]);
+    // two jokers
+    ranks.push('x' as Rank); ranks.push('X' as Rank);
+    return ranks as Rank[];
+  };
+  const shuffle = <T,>(arr: T[]) => {
+    const a = [...arr];
+    for (let i=a.length-1;i>0;i--) { const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+    return a;
+  };
+
+  type SeatState = {
+    hand: Rank[];
+    total: number; // running total score
+  };
+
+  const [running, setRunning] = useState(false);
+  const [roundIdx, setRoundIdx] = useState(0);
+  const [landlord, setLandlord] = useState<number|null>(null);
+  const [kitty, setKitty] = useState<Rank[]>([]);
+  const [seatsState, setSeatsState] = useState<SeatState[]>([{hand:[], total:startScore},{hand:[], total:startScore},{hand:[], total:startScore}]);
+  const [plays, setPlays] = useState<Play[]>([]);
+  const [leader, setLeader] = useState<number>(0);    // current trick leader
+  const [turn, setTurn] = useState<number>(0);        // 0..2 seat turn
+  const [winner, setWinner] = useState<number|null>(null);
+  const timerRef = useRef<number|undefined>(undefined);
+
+  const log = (msg: string) => { /* optionally wire to outer logger */ };
+
+  // Start a new round: deal & choose landlord
+  const newRound = () => {
+    const deck = shuffle(createDeck());
+    const h0 = sortHand(deck.slice(0,17) as Rank[]);
+    const h1 = sortHand(deck.slice(17,34) as Rank[]);
+    const h2 = sortHand(deck.slice(34,51) as Rank[]);
+    const bottom = deck.slice(51) as Rank[];
+    let lord = Math.floor(Math.random()*3);
+    // If rob is disabled, keep random. If enabled, bias to the seat with highest '2' count
+    if (rob) {
+      const counts = [h0,h1,h2].map(h=>h.filter(c=>c==='2').length);
+      const best = counts.indexOf(Math.max(...counts));
+      lord = best >= 0 ? best : lord;
+    }
+    const hands = [h0,h1,h2];
+    hands[lord] = sortHand(hands[lord].concat(bottom));
+    setKitty(bottom);
+    setSeatsState([{hand:hands[0], total: seatsState[0]?.total ?? startScore},
+                   {hand:hands[1], total: seatsState[1]?.total ?? startScore},
+                   {hand:hands[2], total: seatsState[2]?.total ?? startScore}]);
+    setLandlord(lord);
+    setLeader(lord);
+    setTurn(lord);
+    setPlays([]);
+    setWinner(null);
+  };
+
+  // pick a trivial legal play: highest single that beats previous if any; otherwise lead lowest single
+  const pickPlay = (seat:number, history: Play[]): Play => {
+    const prevLeadIndex = [...history].reverse().findIndex(p=>p.move==='play');
+    const leadPlay = prevLeadIndex>=0 ? history[history.length-1-prevLeadIndex] : null;
+    const hand = seatsState[seat].hand;
+    if (!hand.length) return { seat, move:'pass' as const, reason:'empty' };
+
+    const sorted = sortHand(hand);
+    if (leadPlay && leadPlay.seat !== seat && leadPlay.cards && leadPlay.cards.length===1) {
+      const target = leadPlay.cards[0] as Rank;
+      const cand = sorted.find(r => RANK_ORDER[r] > RANK_ORDER[target]);
+      if (cand) return { seat, move:'play', cards:[cand], reason:`beat ${target}` };
+      return { seat, move:'pass', reason:'cannot beat' };
+    }
+    // lead
+    const card = sorted[0];
+    return { seat, move:'play', cards:[card], reason:'lead' };
+  };
+
+  const applyPlay = (p: Play) => {
+    setPlays(prev => [...prev, p]);
+    if (p.move === 'play' && p.cards?.length) {
+      setSeatsState(prev => {
+        const next = prev.map(s => ({...s}));
+        next[p.seat].hand = removeCards(next[p.seat].hand, p.cards as Rank[]);
+        return next;
+      });
+      setLeader(p.seat);
+    }
+    // check win
+    setTimeout(()=>{
+      const emptySeat = [0,1,2].find(i=>seatsState[i].hand.length===0);
+      if (emptySeat !== undefined) {
+        setWinner(emptySeat);
+        setRunning(false);
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = undefined; }
+      }
+    }, 0);
+    // next turn
+    setTurn((p.seat + 1) % 3);
+  };
+
+  const removeCards = (hand: Rank[], used: Rank[]) => {
+    const h = [...hand];
+    used.forEach(u=>{
+      const idx = h.indexOf(u);
+      if (idx>=0) h.splice(idx,1);
+    });
+    return h;
+  };
+
+  // step once
+  const step = () => {
+    if (winner !== null) return;
+    const p = pickPlay(turn, plays);
+    applyPlay(p);
+  };
+
+  const start = () => {
+    if (!seatsState[0].hand.length) newRound();
+    setRunning(true);
+    const delay = Math.max(200, Math.min(...seatDelayMs));
+    timerRef.current = window.setInterval(()=>{
+      step();
+    }, delay) as unknown as number;
+  };
+  const pause = () => {
+    setRunning(false);
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = undefined; }
+  };
+  const nextRound = () => {
+    pause();
+    setRoundIdx(i=>i+1);
+    newRound();
+  };
+
+  useEffect(()=>{ return ()=>{ if (timerRef.current) clearInterval(timerRef.current); }; }, []);
+  useEffect(()=>{ // whenever reset by parent key (not wired here), ensure a fresh round
+    // no-op in baseline
+  }, [roundIdx]);
+
+  // initial deal on mount
+  useEffect(()=>{ newRound(); }, []);
+
+  // ---- render helpers ----
+  const seatName = (i:number) => i===0 ? '甲' : i===1 ? '乙' : '丙';
+  const isLord = (i:number) => landlord === i;
+
+  const HandView = ({i}:{i:number}) => {
+    const s = seatsState[i];
+    return (
+      <div style={{ flex:1, border:'1px solid #e5e7eb', borderRadius:8, padding:8, background:isLord(i)?'rgba(250,204,21,0.12)':'#fff' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+          <div style={{ fontWeight:800 }}>{seatName(i)} {isLord(i) && <span style={{ color:'#b45309' }}>（地主）</span>}</div>
+          <div style={{ fontSize:12, color:'#6b7280' }}>手牌：{s.hand.length}</div>
+        </div>
+        <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+          {s.hand.map((c, idx)=>(
+            <span key={idx} style={{ border:'1px solid #e5e7eb', borderRadius:6, padding:'4px 6px', fontFamily:'monospace' }}>{c}</span>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const TurnBadge = ({i}:{i:number}) => (
+    <span style={{ fontSize:12, color: turn===i ? '#1f2937' : '#9ca3af' }}>{turn===i?'出牌中':'等待'}</span>
+  );
+
   return (
-    <div style={{ padding:12, border:'1px solid #e5e7eb', borderRadius:8 }}>
-      <div style={{ fontSize:14, fontWeight:700, marginBottom:6 }}>对局（占位组件）</div>
-      <div style={{ fontSize:12, color:'#6b7280' }}>该占位仅为恢复编译。后续我可以把你的完整对局逻辑回填到这里。</div>
+    <div style={{ border:'1px solid #e5e7eb', borderRadius:12, padding:12 }}>
+      {/* Controls */}
+      <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
+        <button onClick={running?pause:start} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8 }}>
+          {running ? '暂停' : '开始'}
+        </button>
+        <button onClick={step} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8 }}>单步</button>
+        <button onClick={nextRound} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8 }}>新一局</button>
+        <div style={{ fontSize:12, color:'#6b7280' }}>第 {roundIdx+1} 局</div>
+        <div style={{ marginLeft:'auto', fontSize:12, color:'#6b7280' }}>
+          地主底牌：{kitty.map((k,i)=><span key={i} style={{ border:'1px solid #e5e7eb', borderRadius:6, padding:'2px 4px', marginLeft:4 }}>{k}</span>)}
+        </div>
+      </div>
+
+      {/* Table */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:10 }}>
+        <div style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
+          <HandView i={0} />
+          <div style={{ width:260 }}>
+            <div style={{ fontWeight:800, marginBottom:6 }}>出牌记录</div>
+            <div style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:8, height:180, overflow:'auto', background:'#fff' }}>
+              {plays.map((p, idx)=>(
+                <div key={idx} style={{ fontSize:12, color:'#374151', display:'flex', gap:6 }}>
+                  <span style={{ width:24, fontWeight:700 }}>{seatName(p.seat)}</span>
+                  <span>{p.move==='play' ? `出 ${p.cards?.join('')}` : '过'}</span>
+                  {p.reason && <span style={{ color:'#6b7280' }}>（{p.reason}）</span>}
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop:8, fontSize:12, color:'#6b7280' }}>
+              轮到：{seatName(turn)} <TurnBadge i={turn} />
+            </div>
+            {winner!==null && (
+              <div style={{ marginTop:8, fontWeight:800, color:'#065f46' }}>胜者：{seatName(winner)} {isLord(winner)?'（地主）':'（农民）'}</div>
+            )}
+          </div>
+          <HandView i={1} />
+        </div>
+        <div>
+          <HandView i={2} />
+        </div>
+      </div>
     </div>
   );
 };
