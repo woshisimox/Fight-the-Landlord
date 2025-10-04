@@ -853,7 +853,8 @@ function LivePanel(props: LiveProps) {
     scoreSeriesRef.current[2]?.length||0
   );
   const seriesByIdentity: Record<string,(number|null)[]> = {};
-  for (let i=0;i<3;i++){ seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice(); }
+  for (let i=0;i<3;i++) seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice();
+
   const payload = {
     schema: 'ddz-scores@1',
     version: 2,
@@ -861,9 +862,9 @@ function LivePanel(props: LiveProps) {
     identities,
     agents,
     n,
-    rounds: Array.isArray(roundCutsRef.current) ? roundCutsRef.current.slice() : [],
+    rounds: roundCutsRef.current.slice(),
     seriesByIdentity,
-    landlords: Array.isArray(roundLordsRef.current) ? roundLordsRef.current.slice() : [],
+    landlords: roundLordsRef.current.slice(),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
   const url  = URL.createObjectURL(blob);
@@ -1541,30 +1542,39 @@ nextTotals     = [
 
   // ===== 统一统计打包（All-in-One） =====
   type AllBundle = {
-    schema: 'ddz-all@1';
-    createdAt: string;
-    agents: string[];
-    trueskill?: TsStore;
-    radar?: RadarStore;
-    ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+  schema: 'ddz-all@1';
+  createdAt: string;
+  agents: string[];
+  trueskill?: TsStore;
+  radar?: RadarStore;
 };
-    scoreStats?: { stats: SeatStat[]; dists: number[][] };
-    ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
   };
 
   const buildAllBundle = (): AllBundle => {
-  const agents = [0,1,2].map(agentIdForIndex);
-  const ladder = (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })();
-  return {
-    schema: 'ddz-all@1',
-    createdAt: new Date().toISOString(),
-    agents,
-    trueskill: tsStoreRef.current as any,
-    radar: radarStoreRef.current as any,
-    ladder,
+    const agents = [0,1,2].map(agentIdForIndex);
+    const n = Math.max(
+      scoreSeriesRef.current[0]?.length||0,
+      scoreSeriesRef.current[1]?.length||0,
+      scoreSeriesRef.current[2]?.length||0
+    );
+    return {
+      schema: 'ddz-all@1',
+      createdAt: new Date().toISOString(),
+      agents,
+      trueskill: tsStoreRef.current,
+      radar: radarStoreRef.current as any,
+      ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
+      scoreTimeline: {
+        n,
+        rounds: roundCutsRef.current.slice(),
+        landlords: roundLordsRef.current.slice(),
+      },
+      scoreStats: {
+        stats: scoreStats,
+        dists: scoreDists,
+      },
+    };
   };
-};
-;
 
   const handleAllSaveInner = () => {
     const payload = buildAllBundle();
@@ -1590,12 +1600,32 @@ nextTotals     = [
     if (obj?.ladder?.players) {
       try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {}
     }
-    setLog(l => [...l, '【ALL】统一上传完成（仅 TS / 雷达 / 天梯）。']);
+    setLog(l => [...l, '【ALL】统一上传完成（仅 TS/Radar/天梯）。']);
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
 };
-;
+if (obj?.radar?.players) {
+        radarStoreRef.current = obj.radar as any;
+        writeRadarStore(radarStoreRef.current);
+        applyRadarFromStoreByRole(landlordRef.current, '统一上传');
+      }
+      if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
+      if (obj?.scoreTimeline?.seriesBySeat) {
+        const tl = obj.scoreTimeline;
+        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
+        if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
+        if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
+      }
+      if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
+        setScoreStats(obj.scoreStats.stats as any);
+        setScoreDists(obj.scoreStats.dists as any);
+      }
+      setLog(l => [...l, '【ALL】统一上传完成。']);
+    } catch (e:any) {
+      setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
+    }
+  };
 
   const handleAllRefreshInner = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
@@ -2011,16 +2041,6 @@ function Home() {
       style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >刷新</button>
   </div>
-<div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
-  <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
-    出牌评分（identity-only）
-  </label>
-  <button
-    onClick={handleScoreSave}
-    style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-  >存档</button>
-</div>
-
 </div>
 <div style={{ gridColumn:'2 / 3' }}>
   <label>初始分
