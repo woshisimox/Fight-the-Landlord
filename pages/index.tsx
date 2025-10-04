@@ -1113,11 +1113,22 @@ for (const raw of batch) {
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
 
-                nextLog = [...nextLog, `【边界】round-start #${m.round}`];
+                nextLog = [...nextLog, `【边界】round-start #${m.round
+                  try {
+                    const labels = [0,1,2].map(i=>agentIdForIndex(i));
+                    const ids    = [0,1,2].map(i=>seatIdentity(i));
+                    (window as any).ddzTraceStart?.(m.round, labels, ids);
+                  } catch {}
+                }`];
                 continue;
               }
               if (m.type === 'event' && m.kind === 'round-end') {
-                nextLog = [...nextLog, `【边界】round-end #${m.round}`];
+                nextLog = [...nextLog, `【边界】round-end #${m.round
+                  try {
+                    const winner = (typeof (m as any).winner === 'number') ? (m as any).winner : (typeof nextWinner !== 'undefined' ? nextWinner : null);
+                    (window as any).ddzTraceEnd?.({ winner, delta: (nextDelta||null), totals: (nextTotals||null), lastReason: (Array.isArray((m as any).lastReason)?(m as any).lastReason: null) });
+                  } catch {}
+                }`];
                 const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 continue;
@@ -1138,7 +1149,13 @@ for (const raw of batch) {
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
-                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
+                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; 
+                  try {
+                    const L = (m.landlordIdx ?? m.landlord ?? null) as number | null;
+                    const handsRaw = Array.isArray(m.hands) ? m.hands : (m.payload?.hands || m.state?.hands || m.init?.hands);
+                    (window as any).ddzTraceInit?.(L, handsRaw, (m as any).bottom);
+                  } catch {}
+                }
                     else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
                   }
                   // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
@@ -1196,13 +1213,17 @@ for (const raw of batch) {
 
 // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
-                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
+                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)
+                  try { (window as any).ddzTraceStep?.({ kind:'bot-call', seat: m.seat, by: m.by, model: m.model, phase: (m as any).phase||'play' }); } catch {}
+                }｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
                 nextLog = [
                   ...nextLog,
-                  `AI完成｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
+                  `AI完成｜${seatName(m.seat)
+                  try { (window as any).ddzTraceStep?.({ kind:'bot-done', seat: m.seat, by: m.by, model: m.model, tookMs: m.tookMs, reason: m.reason, score: (typeof m.score==='number'?m.score:null) }); } catch {}
+                }｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
                   ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
                 ];
                 lastReasonRef.current[m.seat] = m.reason || null;
@@ -1212,7 +1233,9 @@ for (const raw of batch) {
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'rob') {
   if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
-                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
+                nextLog = [...nextLog, `${seatName(m.seat)
+                  try { (window as any).ddzTraceStep?.({ kind:'rob', seat: m.seat, rob: !!m.rob }); (window as any).ddzTraceSet?.({ multiplier: ((window as any).__ddzTrace?.multiplier||1) * (m.rob?2:1) }); } catch {}
+                } ${m.rob ? '抢地主' : '不抢'}`];
                 continue;
               }
 
@@ -1221,7 +1244,9 @@ for (const raw of batch) {
                 nextLog = [...nextLog, '一轮结束，重新起牌'];
                 nextPlays = [];
                 continue;
-              }
+              
+                  try { (window as any).ddzTraceStep?.({ kind:'trick-reset' }); } catch {}
+                }
 
               // -------- 出/过 --------
               
@@ -1251,7 +1276,9 @@ for (const raw of batch) {
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
-                  }
+                  
+                  try { (window as any).ddzTraceStep?.({ kind:'turn', seat: m.seat, move: m.move, cards: (m.cards||[]), score: (typeof m.score==='number'?m.score:null), totals: m.totals }); } catch {}
+                }
                 }
                 continue;
               }
@@ -1259,7 +1286,14 @@ if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
                   lastReasonRef.current[m.seat] = null;
-                  nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason }];
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason 
+                  try {
+                    const step = (m.move === 'pass')
+                      ? { kind:'pass', seat: m.seat, reason: m.reason || (lastReasonRef.current?.[m.seat]||null) }
+                      : { kind:'play', seat: m.seat, cards: (m.cards||[]), reason: m.reason || (lastReasonRef.current?.[m.seat]||null) };
+                    (window as any).ddzTraceStep?.(step);
+                  } catch {}
+                }];
                   nextLog = [...nextLog, `${seatName(m.seat)} 过${reason ? `（${reason}）` : ''}`];
                 } else {
                   const pretty: string[] = [];
@@ -1851,7 +1885,26 @@ function Home() {
     setRob(DEFAULTS.rob); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
     setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
-    setLiveLog([]); setResetKey(k => k + 1);
+    setLiveLog([]); setResetKey
+
+  // —— 训练用出牌记录：仅“存档导出” ——
+  const handleTraceExport = () => {
+    try {
+      const payload = (typeof window!=='undefined' && (window as any).ddzTraceDump) ? (window as any).ddzTraceDump() : { schema:'ddz-trace@1', version:1, createdAt:new Date().toISOString(), rounds: [] };
+      // 附加：本次会话的座位标识，便于还原（与 rounds 中 seats 冗余也没关系）
+      try {
+        (payload as any).seats = [0,1,2].map(i => ({ idx:i, id: seatIdentity(i), label: agentIdForIndex(i) }));
+      } catch {}
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'ddz_round_traces.json'; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url), 1200);
+    } catch (err) {
+      console.error('[trace export] failed', err);
+      alert('导出失败，请打开控制台查看错误日志。');
+    }
+  };
+(k => k + 1);
     try { localStorage.removeItem('ddz_ladder_store_v1'); } catch {}
     try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
   };
@@ -2399,4 +2452,71 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
       <div style={{ minWidth:60, fontSize:12, color:'#374151' }}>{title}</div>
     </div>
   );
+
+// ===== 训练用出牌记录 · 全局 Trace 工具（轻侵入，独立导出） =====
+(function initDdzTraceGlobal(){
+  if (typeof window === 'undefined') return;
+  const w = window as any;
+  if (!w.__ddzTraces) w.__ddzTraces = [];
+  if (!w.__ddzTrace)  w.__ddzTrace  = null;
+  if (!w.ddzTraceStart) {
+    w.ddzTraceStart = (round:number, seatLabels:string[], seatIds:string[]) => {
+      w.__ddzTrace = {
+        round, startAt: new Date().toISOString(),
+        landlord: null,
+        seats: [0,1,2].map((i)=>({ idx:i, label: seatLabels[i]||'', id: seatIds[i]||'', role: 'unknown' })),
+        initHands: [[],[],[]],
+        bottom: [],
+        steps: [],
+        multiplier: 1
+      };
+    };
+  }
+  if (!w.ddzTraceInit) {
+    w.ddzTraceInit = (landlord:number|null, hands:string[][], bottom?:string[]) => {
+      if (!w.__ddzTrace) return;
+      w.__ddzTrace.landlord = (typeof landlord === 'number') ? landlord : null;
+      if (Array.isArray(hands) && hands.length === 3) {
+        // 原始未装饰的起手牌
+        w.__ddzTrace.initHands = hands.map(arr => Array.isArray(arr) ? [...arr] : []);
+      }
+      if (Array.isArray(bottom)) w.__ddzTrace.bottom = [...bottom];
+      // 角色标注
+      const L = w.__ddzTrace.landlord;
+      if (typeof L === 'number') {
+        w.__ddzTrace.seats = (w.__ddzTrace.seats||[]).map((s:any)=>({ ...s, role: (s.idx===L ? 'landlord': 'farmer') }));
+      }
+    };
+  }
+  if (!w.ddzTraceStep) {
+    w.ddzTraceStep = (step:any) => {
+      if (!w.__ddzTrace) return;
+      const s = { at: new Date().toISOString(), ...step };
+      (w.__ddzTrace.steps ||= []).push(s);
+    };
+  }
+  if (!w.ddzTraceSet) {
+    w.ddzTraceSet = (patch:any) => { if (w.__ddzTrace) Object.assign(w.__ddzTrace, patch||{}); };
+  }
+  if (!w.ddzTraceEnd) {
+    w.ddzTraceEnd = (payload?:any) => {
+      if (!w.__ddzTrace) return;
+      Object.assign(w.__ddzTrace, payload||{}, { endAt: new Date().toISOString() });
+      w.__ddzTraces.push(w.__ddzTrace);
+      w.__ddzTrace = null;
+    };
+  }
+  if (!w.ddzTraceDump) {
+    w.ddzTraceDump = () => ({
+      schema: 'ddz-trace@1',
+      version: 1,
+      createdAt: new Date().toISOString(),
+      rounds: w.__ddzTraces || []
+    });
+  }
+  if (!w.ddzTraceResetAll) {
+    w.ddzTraceResetAll = () => { w.__ddzTraces = []; w.__ddzTrace = null; };
+  }
+})();
+// ===== /训练用出牌记录 =====
 }
