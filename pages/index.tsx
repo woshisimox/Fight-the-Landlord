@@ -450,58 +450,7 @@ function LivePanel(props: LiveProps) {
     const choice = props.seats[i];
     const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
-    return `${choice}
-
-// === Identity order captured from uploads (for charts/exports identity-only) ===
-const uploadIdentityOrderRef = useRef<string[] | null>(null);
-const activeIds = (): string[] => (
-  uploadIdentityOrderRef.current && uploadIdentityOrderRef.current.length === 3
-    ? uploadIdentityOrderRef.current
-    : [0,1,2].map(seatIdentity)
-);
-const identityOfIndex = (i:number) => (activeIds()[i] ?? seatIdentity(i));
-
-// === Recompute score stats & histogram from series (identity-only) ===
-const recomputeStatsFromSeries = (series: (number|null)[][]): { stats: SeatStat[]; dists: number[][] } => {
-  const stats: SeatStat[] = [];
-  const dists: number[][] = [[],[],[]];
-  for (let i=0;i<3;i++) {
-    const xs = (series[i] || []).filter((v): v is number => typeof v === 'number' && !Number.isNaN(v));
-    const rounds = xs.length;
-    if (!rounds) {
-      stats[i] = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-      dists[i] = [];
-      continue;
-    }
-    const sum = xs.reduce((a,b)=>a+b, 0);
-    const mean = sum / rounds;
-    const lastK = Math.min(20, rounds);
-    const lastAvg = xs.slice(-lastK).reduce((a,b)=>a+b,0) / lastK;
-    const best = Math.max(...xs);
-    const worst = Math.min(...xs);
-    const variance = xs.reduce((a,b)=>a+(b-mean)*(b-mean), 0) / rounds;
-    const sigma = Math.sqrt(variance);
-    stats[i] = { rounds, overallAvg: mean, lastAvg, best, worst, mean, sigma };
-    // Histogram (20 bins)
-    const lo = Math.min(...xs), hi = Math.max(...xs);
-    const bins = 20;
-    if (hi > lo) {
-      const bw = (hi - lo) / bins;
-      const hist = new Array(bins).fill(0);
-      for (const v of xs) {
-        let k = Math.floor((v - lo) / bw);
-        if (k < 0) k = 0;
-        if (k >= bins) k = bins-1;
-        hist[k]++;
-      }
-      dists[i] = hist;
-    } else {
-      dists[i] = [rounds];
-    }
-  }
-  return { stats, dists };
-};
-|${model}|${base}`; // 身份锚定
+    return `${choice}|${model}|${base}`; // 身份锚定
   };
 
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
@@ -918,6 +867,7 @@ const handleScoreSave = () => {
     seriesByIdentity,
     landlords: Array.isArray(roundLordsRef.current) ? roundLordsRef.current.slice() : undefined,
   };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
   setTimeout(()=>URL.revokeObjectURL(url), 1500);
@@ -949,7 +899,7 @@ const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const ids: string[] = Array.isArray(j.identities)
           ? j.identities.slice(0,3)
           : Object.keys(j.seriesByIdentity || {}).slice(0,3);
-        if (uploadIdentityOrderRef) uploadIdentityOrderRef.current = ids.slice(0,3);
+        uploadIdentityOrderRef.current = ids.slice(0,3);
         const mapped:(number|null)[][] = [[],[],[]];
         for (let i=0;i<3;i++) {
           const id = ids[i];
@@ -960,7 +910,7 @@ const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (Array.isArray(j.rounds)) setRoundCuts(j.rounds.slice()); else setRoundCuts([]);
         if (Array.isArray(j.landlords)) setRoundLords(j.landlords.slice()); else setRoundLords([]);
         const { stats, dists } = recomputeStatsFromSeries(mapped);
-        setScoreStats(stats as any);
+        setScoreStats(stats);
         setScoreDists(dists);
         setLog(l => [...l, '【Score】已按 identity 对齐加载，并由序列强制重算统计/直方图。']);
       } catch (err:any) {
@@ -984,6 +934,7 @@ const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   const handleStatsSave = () => {
     try {
       const payload = { when: new Date().toISOString(), stats: scoreStats, dists: scoreDists };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = 'score-stats.json';
@@ -1594,12 +1545,9 @@ nextTotals     = [
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> } | null;
 };
 
-  scoreStats?: {
-    byIdentity: Record<string, SeatStat>;
-    distsByIdentity: Record<string, number[]>;
+    scoreStats?: { stats: SeatStat[]; dists: number[][] };
+    ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
   };
-  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
-};
 
   const buildAllBundle = (): AllBundle => {
   const agents = [0,1,2].map(agentIdForIndex);
@@ -1635,6 +1583,7 @@ nextTotals     = [
 
   const handleAllSaveInner = () => {
     const payload = buildAllBundle();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'ddz_all_stats.json'; a.click();
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
@@ -1648,7 +1597,7 @@ nextTotals     = [
       const ids: string[] = Array.isArray(tl.identities)
         ? tl.identities.slice(0,3)
         : Object.keys(tl.seriesByIdentity || {}).slice(0,3);
-      if (uploadIdentityOrderRef) uploadIdentityOrderRef.current = ids.slice(0,3);
+      uploadIdentityOrderRef.current = ids.slice(0,3);
       const mapped:(number|null)[][] = [[],[],[]];
       for (let i=0;i<3;i++) {
         const id = ids[i];
@@ -1659,7 +1608,7 @@ nextTotals     = [
       if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice()); else setRoundCuts([]);
       if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords.slice()); else setRoundLords([]);
       const { stats, dists } = recomputeStatsFromSeries(mapped);
-      setScoreStats(stats as any);
+      setScoreStats(stats);
       setScoreDists(dists);
     } else {
       setScoreSeries([[],[],[]]);
@@ -2557,17 +2506,3 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
     </div>
   );
 }
-const handleAllSave = () => {
-  try {
-    const bundle = buildAllBundle();
-    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'ddz_all_stats.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1500);
-    setLog(l => [...l, '【ALL】已导出统一统计文件。']);
-  } catch (err) {
-    console.error('[ALL] export error', err);
-    setLog(l => [...l, '【ALL】导出失败。']);
-  }
-};
-
