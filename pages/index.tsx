@@ -231,7 +231,7 @@ function LadderPanel() {
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
 
   return (
-    <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }};>
+    <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
         <div style={{ fontWeight:700 }}>天梯图（活动积分 ΔR）</div>
         <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）</div>
