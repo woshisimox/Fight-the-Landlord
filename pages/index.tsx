@@ -1496,16 +1496,36 @@ nextTotals     = [
   };
 
   const buildAllBundle = (): AllBundle => {
-  // 当前参赛选手（仅三位）
-  const identities = [0,1,2].map(seatIdentity);
+  // 导出“完整最新存档”：包含所有已知算法（未参赛者不注入默认，不改写本地存储）
+  const tsAll = tsStoreRef.current as TsStore | undefined;
+  const radarAll = radarStoreRef.current as RadarStore | undefined;
 
-  // 仅导出参赛选手对应的片段（不改写本地存储，且不为未参赛者生成占位）
-  const tsAll = tsStoreRef.current as TsStore;
-  const radarAll = radarStoreRef.current as RadarStore;
   let ladderAll: any = null;
   try {
     const raw = localStorage.getItem('ddz_ladder_store_v1');
     ladderAll = raw ? JSON.parse(raw) : { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
+  } catch {
+    ladderAll = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
+  }
+
+  // 汇总 identities：三位参赛者 + 三大存档中的全部 keys（去重）
+  const idsSet = new Set<string>();
+  const participants = [0,1,2].map(seatIdentity);
+  for (const id of participants) idsSet.add(id);
+  Object.keys(tsAll?.players || {}).forEach(id => idsSet.add(id));
+  Object.keys(radarAll?.players || {}).forEach(id => idsSet.add(id));
+  Object.keys(ladderAll?.players || {}).forEach(id => idsSet.add(id));
+  const identities = Array.from(idsSet);
+
+  return {
+    schema: 'ddz-all@1',
+    createdAt: new Date().toISOString(),
+    identities,
+    trueskill: tsAll ? JSON.parse(JSON.stringify(tsAll)) : { schema:'ddz-trueskill@1', updatedAt:new Date().toISOString(), players:{} },
+    radar: radarAll ? JSON.parse(JSON.stringify(radarAll)) : { schema:'ddz-radar@1', updatedAt:new Date().toISOString(), players:{} },
+    ladder: ladderAll,
+  };
+};
   } catch {
     ladderAll = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
   }
