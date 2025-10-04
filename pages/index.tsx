@@ -1507,18 +1507,18 @@ nextTotals     = [
       createdAt: new Date().toISOString(),
       agents,
       trueskill: tsStoreRef.current,
-      radar: radarStoreRef.current as any,
+//      radar: radarStoreRef.current as any,
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
-      scoreTimeline: {
-        n,
-        rounds: roundCutsRef.current.slice(),
-        seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
-        landlords: roundLordsRef.current.slice(),
-      },
-      scoreStats: {
-        stats: scoreStats,
-        dists: scoreDists,
-      },
+//      scoreTimeline: {
+//        n,
+//        rounds: roundCutsRef.current.slice(),
+//        seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
+//        landlords: roundLordsRef.current.slice(),
+//      },
+//      scoreStats: {
+//        stats: scoreStats,
+//        dists: scoreDists,
+//      },
     };
   };
 
