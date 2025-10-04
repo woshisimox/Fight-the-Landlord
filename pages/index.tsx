@@ -1497,7 +1497,7 @@ const buildAllBundle = (): AllBundle => {
   const tsAll = tsStoreRef.current as TsStore | undefined;
   const radarAll = radarStoreRef.current as RadarStore | undefined;
 
-  let ladderAll: any = null;
+  let ladderAll: any;
   try {
     const raw = localStorage.getItem('ddz_ladder_store_v1');
     ladderAll = raw ? JSON.parse(raw) : { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
@@ -1505,7 +1505,7 @@ const buildAllBundle = (): AllBundle => {
     ladderAll = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
   }
 
-  // 汇总 identities：三位参赛者 + 三大存档中的全部 keys（去重）
+  // identities = 参赛三人 ∪ 本地存档已存在的所有人（去重）
   const idsSet = new Set<string>();
   const participants = [0,1,2].map(seatIdentity);
   for (const id of participants) idsSet.add(id);
@@ -1523,97 +1523,8 @@ const buildAllBundle = (): AllBundle => {
     ladder: ladderAll,
   };
 };
-  } catch {
-    ladderAll = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-  }
 
-  const tsSlice: TsStore = { schema:'ddz-trueskill@1', updatedAt: new Date().toISOString(), players: {} };
-  const radarSlice: RadarStore = { schema:'ddz-radar@1', updatedAt: new Date().toISOString(), players: {} };
-  const ladderSlice = { schema:'ddz-ladder@1', updatedAt: new Date().toISOString(), players: {} as Record<string, any> };
-
-  for (const id of identities) {
-    if (tsAll?.players?.[id]) tsSlice.players[id] = JSON.parse(JSON.stringify(tsAll.players[id]));
-    if (radarAll?.players?.[id]) radarSlice.players[id] = JSON.parse(JSON.stringify(radarAll.players[id]));
-    if (ladderAll?.players?.[id]) ladderSlice.players[id] = JSON.parse(JSON.stringify(ladderAll.players[id]));
-  }
-
-  return {
-    schema: 'ddz-all@1',
-    createdAt: new Date().toISOString(),
-    identities,
-    trueskill: tsSlice,
-    radar: radarSlice,
-    ladder: ladderSlice,
-  };
-};
-  const radar: RadarStore = radarStoreRef.current ? JSON.parse(JSON.stringify(radarStoreRef.current as any)) : { schema:'ddz-radar@1', updatedAt:new Date().toISOString(), players:{} };
-
-  let ladder: any = null;
-  try {
-    const raw = localStorage.getItem('ddz_ladder_store_v1');
-    ladder = raw ? JSON.parse(raw) : { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-  } catch {
-    ladder = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-  }
-
-  // --- Ensure placeholders for identities that have not played ---
-  for (const id of identities) {
-    // TrueSkill: ensure entry exists; use TS_DEFAULT baseline
-    if (!ts.players[id]) {
-      ts.players[id] = {
-        id,
-        overall: { ...TS_DEFAULT },
-        roles: { landlord: null, farmer: null },
-        meta: {}
-      } as any;
-    }
-
-    // Radar: ensure zero-scores aggregate with count=0
-    if (!radar.players[id]) {
-      radar.players[id] = {
-        id,
-        overall: { scores: { coop:0, agg:0, cons:0, eff:0, rob:0 }, count: 0 },
-        roles: { landlord: null, farmer: null },
-        meta: {}
-      } as any;
-    } else {
-      // If present but missing overall, add zero overall to improve alignment on upload
-      if (!radar.players[id].overall) {
-        (radar.players[id] as any).overall = { scores: { coop:0, agg:0, cons:0, eff:0, rob:0 }, count: 0 };
-      }
-    }
-
-    // Ladder: ensure current struct exists with zeros
-    if (!ladder.players) ladder.players = {};
-    if (!ladder.players[id]) {
-      ladder.players[id] = { id, label: id, current: { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20 }, history: [] };
-    } else {
-      if (!ladder.players[id].current) ladder.players[id].current = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20 };
-      if (!ladder.players[id].label) ladder.players[id].label = id;
-    }
-  }
-
-  return {
-    schema: 'ddz-all@1',
-    createdAt: new Date().toISOString(),
-    identities,
-    trueskill: ts,
-    radar,
-    ladder,
-  };
-};
-  };
-
-  const handleAllSaveInner = () => {
-    const payload = buildAllBundle();
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'ddz_all_stats.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1000);
-    setLog(l => [...l, '【ALL】已导出统一统计文件。']);
-  };
-
-  const applyAllBundleInner = (obj:any) => {
+const applyAllBundleInner = (obj:any) => {
   try {
     const participants = [0,1,2].map(seatIdentity);
     const setHas = (st:any, id:string, path:string)=> Boolean(st && st.players && st.players[id]);
