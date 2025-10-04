@@ -1610,7 +1610,7 @@ function buildAllBundle(): any {
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
     setLog(l => [...l, '【ALL】已导出统一统计文件。']);
 
-  const applyAllBundleInner = (obj:any) => {
+  const applyAllBundleInner = (obj: any) => {
   try {
     if (obj?.trueskill?.players) {
       tsStoreRef.current = obj.trueskill as TsStore;
@@ -1622,31 +1622,24 @@ function buildAllBundle(): any {
       writeRadarStore(radarStoreRef.current);
       applyRadarFromStoreByRole(landlordRef.current, '统一上传');
     }
-    if (obj?.ladder?.players) {
+    if (obj?.ladder?.schema === 'ddz-ladder@1') {
       try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {}
     }
-    setLog(l => [...l, '【ALL】统一上传完成（仅 TS/Radar/天梯）。']);
+    if (obj?.scoreTimeline?.seriesBySeat) {
+      const tl = obj.scoreTimeline;
+      setScoreSeries(tl.seriesBySeat as (number|null)[][]);
+      if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds);
+      if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords);
+    }
+    if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
+      setScoreStats(obj.scoreStats.stats as any);
+      setScoreDists(obj.scoreStats.dists as any);
+    }
+    setLog(l => [...l, '【ALL】统一上传完成。']);
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
-if (obj?.radar?.players) {
-        radarStoreRef.current = obj.radar as any;
-        writeRadarStore(radarStoreRef.current);
-        applyRadarFromStoreByRole(landlordRef.current, '统一上传');
-      }
-      if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
-      if (obj?.scoreTimeline?.seriesBySeat) {
-        const tl = obj.scoreTimeline;
-        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
-        if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
-        if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
-      }
-      if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
-        setScoreStats(obj.scoreStats.stats as any);
-        setScoreDists(obj.scoreStats.dists as any);
-      }
-      setLog(l => [...l, '【ALL】统一上传完成。']);
-    } catch (e:any) {
+}; catch (e:any) {
       setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
     }
   };
