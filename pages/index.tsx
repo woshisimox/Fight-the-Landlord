@@ -845,20 +845,7 @@ function LivePanel(props: LiveProps) {
   };
 
   
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1500);
-  };
 
-  
-      rd.readAsText(f);
-    } catch (err) {
-      console.error('[score upload] error', err);
-    } finally {
-      if (scoreFileRef.current) scoreFileRef.current.value = '';
-    }
-  };
 
   
   const handleStatsSave = () => {
@@ -2434,3 +2421,54 @@ const handleScoreSave = () => {
 
 
 // included above with handleScoreSave block
+
+// === 出牌评分上传：按 identity 读取（兼容旧版 by seat） ===
+const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  try {
+    const f = e.target.files?.[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const j = JSON.parse(String(rd.result||'{}'));
+        const currIds = [0,1,2].map(seatIdentity);
+
+        if (j.seriesById && typeof j.seriesById === 'object') {
+          const mapped:(number|null)[][] = [[],[],[]];
+          for (let i=0;i<3;i++){
+            const id = currIds[i];
+            mapped[i] = Array.isArray(j.seriesById[id]) ? j.seriesById[id] : [];
+          }
+          setScoreSeries(mapped);
+          if (Array.isArray(j.rounds))     setRoundCuts(j.rounds as number[]);
+          if (Array.isArray(j.landlords))  setRoundLords(j.landlords as number[]);
+          return;
+        }
+
+        const fallbackAgents: string[] =
+          j.identities || j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
+        const targetAgents = [0,1,2].map(agentIdForIndex);
+
+        const mapped:(number|null)[][] = [[],[],[]];
+        for (let i=0;i<3;i++){
+          if (Array.isArray(j.identities)) {
+            const idx = (j.identities as string[]).indexOf(currIds[i]);
+            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
+          } else {
+            const idx = fallbackAgents.indexOf(targetAgents[i]);
+            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
+          }
+        }
+        setScoreSeries(mapped);
+        if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
+        if (Array.isArray(j.landlords))  setRoundLords(j.landlords as number[]);
+      } catch (err) {
+        console.error('[score upload] parse error', err);
+      }
+    };
+    rd.readAsText(f);
+  } catch (err) {
+    console.error('[score upload] error', err);
+  } finally {
+    try { if (scoreFileRef.current) scoreFileRef.current.value = ''; } catch {}
+  }
+};
