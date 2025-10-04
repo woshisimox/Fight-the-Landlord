@@ -473,6 +473,24 @@ function LivePanel(props: LiveProps) {
 
   // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
+// === TS 刷新：虚拟发牌方式（不改变对局状态） ===
+const refreshTsVirtualDeal = () => {
+  try {
+    let lord:any = landlordRef.current;
+    if (lord !== 0 && lord !== 1 && lord !== 2) {
+      try {
+        const last = JSON.parse(localStorage.getItem('ddz_last_lord_v1') || 'null');
+        if (last === 0 || last === 1 || last === 2) lord = last;
+      } catch {}
+      if (lord !== 0 && lord !== 1 && lord !== 2) lord = 0;
+    }
+    applyTsFromStoreByRole(lord as (0|1|2), '手动刷新（虚拟发牌）');
+    setLog((l:any[]) => [...l, `【TS】已按虚拟地主位 #${lord} 绑定当前三位选手（不影响对局）。`]);
+  } catch (e:any) {
+    console.error('[refreshTsVirtualDeal] error', e);
+    setLog((l:any[]) => [...l, `【TS】刷新失败：${e?.message || e}`]);
+  }
+};
     const ids = [0,1,2].map(seatIdentity);
     const init = [0,1,2].map(i => {
       const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
@@ -554,7 +572,7 @@ function LivePanel(props: LiveProps) {
 
   // 刷新：按“当前地主身份”应用
   const handleRefreshApply = () => {
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+    refreshTsVirtualDeal();
   };
 
   // —— 用于“区分显示”的帮助函数 —— //
@@ -1536,7 +1554,8 @@ nextTotals     = [
       if (obj?.trueskill?.players) {
         tsStoreRef.current = obj.trueskill as TsStore;
         writeStore(tsStoreRef.current);
-//        applyTsFromStoreByRole(landlordRef.current, '统一上传');
+      // （已移除）上传后不立即套用到 UI；改为“刷新/发牌后”再应用
+
       }
 //      if (obj?.radar?.players) {
 //        radarStoreRef.current = obj.radar as any;
@@ -1561,7 +1580,7 @@ nextTotals     = [
   };
 
   const handleAllRefreshInner = () => {
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+    refreshTsVirtualDeal();
 //  applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
 //    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
