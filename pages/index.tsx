@@ -1555,7 +1555,39 @@ nextTotals     = [
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
-  // ===== 统一统计打包（All-in-One） =====
+  // ===== 统一统计打包（All-in-One）
+// === Wrapper to ensure buildAllBundle is in-scope ===
+function buildAllBundle(): any {
+  try {
+    // Prefer dedicated impl if present
+    // @ts-ignore
+    if (typeof _buildAllBundle_impl === 'function') {
+      // @ts-ignore
+      return _buildAllBundle_impl();
+    }
+  } catch {}
+  try {
+    const ts = (tsStoreRef as any)?.current;
+    const radar = (radarStoreRef as any)?.current;
+    let ladder: any = null;
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem('ddz_ladder_store_v1');
+        ladder = raw ? JSON.parse(raw) : null;
+      }
+    } catch {}
+    return {
+      schema: 'ddz-all@1',
+      createdAt: new Date().toISOString(),
+      trueskill: ts || undefined,
+      radar: radar || undefined,
+      ladder: ladder || undefined,
+    };
+  } catch {
+    return { schema: 'ddz-all@1', createdAt: new Date().toISOString() } as any;
+  }
+}
+ =====
   
 
   
@@ -1915,7 +1947,7 @@ const DEFAULTS = {
 };
 
 function Home() {
-function buildAllBundle(): AllBundle {
+function _buildAllBundle_impl(): AllBundle {
   // 统一存档仅包含 TrueSkill / 雷达图 / 天梯，不含出牌评分与统计
   // 避免引用组件内部的 useRef，直接读取 localStorage / 现有读取函数
   const agents = ['0','1','2'];
