@@ -1451,9 +1451,6 @@ type AllBundle = {
   radar?: RadarStore;
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
 };
-    scoreStats?: { stats: SeatStat[]; dists: number[][] };
-    ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
-  };
 
   const buildAllBundle = (): AllBundle => {
   const identities = [0,1,2].map(seatIdentity);
