@@ -610,11 +610,7 @@ function LivePanel(props: LiveProps) {
     } catch {}
     return emptyRadarStore();
   };
-  const writeRadarStore = (s: RadarStore) => {
-    try { s.updatedAt=new Date().toISOString();
-      localStorage.setItem(RADAR_STORE_KEY, JSON.stringify(s));
-    } catch {}
-  };
+  const writeRadarStore = (_s: RadarStore) => { /* no-op: radar not persisted */ };
 
   /** 用“均值 + 次数”合并（与前端 mean 聚合一致） */
   function mergeRadarAgg(prev: RadarAgg|null|undefined, inc: Score5): RadarAgg {
@@ -728,7 +724,7 @@ function LivePanel(props: LiveProps) {
       entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
       radarStoreRef.current.players[id] = entry;
     }
-    writeRadarStore(radarStoreRef.current);
+    // writeRadarStore disabled (no radar persistence)
   };
 
   /** 上传 Radar 存档（JSON） */
@@ -787,7 +783,7 @@ function LivePanel(props: LiveProps) {
         entry.overall = mergeRadarAgg(entry.overall, aggStatsRef.current[i]);
         radarStoreRef.current.players[id] = entry;
       }
-      writeRadarStore(radarStoreRef.current);
+      // writeRadarStore disabled (no radar persistence)
     }
 
     const blob = new Blob([JSON.stringify(radarStoreRef.current, null, 2)], { type:'application/json' });
@@ -1520,7 +1516,7 @@ const applyAllBundleInner = (obj:any) => {
     }
     if (obj?.radar?.players) {
       radarStoreRef.current = obj.radar as any;
-      writeRadarStore(radarStoreRef.current);
+      // writeRadarStore disabled (no radar persistence)
       applyRadarFromStoreByRole(landlordRef.current, '统一上传');
     }
     if (obj?.ladder?.schema === 'ddz-ladder@1') {
