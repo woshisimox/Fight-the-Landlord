@@ -1944,6 +1944,12 @@ const DEFAULTS = {
   seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
 };
 
+/** Minimal wrapper to satisfy JSX typing; TODO: rewire to implementation */
+type LiveProps = any;
+const LivePanel = (props: any) => {
+  return <div />;
+};
+
 function Home() {
 function _buildAllBundle_impl(): AllBundle {
   // 统一存档仅包含 TrueSkill / 雷达图 / 天梯，不含出牌评分与统计
@@ -2327,12 +2333,7 @@ const buildAllBundle = (): AllBundle => {
         {/* —— 天梯图 —— */}
       <LadderPanel />
 <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
-
-/** Minimal wrapper to satisfy JSX typing; TODO: rewire to implementation */
-type LiveProps = any;
-const LivePanel = (props: any) => {
-  return <div />;
-};
+;
 
 
         <LivePanel
