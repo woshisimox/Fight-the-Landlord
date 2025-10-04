@@ -1536,7 +1536,7 @@ nextTotals     = [
       if (obj?.trueskill?.players) {
         tsStoreRef.current = obj.trueskill as TsStore;
         writeStore(tsStoreRef.current);
-        applyTsFromStoreByRole(landlordRef.current, '统一上传');
+//        applyTsFromStoreByRole(landlordRef.current, '统一上传');
       }
 //      if (obj?.radar?.players) {
 //        radarStoreRef.current = obj.radar as any;
