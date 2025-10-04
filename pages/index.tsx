@@ -871,8 +871,7 @@ const refreshTsVirtualDeal = () => {
   };
 
   const handleScoreSave = () => {
-    const agents = [0,1,2].map(agentIdForIndex);
-    const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
+const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
     const payload = {
       version: 1,
       createdAt: new Date().toISOString(),
@@ -1513,7 +1512,6 @@ nextTotals     = [
   type AllBundle = {
     schema: 'ddz-all@1';
     createdAt: string;
-    agents: string[];
     trueskill?: TsStore;
 //    radar?: RadarStore;
 //    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
@@ -1522,8 +1520,7 @@ nextTotals     = [
   };
 
   const buildAllBundle = (): AllBundle => {
-    const agents = [0,1,2].map(agentIdForIndex);
-    const n = Math.max(
+const n = Math.max(
       scoreSeriesRef.current[0]?.length||0,
       scoreSeriesRef.current[1]?.length||0,
       scoreSeriesRef.current[2]?.length||0
@@ -1531,7 +1528,6 @@ nextTotals     = [
     return {
       schema: 'ddz-all@1',
       createdAt: new Date().toISOString(),
-      agents,
       trueskill: tsStoreRef.current,
 //      radar: radarStoreRef.current as any,
       ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
