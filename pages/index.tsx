@@ -3,13 +3,18 @@ import { useEffect, useRef, useState } from 'react';
 
 
 // === 类型：统一存档 AllBundle（仅 TS / 雷达 / 天梯） ===
+
+/** AllBundle 统一存档类型（仅 TS / 雷达 / 天梯）。
+    这里不依赖项目内的 TsStore / RadarStore 类型，避免顺序或缺失报错。 */
 type AllBundle = {
   schema: 'ddz-all@1';
   createdAt: string;
   agents: string[];
-  trueskill?: TsStore;
-  radar?: RadarStore;
+  trueskill?: any; // TsStore-like
+  radar?: any;     // RadarStore-like
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+};
+
 };
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
