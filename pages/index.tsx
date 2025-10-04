@@ -4,6 +4,31 @@ import { useEffect, useRef, useState } from 'react';
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
+
+type SeatKeyConfig = {
+  openai?: string;
+  gemini?: string;
+  grok?: string;
+  kimi?: string;
+  qwen?: string;
+  deepseek?: string;
+  httpBase?: string;
+  httpToken?: string;
+};
+
+const DEFAULTS = {
+  enabled: false,
+  rounds: 10,
+  startScore: 0,
+  rob: true,
+  four2: 'both' as Four2Policy,
+  farmerCoop: true,
+  seatDelayMs: [0, 0, 0] as number[],
+  seats: ['built-in:greedy-max','built-in:ally-support','built-in:random-legal'] as BotChoice[],
+  seatModels: ['', '', ''] as string[],
+  seatKeys: [{}, {}, {}] as SeatKeyConfig[],
+};
+
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
   | 'built-in:mininet'
