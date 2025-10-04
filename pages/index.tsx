@@ -1371,11 +1371,12 @@ nextTotals     = [
                   const base = 20, cap = 3, gamma = 1;
                   const weight = 1 + gamma * Math.min(cap, mag / base);
                   for (let i=0;i<3;i++) {
-                    const sWin = teamWin(i) ? 1 : 0;
-                    const pExp = teamP(i);
+                    const sWinTeam = teamWin(i) ? 1 : 0;
+                    const pExpTeam = teamP(i);
+                    const scale    = (i === L) ? 1 : 0.5;  // 地主记一份，两个农民各记半份
                     const id = seatIdentity(i);
                     const label = agentIdForIndex(i);
-                    ladderUpdateLocal(id, label, sWin, pExp, weight);
+                    ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, weight);
                   }
                 } catch {}
 // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
