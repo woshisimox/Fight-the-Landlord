@@ -1560,24 +1560,30 @@ nextTotals     = [
   };
 
   const buildAllBundle = (): AllBundle => {
-    const agents = ['0','1','2'];
-return {
-      schema: 'ddz-all@1',
-      createdAt: new Date().toISOString(),
-      agents,
-      trueskill: tsStoreRef.current,
-      radar: radarStoreRef.current as any,
-      ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
-      scoreTimeline: {
-        n,
-        rounds: roundCutsRef.current.slice(),
-        landlords: roundLordsRef.current.slice(),
-      },
-      scoreStats: {
-        stats: scoreStats,
-        dists: scoreDists,
-      },
-    };
+  // 统一存档仅包含 TrueSkill / 雷达图 / 天梯，不含出牌评分与统计
+  // 避免引用组件内部的 useRef，直接读取 localStorage / 现有读取函数
+  const agents = ['0','1','2'];
+  // 读取 TS / Radar 的持久化（若未初始化，readStore/readRadarStore 会返回空模板）
+  const ts = (typeof window !== 'undefined') ? readStore() : null;
+  const radar = (typeof window !== 'undefined') ? readRadarStore() : null;
+  // 读取天梯
+  let ladder: any = null;
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem('ddz_ladder_store_v1');
+      ladder = raw ? JSON.parse(raw) : null;
+    }
+  } catch {}
+  return {
+    schema: 'ddz-all@1',
+    createdAt: new Date().toISOString(),
+    agents,
+    trueskill: ts || undefined,
+    radar: radar || undefined,
+    ladder: ladder || undefined,
+  };
+};
+
   };
 
   const handleAllSaveInner = () => {
