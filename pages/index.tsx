@@ -1,6 +1,16 @@
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
+
+// === 类型：统一存档 AllBundle（仅 TS / 雷达 / 天梯） ===
+type AllBundle = {
+  schema: 'ddz-all@1';
+  createdAt: string;
+  agents: string[];
+  trueskill?: TsStore;
+  radar?: RadarStore;
+  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+};
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
@@ -1541,13 +1551,7 @@ nextTotals     = [
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
   // ===== 统一统计打包（All-in-One） =====
-  type AllBundle = {
-  schema: 'ddz-all@1';
-  createdAt: string;
-  agents: string[];
-  trueskill?: TsStore;
-  radar?: RadarStore;
-};
+  
   };
 
   const buildAllBundle = (): AllBundle => {
