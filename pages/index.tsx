@@ -871,16 +871,32 @@ function LivePanel(props: LiveProps) {
   };
 
   const handleScoreSave = () => {
-    const agents = [0,1,2].map(agentIdForIndex);
-    const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
-    const payload = {
-      version: 1,
-      createdAt: new Date().toISOString(),
-      agents,
-      rounds: roundCutsRef.current,
-      n,
-      seriesBySeat: scoreSeriesRef.current,
-    };
+  const ids = [0,1,2].map(seatIdentity);
+  const n = Math.max(
+    scoreSeriesRef.current[0]?.length||0,
+    scoreSeriesRef.current[1]?.length||0,
+    scoreSeriesRef.current[2]?.length||0
+  );
+  const payload:any = {
+    version: 2,
+    createdAt: new Date().toISOString(),
+    identities: ids,
+    rounds: roundCutsRef.current.slice(),
+    n,
+    seriesById: Object.fromEntries(
+      ids.map((id, i) => [id, (scoreSeriesRef.current[i]||[]).slice()])
+    ),
+    landlords: roundLordsRef.current.slice(),
+  };
+  try {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'score_series_by_identity.json'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  } catch (err) {
+    console.error('[score save] error', err);
+  }
+};
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
@@ -888,25 +904,56 @@ function LivePanel(props: LiveProps) {
   };
 
   const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    try {
-      const f = e.target.files?.[0]; if (!f) return;
-      const rd = new FileReader();
-      rd.onload = () => {
-        try {
-          const j = JSON.parse(String(rd.result||'{}'));
-          const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
-          const targetAgents = [0,1,2].map(agentIdForIndex);
+  try {
+    const f = e.target.files?.[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const j = JSON.parse(String(rd.result||'{}'));
+        const currIds = [0,1,2].map(seatIdentity);
+
+        // 新格式：seriesById（按 identity）
+        if (j.seriesById && typeof j.seriesById === 'object') {
           const mapped:(number|null)[][] = [[],[],[]];
           for (let i=0;i<3;i++){
-            const idx = fileAgents.indexOf(targetAgents[i]);
-            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
+            const id = currIds[i];
+            mapped[i] = Array.isArray(j.seriesById[id]) ? j.seriesById[id] : [];
           }
           setScoreSeries(mapped);
-          if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
-        } catch (err) {
-          console.error('[score upload] parse error', err);
+          if (Array.isArray(j.rounds))     setRoundCuts(j.rounds as number[]);
+          if (Array.isArray(j.landlords))  setRoundLords(j.landlords as number[]);
+          return;
         }
-      };
+
+        // 兼容旧格式：seriesBySeat + agents/seats 标签
+        const fallbackAgents: string[] =
+          j.identities || j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
+        const targetAgents = [0,1,2].map(agentIdForIndex);
+
+        const mapped:(number|null)[][] = [[],[],[]];
+        for (let i=0;i<3;i++){
+          if (Array.isArray(j.identities)) {
+            const idx = (j.identities as string[]).indexOf(currIds[i]);
+            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
+          } else {
+            const idx = fallbackAgents.indexOf(targetAgents[i]);
+            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
+          }
+        }
+        setScoreSeries(mapped);
+        if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
+        if (Array.isArray(j.landlords))  setRoundLords(j.landlords as number[]);
+      } catch (err) {
+        console.error('[score upload] parse error', err);
+      }
+    };
+    rd.readAsText(f);
+  } catch (err) {
+    console.error('[score upload] error', err);
+  } finally {
+    try { if (scoreFileRef.current) scoreFileRef.current.value = ''; } catch {}
+  }
+};
       rd.readAsText(f);
     } catch (err) {
       console.error('[score upload] error', err);
@@ -1548,51 +1595,7 @@ nextTotals     = [
     };
   };
 
-  const applyAllBundleInner = (obj:any) => {
-  try {
-    const participants = [0,1,2].map(seatIdentity);
-
-    // --- TrueSkill（仅参赛选手回写） ---
-    if (obj?.trueskill?.players) {
-      const src = obj.trueskill.players;
-      const curr = tsStoreRef.current as TsStore;
-      for (const id of participants) {
-        if (src[id]) {
-          curr.players[id] = { ...src[id] };
-        }
-      }
-      curr.updatedAt = new Date().toISOString();
-      writeStore(curr);
-      applyTsFromStoreByRole(landlordRef.current, '统一上传（增量回写：TS）');
-    }
-
-    // --- Ladder（仅参赛选手回写） ---
-    if (obj?.ladder?.schema === 'ddz-ladder@1' && obj?.ladder?.players) {
-      let curr: any;
-      try {
-        const raw = localStorage.getItem('ddz_ladder_store_v1');
-        curr = raw ? JSON.parse(raw) : { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-      } catch {
-        curr = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-      }
-      for (const id of participants) {
-        if (obj.ladder.players[id]) {
-          curr.players[id] = { ...obj.ladder.players[id] };
-        }
-      }
-      curr.updatedAt = new Date().toISOString();
-      try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(curr)); } catch {}
-
-      try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
-    }
-
-    setLog(l => [...l, '【ALL】统一上传完成（仅参赛选手增量回写 TS / 天梯）。']);
-  } catch (e:any) {
-    setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
-  }
-};
-
-const handleAllSaveInner = () => {
+  const handleAllSaveInner = () => {
     const payload = buildAllBundle();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1601,17 +1604,339 @@ const handleAllSaveInner = () => {
     setLog(l => [...l, '【ALL】已导出统一统计文件。']);
   };
 
-  
+  const applyAllBundleInner = (obj:any) => {
+    try {
+      if (obj?.trueskill?.players) {
+        tsStoreRef.current = obj.trueskill as TsStore;
+        writeStore(tsStoreRef.current);
+        applyTsFromStoreByRole(landlordRef.current, '统一上传');
+      }
+      if (obj?.radar?.players) {
+        radarStoreRef.current = obj.radar as any;
+        writeRadarStore(radarStoreRef.current);
+        applyRadarFromStoreByRole(landlordRef.current, '统一上传');
+      }
+      if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
+      if (obj?.scoreTimeline?.seriesBySeat) {
+        const tl = obj.scoreTimeline;
+        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
+        if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
+        if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
+      }
+      if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
+        setScoreStats(obj.scoreStats.stats as any);
+        setScoreDists(obj.scoreStats.dists as any);
+      }
+      setLog(l => [...l, '【ALL】统一上传完成。']);
+    } catch (e:any) {
+      setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
+    }
+  };
 
+  const handleAllRefreshInner = () => {
+    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+    applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
+    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+    setRoundCuts(prev => [...prev]);
+    setRoundLords(prev => [...prev]);
+    setLog(l => [...l, '【ALL】已刷新面板数据。']);
+  };
 
+  useEffect(()=>{
+    const onSave = () => handleAllSaveInner();
+    const onRefresh = () => handleAllRefreshInner();
+    const onUpload = (e: Event) => {
+      const ce = e as CustomEvent<any>;
+      applyAllBundleInner(ce.detail);
+    };
+    window.addEventListener('ddz-all-save', onSave as any);
+    window.addEventListener('ddz-all-refresh', onRefresh as any);
+    window.addEventListener('ddz-all-upload', onUpload as any);
+    return () => {
+      window.removeEventListener('ddz-all-save', onSave as any);
+      window.removeEventListener('ddz-all-refresh', onRefresh as any);
+      window.removeEventListener('ddz-all-upload', onUpload as any);
+    };
+  }, []);
 
-  // --- LivePanel UI（minimal placeholder to ensure JSX is returned） ---
   return (
-    <div style={{ border:'1px solid #eee', padding:8, borderRadius:8 }}>
-      {/* LivePanel running in this build (UI simplified to ensure compile). */}
+    <div>
+      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
+        <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
+          剩余局数：{remainingGames}
+        </span>
+      </div>
+
+      {/* ========= TrueSkill（实时） ========= */}
+      <Section title="TrueSkill（实时）">
+        {/* 上传 / 存档 / 刷新 */}
+        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
+<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+          {[0,1,2].map(i=>{
+            const stored = getStoredForSeat(i);
+            const usingRole: 'overall'|'landlord'|'farmer' =
+              landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
+            return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                  <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+                </div>
+                <div style={{ fontSize:13, color:'#374151' }}>
+                  <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
+                  <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
+                  <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
+                </div>
+
+                {/* 区分显示总体/地主/农民三档，并标注当前使用 */}
+                <div style={{ borderTop:'1px dashed #eee', marginTop:8, paddingTop:8 }}>
+                  <div style={{ fontSize:12, marginBottom:6 }}>
+                    当前使用：<b>
+                      {usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}
+                    </b>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12, color:'#374151' }}>
+                    <div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>总体</div>
+                      <div>{muSig(stored.overall)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>地主</div>
+                      <div>{muSig(stored.landlord)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>农民</div>
+                      <div>{muSig(stored.farmer)}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
+          说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。</div>
+      </Section>
+
+      {/* ======= 积分下面、手牌上面：雷达图 ======= */}
+      <Section title="战术画像（累计，0~5）">
+        {/* Radar：上传 / 存档 / 刷新 */}
+        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
+<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
+        </div>
+
+        <RadarPanel
+          aggStats={aggStats}
+          aggCount={aggCount}
+          aggMode={aggMode}
+          alpha={alpha}
+          onChangeMode={setAggMode}
+          onChangeAlpha={setAlpha}
+        />
+      </Section>
+
+      
+      <Section title="出牌评分（每局动态）">
+        
+<div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
+        <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
+      </Section>
+      <div style={{ marginTop:10 }}></div>
+      <Section title="评分统计（每局汇总）">
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+          {[0,1,2].map(i=>{
+            const st = scoreStats[i];
+            return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, background:'#fff' }}>
+                <div style={{ fontWeight:700, marginBottom:6 }}><SeatTitle i={i} /></div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>局数：{st.rounds}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>总体均值：{st.overallAvg.toFixed(3)}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>最近一局均值：{st.lastAvg.toFixed(3)}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>最好局均值：{st.best.toFixed(3)}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>最差局均值：{st.worst.toFixed(3)}</div>
+                {/* 分布曲线（每局均值的分布） */}
+                
+                {/* 分布直方图（每手score汇总：横轴=score，纵轴=频次；固定20桶） */}
+                {(() => {
+                  const samples = (scoreSeries[i] || []).filter(v => typeof v === 'number' && !Number.isNaN(v)) as number[];
+                  if (!samples.length) return null;
+                  const pad = 6, W = 220, H = 72;
+                  // μ & σ 基于所有出牌评分样本
+                  const mu = samples.reduce((a,b)=>a+b,0) / samples.length;
+                  const sg = Math.sqrt(Math.max(0, samples.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / samples.length));
+                  // 固定20桶
+                  const bins = 20;
+                  const lo = Math.min(...samples);
+                  const hi0 = Math.max(...samples);
+                  const hi = hi0===lo ? lo + 1 : hi0; // 防零宽
+                  const x = (v:number)=> pad + (hi>lo ? (v-lo)/(hi-lo) : 0.5) * (W - 2*pad);
+                  const barW = (W - 2*pad) / bins;
+                  // 计数
+                  const counts = new Array(bins).fill(0);
+                  for (const v of samples) {
+                    let k = Math.floor((v - lo) / (hi - lo) * bins);
+                    if (k < 0) k = 0; if (k >= bins) k = bins - 1;
+                    counts[k]++;
+                  }
+                  const binWidthVal = (hi - lo) / bins;
+                  const densities = counts.map(c => c / (samples.length * (binWidthVal || 1)));
+                  const maxD = Math.max(...densities) || 1;
+                  const bars = densities.map((d, k) => {
+                    const x0 = pad + k * barW + 0.5;
+                    const h = (H - 2*pad) * (d / maxD);
+                    const y0 = H - pad - h;
+                    return <rect key={k} x={x0} y={y0} width={Math.max(1, barW - 1)} height={Math.max(0, h)} fill="#9ca3af" opacity={0.45} />;
+                  });
+                  // μ & ±1σ 标注
+                  const meanX = x(mu);
+                  const sigL = x(mu - sg);
+                  const sigR = x(mu + sg);
+                  return (
+                    <svg width={W} height={H} style={{ display:'block', marginTop:6 }}>
+                      <rect x={0} y={0} width={W} height={H} fill="#ffffff" stroke="#e5e7eb"/>
+                      {bars}
+                      <line x1={meanX} y1={pad} x2={meanX} y2={H-pad} stroke="#ef4444" strokeDasharray="4 3" />
+                      <line x1={sigL} y1={pad} x2={sigL} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
+                      <line x1={sigR} y1={pad} x2={sigR} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
+                      <text x={meanX+4} y={12} fontSize={10} fill="#ef4444">μ={mu.toFixed(2)}</text>
+                      <text x={sigL+4} y={24} fontSize={10} fill="#60a5fa">-1σ</text>
+                      <text x={sigR+4} y={24} fontSize={10} fill="#60a5fa">+1σ</text>
+                    </svg>
+                  );
+                })()}
+        
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
+<Section title="手牌">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
+                            <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}</div>
+<div style={{ marginBottom:6 }}>
+                <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
+              </div>
+              <Hand cards={hands[i]} />
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="出牌">
+        <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
+          {plays.length === 0
+            ? <div style={{ opacity:0.6 }}>（尚无出牌）</div>
+            : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)
+          }
+        </div>
+      </Section>
+
+      <Section title="结果">
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>倍数</div>
+            <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
+          </div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>胜者</div>
+            <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}</div>
+          </div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>本局加减分</div>
+            <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div>
+          </div>
+        </div>
+      </Section>
+
+      <div style={{ display:'flex', gap:8 }}>
+        <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
+        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
+      </div>
+
+      <div style={{ marginTop:18 }}>
+        <Section title="运行日志">
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
+            {log.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）</div> : log.map((t, idx) => <LogLine key={idx} text={t} />)}
+          </div>
+        </Section>
+      </div>
     </div>
   );
 }
+
+function RadarPanel({
+  aggStats, aggCount, aggMode, alpha,
+  onChangeMode, onChangeAlpha,
+}:{ aggStats: Score5[] | null; aggCount: number; aggMode:'mean'|'ewma'; alpha:number;
+   onChangeMode:(m:'mean'|'ewma')=>void; onChangeAlpha:(a:number)=>void; }) {
+  const [mode, setMode] = useState<'mean'|'ewma'>(aggMode);
+  const [a, setA] = useState<number>(alpha);
+
+  useEffect(()=>{ setMode(aggMode); }, [aggMode]);
+  useEffect(()=>{ setA(alpha); }, [alpha]);
+
+  return (
+    <>
+      <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:8 }}>
+        <label>
+          汇总方式
+          <select value={mode} onChange={e=>{ const v=e.target.value as ('mean'|'ewma'); setMode(v); onChangeMode(v); }} style={{ marginLeft:6 }}>
+            <option value="ewma">指数加权（推荐）</option>
+            <option value="mean">简单平均</option>
+          </select>
+        </label>
+        {mode === 'ewma' && (
+          <label>
+            α（0.05–0.95）
+            <input type="number" min={0.05} max={0.95} step={0.05}
+              value={a}
+              onChange={e=>{
+                const v = Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35));
+                setA(v); onChangeAlpha(v);
+              }}
+              style={{ width:80, marginLeft:6 }}
+            />
+          </label>
+        )}
+        <div style={{ fontSize:12, color:'#6b7280' }}>
+          {mode==='ewma' ? '越大越看重最近几局' : `已累计 ${aggCount} 局`}
+        </div>
+      </div>
+
+      {aggStats
+        ? (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+            {[0,1,2].map(i=>(
+              <RadarChart key={i} title={`${['甲','乙','丙'][i]}（累计）`} scores={aggStats[i]} />
+            ))}
+          </div>
+        )
+        : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
+      }
+    </>
+  );
+}
+
+/* ========= 默认值（含“清空”按钮的重置） ========= */
+const DEFAULTS = {
+  enabled: true,
+  rounds: 10,
+  startScore: 100,
+  rob: true,
+  four2: 'both' as Four2Policy,
+  farmerCoop: true,
+  seatDelayMs: [1000,1000,1000] as number[],
+  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
+  // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
+  seatModels: ['', '', ''],
+  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
+};
+
 function Home() {
   const [resetKey, setResetKey] = useState<number>(0);
   const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
