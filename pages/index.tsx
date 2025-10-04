@@ -1484,53 +1484,110 @@ nextTotals     = [
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
   // ===== 统一统计打包（All-in-One） =====
-type AllBundle = {
-  schema: 'ddz-all@1';
-  createdAt: string;
-  identities: string[];
-  trueskill?: TsStore;
-  radar?: RadarStore;
-  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
-};
+  type AllBundle = {
+    schema: 'ddz-all@1';
+    createdAt: string;
+    agents: string[];
+    trueskill?: TsStore;
+    radar?: RadarStore;
+    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
+    scoreStats?: { stats: SeatStat[]; dists: number[][] };
+    ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+  };
 
-const buildAllBundle = (): AllBundle => {
+  const buildAllBundle = (): AllBundle => {
+  // 当前参赛选手（仅三位）
   const identities = [0,1,2].map(seatIdentity);
-  let ladder: any = null;
+
+  // 仅导出参赛选手对应的片段（不改写本地存储，且不为未参赛者生成占位）
+  const tsAll = tsStoreRef.current as TsStore;
+  const radarAll = radarStoreRef.current as RadarStore;
+  let ladderAll: any = null;
   try {
     const raw = localStorage.getItem('ddz_ladder_store_v1');
-    ladder = raw ? JSON.parse(raw) : null;
-  } catch {}
+    ladderAll = raw ? JSON.parse(raw) : { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
+  } catch {
+    ladderAll = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
+  }
+
+  const tsSlice: TsStore = { schema:'ddz-trueskill@1', updatedAt: new Date().toISOString(), players: {} };
+  const radarSlice: RadarStore = { schema:'ddz-radar@1', updatedAt: new Date().toISOString(), players: {} };
+  const ladderSlice = { schema:'ddz-ladder@1', updatedAt: new Date().toISOString(), players: {} as Record<string, any> };
+
+  for (const id of identities) {
+    if (tsAll?.players?.[id]) tsSlice.players[id] = JSON.parse(JSON.stringify(tsAll.players[id]));
+    if (radarAll?.players?.[id]) radarSlice.players[id] = JSON.parse(JSON.stringify(radarAll.players[id]));
+    if (ladderAll?.players?.[id]) ladderSlice.players[id] = JSON.parse(JSON.stringify(ladderAll.players[id]));
+  }
+
   return {
     schema: 'ddz-all@1',
     createdAt: new Date().toISOString(),
     identities,
-    trueskill: tsStoreRef.current,
-    radar: radarStoreRef.current as any,
+    trueskill: tsSlice,
+    radar: radarSlice,
+    ladder: ladderSlice,
+  };
+};
+  const radar: RadarStore = radarStoreRef.current ? JSON.parse(JSON.stringify(radarStoreRef.current as any)) : { schema:'ddz-radar@1', updatedAt:new Date().toISOString(), players:{} };
+
+  let ladder: any = null;
+  try {
+    const raw = localStorage.getItem('ddz_ladder_store_v1');
+    ladder = raw ? JSON.parse(raw) : { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
+  } catch {
+    ladder = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
+  }
+
+  // --- Ensure placeholders for identities that have not played ---
+  for (const id of identities) {
+    // TrueSkill: ensure entry exists; use TS_DEFAULT baseline
+    if (!ts.players[id]) {
+      ts.players[id] = {
+        id,
+        overall: { ...TS_DEFAULT },
+        roles: { landlord: null, farmer: null },
+        meta: {}
+      } as any;
+    }
+
+    // Radar: ensure zero-scores aggregate with count=0
+    if (!radar.players[id]) {
+      radar.players[id] = {
+        id,
+        overall: { scores: { coop:0, agg:0, cons:0, eff:0, rob:0 }, count: 0 },
+        roles: { landlord: null, farmer: null },
+        meta: {}
+      } as any;
+    } else {
+      // If present but missing overall, add zero overall to improve alignment on upload
+      if (!radar.players[id].overall) {
+        (radar.players[id] as any).overall = { scores: { coop:0, agg:0, cons:0, eff:0, rob:0 }, count: 0 };
+      }
+    }
+
+    // Ladder: ensure current struct exists with zeros
+    if (!ladder.players) ladder.players = {};
+    if (!ladder.players[id]) {
+      ladder.players[id] = { id, label: id, current: { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20 }, history: [] };
+    } else {
+      if (!ladder.players[id].current) ladder.players[id].current = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20 };
+      if (!ladder.players[id].label) ladder.players[id].label = id;
+    }
+  }
+
+  return {
+    schema: 'ddz-all@1',
+    createdAt: new Date().toISOString(),
+    identities,
+    trueskill: ts,
+    radar,
     ladder,
   };
 };
+  };
 
-const applyAllBundleInner = (obj:any) => {
-  try {
-    if (obj?.trueskill?.players) {
-      tsStoreRef.current = obj.trueskill as TsStore;
-      writeStore(tsStoreRef.current);
-      applyTsFromStoreByRole(landlordRef.current, '统一上传');
-    }
-    if (obj?.radar?.players) {
-      radarStoreRef.current = obj.radar as any;
-      writeRadarStore(radarStoreRef.current);
-      applyRadarFromStoreByRole(landlordRef.current, '统一上传');
-    }
-    if (obj?.ladder?.schema === 'ddz-ladder@1') {
-      try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {}
-    }
-    setLog(l => [...l, '【ALL】统一上传完成（TS / 画像 / 天梯）。']);
-  } catch (e:any) {
-    setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
-  }
-};
-const handleAllSaveInner = () => {
+  const handleAllSaveInner = () => {
     const payload = buildAllBundle();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1539,7 +1596,64 @@ const handleAllSaveInner = () => {
     setLog(l => [...l, '【ALL】已导出统一统计文件。']);
   };
 
-  
+  const applyAllBundleInner = (obj:any) => {
+  try {
+    const participants = [0,1,2].map(seatIdentity);
+    const setHas = (st:any, id:string, path:string)=> Boolean(st && st.players && st.players[id]);
+
+    // --- TrueSkill ---
+    if (obj?.trueskill?.players) {
+      const src = obj.trueskill.players;
+      const curr = tsStoreRef.current as TsStore;
+      for (const id of participants) {
+        if (src[id]) {
+          curr.players[id] = { ...src[id] };
+        }
+      }
+      curr.updatedAt = new Date().toISOString();
+      writeStore(curr);
+      applyTsFromStoreByRole(landlordRef.current, '统一上传（增量回写：TS）');
+    }
+
+    // --- Radar ---
+    if (obj?.radar?.players) {
+      const src = obj.radar.players;
+      const curr = radarStoreRef.current as RadarStore;
+      for (const id of participants) {
+        if (src[id]) {
+          curr.players[id] = { ...src[id] };
+        }
+      }
+      curr.updatedAt = new Date().toISOString();
+      writeRadarStore(curr);
+      applyRadarFromStoreByRole(landlordRef.current, '统一上传（增量回写：Radar）');
+    }
+
+    // --- Ladder ---
+    if (obj?.ladder?.schema === 'ddz-ladder@1' && obj?.ladder?.players) {
+      let curr: any = null;
+      try {
+        const raw = localStorage.getItem('ddz_ladder_store_v1');
+        curr = raw ? JSON.parse(raw) : { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
+      } catch {
+        curr = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
+      }
+      for (const id of participants) {
+        if (obj.ladder.players[id]) {
+          curr.players[id] = { ...obj.ladder.players[id] };
+        }
+      }
+      curr.updatedAt = new Date().toISOString();
+      try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(curr)); } catch {}
+
+      try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
+    }
+
+    setLog(l => [...l, '【ALL】统一上传完成（仅参赛选手增量回写 TS / 画像 / 天梯）。']);
+  } catch (e:any) {
+    setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
+  }
+};
 
   const handleAllRefreshInner = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
