@@ -863,7 +863,7 @@ function LivePanel(props: LiveProps) {
 
   const handleScoreSave = () => {
   const identities = [0,1,2].map(seatIdentity);
-  const agents     = [0,1,2].map(agentIdForIndex);
+  const agents     = [0,1,2].map(seatIdentity);
   const n = Math.max(
     scoreSeriesRef.current[0]?.length||0,
     scoreSeriesRef.current[1]?.length||0,
@@ -897,7 +897,7 @@ const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         try {
           const j = JSON.parse(String(rd.result||'{}'));
           const targetIds = [0,1,2].map(seatIdentity);
-          const targetAgents = [0,1,2].map(agentIdForIndex);
+          const targetAgents = [0,1,2].map(seatIdentity);
 
           const mapped:(number|null)[][] = [[],[],[]];
           for (let i=0;i<3;i++){
@@ -1446,7 +1446,7 @@ nextTotals     = [
                     const sWin = teamWin(i) ? 1 : 0;
                     const pExp = teamP(i);
                     const id = seatIdentity(i);
-                    const label = agentIdForIndex(i);
+                    const label = seatIdentity(i);
                     ladderUpdateLocal(id, label, sWin, pExp, weight);
                   }
                 } catch {}
@@ -1560,7 +1560,7 @@ nextTotals     = [
   };
 
   const buildAllBundle = (): AllBundle => {
-    const agents = [0,1,2].map(agentIdForIndex);
+    const agents = [0,1,2].map(seatIdentity);
     const n = Math.max(
       scoreSeriesRef.current[0]?.length||0,
       scoreSeriesRef.current[1]?.length||0,
@@ -1744,7 +1744,7 @@ if (obj?.radar?.players) {
       <Section title="出牌评分（每局动态）">
         
 <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
-        <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
+        <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>seatIdentity(i))} height={240} />
       </Section>
       <div style={{ marginTop:10 }}></div>
       <Section title="评分统计（每局汇总）">
