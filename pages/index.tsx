@@ -231,7 +231,7 @@ function LadderPanel() {
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
 
   return (
-    <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }};>
+    <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
         <div style={{ fontWeight:700 }}>天梯图（活动积分 ΔR）</div>
         <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）</div>
@@ -510,7 +510,7 @@ function LivePanel(props: LiveProps) {
       const j = JSON.parse(text);
       const store: TsStore = emptyStore();
 
-      // 兼容多种模板：数组 / {players:{}};; / 单人
+      // 兼容多种模板：数组 / {players:{}}; / 单人
       if (Array.isArray(j?.players)) {
         for (const p of j.players) {
           const id = p.id || p.identity || p.key; if (!id) continue;
@@ -1583,7 +1583,7 @@ const handleAllSaveInner = () => {
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }};;>
+      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }};>
         <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
           剩余局数：{remainingGames}
         </span>
@@ -1928,7 +1928,7 @@ function Home() {
 
 
   return (
-    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }};;>
+    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }};>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Bot Arena</h1>
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
