@@ -1113,7 +1113,7 @@ for (const raw of batch) {
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
 
-                nextLog = [...nextLog, `【边界】round-start #${m.round
+                nextLog = [...nextLog, `【边界】round-start #${m.round];
                   try {
                     const labels = [0,1,2].map(i=>agentIdForIndex(i));
                     const ids    = [0,1,2].map(i=>seatIdentity(i));
