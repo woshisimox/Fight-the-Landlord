@@ -379,8 +379,8 @@ function _buildAllBundle_impl(): AllBundle {
   // 避免引用组件内部的 useRef，直接读取 localStorage / 现有读取函数
   const agents = ['0','1','2'];
   // 读取 TS / Radar 的持久化（若未初始化，readStore/readRadarStore 会返回空模板）
-  const ts = (tsStoreRef as any)?.current;
-  const radar = (radarStoreRef as any)?.current;
+  const ts = (globalThis as any)?.tsStoreRef?.current;
+  const radar = (globalThis as any)?.radarStoreRef?.current;
   // 读取天梯
   let ladder: any = null;
   try {
@@ -413,8 +413,8 @@ const buildAllBundle = (): AllBundle => {
     schema: 'ddz-all@1',
     createdAt: new Date().toISOString(),
     agents,
-    trueskill: (tsStoreRef as any)?.current,
-    radar: (radarStoreRef as any)?.current,
+    trueskill: (globalThis as any)?.tsStoreRef?.current,
+    radar: (globalThis as any)?.radarStoreRef?.current,
     ladder: ladder || undefined,
   };
 };
