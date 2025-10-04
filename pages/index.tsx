@@ -2330,7 +2330,7 @@ const buildAllBundle = (): AllBundle => {
 
 /** Minimal wrapper to satisfy JSX typing; TODO: rewire to implementation */
 type LiveProps = any;
-const LivePanel: React.FC<LiveProps> = (props) => {
+const LivePanel = (props: any) => {
   return <div />;
 };
 
