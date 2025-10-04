@@ -12,32 +12,6 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
-type SeatKeyConfig = {
-  openai?: string;
-  gemini?: string;
-  grok?: string;
-  kimi?: string;
-  qwen?: string;
-  deepseek?: string;
-  httpBase?: string;
-  httpToken?: string;
-};
-
-const DEFAULTS = {
-  enabled: false,
-  rounds: 10,
-  startScore: 0,
-  rob: true,
-  four2: 'both' as Four2Policy,
-  farmerCoop: true,
-  seatDelayMs: [0, 0, 0] as number[],
-  seats: ['built-in:greedy-max','built-in:ally-support','built-in:random-legal'] as BotChoice[],
-  seatModels: ['', '', ''] as string[],
-  seatKeys: [{}, {}, {}] as SeatKeyConfig[],
-};
-
-
-
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
 type Rating = { mu:number; sigma:number };
 const TS_DEFAULT: Rating = { mu:25, sigma:25/3 };
@@ -871,84 +845,42 @@ function LivePanel(props: LiveProps) {
   };
 
   const handleScoreSave = () => {
-  const ids = [0,1,2].map(seatIdentity);
-  const n = Math.max(
-    scoreSeriesRef.current[0]?.length||0,
-    scoreSeriesRef.current[1]?.length||0,
-    scoreSeriesRef.current[2]?.length||0
-  );
-  const payload:any = {
-    version: 2,
-    createdAt: new Date().toISOString(),
-    identities: ids,
-    rounds: roundCutsRef.current.slice(),
-    n,
-    seriesById: Object.fromEntries(
-      ids.map((id, i) => [id, (scoreSeriesRef.current[i]||[]).slice()])
-    ),
-    landlords: roundLordsRef.current.slice(),
-  };
-  try {
+    const agents = [0,1,2].map(agentIdForIndex);
+    const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
+    const payload = {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      agents,
+      rounds: roundCutsRef.current,
+      n,
+      seriesBySeat: scoreSeriesRef.current,
+    };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'score_series_by_identity.json'; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
     setTimeout(()=>URL.revokeObjectURL(url), 1500);
-  } catch (err) {
-    console.error('[score save] error', err);
-  }
-};
+  };
 
   const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-  try {
-    const f = e.target.files?.[0]; if (!f) return;
-    const rd = new FileReader();
-    rd.onload = () => {
-      try {
-        const j = JSON.parse(String(rd.result||'{}'));
-        const currIds = [0,1,2].map(seatIdentity);
-
-        // 新格式：seriesById（按 identity）
-        if (j.seriesById && typeof j.seriesById === 'object') {
+    try {
+      const f = e.target.files?.[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const j = JSON.parse(String(rd.result||'{}'));
+          const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
+          const targetAgents = [0,1,2].map(agentIdForIndex);
           const mapped:(number|null)[][] = [[],[],[]];
           for (let i=0;i<3;i++){
-            const id = currIds[i];
-            mapped[i] = Array.isArray(j.seriesById[id]) ? j.seriesById[id] : [];
+            const idx = fileAgents.indexOf(targetAgents[i]);
+            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
           }
           setScoreSeries(mapped);
-          if (Array.isArray(j.rounds))     setRoundCuts(j.rounds as number[]);
-          if (Array.isArray(j.landlords))  setRoundLords(j.landlords as number[]);
-          return;
+          if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
+        } catch (err) {
+          console.error('[score upload] parse error', err);
         }
-
-        // 兼容旧格式：seriesBySeat + agents/seats 标签
-        const fallbackAgents: string[] =
-          j.identities || j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
-        const targetAgents = [0,1,2].map(agentIdForIndex);
-
-        const mapped:(number|null)[][] = [[],[],[]];
-        for (let i=0;i<3;i++){
-          if (Array.isArray(j.identities)) {
-            const idx = (j.identities as string[]).indexOf(currIds[i]);
-            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
-          } else {
-            const idx = fallbackAgents.indexOf(targetAgents[i]);
-            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
-          }
-        }
-        setScoreSeries(mapped);
-        if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
-        if (Array.isArray(j.landlords))  setRoundLords(j.landlords as number[]);
-      } catch (err) {
-        console.error('[score upload] parse error', err);
-      }
-    };
-    rd.readAsText(f);
-  } catch (err) {
-    console.error('[score upload] error', err);
-  } finally {
-    try { if (scoreFileRef.current) scoreFileRef.current.value = ''; } catch {}
-  }
-};
+      };
       rd.readAsText(f);
     } catch (err) {
       console.error('[score upload] error', err);
@@ -1557,9 +1489,9 @@ nextTotals     = [
     createdAt: string;
     agents: string[];
     trueskill?: TsStore;
-    radar?: RadarStore;
-    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
-    scoreStats?: { stats: SeatStat[]; dists: number[][] };
+//    radar?: RadarStore;
+//    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
+//    scoreStats?: { stats: SeatStat[]; dists: number[][] };
     ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
   };
 
@@ -1606,22 +1538,22 @@ nextTotals     = [
         writeStore(tsStoreRef.current);
         applyTsFromStoreByRole(landlordRef.current, '统一上传');
       }
-      if (obj?.radar?.players) {
-        radarStoreRef.current = obj.radar as any;
-        writeRadarStore(radarStoreRef.current);
-        applyRadarFromStoreByRole(landlordRef.current, '统一上传');
-      }
+//      if (obj?.radar?.players) {
+//        radarStoreRef.current = obj.radar as any;
+//        writeRadarStore(radarStoreRef.current);
+//        applyRadarFromStoreByRole(landlordRef.current, '统一上传');
+//      }
       if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
-      if (obj?.scoreTimeline?.seriesBySeat) {
-        const tl = obj.scoreTimeline;
-        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
-        if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
-        if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
-      }
-      if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
-        setScoreStats(obj.scoreStats.stats as any);
-        setScoreDists(obj.scoreStats.dists as any);
-      }
+//      if (obj?.scoreTimeline?.seriesBySeat) {
+//        const tl = obj.scoreTimeline;
+//        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
+//        if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
+//        if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
+//      }
+//      if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
+//        setScoreStats(obj.scoreStats.stats as any);
+//        setScoreDists(obj.scoreStats.dists as any);
+//      }
       setLog(l => [...l, '【ALL】统一上传完成。']);
     } catch (e:any) {
       setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
@@ -1630,8 +1562,8 @@ nextTotals     = [
 
   const handleAllRefreshInner = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
-    applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
-    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+//  applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
+//    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
     setLog(l => [...l, '【ALL】已刷新面板数据。']);
@@ -1918,6 +1850,19 @@ function RadarPanel({
 }
 
 /* ========= 默认值（含“清空”按钮的重置） ========= */
+const DEFAULTS = {
+  enabled: true,
+  rounds: 10,
+  startScore: 100,
+  rob: true,
+  four2: 'both' as Four2Policy,
+  farmerCoop: true,
+  seatDelayMs: [1000,1000,1000] as number[],
+  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
+  // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
+  seatModels: ['', '', ''],
+  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
+};
 
 function Home() {
   const [resetKey, setResetKey] = useState<number>(0);
