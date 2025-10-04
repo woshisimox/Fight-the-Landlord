@@ -868,43 +868,25 @@ function LivePanel(props: LiveProps) {
       rd.onload = () => {
         try {
           const j = JSON.parse(String(rd.result||'{}'));
-          const targetIds = [0,1,2].map(seatIdentity);
+          const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
           const targetAgents = [0,1,2].map(agentIdForIndex);
-
           const mapped:(number|null)[][] = [[],[],[]];
           for (let i=0;i<3;i++){
-            let arr:(number|null)[]|undefined;
-
-            // 1) identities -> seriesByIdentity
-            if (j.seriesByIdentity && typeof j.seriesByIdentity === 'object') {
-              const id = targetIds[i];
-              const cand = j.seriesByIdentity[id];
-              if (Array.isArray(cand)) arr = cand;
-            }
-
-            // 2) identities -> identities[] + seriesBySeat[]
-            if (!arr && Array.isArray(j.identities) && Array.isArray(j.seriesBySeat)) {
-              const idx = j.identities.indexOf(targetIds[i]);
-              if (idx >= 0 && Array.isArray(j.seriesBySeat[idx])) arr = j.seriesBySeat[idx];
-            }
-
-            // 3) agents label fallback
-            if (!arr) {
-              const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
-              const idx = fileAgents.indexOf(targetAgents[i]);
-              if (idx >= 0 && Array.isArray(j.seriesBySeat?.[idx])) arr = j.seriesBySeat[idx];
-            }
-
-            mapped[i] = Array.isArray(arr) ? arr : [];
+            const idx = fileAgents.indexOf(targetAgents[i]);
+            mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
           }
           setScoreSeries(mapped);
-          if (Array.isArray(j.rounds)) setRoundCuts(j.rounds);
-          if (Array.isArray(j.landlords)) setRoundLords(j.landlords);
-        } catch (err) { console.error('[score upload] parse error', err); }
-        finally { if (e.target) e.target.value = ''; }
+          if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
+        } catch (err) {
+          console.error('[score upload] parse error', err);
+        }
       };
       rd.readAsText(f);
-    } catch (err) { console.error('[score upload] error', err); }
+    } catch (err) {
+      console.error('[score upload] error', err);
+    } finally {
+      if (scoreFileRef.current) scoreFileRef.current.value = '';
+    }
   };
 
   
@@ -926,35 +908,9 @@ function LivePanel(props: LiveProps) {
       rd.onload = () => {
         try {
           const obj = JSON.parse(String(rd.result||'{}'));
-          const targetIds = [0,1,2].map(seatIdentity);
-
-          let statsMapped:any[] = [null,null,null];
-          let distsMapped:any[] = [null,null,null];
-
-          // 1) identity-keyed
-          if (obj.statsByIdentity && obj.distsByIdentity) {
-            statsMapped = [0,1,2].map((i:number)=> obj.statsByIdentity[targetIds[i]] || { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 });
-            distsMapped = [0,1,2].map((i:number)=> obj.distsByIdentity[targetIds[i]] || []);
-          } else if (Array.isArray(obj.identities) && Array.isArray(obj.stats) && Array.isArray(obj.dists)) {
-            // 2) identities + arrays
-            statsMapped = [0,1,2].map((i:number)=> {
-              const k = obj.identities.indexOf(targetIds[i]);
-              return (k>=0 && obj.stats[k]) ? obj.stats[k] : { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-            });
-            distsMapped = [0,1,2].map((i:number)=> {
-              const k = obj.identities.indexOf(targetIds[i]);
-              return (k>=0 && Array.isArray(obj.dists[k])) ? obj.dists[k] : [];
-            });
-          } else if (Array.isArray(obj.stats) && Array.isArray(obj.dists) && obj.stats.length===3 && obj.dists.length===3) {
-            // 3) fallback: seat-order
-            statsMapped = obj.stats;
-            distsMapped = obj.dists;
-          }
-
-          setScoreStats(statsMapped as any);
-          setScoreDists(distsMapped as any);
+          if (Array.isArray(obj.stats) && obj.stats.length===3) setScoreStats(obj.stats as any);
+          if (Array.isArray(obj.dists) && obj.dists.length===3) setScoreDists(obj.dists as any);
         } catch (err) { console.error('[stats upload] parse error', err); }
-        finally { if (e.target) e.target.value = ''; }
       };
       rd.readAsText(f);
     } catch (err) { console.error('[stats upload] error', err); }
@@ -1529,42 +1485,29 @@ nextTotals     = [
 
   // ===== 统一统计打包（All-in-One） =====
   type AllBundle = {
-    schema: 'ddz-all@1';
-    createdAt: string;
-    agents: string[];
-    trueskill?: TsStore;
-    radar?: RadarStore;
-    scoreTimeline?: { n:number; rounds:number[]; seriesBySeat:(number|null)[][]; landlords?:number[] };
+  schema: 'ddz-all@1';
+  createdAt: string;
+  agents: string[];
+  trueskill?: TsStore;
+  radar?: RadarStore;
+  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+};
     scoreStats?: { stats: SeatStat[]; dists: number[][] };
     ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
   };
 
   const buildAllBundle = (): AllBundle => {
-    const agents = [0,1,2].map(agentIdForIndex);
-    const n = Math.max(
-      scoreSeriesRef.current[0]?.length||0,
-      scoreSeriesRef.current[1]?.length||0,
-      scoreSeriesRef.current[2]?.length||0
-    );
-    return {
-      schema: 'ddz-all@1',
-      createdAt: new Date().toISOString(),
-      agents,
-      trueskill: tsStoreRef.current,
-      radar: radarStoreRef.current as any,
-      ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
-      scoreTimeline: {
-        n,
-        rounds: roundCutsRef.current.slice(),
-        seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
-        landlords: roundLordsRef.current.slice(),
-      },
-      scoreStats: {
-        stats: scoreStats,
-        dists: scoreDists,
-      },
-    };
+  const agents = [0,1,2].map(agentIdForIndex);
+  return {
+    schema: 'ddz-all@1',
+    createdAt: new Date().toISOString(),
+    agents,
+    trueskill: tsStoreRef.current as any,
+    radar: radarStoreRef.current as any,
+    ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
   };
+};
+;
 
   const handleAllSaveInner = () => {
     const payload = buildAllBundle();
@@ -1576,33 +1519,28 @@ nextTotals     = [
   };
 
   const applyAllBundleInner = (obj:any) => {
-    try {
-      if (obj?.trueskill?.players) {
-        tsStoreRef.current = obj.trueskill as TsStore;
-        writeStore(tsStoreRef.current);
-        applyTsFromStoreByRole(landlordRef.current, '统一上传');
-      }
-      if (obj?.radar?.players) {
-        radarStoreRef.current = obj.radar as any;
-        writeRadarStore(radarStoreRef.current);
-        applyRadarFromStoreByRole(landlordRef.current, '统一上传');
-      }
-      if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
-      if (obj?.scoreTimeline?.seriesBySeat) {
-        const tl = obj.scoreTimeline;
-        setScoreSeries(tl.seriesBySeat as (number|null)[][]);
-        if (Array.isArray(tl.rounds))     setRoundCuts(tl.rounds);
-        if (Array.isArray(tl.landlords))  setRoundLords(tl.landlords);
-      }
-      if (obj?.scoreStats?.stats && obj?.scoreStats?.dists) {
-        setScoreStats(obj.scoreStats.stats as any);
-        setScoreDists(obj.scoreStats.dists as any);
-      }
-      setLog(l => [...l, '【ALL】统一上传完成。']);
-    } catch (e:any) {
-      setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
+  try {
+    if (obj?.trueskill?.players) {
+      tsStoreRef.current = obj.trueskill as TsStore;
+      writeStore(tsStoreRef.current);
+      applyTsFromStoreByRole(landlordRef.current, '统一上传');
     }
-  };
+    if (obj?.radar?.players) {
+      radarStoreRef.current = obj.radar as any;
+      writeRadarStore(radarStoreRef.current);
+      applyRadarFromStoreByRole(landlordRef.current, '统一上传');
+    }
+    if (obj?.ladder?.players) {
+      try {
+        localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder));
+      } catch {}
+    }
+    setLog(l => [...l, '【ALL】统一上传完成（仅 TS/Radar/天梯）。']);
+  } catch (e:any) {
+    setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
+  }
+};
+;
 
   const handleAllRefreshInner = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
@@ -1909,8 +1847,6 @@ const DEFAULTS = {
 };
 
 function Home() {
-  const uploadIdentityOrderRef = useRef<string[] | null>(null);
-
   const [resetKey, setResetKey] = useState<number>(0);
   const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
   const [rounds, setRounds] = useState<number>(DEFAULTS.rounds);
@@ -1997,7 +1933,7 @@ function Home() {
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
     <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
-      统一： TrueSkill / 画像 / 出牌评分 / 评分统计 / 天梯
+      统一： TrueSkill / 雷达图 / 天梯
     <input
       ref={allFileRef}
       type="file"
@@ -2011,6 +1947,17 @@ function Home() {
     >上传</button>
     
     </label>
+
+<div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
+  <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
+    出牌评分（identity-only）
+  </label>
+  <button
+    onClick={handleScoreSave}
+    style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+  >存档</button>
+</div>
+
 <button
       onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
       style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
