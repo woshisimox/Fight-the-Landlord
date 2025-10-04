@@ -1639,12 +1639,8 @@ function buildAllBundle(): any {
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
-}; catch (e:any) {
-      setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
-    }
-  };
-
-  const handleAllRefreshInner = () => {
+}
+const handleAllRefreshInner = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
     applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
