@@ -1594,7 +1594,8 @@ function buildAllBundle(): any {
 
 
   const handleAllSaveInner = () => {
-    const payload = (typeof _buildAllBundle_impl === 'function' ? _buildAllBundle_impl() : (function(){
+    const impl = (globalThis as any)._buildAllBundle_impl;
+    const payload = (typeof impl === 'function' ? impl() : (function(){
   try {
     const ts = (tsStoreRef as any)?.current;
     const radar = (radarStoreRef as any)?.current;
