@@ -1941,7 +1941,27 @@ const DEFAULTS = {
   seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
 };
 
-function Home() {
+function Home() {// === 构建统一存档（仅 TrueSkill / 雷达图 / 天梯；不含出牌评分与统计）===
+const buildAllBundle = (): AllBundle => {
+  const agents = ['0','1','2']; // 元信息，与 identity 无关
+
+  // 读取天梯（保持与项目一致的 key）
+  let ladder: any = null;
+  try {
+    const raw = localStorage.getItem('ddz_ladder_store_v1');
+    ladder = raw ? JSON.parse(raw) : null;
+  } catch {}
+
+  return {
+    schema: 'ddz-all@1',
+    createdAt: new Date().toISOString(),
+    agents,
+    trueskill: (tsStoreRef as any)?.current,
+    radar: (radarStoreRef as any)?.current,
+    ladder: ladder || undefined,
+  };
+};
+
   const [resetKey, setResetKey] = useState<number>(0);
   const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
   const [rounds, setRounds] = useState<number>(DEFAULTS.rounds);
