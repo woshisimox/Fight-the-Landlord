@@ -1484,15 +1484,6 @@ nextTotals     = [
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
   // ===== 统一统计打包（All-in-One） =====
-  
-    scoreStats?: { stats: SeatStat[]; dists: number[][] };
-    ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
-  };
-
-  
-  };
-
-  // ===== 统一统计打包（All-in-One） =====
 type AllBundle = {
   schema: 'ddz-all@1';
   createdAt: string;
