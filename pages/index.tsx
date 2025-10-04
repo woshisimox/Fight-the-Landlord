@@ -4,6 +4,13 @@ import { useEffect, useRef, useState } from 'react';
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
+  | 'built-in:greedy-min'
+  | 'built-in:random-legal'
+  | 'built-in:mininet'
+  | 'built-in:ally-support'
+  | 'built-in:endgame-rush'
+  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
+  | 'http';
 
 type SeatKeyConfig = {
   openai?: string;
@@ -29,13 +36,7 @@ const DEFAULTS = {
   seatKeys: [{}, {}, {}] as SeatKeyConfig[],
 };
 
-  | 'built-in:greedy-min'
-  | 'built-in:random-legal'
-  | 'built-in:mininet'
-  | 'built-in:ally-support'
-  | 'built-in:endgame-rush'
-  | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
-  | 'http';
+
 
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
 type Rating = { mu:number; sigma:number };
