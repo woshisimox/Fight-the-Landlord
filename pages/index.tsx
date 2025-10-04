@@ -1636,17 +1636,39 @@ nextTotals     = [
 
   const applyAllBundleInner = (obj:any) => {
     try {
-      if (obj?.trueskill?.players) {
-        tsStoreRef.current = obj.trueskill as TsStore;
-        writeStore(tsStoreRef.current);
-        applyTsFromStoreByRole(landlordRef.current, '统一上传');
-      }
-      if (obj?.radar?.players) {
-        radarStoreRef.current = obj.radar as any;
-        writeRadarStore(radarStoreRef.current);
-        applyRadarFromStoreByRole(landlordRef.current, '统一上传');
-      }
-      if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
+  if (obj?.scoreTimeline?.seriesByIdentity) {
+    const tl = obj.scoreTimeline;
+    const ids: string[] = Array.isArray(tl.identities)
+      ? tl.identities.slice(0,3)
+      : Object.keys(tl.seriesByIdentity || {}).slice(0,3);
+    if (typeof uploadIdentityOrderRef !== 'undefined' && uploadIdentityOrderRef) {
+      uploadIdentityOrderRef.current = ids.slice(0,3);
+    }
+    const mapped:(number|null)[][] = [[],[],[]];
+    for (let i=0;i<3;i++) {
+      const id = ids[i];
+      const arr = id ? tl.seriesByIdentity[id] : undefined;
+      mapped[i] = Array.isArray(arr) ? arr.slice() : [];
+    }
+    setScoreSeries(mapped);
+    if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice()); else setRoundCuts([]);
+    if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords.slice()); else setRoundLords([]);
+    // 强制由 series 重算统计（忽略上传的统计）
+    const { stats, dists } = recomputeStatsFromSeries(mapped);
+    setScoreStats(stats as any);
+    setScoreDists(dists);
+  } else {
+    setScoreSeries([[],[],[]]);
+    setRoundCuts([]);
+    setRoundLords([]);
+    setScoreStats([
+      { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+      { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+      { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
+    ]);
+    setScoreDists([[],[],[]]);
+  }
+} catch {} }
       if (obj?.scoreTimeline?.seriesByIdentity) {
         const tl = obj.scoreTimeline;
         const ids = [0,1,2].map(seatIdentity);
