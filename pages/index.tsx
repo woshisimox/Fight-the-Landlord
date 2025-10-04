@@ -1594,7 +1594,14 @@ function buildAllBundle(): any {
 
 
   const handleAllSaveInner = () => {
-    const payload = buildAllBundle();
+    const payload = (typeof _buildAllBundle_impl === 'function' ? _buildAllBundle_impl() : (function(){
+  try {
+    const ts = (tsStoreRef as any)?.current;
+    const radar = (radarStoreRef as any)?.current;
+    let ladder:any=null; try{ if (typeof window!=='undefined'){ const raw=localStorage.getItem('ddz_ladder_store_v1'); ladder = raw?JSON.parse(raw):null; } }catch{}
+    return { schema:'ddz-all@1', createdAt:new Date().toISOString(), trueskill: ts||undefined, radar: radar||undefined, ladder: ladder||undefined };
+  } catch { return { schema:'ddz-all@1', createdAt:new Date().toISOString() } as any; }
+})());
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'ddz_all_stats.json'; a.click();
