@@ -13,9 +13,9 @@ type AllBundle = {
   trueskill?: any; // TsStore-like
   radar?: any;     // RadarStore-like
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
-};
+// removed stray };
 
-};
+// removed stray };
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
@@ -887,9 +887,7 @@ function LivePanel(props: LiveProps) {
   setTimeout(()=>URL.revokeObjectURL(url), 1500);
   setLog(l => [...l, '【Score】已导出出牌评分（identity-only）。']);
 };
-;
-
-  const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       const f = e.target.files?.[0]; if (!f) return;
       const rd = new FileReader();
