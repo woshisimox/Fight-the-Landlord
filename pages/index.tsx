@@ -1149,9 +1149,9 @@ for (const raw of batch) {
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
-                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal];
- 
-                  try {
+                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; 
+                  
+try {
                     const L = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                     const handsRaw = Array.isArray(m.hands) ? m.hands : (m.payload?.hands || m.state?.hands || m.init?.hands);
                     (window as any).ddzTraceInit?.(L, handsRaw, (m as any).bottom);
@@ -1170,8 +1170,8 @@ for (const raw of batch) {
 
                   nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
 
-
-                  try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
+                  
+try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
                   lastReasonRef.current = [null, null, null];
                 }
                 continue;
@@ -1278,9 +1278,9 @@ for (const raw of batch) {
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
-
                   
-                  try { (window as any).ddzTraceStep?.({ kind:'turn', seat: m.seat, move: m.move, cards: (m.cards||[]), score: (typeof m.score==='number'?m.score:null), totals: m.totals }); } catch {}
+                  
+try { (window as any).ddzTraceStep?.({ kind:'turn', seat: m.seat, move: m.move, cards: (m.cards||[]), score: (typeof m.score==='number'?m.score:null), totals: m.totals }); } catch {}
                 }
                 }
                 continue;
