@@ -1123,7 +1123,7 @@ for (const raw of batch) {
                 continue;
               }
               if (m.type === 'event' && m.kind === 'round-end') {
-                nextLog = [...nextLog, `【边界】round-end #${m.round
+                nextLog = [...nextLog, `【边界】round-end #${m.round}];
                   try {
                     const winner = (typeof (m as any).winner === 'number') ? (m as any).winner : (typeof nextWinner !== 'undefined' ? nextWinner : null);
                     (window as any).ddzTraceEnd?.({ winner, delta: (nextDelta||null), totals: (nextTotals||null), lastReason: (Array.isArray((m as any).lastReason)?(m as any).lastReason: null) });
