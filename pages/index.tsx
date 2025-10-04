@@ -775,23 +775,9 @@ function LivePanel(props: LiveProps) {
 
   /** 导出当前 Radar 存档 */
   const handleRadarSave = () => {
-    if (aggStatsRef.current) {
-      const ids = [0,1,2].map(seatIdentity);
-      for (let i=0;i<3;i++){
-        const id = ids[i];
-        const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
-        entry.overall = mergeRadarAgg(entry.overall, aggStatsRef.current[i]);
-        radarStoreRef.current.players[id] = entry;
-      }
-      // writeRadarStore disabled (no radar persistence)
-    }
-
-    const blob = new Blob([JSON.stringify(radarStoreRef.current, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'radar_store.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1200);
-    setLog(l => [...l, '【Radar】已导出当前存档。']);
-  };
+  setLog(l => [...l, '【Radar】存档已禁用（仅支持查看/刷新，不再保存到本地或 ALL 文件）。']);
+};
+;
 
   /** 手动刷新：按当前地主身份（未知则用 overall）把存档套到面板 */
   const handleRadarRefresh = () => {
@@ -1486,7 +1472,7 @@ type AllBundle = {
   createdAt: string;
   identities: string[];
   trueskill?: TsStore;
-  radar?: RadarStore;
+  /* radar?: RadarStore;  // disabled */
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
 };
 
@@ -1502,7 +1488,7 @@ const buildAllBundle = (): AllBundle => {
     createdAt: new Date().toISOString(),
     identities,
     trueskill: tsStoreRef.current,
-    radar: radarStoreRef.current as any,
+    /* radar excluded */
     ladder,
   };
 };
@@ -1514,11 +1500,8 @@ const applyAllBundleInner = (obj:any) => {
       writeStore(tsStoreRef.current);
       applyTsFromStoreByRole(landlordRef.current, '统一上传');
     }
-    if (obj?.radar?.players) {
-      radarStoreRef.current = obj.radar as any;
-      // writeRadarStore disabled (no radar persistence)
-      applyRadarFromStoreByRole(landlordRef.current, '统一上传');
-    }
+    // radar ignored for ALL upload (persistence disabled)
+
     if (obj?.ladder?.schema === 'ddz-ladder@1') {
       try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {}
     }
