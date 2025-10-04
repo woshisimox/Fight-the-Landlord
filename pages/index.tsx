@@ -453,46 +453,6 @@ function LivePanel(props: LiveProps) {
     return `${choice}|${model}|${base}`; // 身份锚定
   };
 
-const recomputeStatsFromSeries = (series: (number|null)[][]): { stats: SeatStat[]; dists: number[][] } => {
-  const stats: SeatStat[] = [];
-  const dists: number[][] = [[],[],[]];
-  for (let i=0;i<3;i++) {
-    const xs = (series[i] || []).filter((v): v is number => typeof v === 'number' && !Number.isNaN(v));
-    const rounds = xs.length;
-    if (!rounds) {
-      stats[i] = { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-      dists[i] = [];
-      continue;
-    }
-    const sum = xs.reduce((a,b)=>a+b, 0);
-    const mean = sum / rounds;
-    const lastK = Math.min(20, rounds);
-    const lastAvg = xs.slice(-lastK).reduce((a,b)=>a+b,0) / lastK;
-    const best = Math.max(...xs);
-    const worst = Math.min(...xs);
-    const variance = xs.reduce((a,b)=>a+(b-mean)*(b-mean), 0) / rounds;
-    const sigma = Math.sqrt(variance);
-    stats[i] = { rounds, overallAvg: mean, lastAvg, best, worst, mean, sigma };
-    const lo = Math.min(...xs), hi = Math.max(...xs);
-    const bins = 20;
-    if (hi > lo) {
-      const bw = (hi - lo) / bins;
-      const hist = new Array(bins).fill(0);
-      for (const v of xs) {
-        let k = Math.floor((v - lo) / bw);
-        if (k < 0) k = 0;
-        if (k >= bins) k = bins-1;
-        hist[k]++;
-      }
-      dists[i] = hist;
-    } else {
-      dists[i] = [rounds];
-    }
-  }
-  return { stats, dists };
-};
-
-
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
     const p = tsStoreRef.current.players[id]; if (!p) return null;
     if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
@@ -912,7 +872,7 @@ const handleScoreSave = () => {
     rounds,
     seriesByIdentity,
     // 兼容字段（导入时不再使用）
-    .map(a => Array.isArray(a) ? a.slice() : []),
+    seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
   };
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
@@ -1569,106 +1529,81 @@ nextTotals     = [
   scoreTimeline?: {
     n: number;
     rounds: number[];
-    identities: string[];
-    seriesByIdentity: Record<string, (number|null)[]>;
-    landlords?: number[];
+    identities?: string[]; // 新增：按 identity 导出
+    seriesByIdentity?: Record<string, (number|null)[]>;
+    seriesBySeat?: (number|null)[][]; // 兼容旧字段
+    landlords?: number[]
   };
-  scoreStats?: {
-    byIdentity: Record<string, SeatStat>;
-    distsByIdentity: Record<string, number[]>;
-  };
-  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> } | null;
-};
   scoreStats?: { stats: SeatStat[]; dists: number[][]; byIdentity?: Record<string, SeatStat>; distsByIdentity?: Record<string, number[]> };
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
 };
 
   const buildAllBundle = (): AllBundle => {
-  const n = Math.max(
-    scoreSeriesRef.current[0]?.length||0,
-    scoreSeriesRef.current[1]?.length||0,
-    scoreSeriesRef.current[2]?.length||0
-  );
-  const identities = activeIds ? activeIds() : [0,1,2].map(seatIdentity);
-  const seriesByIdentity: Record<string,(number|null)[]> = {};
-  for (let i=0;i<3;i++){ seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice(); }
+    const agents = [0,1,2].map(agentIdForIndex);
+    const n = Math.max(
+      scoreSeriesRef.current[0]?.length||0,
+      scoreSeriesRef.current[1]?.length||0,
+      scoreSeriesRef.current[2]?.length||0
+    );
+    const identities = [0,1,2].map(seatIdentity);
 
-  const { stats: statsRecalc, dists: distsRecalc } = recomputeStatsFromSeries(scoreSeriesRef.current as any);
-  const scoreStatsByIdentity: Record<string, SeatStat> = {};
-  const distsByIdentity: Record<string, number[]> = {};
-  for (let i=0;i<3;i++){
-    scoreStatsByIdentity[identities[i]] = statsRecalc[i];
-    distsByIdentity[identities[i]] = (distsRecalc[i]||[]).slice();
-  }
+    // --- map scoreStats/dists by identity for ALL export ---
+    const scoreStatsByIdentity: Record<string, SeatStat> = {};
+    const distsByIdentity: Record<string, number[]> = {};
+    for (let i=0;i<3;i++){
+      const id = identities[i];
+      if (id!=null) {
+        scoreStatsByIdentity[id] = (scoreStats as any)[i];
+        distsByIdentity[id] = (scoreDists[i] || []).slice();
+      }
+    }
+    const seriesByIdentity: Record<string,(number|null)[]> = {};
+    for (let i=0;i<3;i++){
+      seriesByIdentity[identities[i]] = (scoreSeriesRef.current[i]||[]).slice();
+    }
 
-  const ladder = (function(){ try{
-    const raw = localStorage.getItem('ddz_ladder_store_v1');
-    return raw? JSON.parse(raw): null
-  }catch{return null} })();
-
-  return {
-    schema: 'ddz-all@1',
-    createdAt: new Date().toISOString(),
-    agents: [0,1,2].map(agentIdForIndex),
-    trueskill: tsStoreRef.current as any,
-    radar: radarStoreRef.current as any,
-    ladder,
-    scoreTimeline: { n, rounds: roundCutsRef.current.slice(), identities, seriesByIdentity, landlords: roundLordsRef.current.slice() },
-    scoreStats: { byIdentity: scoreStatsByIdentity, distsByIdentity },
+    return {
+      schema: 'ddz-all@1',
+      createdAt: new Date().toISOString(),
+      agents,
+      trueskill: tsStoreRef.current,
+      radar: radarStoreRef.current as any,
+      ladder: (function(){ try{ const raw = localStorage.getItem('ddz_ladder_store_v1'); return raw? JSON.parse(raw): null }catch{ return null } })(),
+      scoreTimeline: {
+      n,
+      rounds: roundCutsRef.current.slice(),
+      identities,
+      seriesByIdentity,
+      // 兼容旧版：保留 seat 导出
+      seriesBySeat: scoreSeriesRef.current.map(a => Array.isArray(a) ? a.slice() : []),
+      landlords: roundLordsRef.current.slice(),
+    },
+      scoreStats: { stats: scoreStats, dists: scoreDists, byIdentity: scoreStatsByIdentity, distsByIdentity }
+    };
   };
-};
-;
 
-  const handleAllSave = () => {
-  try{
-    const bundle = buildAllBundle();
-    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type:'application/json' });
+  const handleAllSaveInner = () => {
+    const payload = buildAllBundle();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'ddz_all_stats.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
     setLog(l => [...l, '【ALL】已导出统一统计文件。']);
-  }catch(err){
-    console.error('[ALL] export error', err);
-    setLog(l => [...l, '【ALL】导出失败。']);
-  }
-};
-;
+  };
 
   const applyAllBundleInner = (obj:any) => {
     try {
-  if (obj?.scoreTimeline?.seriesByIdentity) {
-    const tl = obj.scoreTimeline;
-    const ids: string[] = Array.isArray(tl.identities)
-      ? tl.identities.slice(0,3)
-      : Object.keys(tl.seriesByIdentity || {}).slice(0,3);
-    if (typeof uploadIdentityOrderRef !== 'undefined' && uploadIdentityOrderRef) {
-      uploadIdentityOrderRef.current = ids.slice(0,3);
-    }
-    const mapped:(number|null)[][] = [[],[],[]];
-    for (let i=0;i<3;i++) {
-      const id = ids[i];
-      const arr = id ? tl.seriesByIdentity[id] : undefined;
-      mapped[i] = Array.isArray(arr) ? arr.slice() : [];
-    }
-    setScoreSeries(mapped);
-    if (Array.isArray(tl.rounds)) setRoundCuts(tl.rounds.slice()); else setRoundCuts([]);
-    if (Array.isArray(tl.landlords)) setRoundLords(tl.landlords.slice()); else setRoundLords([]);
-    // 强制由 series 重算统计（忽略上传的统计）
-    const { stats, dists } = recomputeStatsFromSeries(mapped);
-    setScoreStats(stats as any);
-    setScoreDists(dists);
-  } else {
-    setScoreSeries([[],[],[]]);
-    setRoundCuts([]);
-    setRoundLords([]);
-    setScoreStats([
-      { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-      { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-      { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-    ]);
-    setScoreDists([[],[],[]]);
-  }
-} catch {} }
+      if (obj?.trueskill?.players) {
+        tsStoreRef.current = obj.trueskill as TsStore;
+        writeStore(tsStoreRef.current);
+        applyTsFromStoreByRole(landlordRef.current, '统一上传');
+      }
+      if (obj?.radar?.players) {
+        radarStoreRef.current = obj.radar as any;
+        writeRadarStore(radarStoreRef.current);
+        applyRadarFromStoreByRole(landlordRef.current, '统一上传');
+      }
+      if (obj?.ladder?.schema === 'ddz-ladder@1') { try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {} }
       if (obj?.scoreTimeline?.seriesByIdentity) {
         const tl = obj.scoreTimeline;
         const ids = [0,1,2].map(seatIdentity);
