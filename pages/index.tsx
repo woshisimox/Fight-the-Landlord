@@ -1557,12 +1557,9 @@ nextTotals     = [
 
   // ===== 统一统计打包（All-in-One） =====
   
-  };
 
   
-;
 
-  };
 
   const handleAllSaveInner = () => {
     const payload = buildAllBundle();
@@ -1571,7 +1568,6 @@ nextTotals     = [
     const a = document.createElement('a'); a.href = url; a.download = 'ddz_all_stats.json'; a.click();
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
     setLog(l => [...l, '【ALL】已导出统一统计文件。']);
-  };
 
   const applyAllBundleInner = (obj:any) => {
   try {
@@ -1592,7 +1588,6 @@ nextTotals     = [
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
-};
 if (obj?.radar?.players) {
         radarStoreRef.current = obj.radar as any;
         writeRadarStore(radarStoreRef.current);
