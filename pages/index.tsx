@@ -897,11 +897,6 @@ function LivePanel(props: LiveProps) {
     console.error('[score save] error', err);
   }
 };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1500);
-  };
 
   const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   try {
