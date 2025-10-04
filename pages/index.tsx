@@ -1915,7 +1915,7 @@ const DEFAULTS = {
 };
 
 function Home() {
-const buildAllBundle = (): AllBundle => {
+function buildAllBundle(): AllBundle {
   // 统一存档仅包含 TrueSkill / 雷达图 / 天梯，不含出牌评分与统计
   // 避免引用组件内部的 useRef，直接读取 localStorage / 现有读取函数
   const agents = ['0','1','2'];
@@ -1937,7 +1937,7 @@ const buildAllBundle = (): AllBundle => {
     trueskill: ts || undefined,
     radar: radar || undefined,
     ladder: ladder || undefined,
-  };
+  }
 }
 // === 构建统一存档（仅 TrueSkill / 雷达图 / 天梯；不含出牌评分与统计）===
 const buildAllBundle = (): AllBundle => {
