@@ -1,3 +1,4 @@
+declare global { var _buildAllBundle_impl: undefined | ((...args:any[])=>any); }
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
@@ -1561,9 +1562,9 @@ function buildAllBundle(): any {
   try {
     // Prefer dedicated impl if present
     // @ts-ignore
-    if (typeof _buildAllBundle_impl === 'function') {
-      // @ts-ignore
-      return _buildAllBundle_impl();
+    const _impl = (globalThis as any)._buildAllBundle_impl;
+    if (typeof _impl === 'function') {
+      return _impl();
     }
   } catch {}
   try {
