@@ -1646,15 +1646,22 @@ setLog(l => [...l, '【ALL】已刷新（虚拟发牌：甲为地主）']);
             const stored = getStoredForSeat(i);
             const usingRole: 'overall'|'landlord'|'farmer' =
               landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
-            return (
+            // 显示层的最小修补：若当前为“地主/农民”且 tsArr[i] 仍是缺省(25, 8.33)，
+// 则回退用存档中的对应分档，避免刷新后甲显示为缺省值。
+const __isDefault = (r)=> Math.abs((r?.mu ?? 25) - 25) < 1e-6 && Math.abs((r?.sigma ?? 25/3) - 25/3) < 1e-6;
+let displayR = tsArr[i];
+if (usingRole === 'landlord' && __isDefault(displayR)) displayR = stored.landlord || displayR;
+if (usingRole === 'farmer'   && __isDefault(displayR)) displayR = stored.farmer   || displayR;
+if (usingRole === 'overall'  && __isDefault(displayR)) displayR = stored.overall  || displayR;
+return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
                   <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
                 </div>
                 <div style={{ fontSize:13, color:'#374151' }}>
-                  <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
-                  <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
-                  <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
+                  <div>μ：<b>{fmt2(displayR.mu)}</b></div>
+                  <div>σ：<b>{fmt2(displayR.sigma)}</b></div>
+                  <div>CR = μ − 3σ：<b>{fmt2(tsCr(displayR))}</b></div>
                 </div>
 
                 {/* 区分显示总体/地主/农民三档，并标注当前使用 */}
