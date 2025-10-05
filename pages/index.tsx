@@ -486,6 +486,40 @@ function LivePanel(props: LiveProps) {
     }
   };
 
+  // —— 修复手牌更新逻辑 —— //
+  const updateHandsForPlay = (seat: number, playedCards: string[]) => {
+    setHands(prev => {
+      const newHands = [...prev];
+      const currentHand = [...newHands[seat]];
+      
+      // 精确移除打出的每张牌
+      playedCards.forEach(playedCard => {
+        // 找到完全匹配的牌进行移除
+        const index = currentHand.findIndex(handCard => {
+          // 如果是带花色的牌，精确匹配
+          if (playedCard.startsWith('🃏') || '♠♥♦♣'.includes(playedCard[0])) {
+            return handCard === playedCard;
+          }
+          // 如果是不带花色的牌，匹配点数（考虑10/T转换）
+          const playedRank = playedCard.replace('10', 'T');
+          const handRank = handCard.replace('10', 'T');
+          return handRank.includes(playedRank);
+        });
+        if (index > -1) {
+          currentHand.splice(index, 1);
+        }
+      });
+      
+      newHands[seat] = currentHand;
+      console.log(`座位 ${seat} 手牌更新:`, {
+        played: playedCards,
+        before: prev[seat],
+        after: currentHand
+      });
+      return newHands;
+    });
+  };
+
   // —— 主循环 —— //
   const runGame = async () => {
     if (running) return;
@@ -581,6 +615,7 @@ function LivePanel(props: LiveProps) {
 
               // 处理初始化数据
               if (data.type === 'init') {
+                console.log('初始化手牌:', data.hands);
                 const gameHands = data.hands || [[],[],[]];
                 const decoratedHands = gameHands.map((h:string[]) => decorateHandCycle(h));
                 setHands(decoratedHands);
@@ -606,31 +641,10 @@ function LivePanel(props: LiveProps) {
                   setPlays(prev => [...prev, { seat, move: 'pass', reason }]);
                   setLog(l => [...l, `${seatName(seat)} 过${reason ? `（${reason}）` : ''}`]);
                 } else {
-                  // 实时更新手牌 - 修复版
-                  setHands(prev => {
-                    const newHands = [...prev];
-                    const playerHand = [...newHands[seat]];
-                    
-                    // 从手牌中移除打出的牌
-                    for (const card of cards) {
-                      // 查找匹配的牌（考虑花色）
-                      const cardIndex = playerHand.findIndex(c => {
-                        // 如果是带花色的牌，精确匹配
-                        if (card.startsWith('🃏') || '♠♥♦♣'.includes(card[0])) {
-                          return c === card;
-                        }
-                        // 如果是不带花色的牌，匹配点数
-                        return c.includes(card);
-                      });
-                      if (cardIndex > -1) {
-                        playerHand.splice(cardIndex, 1);
-                      }
-                    }
-                    newHands[seat] = playerHand;
-                    return newHands;
-                  });
+                  // 使用修复的手牌更新逻辑
+                  updateHandsForPlay(seat, cards);
 
-                  // 修复：为 card 参数添加明确的 string 类型
+                  // 记录出牌
                   setPlays(prev => [...prev, { 
                     seat, 
                     move: 'play', 
@@ -640,7 +654,9 @@ function LivePanel(props: LiveProps) {
                         return card;
                       }
                       // 为没有花色的卡片添加默认花色
-                      return `♠${card}`;
+                      const suits = ['♠', '♥', '♦', '♣'];
+                      const suit = suits[Math.floor(Math.random() * suits.length)];
+                      return `${suit}${card}`;
                     }), 
                     reason 
                   }]);
@@ -649,6 +665,20 @@ function LivePanel(props: LiveProps) {
 
                 // 添加延迟以便观察手牌变化
                 await new Promise(resolve => setTimeout(resolve, 500));
+              }
+
+              // 处理 turn 事件（包含手牌状态）
+              if (data.type === 'turn') {
+                const { seat, move, cards, hand } = data;
+                if (move === 'play' && Array.isArray(hand)) {
+                  // 使用后端提供的最新手牌状态
+                  const decoratedHand = decorateHandCycle(hand);
+                  setHands(prev => {
+                    const newHands = [...prev];
+                    newHands[seat] = decoratedHand;
+                    return newHands;
+                  });
+                }
               }
 
               // 处理游戏结果

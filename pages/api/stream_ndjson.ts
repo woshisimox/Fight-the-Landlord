@@ -349,7 +349,14 @@ for await (const ev of (iter as any)) {
     if (!sentInit && ev?.type==='init') {
       sentInit = true;
       landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
-      writeLine(res, { type:'init', landlordIdx, bottom: ev.bottom, hands: ev.hands });
+      // 修复：添加 landlord 字段确保前端能正确识别地主
+      writeLine(res, { 
+        type:'init', 
+        landlordIdx, 
+        landlord: landlordIdx,  // 添加 landlord 字段
+        bottom: ev.bottom, 
+        hands: ev.hands 
+      });
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
       continue;
@@ -361,7 +368,18 @@ for await (const ev of (iter as any)) {
       countPlay(seat, move, cards);
       const moveStr = stringifyMove({ move, cards });
       const reason = lastReason[seat] || null;
-      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: (lastScore[seat] ?? undefined), totals });
+      // 确保发送完整的手牌信息
+      writeLine(res, { 
+        type:'turn', 
+        seat, 
+        move, 
+        cards, 
+        hand: hand || [],  // 确保手牌不为空
+        moveStr, 
+        reason, 
+        score: (lastScore[seat] ?? undefined), 
+        totals 
+      });
       continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
@@ -371,7 +389,7 @@ for await (const ev of (iter as any)) {
       continue;
     }
 
-    // 兼容多种“结果”别名
+    // 兼容多种"结果"别名
     const isResultLike =
       (ev?.type==='result') ||
       (ev?.type==='event' && (ev.kind==='win' || ev.kind==='result' || ev.kind==='game-over' || ev.kind==='game_end')) ||
