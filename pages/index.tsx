@@ -552,42 +552,9 @@ function LivePanel(props: LiveProps) {
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
 
-  // // ===== 新增：虚拟发牌 + 角色应用（刷新键触发） =====
-function refreshTsVirtualDeal() {
-  // 固定：虚拟地主总是甲（seat 0），乙/丙为农民
-  const lord = 0;
-  setLandlord(lord);
-
-  // 推进一段 roundCuts / roundLords，确保底色/统计与角色绑定
-  try {
-    const n0 = Math.max(
-      scoreSeriesRef.current[0]?.length||0,
-      scoreSeriesRef.current[1]?.length||0,
-      scoreSeriesRef.current[2]?.length||0
-    );
-    setRoundCuts(prev => {
-      if (!Array.isArray(prev) || prev.length === 0) return [n0];
-      return (prev[prev.length-1] !== n0) ? [...prev, n0] : [...prev];
-    });
-    setRoundLords(prev => {
-      const lordVal = 0 as number;
-      if (!Array.isArray(prev) || prev.length === 0) return [lordVal];
-      const arr = [...prev];
-      arr[arr.length - 1] = lordVal;
-      return arr;
-    });
-  } catch {}
-
-  // TrueSkill：按角色从存档套用（甲为地主，乙/丙为农民）
-  applyTsFromStoreByRole(lord, '虚拟发牌');
-
-  // 记录日志
-  try { setLog(l => [...l, `【TS】虚拟发牌：甲(0) 作为地主，已按角色从存档应用初值`]); } catch {}
-}
-
   // 刷新：按“当前地主身份”应用
   const handleRefreshApply = () => {
-    refreshTsVirtualDeal();
+    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
   };
 
   // —— 用于“区分显示”的帮助函数 —— //
@@ -1780,35 +1747,20 @@ const handleAllSaveInner = () => {
       </div>
 
       <div style={{ marginTop:18 }}>
-        <Section title="运行日志">
-  <div style={{ display:'flex', justifyContent:'flex-end', alignItems:'center', marginBottom:8 }}>
+        <Section title="">
+  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+    <div style={{ fontWeight:700 }}>运行日志</div>
     <button
-      onClick={() => {
-        try {
-          const lines = (logRef.current || []) as string[];
-          const ts = new Date().toISOString().replace(/[:.]/g, '-');
-          const text = lines.length ? lines.join('\n') : '（暂无）';
-          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `run-log_${ts}.txt`;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1200);
-        } catch (e) {
-          console.error('[runlog] save error', e);
-        }
-      }}
+      onClick={() => { try { const lines=(logRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
       style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-    >
-      存档
-    </button>
+    >存档</button>
   </div>
 
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
+<div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
             {log.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）</div> : log.map((t, idx) => <LogLine key={idx} text={t} />)}
           </div>
-        </Section>
+        
+</Section>
       </div>
     </div>
   );
