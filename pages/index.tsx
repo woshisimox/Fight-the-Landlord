@@ -144,11 +144,12 @@ function Card({ label }: { label:string }) {
       border:'1px solid #ddd', borderRadius:8, padding:'6px 10px',
       marginRight:6, marginBottom:6, fontWeight:800, color: baseColor
     }}>
-      <span style={{ fontSize:18 }}>{suit}</span>
-      <span style={{ fontSize:16, color: rankColor }}>{rank}</span>
+      <span style={{ fontSize:16 }}>{suit}</span>
+      <span style={{ fontSize:16, ...(rankColor ? { color: rankColor } : {}) }}>{rank === 'T' ? '10' : rank}</span>
     </span>
   );
-}function Hand({ cards }: { cards: string[] }) {
+}
+function Hand({ cards }: { cards: string[] }) {
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>（空）</span>;
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
@@ -254,17 +255,9 @@ function LadderPanel() {
     </div>
   );
 }
-function Section({ title, extra, children }:{ title:string; extra?:React.ReactNode; children:React.ReactNode }) {
+function Section({ title, children }:{title:string; children:React.ReactNode}) {
   return (
     <div style={{ marginBottom:16 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-        <div style={{ fontWeight:700 }}>{title}</div>
-        {extra ?? null}
-      </div>
-      <div>{children}</div>
-    </div>
-  );
-}}>
       <div style={{ fontWeight:700, marginBottom:8 }}>{title}</div>
       <div>{children}</div>
     </div>
@@ -1471,23 +1464,6 @@ nextTotals     = [
 
   const stop = () => { controllerRef.current?.abort(); setRunning(false); };
 
-// —— 运行日志存档 ——
-const handleRunLogSave = () => {
-  try {
-    const lines = (logRef.current || []) as string[];
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const text = lines.length ? lines.join('\n') : '（暂无）';
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `run-log_${ts}.txt`; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1200);
-  } catch (e) {
-    console.error('[runlog] save error', e);
-  }
-};
-
-
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
   // ===== 统一统计打包（All-in-One） =====
@@ -1771,7 +1747,31 @@ const handleAllSaveInner = () => {
       </div>
 
       <div style={{ marginTop:18 }}>
-        <Section title="运行日志" extra={<button onClick={handleRunLogSave} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>}>
+        <Section title="运行日志">
+  <div style={{ display:'flex', justifyContent:'flex-end', alignItems:'center', marginBottom:8 }}>
+    <button
+      onClick={() => {
+        try {
+          const lines = (logRef.current || []) as string[];
+          const ts = new Date().toISOString().replace(/[:.]/g, '-');
+          const text = lines.length ? lines.join('\n') : '（暂无）';
+          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `run-log_${ts}.txt`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1200);
+        } catch (e) {
+          console.error('[runlog] save error', e);
+        }
+      }}
+      style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >
+      存档
+    </button>
+  </div>
+
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
             {log.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）</div> : log.map((t, idx) => <LogLine key={idx} text={t} />)}
           </div>
