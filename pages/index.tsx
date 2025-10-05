@@ -2094,3 +2094,8 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
     </div>
   );
 }
+
+// ===== Fallback stub: Radar apply by role (no-op if radar persistence disabled) =====
+const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
+  try { setLog(l => [...l, `【Radar】跳过应用（${why}，未启用持久化）`]); } catch {}
+};
