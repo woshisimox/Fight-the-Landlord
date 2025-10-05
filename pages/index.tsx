@@ -307,23 +307,6 @@ function choiceLabel(choice: BotChoice): string {
     default: return String(choice);
   }
 }
-// === 映射：人类可读标签 -> choice 枚举（用于宽松模板兼容） ===
-const CHOICE_BY_LABEL: Record<string, BotChoice> = {
-  'Greedy Max':'built-in:greedy-max',
-  'Greedy Min':'built-in:greedy-min',
-  'Random Legal':'built-in:random-legal',
-  'MiniNet':'built-in:mininet',
-  'AllySupport':'built-in:ally-support',
-  'EndgameRush':'built-in:endgame-rush',
-  'OpenAI':'ai:openai',
-  'Gemini':'ai:gemini',
-  'Grok':'ai:grok',
-  'Kimi':'ai:kimi',
-  'Qwen':'ai:qwen',
-  'DeepSeek':'ai:deepseek',
-  'HTTP':'http',
-};
-
 
 
 /* ====== 雷达图累计（0~5） ====== */
@@ -463,73 +446,13 @@ function LivePanel(props: LiveProps) {
   useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
 
-  
-// —— 待应用的 TrueSkill 存档（上传时暂存，刷新时才写入并应用） ——
-const tsPendingRawRef = useRef<any|null>(null);
-
-// 将 pending 的 TS 存档标准化为 identity 键并写入 tsStoreRef.current.players
-function materializePendingTsStore(): boolean {
-  const j = tsPendingRawRef.current;
-  if (!j) return false;
-
-  if (!tsStoreRef.current) (tsStoreRef as any).current = emptyStore();
-  if (!tsStoreRef.current.players) tsStoreRef.current.players = {} as any;
-
-  const incoming: any = (j?.players && typeof j.players === 'object') ? j.players : j;
-
-  for (const [k, p0] of Object.entries<any>(incoming || {})) {
-    const meta = (p0 && p0.meta) || {};
-    let choice: BotChoice | undefined =
-      meta.choice ||
-      (CHOICE_BY_LABEL as any)[k] ||
-      ((String(k).startsWith('built-in:') || String(k).startsWith('ai:') || String(k) === 'http') ? (k as BotChoice) : undefined);
-
-    if (!choice && typeof (p0 && p0.label) === 'string') {
-      choice = (CHOICE_BY_LABEL as any)[p0.label];
-    }
-
-    if (!choice) {
-      const idRaw = (p0 && p0.id) || k;
-      const id = typeof idRaw === 'string' ? idRaw : String(idRaw);
-      (tsStoreRef.current.players as any)[id] = {
-        id,
-        overall: (p0 && (p0.overall || p0.rating)) || null,
-        roles: (p0 && p0.roles) || null,
-        meta,
-      };
-      continue;
-    }
-
-    const modelNorm =
-      normalizeModelForProvider(choice, (meta && meta.model) || '') ||
-      defaultModelFor(choice);
-
-    const base = (choice === 'http') ? ((meta && meta.httpBase) || '') : '';
-    const id = `${choice}|${modelNorm}|${base}`;
-
-    (tsStoreRef.current.players as any)[id] = {
-      id,
-      overall: (p0 && (p0.overall || p0.rating)) || null,
-      roles: {
-        landlord: (p0 && p0.roles && p0.roles.landlord) ?? (p0 && p0.landlord) ?? null,
-        farmer  : (p0 && p0.roles && p0.roles.farmer)   ?? (p0 && p0.farmer)   ?? null,
-      },
-      meta: { choice, ...(meta && meta.model ? { model: meta.model } : {}), ...(base ? { httpBase: base } : {}) },
-    };
-  }
-
-  tsPendingRawRef.current = null;
-  try { setLog(l => [...l, '【TS】已将待应用存档标准化并写入内存']); } catch {}
-  try { writeStore(tsStoreRef.current); } catch {}
-  return true;
-}
-
-const seatIdentity = (i:number) => {
-    const choice = props.seats[i];
-    const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
-    const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
-    return `${choice}|${model}|${base}`; // 身份锚定
+  const seatIdentity = (i:number) => {
+    const choice = seats[i];
+    const model = normalizeModelForProvider(choice, seatModels[i] || '') || defaultModelFor(choice);
+    const base = choice === 'http' ? (seatKeys[i]?.httpBase || '') : '';
+    return `${choice}|${model}|${base}`; // 身份锚定（用本地 UI 状态）
   };
+;
 
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
     const p = tsStoreRef.current.players[id]; if (!p) return null;
@@ -542,41 +465,8 @@ const seatIdentity = (i:number) => {
     return null;
   };
 
-  
-  // 根据当前座位构造 identity，并对 tsStoreRef.current.players 做容错映射
-  const resolveIdsForCurrentSeats = (): string[] => {
-    const ids: string[] = [0,1,2].map((i)=>{
-      const choice = props.seats[i];
-      const model  = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
-      const base   = (choice === 'http') ? (props.seatKeys[i]?.httpBase || '') : '';
-      const direct = `${choice}|${model}|${base}`;
-      if (tsStoreRef.current.players[direct]) return direct;
-
-      // 1) 按 meta 精准匹配
-      const byMeta = Object.entries<any>(tsStoreRef.current.players).find(([_, p])=>{
-        const m = p?.meta || {};
-        if (m.choice !== choice) return false;
-        if (choice === 'http') return (m.httpBase || '') === base;
-        const mnorm = normalizeModelForProvider(choice, m.model || '') || defaultModelFor(choice);
-        return mnorm === model || !m.model;
-      });
-      if (byMeta) return byMeta[0];
-
-      // 2) 内置算法：用 label 推断
-      if ((choice as string).startsWith('built-in')) {
-        const guess = `built-in:${choiceLabel(choice as any).toLowerCase().replace(/\s+/g,'-')}||`;
-        if (tsStoreRef.current.players[guess]) return guess;
-      }
-
-      // 3) 兜底：找任意以 `${choice}|` 开头的条目
-      const starts = Object.keys(tsStoreRef.current.players).find(k => k.startsWith(`${choice}|`));
-      return starts || direct;
-    });
-    try { setLog(l => [...l, '【TS】参赛确认：' + ids.map((id,i)=>`${['甲','乙','丙'][i]}→${id}`).join(' | ')]); } catch {}
-    return ids;
-  };
-const applyTsFromStore = (why:string) => {
-    const ids = resolveIdsForCurrentSeats();
+  const applyTsFromStore = (why:string) => {
+    const ids = [0,1,2].map(seatIdentity);
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
     setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
@@ -584,7 +474,7 @@ const applyTsFromStore = (why:string) => {
 
   // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = resolveIdsForCurrentSeats();
+    const ids = [0,1,2].map(seatIdentity);
     const init = [0,1,2].map(i => {
       const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
       return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
@@ -605,9 +495,9 @@ const applyTsFromStore = (why:string) => {
       const role: TsRole = (i===landlordIndex) ? 'landlord' : 'farmer';
       entry.roles = entry.roles || {};
       entry.roles[role] = { ...updated[i] };
-      const choice = props.seats[i];
-      const model  = (props.seatModels[i] || '').trim();
-      const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
+      const choice = seats[i];
+      const model  = (seatModels[i] || '').trim();
+      const base   = choice==='http' ? (seatKeys[i]?.httpBase || '') : '';
       entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
       tsStoreRef.current.players[id] = entry;
     }
@@ -1606,22 +1496,21 @@ const buildAllBundle = (): AllBundle => {
 
 const applyAllBundleInner = (obj:any) => {
   try {
-    if (obj?.trueskill) {
-      // 不立即写入/应用；改为暂存，待“刷新”时写入并按身份套用
-      tsPendingRawRef.current = obj.trueskill;
-      setLog(l => [...l, '【ALL】已载入 TrueSkill 待应用存档（点“刷新”生效）']);
+    if (obj?.trueskill?.players) {
+      tsStoreRef.current = obj.trueskill as TsStore;
+      writeStore(tsStoreRef.current);
+      applyTsFromStoreByRole(landlordRef.current, '统一上传');
     }
     // radar ignored for ALL upload (persistence disabled)
 
     if (obj?.ladder?.schema === 'ddz-ladder@1') {
       try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {}
     }
-    setLog(l => [...l, '【ALL】统一上传完成（TS 已延迟套用，需“刷新”）。']);
+    setLog(l => [...l, '【ALL】统一上传完成（TS / 画像 / 天梯）。']);
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
-}
-;
+};
 const handleAllSaveInner = () => {
     const payload = buildAllBundle();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
@@ -1634,7 +1523,7 @@ const handleAllSaveInner = () => {
   
 
   const handleAllRefreshInner = () => {
-    try { materializePendingTsStore(); } catch {}
+    try { const _ids=[0,1,2].map(seatIdentity); setLog(l=>[...l, '【TS】刷新身份：'+_ids.join(' | ')]); } catch {}
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
     applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
