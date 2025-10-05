@@ -603,10 +603,11 @@ function LivePanel(props: LiveProps) {
                     return newHands;
                   });
 
+                  // 修复：为 card 参数添加明确的 string 类型
                   setPlays(prev => [...prev, { 
                     seat, 
                     move: 'play', 
-                    cards: cards.map(card => {
+                    cards: cards.map((card: string) => {
                       // 确保卡片有花色装饰
                       if (card.startsWith('🃏') || '♠♥♦♣'.includes(card[0])) {
                         return card;
