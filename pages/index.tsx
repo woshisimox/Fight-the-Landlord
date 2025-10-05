@@ -1533,7 +1533,11 @@ function Home() {
   
 // 当前 UI 状态下的身份（用于“刷新”等需要精准对齐的场景）
 const seatIdentityCurrent = (i:number) => {
-// 从存档应用（不区分角色，使用 overall；未知地主时用它）
+  const choice = seats[i];
+  const model = normalizeModelForProvider(choice, seatModels[i] || '') || defaultModelFor(choice);
+  const base = choice === 'http' ? (seatKeys[i]?.httpBase || '') : '';
+  return `${choice}|${model}|${base}`;
+};
 const applyTsFromStore = (why:string) => {
   const ids = [0,1,2].map(seatIdentityCurrent);
   const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
