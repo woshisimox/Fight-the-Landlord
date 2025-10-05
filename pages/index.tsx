@@ -143,12 +143,6 @@ function Card({ label }: { label:string }) {
       display:'inline-flex', alignItems:'center', gap:6,
       border:'1px solid #ddd', borderRadius:8, padding:'6px 10px',
       marginRight:6, marginBottom:6, fontWeight:800, color: baseColor
-    }}>
-      <span style={{ fontSize:16 }}>{suit}</span>
-      <span style={{ fontSize:16, ...(rankColor ? { color: rankColor } : {}) }}>{rank === 'T' ? '10' : rank}</span>
-    </span>
-  );
-}
 function Hand({ cards }: { cards: string[] }) {
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>（空）</span>;
   return (
