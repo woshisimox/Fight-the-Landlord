@@ -1,3 +1,27 @@
+// —— 刷新时“虚拟启动一局”以与 start() 的轮换一致 —— //
+const getStartShiftNext = (): number => {
+  const n = (finishedRef?.current ?? finishedCount) + 1;
+  return ((n - 1) % 3 + 3) % 3;
+};
+const seatIdentityNextRound = (i:number): string => {
+  const shift = getStartShiftNext();
+  const idx = (i + shift) % 3; // 对齐 start() 中 specs 构造
+  const choice = props.seats[idx];
+  const model  = normalizeModelForProvider(choice, props.seatModels[idx] || '') || defaultModelFor(choice);
+  const base   = choice === 'http' ? (props.seatKeys[idx]?.httpBase || '') : '';
+  return `${choice}|${model}|${base}`;
+};
+const applyTsFromStoreNextRound = (why: string) => {
+  const ids = [0,1,2].map(seatIdentityNextRound);
+  const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
+  setTsArr(init);
+  try {
+    setLog(l => [...l,
+      `【TS】按“下一局轮换”应用（${why}）：` +
+      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
+    ]);
+  } catch {}
+};
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
@@ -450,336 +474,9 @@ function LivePanel(props: LiveProps) {
     const choice = props.seats[i];
     const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
-    return `${choice}|${model}|${base}`; // 身份锚定
+    return `${choice}|${model}|${base}`; // 身份锚定（props）
   };
 
-  const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
-    const p = tsStoreRef.current.players[id]; if (!p) return null;
-    if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
-    if (p.overall) return ensureRating(p.overall);
-    const L = p.roles?.landlord, F = p.roles?.farmer;
-    if (L && F) return { mu:(L.mu+F.mu)/2, sigma:(L.sigma+F.sigma)/2 };
-    if (L) return ensureRating(L);
-    if (F) return ensureRating(F);
-    return null;
-  };
-
-  const applyTsFromStore = (why:string) => {
-    const ids = [0,1,2].map(seatIdentity);
-    const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
-    setTsArr(init);
-    setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
-  };
-
-  // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
-  const applyTsFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = [0,1,2].map(seatIdentity);
-    const init = [0,1,2].map(i => {
-      const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
-      return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
-    });
-    setTsArr(init);
-    setLog(l => [...l,
-      `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
-      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
-    ]);
-  };
-
-  const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
-    const ids = [0,1,2].map(seatIdentity);
-    for (let i=0;i<3;i++){
-      const id = ids[i];
-      const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
-      entry.overall = { ...updated[i] };
-      const role: TsRole = (i===landlordIndex) ? 'landlord' : 'farmer';
-      entry.roles = entry.roles || {};
-      entry.roles[role] = { ...updated[i] };
-      const choice = props.seats[i];
-      const model  = (props.seatModels[i] || '').trim();
-      const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
-      entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
-      tsStoreRef.current.players[id] = entry;
-    }
-    writeStore(tsStoreRef.current);
-  };
-
-  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    try {
-      const text = await f.text();
-      const j = JSON.parse(text);
-      const store: TsStore = emptyStore();
-
-      // 兼容多种模板：数组 / {players:{}} / 单人
-      if (Array.isArray(j?.players)) {
-        for (const p of j.players) {
-          const id = p.id || p.identity || p.key; if (!id) continue;
-          store.players[id] = {
-            id,
-            overall: p.overall || p.rating || null,
-            roles: { landlord: p.roles?.landlord ?? p.landlord ?? p.L ?? null,
-                     farmer:   p.roles?.farmer   ?? p.farmer   ?? p.F ?? null },
-            meta: p.meta || {}
-          };
-        }
-      } else if (j?.players && typeof j.players === 'object') {
-        store.players = j.players;
-      } else if (Array.isArray(j)) {
-        for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p; }
-      } else {
-        if (j?.id) store.players[j.id] = j;
-      }
-
-      tsStoreRef.current = store; writeStore(store);
-      setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
-    } catch (err:any) {
-      setLog(l => [...l, `【TS】上传解析失败：${err?.message || err}`]);
-    } finally { e.target.value = ''; }
-  };
-
-  const handleSaveArchive = () => {
-    const ids = [0,1,2].map(seatIdentity);
-    ids.forEach((id,i)=>{
-      const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
-      entry.overall = { ...tsRef.current[i] };
-      tsStoreRef.current.players[id] = entry;
-    });
-    writeStore(tsStoreRef.current);
-    const blob = new Blob([JSON.stringify(tsStoreRef.current, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'trueskill_store.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1200);
-    setLog(l => [...l, '【TS】已导出当前存档。']);
-  };
-
-  // 刷新：按“当前地主身份”应用
-  const handleRefreshApply = () => {
-    // 先按照“下一局的轮换座位”虚拟启动一局，按实际参赛算法导入 μ/σ（若未知地主则用 overall）
-    applyTsFromStoreNextRound('手动刷新·虚拟启动');
-    // 若此刻已经能确定地主（例如 UI 已记录上一帧/本局），再按角色微调一次
-    try { applyTsFromStoreByRole(landlordRef.current, '手动刷新·按角色微调'); } catch {}
-  };
-
-  // —— 用于“区分显示”的帮助函数 —— //
-  const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
-  const muSig = (r: Rating | null | undefined) => r ? `μ ${fmt2(r.mu)}｜σ ${fmt2(r.sigma)}` : '—';
-  const getStoredForSeat = (i:number) => {
-    const id = seatIdentity(i);
-    const p = tsStoreRef.current.players[id];
-    return {
-      overall: p?.overall ? ensureRating(p.overall) : null,
-      landlord: p?.roles?.landlord ? ensureRating(p.roles.landlord) : null,
-      farmer: p?.roles?.farmer ? ensureRating(p.roles.farmer) : null,
-    };
-  };
-
-
-  /* ===== Radar（战术画像）本地存档（新增） ===== */
-  type RadarAgg = { scores: Score5; count: number };
-  type RadarStoreEntry = {
-    id: string; // 身份：choice|model|base（沿用 seatIdentity）
-    overall?: RadarAgg | null;  // 不区分身份时累计
-    roles?: { landlord?: RadarAgg | null; farmer?: RadarAgg | null }; // 按角色分档
-    meta?: { choice?: string; model?: string; httpBase?: string };
-  };
-  type RadarStore = {
-    schema: 'ddz-radar@1';
-    updatedAt: string;
-    players: Record<string, RadarStoreEntry>;
-  };
-  const RADAR_STORE_KEY = 'ddz_radar_store_v1';
-
-  const ensureScore5 = (x:any): Score5 => ({
-    coop: Number(x?.coop ?? 2.5),
-    agg : Number(x?.agg  ?? 2.5),
-    cons: Number(x?.cons ?? 2.5),
-    eff : Number(x?.eff  ?? 2.5),
-    rob : Number(x?.rob  ?? 2.5),
-  });
-  const ensureRadarAgg = (x:any): RadarAgg => ({
-    scores: ensureScore5(x?.scores),
-    count : Math.max(0, Number(x?.count)||0),
-  });
-
-  const emptyRadarStore = (): RadarStore =>
-    ({ schema:'ddz-radar@1', updatedAt:new Date().toISOString(), players:{} });
-
-  const readRadarStore = (): RadarStore => {
-    try {
-      const raw = localStorage.getItem(RADAR_STORE_KEY);
-      if (!raw) return emptyRadarStore();
-      const j = JSON.parse(raw);
-      if (j?.schema === 'ddz-radar@1' && j?.players) return j as RadarStore;
-    } catch {}
-    return emptyRadarStore();
-  };
-  const writeRadarStore = (_s: RadarStore) => { /* no-op: radar not persisted */ };
-
-  /** 用“均值 + 次数”合并（与前端 mean 聚合一致） */
-  function mergeRadarAgg(prev: RadarAgg|null|undefined, inc: Score5): RadarAgg {
-    if (!prev) return { scores: { ...inc }, count: 1 };
-    const c = prev.count;
-    const mean = (a:number,b:number)=> (a*c + b)/(c+1);
-    return {
-      scores: {
-        coop: mean(prev.scores.coop, inc.coop),
-        agg : mean(prev.scores.agg , inc.agg ),
-        cons: mean(prev.scores.cons, inc.cons),
-        eff : mean(prev.scores.eff , inc.eff ),
-        rob : mean(prev.scores.rob , inc.rob ),
-      },
-      count: c + 1,
-    };
-  }
-
-  // —— Radar 存档：读写/应用/上传/导出 —— //
-  const radarStoreRef = useRef<RadarStore>(emptyRadarStore());
-  useEffect(()=>{ try { radarStoreRef.current = readRadarStore(); } catch {} }, []);
-  const radarFileRef = useRef<HTMLInputElement|null>(null);
-
-  /** 取指定座位的（按角色可选）Radar 累计 */
-  const resolveRadarForIdentity = (id:string, role?: 'landlord'|'farmer'): RadarAgg | null => {
-    const p = radarStoreRef.current.players[id];
-    if (!p) return null;
-    if (role && p.roles?.[role]) return ensureRadarAgg(p.roles[role]);
-    if (p.overall) return ensureRadarAgg(p.overall);
-    const L = p.roles?.landlord, F = p.roles?.farmer;
-    if (L && F) {
-      const ll = ensureRadarAgg(L), ff = ensureRadarAgg(F);
-      const tot = Math.max(1, ll.count + ff.count);
-      const w = (a:number,b:number,ca:number,cb:number)=> (a*ca + b*cb)/tot;
-      return {
-        scores: {
-          coop: w(ll.scores.coop, ff.scores.coop, ll.count, ff.count),
-          agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
-          cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
-          eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
-          rob : w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
-        },
-        count: tot,
-      };
-    }
-    if (L) return ensureRadarAgg(L);
-    if (F) return ensureRadarAgg(F);
-    return null;
-  };
-
-  /** 根据当前地主身份（已知/未知）把存档套到 UI 的 aggStats/aggCount */
-  
-  /* ===== 天梯（活动积分 ΔR_event）本地存档（localStorage 直接读写） ===== */
-  type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number };
-  type LadderEntry = { id:string; label:string; current:LadderAgg; history?: { when:string; n:number; delta:number; deltaR:number }[] };
-  type LadderStore = { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, LadderEntry> };
-  const LADDER_KEY = 'ddz_ladder_store_v1';
-  const LADDER_EMPTY: LadderStore = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-  const LADDER_DEFAULT: LadderAgg = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20 };
-
-  function readLadder(): LadderStore {
-    try { const raw = localStorage.getItem(LADDER_KEY); if (raw) { const j = JSON.parse(raw); if (j?.schema==='ddz-ladder@1') return j as LadderStore; } } catch {}
-    return { ...LADDER_EMPTY, updatedAt:new Date().toISOString() };
-  }
-  function writeLadder(s: LadderStore) {
-    try { s.updatedAt = new Date().toISOString(); localStorage.setItem(LADDER_KEY, JSON.stringify(s)); } catch {}
-  }
-  function ladderUpdateLocal(id:string, label:string, sWin:number, pExp:number, weight:number=1) {
-    const st = readLadder();
-    const ent = st.players[id] || { id, label, current: { ...LADDER_DEFAULT }, history: [] };
-    if (!ent.current) ent.current = { ...LADDER_DEFAULT };
-    if (!ent.label) ent.label = label;
-    const w = Math.max(0, Number(weight) || 0);
-    ent.current.n += w;
-    ent.current.sum += w * (sWin - pExp);
-    const N0 = ent.current.N0 ?? 20;
-    const K  = ent.current.K  ?? 20;
-    ent.current.delta = ent.current.n > 0 ? (ent.current.sum / ent.current.n) : 0;
-    const shrink = Math.sqrt(ent.current.n / (ent.current.n + Math.max(1, N0)));
-    ent.current.deltaR = K * ent.current.delta * shrink;
-    st.players[id] = ent;
-    writeLadder(st);
-    try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
-  }
-    const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = [0,1,2].map(seatIdentity);
-    const s3 = [0,1,2].map(i=>{
-      const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
-      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 }, count: 0 };
-    });
-    setAggStats(s3.map(x=>({ ...x.scores })));
-    setAggCount(Math.max(s3[0].count, s3[1].count, s3[2].count));
-    setLog(l => [...l, `【Radar】已从存档应用（${why}，地主=${lord ?? '未知'}）`]);
-  };
-
-  /** 在收到一帧“本局画像 s3[0..2]”后，写入 Radar 存档（overall + 角色分档） */
-  const updateRadarStoreFromStats = (s3: Score5[], lord: number | null) => {
-    const ids = [0,1,2].map(seatIdentity);
-    for (let i=0;i<3;i++){
-      const id = ids[i];
-      const entry = (radarStoreRef.current.players[id] || { id, roles:{} }) as RadarStoreEntry;
-      entry.overall = mergeRadarAgg(entry.overall, s3[i]);
-      if (lord!=null) {
-        const role: 'landlord' | 'farmer' = (i===lord ? 'landlord' : 'farmer');
-        entry.roles = entry.roles || {};
-        entry.roles[role] = mergeRadarAgg(entry.roles[role], s3[i]);
-      }
-      const choice = props.seats[i];
-      const model  = (props.seatModels[i] || '').trim();
-      const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
-      entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
-      radarStoreRef.current.players[id] = entry;
-    }
-    // writeRadarStore disabled (no radar persistence)
-  };
-
-  /** 上传 Radar 存档（JSON） */
-  const handleRadarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    try {
-      const text = await f.text();
-      const j = JSON.parse(text);
-      const store: RadarStore = emptyRadarStore();
-
-      if (Array.isArray(j?.players)) {
-        for (const p of j.players) {
-          const id = p.id || p.identity || p.key; if (!id) continue;
-          store.players[id] = {
-            id,
-            overall: p.overall ? ensureRadarAgg(p.overall) : null,
-            roles: {
-              landlord: p.roles?.landlord ? ensureRadarAgg(p.roles.landlord) : (p.landlord ? ensureRadarAgg(p.landlord) : null),
-              farmer  : p.roles?.farmer   ? ensureRadarAgg(p.roles.farmer)   : (p.farmer   ? ensureRadarAgg(p.farmer)   : null),
-            },
-            meta: p.meta || {},
-          };
-        }
-      } else if (j?.players && typeof j.players === 'object') {
-        for (const [id, p] of Object.entries<any>(j.players)) {
-          store.players[id] = {
-            id,
-            overall: p?.overall ? ensureRadarAgg(p.overall) : null,
-            roles: {
-              landlord: p?.roles?.landlord ? ensureRadarAgg(p.roles.landlord) : null,
-              farmer  : p?.roles?.farmer   ? ensureRadarAgg(p.roles.farmer)   : null,
-            },
-            meta: p?.meta || {},
-          };
-        }
-      } else if (Array.isArray(j)) {
-        for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p as any; }
-      } else if (j?.id) {
-        store.players[j.id] = j as any;
-      }
-
-      radarStoreRef.current = store; writeRadarStore(store);
-      setLog(l => [...l, `【Radar】已上传存档（${Object.keys(store.players).length} 位）`]);
-    } catch (err:any) {
-      setLog(l => [...l, `【Radar】上传解析失败：${err?.message || err}`]);
-    } finally { e.target.value = ''; }
-  };
-
-  /** 导出当前 Radar 存档 */
-  const handleRadarSave = () => {
-  setLog(l => [...l, '【Radar】存档已禁用（仅支持查看/刷新，不再保存到本地或 ALL 文件）。']);
-};
 ;
 
   /** 手动刷新：按当前地主身份（未知则用 overall）把存档套到面板 */
@@ -802,33 +499,10 @@ function LivePanel(props: LiveProps) {
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
   const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
   const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
-  const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
-  const winnerRef = useRef
-// —— 刷新时“虚拟启动一局”以对齐下一局的参赛算法（座位轮换与 start() 保持一致） —— //
-const getStartShiftNext = (): number => {
-  const n = (finishedRef?.current ?? finishedCount) + 1; // 下一局的序号
-  return ((n - 1) % 3 + 3) % 3;
-};
-const seatIdentityNextRound = (i:number): string => {
-  const shift = getStartShiftNext();
-  const idx = (i + shift) % 3; // 与 start() 中 specs 的构造保持一致
-  const choice = props.seats[idx];
-  const model  = normalizeModelForProvider(choice, props.seatModels[idx] || '') || defaultModelFor(choice);
-  const base   = choice === 'http' ? (props.seatKeys[idx]?.httpBase || '') : '';
-  return `${choice}|${model}|${base}`;
-};
-const applyTsFromStoreNextRound = (why: string) => {
-  const ids = [0,1,2].map(seatIdentityNextRound);
-  const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
-  setTsArr(init);
-  setLog(l => [...l,
-    `【TS】按“下一局轮换”应用（${why}）：` +
-    init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
-  ]);
-};
-(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
-  const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
-  const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+  const const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
+  const const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
+  const const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
+  const const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
 
   const aggStatsRef = useRef(aggStats); useEffect(()=>{ aggStatsRef.current = aggStats; }, [aggStats]);
   const aggCountRef = useRef(aggCount); useEffect(()=>{ aggCountRef.current = aggCount; }, [aggCount]);
@@ -1548,13 +1222,9 @@ const handleAllSaveInner = () => {
   
 
   const handleAllRefreshInner = () => {
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
-    applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
-    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
-    setRoundCuts(prev => [...prev]);
-    setRoundLords(prev => [...prev]);
-    setLog(l => [...l, '【ALL】已刷新面板数据。']);
-  };
+  applyTsFromStoreNextRound('手动刷新·虚拟启动');
+  try { applyTsFromStoreByRole(landlordRef.current, '手动刷新·按角色微调'); } catch {}
+};
 
   useEffect(()=>{
     const onSave = () => handleAllSaveInner();
@@ -1773,35 +1443,20 @@ const handleAllSaveInner = () => {
       </div>
 
       <div style={{ marginTop:18 }}>
-        <Section title="运行日志">
-  <div style={{ display:'flex', justifyContent:'flex-end', alignItems:'center', marginBottom:8 }}>
+        <Section title="">
+  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+    <div style={{ fontWeight:700 }}>运行日志</div>
     <button
-      onClick={() => {
-        try {
-          const lines = (logRef.current || []) as string[];
-          const ts = new Date().toISOString().replace(/[:.]/g, '-');
-          const text = lines.length ? lines.join('\n') : '（暂无）';
-          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `run-log_${ts}.txt`;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1200);
-        } catch (e) {
-          console.error('[runlog] save error', e);
-        }
-      }}
+      onClick={() => { try { const lines=(logRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
       style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-    >
-      存档
-    </button>
+    >存档</button>
   </div>
 
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
+<div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
             {log.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）</div> : log.map((t, idx) => <LogLine key={idx} text={t} />)}
           </div>
-        </Section>
+        
+</Section>
       </div>
     </div>
   );
@@ -1894,7 +1549,52 @@ function Home() {
   const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
 
-  const [liveLog, setLiveLog] = useState<string[]>([]);
+  
+// 当前 UI 状态下的身份（用于“刷新”等需要精准对齐的场景）
+const seatIdentityCurrent = (i:number) => {
+  const choice = seats[i];
+  const model = normalizeModelForProvider(choice, seatModels[i] || '') || defaultModelFor(choice);
+  const base = choice === 'http' ? (seatKeys[i]?.httpBase || '') : '';
+  return `${choice}|${model}|${base}`;
+};
+const applyTsFromStore = (why:string) => {
+  const ids = [0,1,2].map(seatIdentityCurrent);
+  const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
+  setTsArr(init);
+  try {
+    setLog(l => [
+      ...l,
+      `【TS】已从存档应用（${why}）：` +
+      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
+    ]);
+  } catch {}
+};
+;
+
+// 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
+const applyTsFromStoreByRole = (lord: number | null, why: string) => {
+  const ids = [0,1,2].map(seatIdentityCurrent);
+  const init = [0,1,2].map(i => {
+    const role: 'landlord' | 'farmer' | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
+    return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
+  });
+  setTsArr(init);
+  try {
+    setLog(l => [
+      ...l,
+      `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
+      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
+    ]);
+  } catch {}
+};
+;
+
+  const choice = seats[i];
+  const model = normalizeModelForProvider(choice, seatModels[i] || '') || defaultModelFor(choice);
+  const base = choice === 'http' ? (seatKeys[i]?.httpBase || '') : '';
+  return `${choice}|${model}|${base}`;
+};
+const [liveLog, setLiveLog] = useState<string[]>([]);
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
@@ -2450,3 +2150,8 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
     </div>
   );
 }
+
+// ===== Fallback stub: Radar apply by role (no-op if radar persistence disabled) =====
+const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
+  try { setLog(l => [...l, `【Radar】跳过应用（${why}，未启用持久化）`]); } catch {}
+};
