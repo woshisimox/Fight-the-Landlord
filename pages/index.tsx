@@ -466,7 +466,7 @@ function LivePanel(props: LiveProps) {
   };
 
   const applyTsFromStore = (why:string) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = [0,1,2].map(seatIdentityCurrent);
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
     setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
@@ -474,7 +474,7 @@ function LivePanel(props: LiveProps) {
 
   // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = [0,1,2].map(seatIdentityCurrent);
     const init = [0,1,2].map(i => {
       const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
       return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
@@ -1523,7 +1523,7 @@ const handleAllSaveInner = () => {
   
 
   const handleAllRefreshInner = () => {
-    try { const _ids=[0,1,2].map(seatIdentity); setLog(l=>[...l, '【TS】刷新身份：'+_ids.join(' | ')]); } catch {}
+    try { const _ids=[0,1,2].map(seatIdentityCurrent); setLog(l=>[...l, '【TS】刷新身份：'+_ids.join(' | ')]); } catch {}
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
     applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
@@ -1855,7 +1855,15 @@ function Home() {
   const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
 
-  const [liveLog, setLiveLog] = useState<string[]>([]);
+  
+// 当前 UI 状态下的身份（用于“刷新”等需要精准对齐的场景）
+const seatIdentityCurrent = (i:number) => {
+  const choice = seats[i];
+  const model = normalizeModelForProvider(choice, seatModels[i] || '') || defaultModelFor(choice);
+  const base = choice === 'http' ? (seatKeys[i]?.httpBase || '') : '';
+  return `${choice}|${model}|${base}`;
+};
+const [liveLog, setLiveLog] = useState<string[]>([]);
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
