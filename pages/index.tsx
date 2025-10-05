@@ -1,27 +1,3 @@
-// —— 刷新时“虚拟启动一局”以与 start() 的轮换一致 —— //
-const getStartShiftNext = (): number => {
-  const n = (finishedRef?.current ?? finishedCount) + 1;
-  return ((n - 1) % 3 + 3) % 3;
-};
-const seatIdentityNextRound = (i:number): string => {
-  const shift = getStartShiftNext();
-  const idx = (i + shift) % 3; // 对齐 start() 中 specs 构造
-  const choice = props.seats[idx];
-  const model  = normalizeModelForProvider(choice, props.seatModels[idx] || '') || defaultModelFor(choice);
-  const base   = choice === 'http' ? (props.seatKeys[idx]?.httpBase || '') : '';
-  return `${choice}|${model}|${base}`;
-};
-const applyTsFromStoreNextRound = (why: string) => {
-  const ids = [0,1,2].map(seatIdentityNextRound);
-  const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
-  setTsArr(init);
-  try {
-    setLog(l => [...l,
-      `【TS】按“下一局轮换”应用（${why}）：` +
-      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
-    ]);
-  } catch {}
-};
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
@@ -497,7 +473,32 @@ function LivePanel(props: LiveProps) {
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
-  const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
+  const finishedRef = useRef(finishedCount);
+// —— 刷新时“虚拟启动一局”以与 start() 的轮换一致 —— //
+const getStartShiftNext = (): number => {
+  const n = (finishedRef?.current ?? finishedCount) + 1;
+  return ((n - 1) % 3 + 3) % 3;
+};
+const seatIdentityNextRound = (i:number): string => {
+  const shift = getStartShiftNext();
+  const idx = (i + shift) % 3; // 对齐 start() 中 specs 构造
+  const choice = props.seats[idx];
+  const model  = normalizeModelForProvider(choice, props.seatModels[idx] || '') || defaultModelFor(choice);
+  const base   = choice === 'http' ? (props.seatKeys[idx]?.httpBase || '') : '';
+  return `${choice}|${model}|${base}`;
+};
+const applyTsFromStoreNextRound = (why: string) => {
+  const ids = [0,1,2].map(seatIdentityNextRound);
+  const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
+  setTsArr(init);
+  try {
+    setLog(l => [...l,
+      `【TS】按“下一局轮换”应用（${why}）：` +
+      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
+    ]);
+  } catch {}
+};
+ useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
   const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
   const const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
   const const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
@@ -1222,9 +1223,9 @@ const handleAllSaveInner = () => {
   
 
   const handleAllRefreshInner = () => {
-  applyTsFromStoreNextRound('手动刷新·虚拟启动');
-  try { applyTsFromStoreByRole(landlordRef.current, '手动刷新·按角色微调'); } catch {}
-};
+    applyTsFromStoreNextRound('手动刷新·虚拟启动');
+    try { applyTsFromStoreByRole(landlordRef.current, '手动刷新·按角色微调'); } catch {}
+  };
 
   useEffect(()=>{
     const onSave = () => handleAllSaveInner();
