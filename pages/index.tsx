@@ -255,10 +255,13 @@ function LadderPanel() {
     </div>
   );
 }
-function Section({ title, children }:{title:string; children:React.ReactNode}) {
+function Section({ title, extra, children }:{title:string; extra?:React.ReactNode; children:React.ReactNode}) {
   return (
     <div style={{ marginBottom:16 }}>
-      <div style={{ fontWeight:700, marginBottom:8 }}>{title}</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+        <div style={{ fontWeight:700 }}>{title}</div>
+        {extra ?? null}
+      </div>
       <div>{children}</div>
     </div>
   );
@@ -1747,32 +1750,9 @@ const handleAllSaveInner = () => {
       </div>
 
       <div style={{ marginTop:18 }}>
-        <Section title="运行日志">
-  <div style={{ display:'flex', justifyContent:'flex-end', alignItems:'center', marginBottom:8 }}>
-    <button
-      onClick={() => {
-        try {
-          const lines = (logRef.current || []) as string[];
-          const ts = new Date().toISOString().replace(/[:.]/g, '-');
-          const text = lines.length ? lines.join('\n') : '（暂无）';
-          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `run-log_${ts}.txt`;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1200);
-        } catch (e) {
-          console.error('[runlog] save error', e);
-        }
-      }}
-      style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-    >
-      存档
-    </button>
-  </div>
-
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
+        <Section title="运行日志" extra={<button onClick={() => { try { const lines = (logRef.current || []) as string[]; const ts = new Date().toISOString().replace(/[:.]/g, '-'); const text = lines.length ? lines.join('
+') : '（暂无）'; const blob = new Blob([text], { type: 'text/plain;charset=utf-8' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `run-log_${ts}.txt`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1200); } catch (e) { console.error('[runlog] save error', e); } }} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>}>
+  <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
             {log.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）</div> : log.map((t, idx) => <LogLine key={idx} text={t} />)}
           </div>
         </Section>
