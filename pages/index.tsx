@@ -1566,11 +1566,11 @@ const handleAllSaveInner = () => {
 
   return (
     <div>
+        <Section title="运行日志" extra={<button onClick={handleRunLogSave} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>存档</button>}>
 <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
             {log.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）</div> : log.map((t, idx) => <LogLine key={idx} text={t} />)}
           </div>
         </Section>
-      </div>
     </div>
   );
 }
