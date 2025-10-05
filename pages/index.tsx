@@ -454,8 +454,7 @@ function LivePanel(props: LiveProps) {
   };
 
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
-  const pickRole = (p: any): Rating | null => {
-    if (!p) return null;
+    const p = tsStoreRef.current.players[id]; if (!p) return null;
     if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
     if (p.overall) return ensureRating(p.overall);
     const L = p.roles?.landlord, F = p.roles?.farmer;
@@ -464,45 +463,6 @@ function LivePanel(props: LiveProps) {
     if (F) return ensureRating(F);
     return null;
   };
-
-  // 1) exact
-  let r = pickRole(tsStoreRef.current.players[id]);
-  if (r) return r;
-
-  // 2) fallback candidates for legacy IDs
-  const candidates = (() => {
-    const c = new Set<string>();
-    const s = (id || '').trim();
-    c.add(s);
-    const parts = s.split('|');
-    // remove empty trailing fields
-    while (parts.length > 1 && (!parts[parts.length-1] || parts[parts.length-1] === '')) parts.pop();
-    if (parts.length) c.add(parts.join('|'));
-    // only choice
-    if (parts.length >= 1) c.add(parts[0]);
-    // choice|model
-    if (parts.length >= 2) c.add(`${parts[0]}|${parts[1]}`);
-    // normalized 3-part with empties
-    if (parts.length === 1) c.add(`${parts[0]}||`);
-    if (parts.length === 2) c.add(`${parts[0]}|${parts[1]}|`);
-    // friendly label → built-in choice
-    const friendlyMap: Record<string,string> = {
-      'Greedy Max': 'built-in:greedy-max',
-      'Greedy Min': 'built-in:greedy-min',
-      'Random Legal': 'built-in:random-legal',
-    };
-    const choice = parts[0] || s;
-    const alt = friendlyMap[choice];
-    if (alt) { c.add(alt); c.add(`${alt}|`); c.add(`${alt}||`); }
-    return Array.from(c);
-  })();
-
-  for (const key of candidates) {
-    r = pickRole(tsStoreRef.current.players[key]);
-    if (r) return r;
-  }
-  return null;
-};;
 
   const applyTsFromStore = (why:string) => {
     const ids = [0,1,2].map(seatIdentity);
@@ -1577,8 +1537,8 @@ const applyAllBundleInner = (obj:any) => {
     if (obj?.trueskill?.players) {
       tsStoreRef.current = obj.trueskill as TsStore;
       writeStore(tsStoreRef.current);
-      setLog(l => [...l, '【TS】已接收存档（未应用，待“刷新”虚拟发牌套用）。']);
-}
+      applyTsFromStoreByRole(landlordRef.current, '统一上传');
+    }
     // radar ignored for ALL upload (persistence disabled)
 
     if (obj?.ladder?.schema === 'ddz-ladder@1') {
@@ -1601,12 +1561,12 @@ const handleAllSaveInner = () => {
   
 
   const handleAllRefreshInner = () => {
-    refreshTsVirtualDeal();                // 固定甲为地主 + 按角色把 TS 从存档套到当前参赛算法身份
-applyRadarFromStoreByRole(0, '虚拟局-刷新'); // 画像也按虚拟地主=甲来套用
-setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
-setRoundCuts(prev => [...prev]);
-setRoundLords(prev => [...prev]);
-setLog(l => [...l, '【ALL】已刷新（虚拟发牌：甲为地主）']);
+    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+    applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
+    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+    setRoundCuts(prev => [...prev]);
+    setRoundLords(prev => [...prev]);
+    setLog(l => [...l, '【ALL】已刷新面板数据。']);
   };
 
   useEffect(()=>{
@@ -1646,13 +1606,15 @@ setLog(l => [...l, '【ALL】已刷新（虚拟发牌：甲为地主）']);
             const stored = getStoredForSeat(i);
             const usingRole: 'overall'|'landlord'|'farmer' =
               landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
-            // 显示层的最小修补：若当前为“地主/农民”且 tsArr[i] 仍是缺省(25, 8.33)，
-// 则回退用存档中的对应分档，避免刷新后甲显示为缺省值。
-const __isDefault = (r)=> Math.abs((r?.mu ?? 25) - 25) < 1e-6 && Math.abs((r?.sigma ?? 25/3) - 25/3) < 1e-6;
-let displayR = tsArr[i];
-if (usingRole === 'landlord' && __isDefault(displayR)) displayR = stored.landlord || displayR;
-if (usingRole === 'farmer'   && __isDefault(displayR)) displayR = stored.farmer   || displayR;
-if (usingRole === 'overall'  && __isDefault(displayR)) displayR = stored.overall  || displayR;
+            // 显示层兜底：若当前为角色档且 tsArr[i] 仍是缺省(25, 8.33)，回退显示存档对应分档
+const __isDefault = (r: Rating | null | undefined) =>
+  Math.abs(( (r?.mu ?? 25) - 25 )) < 1e-6 &&
+  Math.abs(( (r?.sigma ?? (25/3)) - (25/3) )) < 1e-6;
+
+let displayR: Rating = tsArr[i];
+if (usingRole === 'landlord' && __isDefault(displayR) && stored.landlord) displayR = stored.landlord;
+if (usingRole === 'farmer'   && __isDefault(displayR) && stored.farmer)   displayR = stored.farmer;
+if (usingRole === 'overall'  && __isDefault(displayR) && stored.overall)  displayR = stored.overall;
 return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
