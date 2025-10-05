@@ -1941,7 +1941,7 @@ function Home() {
   return (
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
-                )
+                
         </div>
       </div>
 
