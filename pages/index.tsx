@@ -468,6 +468,24 @@ function LivePanel(props: LiveProps) {
     };
   };
 
+  // —— 雷达图状态 —— //
+  const [radarStats, setRadarStats] = useState<Score5[] | null>(null);
+  const [radarCount, setRadarCount] = useState<number>(0);
+
+  // 更新雷达图数据
+  const updateRadarStats = (scores: Score5[]) => {
+    if (!radarStats) {
+      setRadarStats(scores);
+      setRadarCount(1);
+    } else {
+      const newStats = radarStats.map((prev, idx) => 
+        mergeScore(prev, scores[idx], 'mean', radarCount, 0.35)
+      );
+      setRadarStats(newStats);
+      setRadarCount(prev => prev + 1);
+    }
+  };
+
   // —— 主循环 —— //
   const runGame = async () => {
     if (running) return;
@@ -564,7 +582,8 @@ function LivePanel(props: LiveProps) {
               // 处理初始化数据
               if (data.type === 'init') {
                 const gameHands = data.hands || [[],[],[]];
-                setHands(gameHands.map((h:string[]) => decorateHandCycle(h)));
+                const decoratedHands = gameHands.map((h:string[]) => decorateHandCycle(h));
+                setHands(decoratedHands);
                 const lordIndex = data.landlordIdx ?? data.landlord ?? null;
                 setLandlord(lordIndex);
                 
@@ -576,7 +595,7 @@ function LivePanel(props: LiveProps) {
                 setLog(l => [...l, `发牌完成，${lordIndex !== null ? seatName(lordIndex) : '?'}为地主`]);
               }
 
-              // 处理出牌事件
+              // 处理出牌事件 - 修复手牌实时更新
               if (data.type === 'event' && data.kind === 'play') {
                 const seat = data.seat;
                 const move = data.move;
@@ -587,14 +606,22 @@ function LivePanel(props: LiveProps) {
                   setPlays(prev => [...prev, { seat, move: 'pass', reason }]);
                   setLog(l => [...l, `${seatName(seat)} 过${reason ? `（${reason}）` : ''}`]);
                 } else {
-                  // 更新手牌
+                  // 实时更新手牌 - 修复版
                   setHands(prev => {
                     const newHands = [...prev];
                     const playerHand = [...newHands[seat]];
+                    
+                    // 从手牌中移除打出的牌
                     for (const card of cards) {
-                      const cardIndex = playerHand.findIndex(c => 
-                        c === card || c.replace(/[♠♥♦♣]/, '') === card.replace(/[♠♥♦♣]/, '')
-                      );
+                      // 查找匹配的牌（考虑花色）
+                      const cardIndex = playerHand.findIndex(c => {
+                        // 如果是带花色的牌，精确匹配
+                        if (card.startsWith('🃏') || '♠♥♦♣'.includes(card[0])) {
+                          return c === card;
+                        }
+                        // 如果是不带花色的牌，匹配点数
+                        return c.includes(card);
+                      });
                       if (cardIndex > -1) {
                         playerHand.splice(cardIndex, 1);
                       }
@@ -619,6 +646,9 @@ function LivePanel(props: LiveProps) {
                   }]);
                   setLog(l => [...l, `${seatName(seat)} 出牌：${cards.join(' ')}${reason ? `（理由：${reason}）` : ''}`]);
                 }
+
+                // 添加延迟以便观察手牌变化
+                await new Promise(resolve => setTimeout(resolve, 500));
               }
 
               // 处理游戏结果
@@ -638,7 +668,7 @@ function LivePanel(props: LiveProps) {
                   prev[2] + deltaScores[2],
                 ]);
 
-                // 更新 TrueSkill
+                // 更新 TrueSkill - 确保每局结束后更新
                 const tsCur = [...tsRef.current];
                 if (winnerSeat !== null && landlord !== null) {
                   if (winnerSeat === landlord) {
@@ -648,6 +678,13 @@ function LivePanel(props: LiveProps) {
                   }
                   setTsArr([...tsCur]);
                   updateStoreAfterRound(tsCur, landlord);
+                  setLog(l => [...l, `【TS】第${round+1}局后更新完成`]);
+                }
+
+                // 更新雷达图数据
+                if (data.radarScores) {
+                  updateRadarStats(data.radarScores);
+                  setLog(l => [...l, `【雷达图】第${round+1}局数据已记录`]);
                 }
 
                 setLog(l => [...l, 
@@ -675,6 +712,19 @@ function LivePanel(props: LiveProps) {
                 } catch (e) {
                   console.error('更新天梯图失败:', e);
                 }
+              }
+
+              // 处理雷达图数据
+              if (data.type === 'stats' && Array.isArray(data.perSeat)) {
+                const radarScores = data.perSeat.map((seatData: any) => ({
+                  coop: Number(seatData.scaled?.coop ?? 2.5),
+                  agg: Number(seatData.scaled?.agg ?? 2.5),
+                  cons: Number(seatData.scaled?.cons ?? 2.5),
+                  eff: Number(seatData.scaled?.eff ?? 2.5),
+                  rob: Number(seatData.scaled?.rob ?? 2.5),
+                }));
+                updateRadarStats(radarScores);
+                setLog(l => [...l, `【雷达图】收到统计数据，已更新`]);
               }
 
               // 处理日志
@@ -763,6 +813,23 @@ function LivePanel(props: LiveProps) {
         </div>
       </Section>
 
+      {/* 雷达图显示 */}
+      <Section title="战术画像（雷达图）">
+        {radarStats ? (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12 }}>
+            {[0,1,2].map(i=>(
+              <RadarChart 
+                key={i}
+                title={`${['甲','乙','丙'][i]}（${radarCount}局）`}
+                scores={radarStats[i]} 
+              />
+            ))}
+          </div>
+        ) : (
+          <div style={{ opacity:0.6, textAlign:'center', padding:20 }}>（等待对局数据生成雷达图）</div>
+        )}
+      </Section>
+
       {/* 对局信息 */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginTop:16 }}>
         <div>
@@ -832,6 +899,58 @@ function LivePanel(props: LiveProps) {
           )}
         </div>
       </Section>
+    </div>
+  );
+}
+
+/* ====== 雷达图组件 ====== */
+function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
+  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
+  const labels = ['配合','激进','保守','效率','抢地主'];
+  const size = 180, R = 70, cx = size/2, cy = size/2;
+
+  const ang = (i:number)=> (-90 + i*(360/5)) * Math.PI/180;
+
+  const ringPoints = (r:number)=> Array.from({length:5}, (_,i)=> {
+    return `${cx + r * Math.cos(ang(i))},${cy + r * Math.sin(ang(i))}`;
+  }).join(' ');
+
+  const valuePoints = Array.from({length:5}, (_,i)=> {
+    const r = Math.max(0, Math.min(5, vals[i] ?? 0)) / 5 * R;
+    return `${cx + r * Math.cos(ang(i))},${cy + r * Math.sin(ang(i))}`;
+  }).join(' ');
+
+  return (
+    <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {/* 环形网格 */}
+        {[1,2,3,4].map(k=>{
+          const r = (k/4) * R;
+          return <polygon key={k} points={ringPoints(r)} fill="none" stroke="#e5e7eb"/>;
+        })}
+        {/* 轴线 */}
+        {Array.from({length:5}, (_,i)=>{
+          return <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang(i))} y2={cy + R * Math.sin(ang(i))} stroke="#e5e7eb"/>;
+        })}
+        {/* 值多边形 */}
+        <polygon points={valuePoints} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
+        {/* 标签 */}
+        {labels.map((lab, i)=>{
+          const lx = cx + (R + 14) * Math.cos(ang(i));
+          const ly = cy + (R + 14) * Math.sin(ang(i));
+          return <text key={i} x={lx} y={ly} fontSize={11} textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
+        })}
+      </svg>
+      <div style={{ minWidth:60, fontSize:12, color:'#374151' }}>
+        <div style={{ fontWeight:600 }}>{title}</div>
+        <div style={{ marginTop:4 }}>
+          合作: {scores.coop.toFixed(1)}<br/>
+          激进: {scores.agg.toFixed(1)}<br/>
+          稳健: {scores.cons.toFixed(1)}<br/>
+          效率: {scores.eff.toFixed(1)}<br/>
+          抢庄: {scores.rob.toFixed(1)}
+        </div>
+      </div>
     </div>
   );
 }
