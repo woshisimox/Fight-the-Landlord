@@ -225,7 +225,14 @@ function LadderPanel() {
     return { id, label, val, n };
   });
 
-  const K = Math.max(1, ...arr.map(x=> (players[x.id]?.current?.K ?? 20)), 20);
+  // 优化：动态计算 K，根据实际 ΔR 值范围调整（padding 10%，最小 ±20）
+  let allVals = arr.map(it => it.val);
+  let minV = Math.min(...allVals);
+  let maxV = Math.max(...allVals);
+  let range = maxV - minV;
+  let dynamicK = range > 0 ? (range / 2) * 1.1 : 20;  // 以范围中点为基准，扩展 10% padding
+  const K = Math.max(20, dynamicK);
+
   const items = arr.sort((a,b)=> b.val - a.val);
 
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
@@ -234,7 +241,7 @@ function LadderPanel() {
     <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
         <div style={{ fontWeight:700 }}>天梯图（活动积分 ΔR）</div>
-        <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）</div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（按局面权重加权，当前 K≈{K.toFixed(1)}；未参赛=历史或0）</div>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
         {items.map((it:any)=>{
