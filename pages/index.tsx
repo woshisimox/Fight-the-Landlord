@@ -225,34 +225,40 @@ function LadderPanel() {
     return { id, label, val, n };
   });
 
-  // 优化：动态计算 K，根据实际 ΔR 值范围调整（padding 10%，最小 ±20）
+  // 优化：动态计算上下限，根据实际 ΔR 值范围调整（padding 10%，最小 pad=1）
   let allVals = arr.map(it => it.val);
-  let minV = Math.min(...allVals);
-  let maxV = Math.max(...allVals);
+  let minV = allVals.length > 0 ? Math.min(...allVals) : 0;
+  let maxV = allVals.length > 0 ? Math.max(...allVals) : 0;
   let range = maxV - minV;
-  let dynamicK = range > 0 ? (range / 2) * 1.1 : 20;  // 以范围中点为基准，扩展 10% padding
-  const K = Math.max(20, dynamicK);
+  let pad = Math.max(1, range * 0.1);
+  let minLimit = minV - pad;
+  let maxLimit = maxV + pad;
+  let totalRange = maxLimit - minLimit;
+  let zeroPct = totalRange > 0 ? ((0 - minLimit) / totalRange) * 100 : 50;
 
   const items = arr.sort((a,b)=> b.val - a.val);
 
-  const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
+  const axisStyle:any = { position:'absolute', left: `${zeroPct}%`, top:0, bottom:0, width:1, background:'#e5e7eb' };
 
   return (
     <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
         <div style={{ fontWeight:700 }}>天梯图（活动积分 ΔR）</div>
-        <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（按局面权重加权，当前 K≈{K.toFixed(1)}；未参赛=历史或0）</div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>范围 [{minLimit.toFixed(1)}, {maxLimit.toFixed(1)}]（按实际值动态调整；未参赛=历史或0）</div>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
         {items.map((it:any)=>{
-          const pct = Math.min(1, Math.abs(it.val)/K);
-          const pos = it.val >= 0;
+          const valPct = totalRange > 0 ? ((it.val - minLimit) / totalRange) * 100 : 50;
+          const isPos = it.val >= 0;
+          const barLeft = isPos ? `${zeroPct}%` : `${valPct}%`;
+          const barWidth = isPos ? `${valPct - zeroPct}%` : `${zeroPct - valPct}%`;
+          const barColor = isPos ? '#16a34a' : '#ef4444';
           return (
             <div key={it.id} style={{ display:'contents' }}>
               <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.label}</div>
               <div style={{ position:'relative', height:16, background:'#f9fafb', border:'1px solid #f3f4f6', borderRadius:8 }}>
                 <div style={axisStyle} />
-                <div style={{ position:'absolute', left: pos ? '50%' : `${50 - pct*50}%`, width: `${pct*50}%`, top:2, bottom:2, background: pos ? '#16a34a' : '#ef4444', borderRadius:6 }}/>
+                <div style={{ position:'absolute', left: barLeft, width: barWidth, top:2, bottom:2, background: barColor, borderRadius:6 }}/>
               </div>
               <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right' }}>{it.val.toFixed(2)}</div>
             </div>
