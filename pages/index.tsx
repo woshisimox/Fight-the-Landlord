@@ -255,10 +255,13 @@ function LadderPanel() {
     </div>
   );
 }
-function Section({ title, children }:{title:string; children:React.ReactNode}) {
+function Section({ title, extra, children }:{ title:string; extra?:React.ReactNode; children:React.ReactNode }) {
   return (
     <div style={{ marginBottom:16 }}>
-      <div style={{ fontWeight:700, marginBottom:8 }}>{title}</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+        <div style={{ fontWeight:700 }}>{title}</div>
+        {extra ?? null}
+      </div>
       <div>{children}</div>
     </div>
   );
@@ -793,7 +796,21 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onTotals?.(totals); }, [totals]);
   useEffect(() => { props.onLog?.(log); }, [log]);
 
-  const controllerRef = useRef<AbortController|null>(null);
+  
+  // —— 运行日志存档（下载当前 logRef 为 txt） ——
+  const handleRunLogSave = () => {
+    try {
+      const lines = (logRef.current || []) as string[];
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const text = lines.length ? lines.join('\n') : '（暂无）';
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `run-log_${ts}.txt`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1200);
+    } catch (e) { console.error('[runlog] save error', e); }
+  };
+const controllerRef = useRef<AbortController|null>(null);
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
@@ -1549,230 +1566,7 @@ const handleAllSaveInner = () => {
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
-        <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
-          剩余局数：{remainingGames}
-        </span>
-      </div>
-
-      {/* ========= TrueSkill（实时） ========= */}
-      <Section title="TrueSkill（实时）">
-        {/* 上传 / 存档 / 刷新 */}
-        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
-        </div>
-
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          {[0,1,2].map(i=>{
-            const stored = getStoredForSeat(i);
-            const usingRole: 'overall'|'landlord'|'farmer' =
-              landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
-            return (
-              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                  <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
-                </div>
-                <div style={{ fontSize:13, color:'#374151' }}>
-                  <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
-                  <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
-                  <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
-                </div>
-
-                {/* 区分显示总体/地主/农民三档，并标注当前使用 */}
-                <div style={{ borderTop:'1px dashed #eee', marginTop:8, paddingTop:8 }}>
-                  <div style={{ fontSize:12, marginBottom:6 }}>
-                    当前使用：<b>
-                      {usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}
-                    </b>
-                  </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12, color:'#374151' }}>
-                    <div>
-                      <div style={{ fontWeight:600, opacity:0.8 }}>总体</div>
-                      <div>{muSig(stored.overall)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontWeight:600, opacity:0.8 }}>地主</div>
-                      <div>{muSig(stored.landlord)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontWeight:600, opacity:0.8 }}>农民</div>
-                      <div>{muSig(stored.farmer)}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
-          说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。</div>
-      </Section>
-
-      {/* ======= 积分下面、手牌上面：雷达图 ======= */}
-      <Section title="战术画像（累计，0~5）">
-        {/* Radar：上传 / 存档 / 刷新 */}
-        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
-        </div>
-
-        <RadarPanel
-          aggStats={aggStats}
-          aggCount={aggCount}
-          aggMode={aggMode}
-          alpha={alpha}
-          onChangeMode={setAggMode}
-          onChangeAlpha={setAlpha}
-        />
-      </Section>
-
-      
-      <Section title="出牌评分（每局动态）">
-        
-<div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
-        <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
-      </Section>
-      <div style={{ marginTop:10 }}></div>
-      <Section title="评分统计（每局汇总）">
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
-          {[0,1,2].map(i=>{
-            const st = scoreStats[i];
-            return (
-              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, background:'#fff' }}>
-                <div style={{ fontWeight:700, marginBottom:6 }}><SeatTitle i={i} /></div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>局数：{st.rounds}</div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>总体均值：{st.overallAvg.toFixed(3)}</div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>最近一局均值：{st.lastAvg.toFixed(3)}</div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>最好局均值：{st.best.toFixed(3)}</div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>最差局均值：{st.worst.toFixed(3)}</div>
-                {/* 分布曲线（每局均值的分布） */}
-                
-                {/* 分布直方图（每手score汇总：横轴=score，纵轴=频次；固定20桶） */}
-                {(() => {
-                  const samples = (scoreSeries[i] || []).filter(v => typeof v === 'number' && !Number.isNaN(v)) as number[];
-                  if (!samples.length) return null;
-                  const pad = 6, W = 220, H = 72;
-                  // μ & σ 基于所有出牌评分样本
-                  const mu = samples.reduce((a,b)=>a+b,0) / samples.length;
-                  const sg = Math.sqrt(Math.max(0, samples.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / samples.length));
-                  // 固定20桶
-                  const bins = 20;
-                  const lo = Math.min(...samples);
-                  const hi0 = Math.max(...samples);
-                  const hi = hi0===lo ? lo + 1 : hi0; // 防零宽
-                  const x = (v:number)=> pad + (hi>lo ? (v-lo)/(hi-lo) : 0.5) * (W - 2*pad);
-                  const barW = (W - 2*pad) / bins;
-                  // 计数
-                  const counts = new Array(bins).fill(0);
-                  for (const v of samples) {
-                    let k = Math.floor((v - lo) / (hi - lo) * bins);
-                    if (k < 0) k = 0; if (k >= bins) k = bins - 1;
-                    counts[k]++;
-                  }
-                  const binWidthVal = (hi - lo) / bins;
-                  const densities = counts.map(c => c / (samples.length * (binWidthVal || 1)));
-                  const maxD = Math.max(...densities) || 1;
-                  const bars = densities.map((d, k) => {
-                    const x0 = pad + k * barW + 0.5;
-                    const h = (H - 2*pad) * (d / maxD);
-                    const y0 = H - pad - h;
-                    return <rect key={k} x={x0} y={y0} width={Math.max(1, barW - 1)} height={Math.max(0, h)} fill="#9ca3af" opacity={0.45} />;
-                  });
-                  // μ & ±1σ 标注
-                  const meanX = x(mu);
-                  const sigL = x(mu - sg);
-                  const sigR = x(mu + sg);
-                  return (
-                    <svg width={W} height={H} style={{ display:'block', marginTop:6 }}>
-                      <rect x={0} y={0} width={W} height={H} fill="#ffffff" stroke="#e5e7eb"/>
-                      {bars}
-                      <line x1={meanX} y1={pad} x2={meanX} y2={H-pad} stroke="#ef4444" strokeDasharray="4 3" />
-                      <line x1={sigL} y1={pad} x2={sigL} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
-                      <line x1={sigR} y1={pad} x2={sigR} y2={H-pad} stroke="#60a5fa" strokeDasharray="2 3" />
-                      <text x={meanX+4} y={12} fontSize={10} fill="#ef4444">μ={mu.toFixed(2)}</text>
-                      <text x={sigL+4} y={24} fontSize={10} fill="#60a5fa">-1σ</text>
-                      <text x={sigR+4} y={24} fontSize={10} fill="#60a5fa">+1σ</text>
-                    </svg>
-                  );
-                })()}
-        
-              </div>
-            );
-          })}
-        </div>
-      </Section>
-
-<Section title="手牌">
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
-          {[0,1,2].map(i=>(
-            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
-                            <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}</div>
-<div style={{ marginBottom:6 }}>
-                <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
-              </div>
-              <Hand cards={hands[i]} />
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      <Section title="出牌">
-        <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
-          {plays.length === 0
-            ? <div style={{ opacity:0.6 }}>（尚无出牌）</div>
-            : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)
-          }
-        </div>
-      </Section>
-
-      <Section title="结果">
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>倍数</div>
-            <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
-          </div>
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>胜者</div>
-            <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}</div>
-          </div>
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>本局加减分</div>
-            <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div>
-          </div>
-        </div>
-      </Section>
-
-      <div style={{ display:'flex', gap:8 }}>
-        <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
-        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
-      </div>
-
-      <div style={{ marginTop:18 }}>
-        <Section title="运行日志">
-  <div style={{ display:'flex', justifyContent:'flex-end', alignItems:'center', marginBottom:8 }}>
-    <button
-      onClick={() => {
-        try {
-          const lines = (logRef.current || []) as string[];
-          const ts = new Date().toISOString().replace(/[:.]/g, '-');
-          const text = lines.length ? lines.join('\n') : '（暂无）';
-          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `run-log_${ts}.txt`;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1200);
-        } catch (e) {
-          console.error('[runlog] save error', e);
-        }
-      }}
-      style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-    >
-      存档
-    </button>
-  </div>
-
-          <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
+<div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
             {log.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）</div> : log.map((t, idx) => <LogLine key={idx} text={t} />)}
           </div>
         </Section>
