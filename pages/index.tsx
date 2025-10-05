@@ -443,6 +443,18 @@ function LivePanel(props: LiveProps) {
 
   // ===== 新增：TS 存档（读/写/应用） =====
   const tsStoreRef = useRef<TsStore>(emptyStore());
+/** 依据 identity（choice|model|base）解析 TrueSkill 评分；若传入 role，则优先取角色档 */
+const resolveRatingForIdentity = (id: string, role?: 'landlord' | 'farmer') => {
+  const store: any = tsStoreRef.current;
+  const p = store && store.players ? store.players[id] : undefined;
+  if (!p) return null;
+  if (role && p.roles && p.roles[role] && typeof p.roles[role].mu === 'number') {
+    return p.roles[role];
+  }
+  const r = p.overall || p.rating || null;
+  return (r && typeof r.mu === 'number') ? r : null;
+};
+
   useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
 
