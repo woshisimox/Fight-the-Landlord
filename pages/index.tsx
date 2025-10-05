@@ -556,40 +556,7 @@ function LivePanel(props: LiveProps) {
   
 
 // 固定甲(0)为地主的“虚拟发牌”：不打牌，只用于角色就绪与TS映射
-
 const refreshTsVirtualDeal = () => {
-  // Force "甲" as the landlord when either "乙" or "丙" isn't GreedyMin or RandomLegal
-  const lord = 0; // 甲 is always the landlord
-  
-  // Set the landlord to "甲"
-  setLandlord(lord);
-  
-  // Update round cuts and round lords to ensure correct initialization
-  setRoundCuts(prev => {
-    const n0 = Math.max(
-      scoreSeriesRef.current[0]?.length || 0,
-      scoreSeriesRef.current[1]?.length || 0,
-      scoreSeriesRef.current[2]?.length || 0
-    );
-    if (prev.length === 0) return [n0];
-    if (prev[prev.length - 1] !== n0) return [...prev, n0];
-    return prev;
-  });
-  
-  setRoundLords(prev => {
-    const bands = Math.max(1, roundCutsRef.current.length);
-    const next = [...prev];
-    next[bands - 1] = lord; // Mark "甲" as the landlord in the current band
-    return next;
-  });
-
-  // Apply ratings based on the landlord/farmer distinction
-  applyTsFromStoreByRole(lord, '虚拟局-刷新');
-
-  // Log the virtual deal initialization
-  setLog(l => [...l, '【TS】已启动虚拟发牌：固定甲为地主，仅用于映射参赛算法→存档身份（不产生对局）。']);
-};
-    
   const lord = 0; // 甲
   // 1) 设置地主（让角色生效）
   setLandlord(lord);
