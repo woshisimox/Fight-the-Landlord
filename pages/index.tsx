@@ -1911,7 +1911,7 @@ function Home() {
     </label>
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:600 }}>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       天梯  /  TrueSkill
     <input
       ref={allFileRef}
