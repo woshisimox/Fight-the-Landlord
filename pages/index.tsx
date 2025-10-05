@@ -360,9 +360,6 @@ function LivePanel(props: LiveProps) {
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [log, setLog] = useState<string[]>([]);
-  const [aiMs, setAiMs] = useState<[number, number, number]>([0,0,0]); // 最近一次AI耗时（ms）
-  const [timeline, setTimeline] = useState<any[]>([]); // 严格时序回放（来自后端 turn.history）
-
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
@@ -812,8 +809,6 @@ function LivePanel(props: LiveProps) {
   const aggModeRef  = useRef(aggMode);  useEffect(()=>{ aggModeRef.current  = aggMode;  }, [aggMode]);
   const alphaRef    = useRef(alpha);    useEffect(()=>{ alphaRef.current    = alpha;    }, [alpha]);
 
-  const aiMsRef = useRef<[number,number,number]>([0,0,0]);
-
   const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
 
   // 每局观测标记
@@ -1113,8 +1108,6 @@ for (const raw of batch) {
 
               // -------- 事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
-                setTimeline([]);
-                aiMsRef.current = [0,0,0] as any; setAiMs([0,0,0] as any);
                 // 清空上一局残余手牌/出牌；等待 init/hands 再填充
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
@@ -1203,8 +1196,6 @@ for (const raw of batch) {
 
 // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
-                // 记录AI调用开始
-                aiMsRef.current && (aiMsRef.current[m.seat] = 0);
                 nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
               }
@@ -1262,12 +1253,7 @@ for (const raw of batch) {
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
                   }
                 }
-                
-                  // 3) 回放时间轴：如果后端带了 history（严格时序，含时间戳），直接采用最新快照
-                  if (Array.isArray((m as any).history)) {
-                    setTimeline((m as any).history as any[]);
-                  }
-continue;
+                continue;
               }
 if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
@@ -1563,56 +1549,6 @@ const handleAllSaveInner = () => {
 
   return (
     <div>
-      {/* === AI 用时（ms） === */}
-      <div style={{ border:'1px solid #eee', borderRadius:10, padding:12, margin:'12px 0' }}>
-        <div style={{ fontSize:16, fontWeight:800, marginBottom:6 }}>AI 用时（最近一次）</div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          {[0,1,2].map(i=>(
-            <div key={i} style={{ border:'1px dashed #eee', borderRadius:8, padding:10 }}>
-              <div style={{ fontWeight:700, marginBottom:6 }}>{seatName(i)}</div>
-              <div style={{ fontSize:20, fontWeight:900 }}>{aiMs[i] ?? 0} ms</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* === 回放时间轴（基于后端 history.t 时间戳） === */}
-      <div style={{ border:'1px solid #eee', borderRadius:10, padding:12, margin:'12px 0' }}>
-        <div style={{ fontSize:16, fontWeight:800, marginBottom:6 }}>回放时间轴</div>
-        <div style={{ maxHeight:240, overflow:'auto', border:'1px dashed #eee', borderRadius:8, padding:8 }}>
-          {timeline && timeline.length>0 ? (
-            <table style={{ width:'100%', fontSize:12, borderCollapse:'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>#</th>
-                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>seat</th>
-                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>action</th>
-                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>cards</th>
-                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>Δt (ms)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {timeline.map((ev:any, idx:number)=>{
-                  const prev = idx>0 ? timeline[idx-1] : null;
-                  const dt = prev ? Math.max(0, (ev.t||0) - (prev.t||0)) : 0;
-                  return (
-                    <tr key={idx}>
-                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{idx+1}</td>
-                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{ev.seat>=0?seatName(ev.seat):'-'}</td>
-                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{ev.action}</td>
-                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{Array.isArray(ev.cards)? ev.cards.join(' '): ''}</td>
-                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{dt}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <div style={{ color:'#999' }}>等待一局开始后自动出现（依赖后端 turn.history.t）。</div>
-          )}
-        </div>
-      </div>
-
       <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
         <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
           剩余局数：{remainingGames}
@@ -1902,7 +1838,7 @@ function Home() {
   const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
   const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
   const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
-  const setSeatDelay = (i:number, v:number|string) => setSeatDelayMs(arr => { const n=[...arr]; n[i]=Math.max(0, Math.floor(Number(v as any)||0)); return n; });
+  const setSeatDelay = (i:number, v:number|string) => setSeatDelayMs(arr => { const n=[...arr]; n[i]=Math.max(0, Math.floor(Number(v)||0)); return n; });
 
   const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
   const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
@@ -1941,7 +1877,6 @@ function Home() {
   return (
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
-                
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
@@ -1952,7 +1887,7 @@ function Home() {
                 启用对局
                 <input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} />
               </label>
-              <button onClick={doResetAll} style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+              <button onClick={doResetAll} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
                 清空
               </button>
             </div>
@@ -2464,6 +2399,4 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
       <div style={{ minWidth:60, fontSize:12, color:'#374151' }}>{title}</div>
     </div>
   );
-
-      
 }
