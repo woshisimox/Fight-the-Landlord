@@ -1,4 +1,3 @@
-
 // pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
@@ -885,11 +884,15 @@ const handleScoreRefresh = () => {
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
   };
+const [allLogs, setAllLogs] = useState<string[]>([]);
+const allLogsRef = useRef(allLogs);
+useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
 const start = async () => {
     if (running) return;
     if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
 
     setRunning(true);
+    setAllLogs([]);
     setLandlord(null); setHands([[], [], []]); setPlays([]);
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
@@ -1425,6 +1428,7 @@ nextTotals     = [
 
           if (dogId) { try { clearInterval(dogId); } catch {} }
     setLog(l => [...l, `—— 本局流结束 ——`]);
+    setAllLogs(prev => [...prev, ...logRef.current, `\n--- End of Round ${labelRoundNo} ---\n`]);
     };
 
     try {
@@ -1432,7 +1436,6 @@ nextTotals     = [
         if (controllerRef.current?.signal.aborted) break;
         const thisRound = i + 1;
         await playOneGame(i, thisRound);
-
         const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
         if (hasNegative) { setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']); break; }
         await new Promise(r => setTimeout(r, 800 + Math.floor(Math.random() * 600)));
@@ -1731,7 +1734,7 @@ const handleAllSaveInner = () => {
   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
     <div style={{ fontWeight:700 }}>运行日志</div>
     <button
-      onClick={() => { try { const lines=(logRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
+      onClick={() => { try { const lines=(allLogsRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
       style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >存档</button>
   </div>
@@ -2380,4 +2383,3 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
     </div>
   );
 }
-
