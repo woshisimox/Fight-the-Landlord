@@ -552,9 +552,42 @@ function LivePanel(props: LiveProps) {
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
 
+  // // ===== 新增：虚拟发牌 + 角色应用（刷新键触发） =====
+function refreshTsVirtualDeal() {
+  // 若已有地主保持；否则默认甲（seat 0）作为虚拟地主
+  const lord = (typeof landlordRef.current === 'number') ? (landlordRef.current as number) : 0;
+  setLandlord(lord);
+
+  // 推进一段 roundCuts / roundLords，确保底色/统计不为白且与角色绑定
+  try {
+    const n0 = Math.max(
+      scoreSeriesRef.current[0]?.length||0,
+      scoreSeriesRef.current[1]?.length||0,
+      scoreSeriesRef.current[2]?.length||0
+    );
+    setRoundCuts(prev => {
+      if (!Array.isArray(prev) || prev.length === 0) return [n0];
+      return (prev[prev.length-1] !== n0) ? [...prev, n0] : [...prev];
+    });
+    setRoundLords(prev => {
+      const lordVal = (lord ?? -1) as number | -1;
+      if (!Array.isArray(prev) || prev.length === 0) return [lordVal];
+      const arr = [...prev];
+      arr[arr.length - 1] = lordVal;
+      return arr;
+    });
+  } catch {}
+
+  // TrueSkill：按角色从存档套用
+  applyTsFromStoreByRole(lord, '虚拟发牌');
+
+  // 记录日志
+  try { setLog(l => [...l, `【TS】虚拟发牌：${seatName(lord)} 作为地主，已按角色从存档应用初值`]); } catch {}
+}
+
   // 刷新：按“当前地主身份”应用
   const handleRefreshApply = () => {
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+    refreshTsVirtualDeal();
   };
 
   // —— 用于“区分显示”的帮助函数 —— //
