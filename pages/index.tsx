@@ -553,9 +553,48 @@ function LivePanel(props: LiveProps) {
   };
 
   // 刷新：按“当前地主身份”应用
-  const handleRefreshApply = () => {
+  
+
+// 固定甲(0)为地主的“虚拟发牌”：不打牌，只用于角色就绪与TS映射
+const refreshTsVirtualDeal = () => {
+  const lord = 0; // 甲
+  // 1) 设置地主（让角色生效）
+  setLandlord(lord);
+
+  // 2) 补齐“分局切点/地主带”（仅用于颜色/分段就绪，不改变已有评分）
+  setRoundCuts(prev => {
+    const n0 = Math.max(
+      scoreSeriesRef.current[0]?.length || 0,
+      scoreSeriesRef.current[1]?.length || 0,
+      scoreSeriesRef.current[2]?.length || 0
+    );
+    if (prev.length === 0) return [n0];
+    if (prev[prev.length - 1] !== n0) return [...prev, n0];
+    return prev;
+  });
+  setRoundLords(prev => {
+    const bands = Math.max(1, roundCutsRef.current.length);
+    const next = [...prev];
+    next[bands - 1] = lord; // 把当前“区段”的地主标上甲
+    return next;
+  });
+
+  // 3) 关键：按“角色=甲(landlord)、乙丙(farmer)”从存档应用到当前参赛算法 identity
+  applyTsFromStoreByRole(lord, '虚拟局-刷新');
+
+  // 4) 记录日志（可选）
+  setLog(l => [...l, '【TS】已启动虚拟发牌：固定甲为地主，仅用于映射参赛算法→存档身份（不产生对局）。']);
+};
+
+const handleRefreshApply = () => {
+  if (landlordRef.current == null || typeof landlordRef.current === 'undefined') {
+    // 还没选参赛/还没发牌：用“虚拟发牌”完成身份与角色就绪 + 映射
+    refreshTsVirtualDeal();
+  } else {
+    // 已有地主（来自真实发牌/对局中）：按当前地主身份套用
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
-  };
+  }
+};
 
   // —— 用于“区分显示”的帮助函数 —— //
   const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
