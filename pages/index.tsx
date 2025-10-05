@@ -1041,6 +1041,8 @@ const start = async () => {
         }
 
         if (batch.length) {
+          const hasTurnFrame = batch.some((x:any)=>x && x.type === 'turn');
+
           let nextHands = handsRef.current.map(x => [...x]);
           let nextPlays = [...playsRef.current];
           let nextTotals = [...totalsRef.current] as [number, number, number];
@@ -1242,20 +1244,43 @@ for (const raw of batch) {
                   }
                 }
 
-              // -------- 记录 turn（含 score） --------
+              // -------- 记录 turn（含 score + 手牌/日志回放） --------
               if (m.type === 'turn') {
                 const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                 if (s>=0 && s<3) {
-                  sawAnyTurn = true;
+                  // 1) 评分时间序列
                   const val = (typeof m.score === 'number') ? (m.score as number) : null;
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
                   }
+
+                  // 2) 同步 UI：出/过 + 实时扣手牌
+                  const reason = (m.reason ?? lastReasonRef.current[s]) || undefined;
+                  lastReasonRef.current[s] = null;
+                  if (m.move === 'pass') {
+                    nextPlays = [...nextPlays, { seat: s, move: 'pass', reason }];
+                    nextLog   = [...nextLog, `${seatName(s)} 过${reason ? `（${reason}）` : ''}`];
+                  } else {
+                    const nh = (nextHands && (nextHands as any[]).length === 3 ? nextHands : [[], [], []]).map((x: any) => [...x]);
+                    const pretty: string[] = [];
+                    const cards: string[] = Array.isArray(m.cards) ? m.cards : [];
+                    for (const rawCard of cards) {
+                      const options = candDecorations(rawCard);
+                      const chosen = options.find((d: string) => nh[s].includes(d)) || options[0];
+                      const k = nh[s].indexOf(chosen);
+                      if (k >= 0) nh[s].splice(k, 1);
+                      pretty.push(chosen);
+                    }
+                    nextHands = nh;
+                    nextPlays = [...nextPlays, { seat: s, move: 'play', cards: pretty, reason }];
+                    nextLog   = [...nextLog, `${seatName(s)} 出 ` + (pretty.length ? pretty.join(' ') : '(?)') + (reason ? `（${reason}）` : '')];
+                  }
                 }
                 continue;
               }
-if (m.type === 'event' && m.kind === 'play') {
+              }
+if (m.type === 'event' && m.kind === 'play' && !hasTurnFrame) {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
                   lastReasonRef.current[m.seat] = null;
