@@ -465,7 +465,7 @@ function LivePanel(props: LiveProps) {
   };
 
 //  const applyTsFromStore = (why:string) => {
-//  const ids = [0,1,2].map(seatIdentity);
+  const ids = [0,1,2].map(seatIdentity);
 //  const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
 //  setTsArr(init);
 //  setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
