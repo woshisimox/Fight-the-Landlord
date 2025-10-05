@@ -552,10 +552,7 @@ function LivePanel(props: LiveProps) {
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
 
-  // 刷新：按“当前地主身份”应用
-  
-
-// 固定甲(0)为地主的“虚拟发牌”：不打牌，只用于角色就绪与TS映射
+  // 固定甲(0)为地主的“虚拟发牌”：不打牌，只用于角色就绪与TS映射
 const refreshTsVirtualDeal = () => {
   const lord = 0; // 甲
   // 1) 设置地主（让角色生效）
@@ -587,14 +584,12 @@ const refreshTsVirtualDeal = () => {
 };
 
 const handleRefreshApply = () => {
-  if (landlordRef.current == null || typeof landlordRef.current === 'undefined') {
-    // 还没选参赛/还没发牌：用“虚拟发牌”完成身份与角色就绪 + 映射
-    refreshTsVirtualDeal();
-  } else {
-    // 已有地主（来自真实发牌/对局中）：按当前地主身份套用
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
-  }
+  // 始终走虚拟发牌，固定甲为地主，确保角色与身份对齐
+  refreshTsVirtualDeal();
 };
+
+
+\1  // 始终走虚拟发牌，固定甲为地主，确保角色与身份对齐\n  refreshTsVirtualDeal();\n\3
 
   // —— 用于“区分显示”的帮助函数 —— //
   const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
