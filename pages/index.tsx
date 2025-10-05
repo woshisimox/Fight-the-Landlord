@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from 'react';
 
 type Four2Policy = 'both' | '2singles' | '2pairs';
@@ -97,13 +96,51 @@ type LiveProps = {
 
 function SeatTitle({ i }: { i:number }) {
   return <span style={{ fontWeight:700 }}>{['甲','乙','丙'][i]}</span>;
-}
+  };
 
-...
 
 // 刷新：按“当前地主身份”应用
 const handleRefreshApply = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
 };
 
-...
+type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
+const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
+const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
+
+// Function to dynamically get player identity including their selected algorithm
+const seatIdentity = (i:number) => {
+  const choice = props.seats[i];
+  const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
+  const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
+  return `${choice}|${model}|${base}`; // Identity including algorithm info
+};
+
+// Resolve ratings based on seat identity (and role)
+const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
+  const p = tsStoreRef.current.players[id]; if (!p) return null;
+  if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
+  if (p.overall) return ensureRating(p.overall);
+  const L = p.roles?.landlord, F = p.roles?.farmer;
+  if (L && F) return { mu:(L.mu+F.mu)/2, sigma:(L.sigma+F.sigma)/2 };
+  if (L) return ensureRating(L);
+  if (F) return ensureRating(F);
+  return null;
+};
+
+// Apply ratings from the store dynamically based on role (landlord vs farmer)
+const applyTsFromStoreByRole = (lord: number | null, why: string) => {
+  const ids = [0, 1, 2].map(seatIdentity);  // Dynamically get the seat identities (with algorithms)
+  const init = [0, 1, 2].map(i => {
+    const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
+    return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
+  });
+  setTsArr(init);
+  setLog(l => [...l, `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
+    init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
+};
+
+// Use this function to refresh the TrueSkill ratings dynamically
+const handleRefreshApply = () => {
+  applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+};
