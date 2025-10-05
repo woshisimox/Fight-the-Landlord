@@ -1,5 +1,5 @@
 // pages/index.tsx
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
@@ -154,22 +154,6 @@ function Hand({ cards }: { cards: string[] }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
       {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
-    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
     </div>
   );
 }
@@ -178,92 +162,12 @@ function PlayRow({ seat, move, cards, reason }:{
 }) {
   return (
     <div style={{ display:'flex', gap:8, alignItems:'center', padding:'6px 0' }}>
-      <div style={{ width:32, textAlign:'right', opacity:0.8 }}>{seatName(seat)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-      <div style={{ width:56, fontWeight:700 }}>{move === 'pass' ? '过' : '出牌'}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+      <div style={{ width:32, textAlign:'right', opacity:0.8 }}>{seatName(seat)}</div>
+      <div style={{ width:56, fontWeight:700 }}>{move === 'pass' ? '过' : '出牌'}</div>
       <div style={{ flex:1 }}>
         {move === 'pass' ? <span style={{ opacity:0.6 }}>过</span> : <Hand cards={cards || []} />}
-      <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-      {reason && <div style={{ width:260, fontSize:12, color:'#666' }}>{reason}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>}
-    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
+      </div>
+      {reason && <div style={{ width:260, fontSize:12, color:'#666' }}>{reason}</div>}
     </div>
   );
 }
@@ -271,22 +175,6 @@ function LogLine({ text }: { text:string }) {
   return (
     <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', fontSize:12, color:'#555', padding:'2px 0' }}>
       {text}
-    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
     </div>
   );
 }
@@ -345,225 +233,33 @@ function LadderPanel() {
   return (
     <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
-        <div style={{ fontWeight:700 }}>天梯图（活动积分 ΔR）<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-        <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-      <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+        <div style={{ fontWeight:700 }}>天梯图（活动积分 ΔR）</div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）</div>
+      </div>
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
         {items.map((it:any)=>{
           const pct = Math.min(1, Math.abs(it.val)/K);
           const pos = it.val >= 0;
           return (
             <div key={it.id} style={{ display:'contents' }}>
-              <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.label}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+              <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.label}</div>
               <div style={{ position:'relative', height:16, background:'#f9fafb', border:'1px solid #f3f4f6', borderRadius:8 }}>
                 <div style={axisStyle} />
                 <div style={{ position:'absolute', left: pos ? '50%' : `${50 - pct*50}%`, width: `${pct*50}%`, top:2, bottom:2, background: pos ? '#16a34a' : '#ef4444', borderRadius:6 }}/>
-              <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-              <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right' }}>{it.val.toFixed(2)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-            <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+              </div>
+              <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right' }}>{it.val.toFixed(2)}</div>
+            </div>
           );
         })}
-      <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
+      </div>
     </div>
   );
 }
 function Section({ title, children }:{title:string; children:React.ReactNode}) {
   return (
     <div style={{ marginBottom:16 }}>
-      <div style={{ fontWeight:700, marginBottom:8 }}>{title}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-      <div>{children}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
+      <div style={{ fontWeight:700, marginBottom:8 }}>{title}</div>
+      <div>{children}</div>
     </div>
   );
 }
@@ -654,15 +350,7 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 };
 
 /* ==================== LivePanel（对局） ==================== */
-const LivePanel = forwardRef<{ forceApplyByCurrentId: () => void }, LiveProps>((props, ref) => {
-  const handleRefreshApply = useCallback(() => {
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
-  }, []);
-  useImperativeHandle(ref, () => ({
-    forceApplyByCurrentId: handleRefreshApply,
-  }));
-  return (<>...</>);
-});
+function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
 
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
@@ -1865,62 +1553,14 @@ const handleAllSaveInner = () => {
         <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
           剩余局数：{remainingGames}
         </span>
-      <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+      </div>
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
         {/* 上传 / 存档 / 刷新 */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-        <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
+        </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           {[0,1,2].map(i=>{
@@ -1930,109 +1570,13 @@ const handleAllSaveInner = () => {
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                  <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                  <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+                </div>
                 <div style={{ fontSize:13, color:'#374151' }}>
-                  <div>μ：<b>{fmt2(tsArr[i].mu)}</b><LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                  <div>σ：<b>{fmt2(tsArr[i].sigma)}</b><LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                  <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b><LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                  <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
+                  <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
+                  <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
+                </div>
 
                 {/* 区分显示总体/地主/农民三档，并标注当前使用 */}
                 <div style={{ borderTop:'1px dashed #eee', marginTop:8, paddingTop:8 }}>
@@ -2040,308 +1584,36 @@ const handleAllSaveInner = () => {
                     当前使用：<b>
                       {usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}
                     </b>
-                  <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                  </div>
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12, color:'#374151' }}>
                     <div>
-                      <div style={{ fontWeight:600, opacity:0.8 }}>总体<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                      <div>{muSig(stored.overall)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>总体</div>
+                      <div>{muSig(stored.overall)}</div>
+                    </div>
                     <div>
-                      <div style={{ fontWeight:600, opacity:0.8 }}>地主<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                      <div>{muSig(stored.landlord)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>地主</div>
+                      <div>{muSig(stored.landlord)}</div>
+                    </div>
                     <div>
-                      <div style={{ fontWeight:600, opacity:0.8 }}>农民<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                      <div>{muSig(stored.farmer)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                  <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-              <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                      <div style={{ fontWeight:600, opacity:0.8 }}>农民</div>
+                      <div>{muSig(stored.farmer)}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             );
           })}
-        <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+        </div>
         <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
-          说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+          说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。</div>
       </Section>
 
       {/* ======= 积分下面、手牌上面：雷达图 ======= */}
       <Section title="战术画像（累计，0~5）">
         {/* Radar：上传 / 存档 / 刷新 */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-        <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
+        </div>
 
         <RadarPanel
           aggStats={aggStats}
@@ -2356,150 +1628,22 @@ const handleAllSaveInner = () => {
       
       <Section title="出牌评分（每局动态）">
         
-<div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+<div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
         <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
       </Section>
-      <div style={{ marginTop:10 }}><LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+      <div style={{ marginTop:10 }}></div>
       <Section title="评分统计（每局汇总）">
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
           {[0,1,2].map(i=>{
             const st = scoreStats[i];
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, background:'#fff' }}>
-                <div style={{ fontWeight:700, marginBottom:6 }}><SeatTitle i={i} /><LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>局数：{st.rounds}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>总体均值：{st.overallAvg.toFixed(3)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>最近一局均值：{st.lastAvg.toFixed(3)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>最好局均值：{st.best.toFixed(3)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-                <div style={{ fontSize:12, color:'#6b7280' }}>最差局均值：{st.worst.toFixed(3)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                <div style={{ fontWeight:700, marginBottom:6 }}><SeatTitle i={i} /></div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>局数：{st.rounds}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>总体均值：{st.overallAvg.toFixed(3)}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>最近一局均值：{st.lastAvg.toFixed(3)}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>最好局均值：{st.best.toFixed(3)}</div>
+                <div style={{ fontSize:12, color:'#6b7280' }}>最差局均值：{st.worst.toFixed(3)}</div>
                 {/* 分布曲线（每局均值的分布） */}
                 
                 {/* 分布直方图（每手score汇总：横轴=score，纵轴=频次；固定20桶） */}
@@ -2551,473 +1695,73 @@ const handleAllSaveInner = () => {
                   );
                 })()}
         
-              <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+              </div>
             );
           })}
-        <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+        </div>
       </Section>
 
 <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
           {[0,1,2].map(i=>(
             <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
-                            <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                            <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}</div>
 <div style={{ marginBottom:6 }}>
                 <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
-              <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+              </div>
               <Hand cards={hands[i]} />
-            <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            </div>
           ))}
-        <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+        </div>
       </Section>
 
       <Section title="出牌">
         <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
           {plays.length === 0
-            ? <div style={{ opacity:0.6 }}>（尚无出牌）<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            ? <div style={{ opacity:0.6 }}>（尚无出牌）</div>
             : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)
           }
-        <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+        </div>
       </Section>
 
       <Section title="结果">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>倍数<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-            <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-          <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            <div>倍数</div>
+            <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
+          </div>
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>胜者<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-            <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-          <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            <div>胜者</div>
+            <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}</div>
+          </div>
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>本局加减分<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-            <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-          <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-        <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            <div>本局加减分</div>
+            <div style={{ fontSize:20, fontWeight:700 }}>{delta ? delta.join(' / ') : '—'}</div>
+          </div>
+        </div>
       </Section>
 
       <div style={{ display:'flex', gap:8 }}>
         <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
         <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
-      <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+      </div>
 
       <div style={{ marginTop:18 }}>
         <Section title="">
   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-    <div style={{ fontWeight:700 }}>运行日志<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+    <div style={{ fontWeight:700 }}>运行日志</div>
     <button
       onClick={() => { try { const lines=(logRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
       style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >存档</button>
-  <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+  </div>
 
 <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', maxHeight:420, overflow:'auto', background:'#fafafa' }}>
-            {log.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div> : log.map((t, idx) => <LogLine key={idx} text={t} />)}
-          <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            {log.length === 0 ? <div style={{ opacity:0.6 }}>（暂无）</div> : log.map((t, idx) => <LogLine key={idx} text={t} />)}
+          </div>
         
 </Section>
-      <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
+      </div>
     </div>
   );
 }
@@ -3058,40 +1802,8 @@ function RadarPanel({
         )}
         <div style={{ fontSize:12, color:'#6b7280' }}>
           {mode==='ewma' ? '越大越看重最近几局' : `已累计 ${aggCount} 局`}
-        <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-      <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+        </div>
+      </div>
 
       {aggStats
         ? (
@@ -3099,41 +1811,9 @@ function RadarPanel({
             {[0,1,2].map(i=>(
               <RadarChart key={i} title={`${['甲','乙','丙'][i]}（累计）`} scores={aggStats[i]} />
             ))}
-          <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+          </div>
         )
-        : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+        : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
       }
     </>
   );
@@ -3208,23 +1888,7 @@ function Home() {
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
-        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12, gridAutoFlow:'row dense' }}>
           <div>
             <div style={{ display:'flex', alignItems:'center', gap:10 }}>
@@ -3235,57 +1899,9 @@ function Home() {
               <button onClick={doResetAll} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
                 清空
               </button>
-            <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-          <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            </div>
+            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
+          </div>
 
           <label>局数
             <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
@@ -3302,23 +1918,7 @@ function Home() {
       农民配合
       <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
     </label>
-  <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+  </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       天梯  /  TrueSkill
@@ -3343,63 +1943,15 @@ function Home() {
       onClick={()=>window.dispatchEvent(new Event('ddz-all-refresh'))}
       style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >刷新</button>
-  <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+  </div>
+</div>
 <div style={{ gridColumn:'2 / 3' }}>
   <label>初始分
           <input type="number" step={10} value={startScore}
            onChange={e=>setStartScore(Number(e.target.value)||0)}
            style={{ width:'100%' }} />
           </label>
-<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+</div>
 
 
 
@@ -3411,80 +1963,16 @@ function Home() {
               <option value="2pairs">两对</option>
             </select>
           </label>
-<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-        <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+</div>
+        </div>
 
         <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
-          <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+          <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
 
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
             {[0,1,2].map(i=>(
               <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
-                <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /><LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /></div>
 
                 <label style={{ display:'block', marginBottom:6 }}>
                   选择
@@ -3533,23 +2021,7 @@ function Home() {
                     />
                     <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
                       留空则使用推荐：{defaultModelFor(seats[i])}
-                    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                    </div>
                   </label>
                 )}
 
@@ -3647,80 +2119,16 @@ function Home() {
                     </label>
                   </>
                 )}
-              <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+              </div>
             ))}
-          <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+          </div>
 
           <div style={{ marginTop:12 }}>
-            <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)</div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
               {[0,1,2].map(i=>(
                 <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
-                  <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                  <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
                   <label style={{ display:'block' }}>
                     最小间隔 (ms)
                     <input
@@ -3730,97 +2138,17 @@ function Home() {
                       style={{ width:'100%' }}
                     />
                   </label>
-                <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                </div>
 
               ))}
-            <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-          <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            </div>
+          </div>
           <div style={{ marginTop:12 }}>
-            <div style={{ fontWeight:700, marginBottom:6 }}>每家思考超时（秒）<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            <div style={{ fontWeight:700, marginBottom:6 }}>每家思考超时（秒）</div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
               {[0,1,2].map(i=>(
                 <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
-                  <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                  <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
                   <label style={{ display:'block' }}>
                     弃牌时间（秒）
                     <input
@@ -3833,113 +2161,17 @@ function Home() {
                       style={{ width:'100%' }}
                     />
                   </label>
-                <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+                </div>
               ))}
-            <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-          <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-        <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-      <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         {/* —— 天梯图 —— */}
       <LadderPanel />
-<div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+<div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
         <LivePanel
           key={resetKey}
           rounds={rounds}
@@ -3956,39 +2188,7 @@ function Home() {
         
           turnTimeoutSecs={turnTimeoutSecs}
         />
-      <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
+      </div>
     </div>
   );
 }
@@ -4159,74 +2359,10 @@ function ScoreTimeline(
           <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
             <span style={{ width:10, height:10, borderRadius:5, background:colors[i], display:'inline-block' }} />
             <span>{labels?.[i] ?? ['甲','乙','丙'][i]}</span>
-          <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
+          </div>
         ))}
-        <div style={{ marginLeft:'auto', color:'#6b7280' }}>横轴：第几手牌 ｜ 纵轴：score<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-      <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
+        <div style={{ marginLeft:'auto', color:'#6b7280' }}>横轴：第几手牌 ｜ 纵轴：score</div>
+      </div>
     </div>
   );
 }
@@ -4269,39 +2405,7 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
           return <text key={i} x={lx} y={ly} fontSize={11} textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
         })}
       </svg>
-      <div style={{ minWidth:60, fontSize:12, color:'#374151' }}>{title}<LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
-    </div>
-    <LivePanel
-        ref={livePanelRef}
-        key={resetKey}
-        rounds={rounds}
-        startScore={startScore}
-        seatDelayMs={seatDelayMs}
-        enabled={enabled}
-        rob={rob}
-        four2={four2}
-        seats={seats}
-        seatModels={seatModels}
-        seatKeys={seatKeys}
-        farmerCoop={farmerCoop}
-        onLog={setLiveLog}
-        turnTimeoutSecs={turnTimeoutSecs}
-      />
+      <div style={{ minWidth:60, fontSize:12, color:'#374151' }}>{title}</div>
     </div>
   );
 }
