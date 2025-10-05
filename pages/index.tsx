@@ -1199,7 +1199,7 @@ for (const raw of batch) {
                 nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
               }
-              if (m.type === 'event' && m.kind === 'bot-done') {
+              if (m.type === 'event' && (m.kind === 'bot-done' || m.kind === 'bot-return')) {
                 nextLog = [
                   ...nextLog,
                   `AI完成｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
