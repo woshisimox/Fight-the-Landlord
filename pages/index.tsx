@@ -1,7 +1,4 @@
 // pages/index.tsx
-
-function seatName(i:number){ return i===0?'甲': i===1?'乙': i===2?'丙': String(i); }
-
 import { useEffect, useRef, useState } from 'react';
 
 type Four2Policy = 'both' | '2singles' | '2pairs';
