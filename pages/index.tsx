@@ -1748,7 +1748,7 @@ const handleAllSaveInner = () => {
 
       <div style={{ marginTop:18 }}>
         <Section title="">
-  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
     <div style={{ fontWeight:700 }}>运行日志</div>
     <button
       onClick={() => { try { const lines=(logRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
