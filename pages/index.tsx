@@ -332,23 +332,6 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
   };
 }
 
-
-
-
-/* ---------- 文本改写：把"第 x 局"固定到本局 ---------- */
-const makeRewriteRoundLabel = (n: number) => (msg: string) => {
-  if (typeof msg !== 'string') return msg;
-  let out = msg;
-  out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
-  out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-  out = out.replace(/开始第\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
-  out = out.replace(/开始连打\s*\d+\s*局（/g, `开始第 ${n} 局（`);
-  out = out.replace(/开始连打\s*\d+\s*局\(/g,  `开始第 ${n} 局(`);
-  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局（/g, `单局模式：开始第 ${n} 局（`);
-  out = out.replace(/单局模式.*?(仅运行|运行)\s*\d+\s*局\(/g,  `单局模式：开始第 ${n} 局(`);
-  return out;
-};
-
 /* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
@@ -364,76 +347,13 @@ function LivePanel(props: LiveProps) {
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
-  // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
-  const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
-  const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
-  const [roundCuts, setRoundCuts] = useState<number[]>([0]);
-  const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
-
-  const [roundLords, setRoundLords] = useState<number[]>([]);
-
-  /* ====== 评分统计（每局） ====== */
-  type SeatStat = { rounds:number; overallAvg:number; lastAvg:number; best:number; worst:number; mean:number; sigma:number };
-  const [scoreStats, setScoreStats] = useState<SeatStat[]>([
-    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-    { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
-  ]);
-  const [scoreDists, setScoreDists] = useState<number[][]>([[],[],[]]);
-  const statsFileRef = useRef<HTMLInputElement|null>(null);
-  const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
-
-  // 依据 scoreSeries（每手评分）与 roundCuts（每局切点）计算每局均值，并汇总到席位统计
-  const recomputeScoreStats = () => {
-    try {
-      const series = scoreSeriesRef.current;   // number[][]
-      const cuts = roundCutsRef.current;       // number[]
-      const n = Math.max(series[0]?.length||0, series[1]?.length||0, series[2]?.length||0);
-      const bands = (cuts && cuts.length ? [...cuts] : [0]).sort((a,b)=>a-b);
-      if (bands[0] !== 0) bands.unshift(0);
-      if (bands[bands.length-1] !== n) bands.push(n);
-      const perSeatRounds:number[][] = [[],[],[]];
-      for (let b=0;b<bands.length-1;b++){
-        const st = bands[b], ed = bands[b+1];
-        const len = Math.max(0, ed - st);
-        if (len <= 0) continue;
-        for (let s=0;s<3;s++){
-          const arr = series[s]||[];
-          let sum = 0, cnt = 0;
-          for (let i=st;i<ed;i++){
-            const v = arr[i];
-            if (typeof v === 'number') { sum += v; cnt++; }
-          }
-          if (cnt>0) perSeatRounds[s].push(sum/cnt);
-        }
-      }
-      const stats = [0,1,2].map(s=>{
-        const rs = perSeatRounds[s];
-        const rounds = rs.length;
-        if (rounds===0) return { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-        const sum = rs.reduce((a,b)=>a+b,0);
-        const overall = sum/rounds;
-        const last = rs[rounds-1];
-        const best = Math.max(...rs);
-        const worst = Math.min(...rs);
-        const mu = overall;
-        const varv = rs.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / rounds;
-        const sigma = Math.sqrt(Math.max(0, varv));
-        return { rounds, overallAvg: overall, lastAvg: last, best, worst, mean: mu, sigma };
-      });
-      setScoreStats(stats);
-      setScoreDists(perSeatRounds);
-    } catch (e) { console.error('[stats] recompute error', e); }
-  }
-  // 每局结束或数据变化时刷新统计
-  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
 
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
   const tsRef = useRef(tsArr); useEffect(()=>{ tsRef.current=tsArr; }, [tsArr]);
   const tsCr = (r:Rating)=> (r.mu - 3*r.sigma);
 
-  // ===== 新增：TS 存档（读/写/应用） =====
+  // ===== TS 存档 =====
   const tsStoreRef = useRef<TsStore>(emptyStore());
   useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
@@ -442,7 +362,7 @@ function LivePanel(props: LiveProps) {
     const choice = props.seats[i];
     const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
-    return `${choice}|${model}|${base}`; // 身份锚定
+    return `${choice}|${model}|${base}`;
   };
 
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
@@ -456,15 +376,6 @@ function LivePanel(props: LiveProps) {
     return null;
   };
 
-  // 修改：移除立即应用，只在牌局开始时应用
-  const applyTsFromStore = (why:string) => {
-    const ids = [0,1,2].map(seatIdentity);
-    const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
-    setTsArr(init);
-    setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
-  };
-
-  // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
     const ids = [0,1,2].map(seatIdentity);
     const init = [0,1,2].map(i => {
@@ -503,7 +414,6 @@ function LivePanel(props: LiveProps) {
       const j = JSON.parse(text);
       const store: TsStore = emptyStore();
 
-      // 兼容多种模板：数组 / {players:{}} / 单人
       if (Array.isArray(j?.players)) {
         for (const p of j.players) {
           const id = p.id || p.identity || p.key; if (!id) continue;
@@ -558,123 +468,14 @@ function LivePanel(props: LiveProps) {
     };
   };
 
-
-  /* ===== Radar（战术画像）本地存档（新增） ===== */
-  type RadarAgg = { scores: Score5; count: number };
-  type RadarStoreEntry = {
-    id: string; // 身份：choice|model|base（沿用 seatIdentity）
-    overall?: RadarAgg | null;  // 不区分身份时累计
-    roles?: { landlord?: RadarAgg | null; farmer?: RadarAgg | null }; // 按角色分档
-    meta?: { choice?: string; model?: string; httpBase?: string };
-  };
-  type RadarStore = {
-    schema: 'ddz-radar@1';
-    updatedAt: string;
-    players: Record<string, RadarStoreEntry>;
-  };
-  const RADAR_STORE_KEY = 'ddz_radar_store_v1';
-
-  const ensureScore5 = (x:any): Score5 => ({
-    coop: Number(x?.coop ?? 2.5),
-    agg : Number(x?.agg  ?? 2.5),
-    cons: Number(x?.cons ?? 2.5),
-    eff : Number(x?.eff  ?? 2.5),
-    rob : Number(x?.rob  ?? 2.5),
-  });
-  const ensureRadarAgg = (x:any): RadarAgg => ({
-    scores: ensureScore5(x?.scores),
-    count : Math.max(0, Number(x?.count)||0),
-  });
-
-  const emptyRadarStore = (): RadarStore =>
-    ({ schema:'ddz-radar@1', updatedAt:new Date().toISOString(), players:{} });
-
-  const readRadarStore = (): RadarStore => {
-    try {
-      const raw = localStorage.getItem(RADAR_STORE_KEY);
-      if (!raw) return emptyRadarStore();
-      const j = JSON.parse(raw);
-      if (j?.schema && j?.players) return j as RadarStore;
-    } catch {}
-    return emptyRadarStore();
-  };
-  const writeRadarStore = (s: RadarStore) => {
-    try { s.updatedAt=new Date().toISOString(); localStorage.setItem(RADAR_STORE_KEY, JSON.stringify(s)); } catch {}
-  };
-  const radarStoreRef = useRef<RadarStore>(emptyRadarStore());
-  useEffect(()=>{ radarStoreRef.current = readRadarStore(); }, []);
-
-  const updateRadarStoreAfterRound = (scores: Score5[], landlordIndex: number) => {
-    const ids = [0,1,2].map(seatIdentity);
-    for (let i=0;i<3;i++){
-      const id = ids[i];
-      const entry: RadarStoreEntry = radarStoreRef.current.players[id] || { id, roles:{} };
-      const role: TsRole = (i===landlordIndex) ? 'landlord' : 'farmer';
-      entry.roles = entry.roles || {};
-      const prev = entry.roles[role] || entry.overall || { scores: ensureScore5(null), count:0 };
-      const merged = {
-        scores: mergeScore(prev.scores, scores[i], 'mean', prev.count, 0),
-        count: prev.count + 1,
-      };
-      entry.roles[role] = merged;
-      radarStoreRef.current.players[id] = entry;
-    }
-    writeRadarStore(radarStoreRef.current);
-  };
-
-  const radarFileRef = useRef<HTMLInputElement|null>(null);
-  const handleUploadRadarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    try {
-      const text = await f.text();
-      const j = JSON.parse(text);
-      const store: RadarStore = emptyRadarStore();
-      if (Array.isArray(j?.players)) {
-        for (const p of j.players) {
-          const id = p.id || p.identity; if (!id) continue;
-          store.players[id] = {
-            id,
-            overall: p.overall || p.radar || null,
-            roles: { landlord: p.roles?.landlord ?? p.landlord ?? p.L ?? null,
-                     farmer:   p.roles?.farmer   ?? p.farmer   ?? p.F ?? null },
-            meta: p.meta || {}
-          };
-        }
-      } else if (j?.players && typeof j.players === 'object') {
-        store.players = j.players;
-      } else if (Array.isArray(j)) {
-        for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p; }
-      } else {
-        if (j?.id) store.players[j.id] = j;
-      }
-      radarStoreRef.current = store; writeRadarStore(store);
-      setLog(l => [...l, `【Radar】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
-    } catch (err:any) {
-      setLog(l => [...l, `【Radar】上传解析失败：${err?.message || err}`]);
-    } finally { e.target.value = ''; }
-  };
-
-  const handleSaveRadarArchive = () => {
-    const blob = new Blob([JSON.stringify(radarStoreRef.current, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'radar_store.json'; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1200);
-    setLog(l => [...l, '【Radar】已导出当前存档。']);
-  };
-
-  const getRadarStoredForSeat = (i:number) => {
-    const id = seatIdentity(i);
-    const p = radarStoreRef.current.players[id];
-    return {
-      overall: p?.overall ? ensureRadarAgg(p.overall) : null,
-      landlord: p?.roles?.landlord ? ensureRadarAgg(p.roles.landlord) : null,
-      farmer: p?.roles?.farmer ? ensureRadarAgg(p.roles.farmer) : null,
-    };
-  };
-
   // —— 主循环 —— //
   const runGame = async () => {
     if (running) return;
+    if (!props.enabled) {
+      setLog(l => [...l, '【前端】未启用对局：请在设置中勾选"启用对局"。']);
+      return;
+    }
+
     setRunning(true);
     setFinishedCount(0);
     setLog([]);
@@ -682,154 +483,243 @@ function LivePanel(props: LiveProps) {
     setLandlord(null);
     setWinner(null);
     setDelta(null);
-    setScoreSeries([[],[],[]]);
-    setRoundCuts([0]);
-    setRoundLords([]);
+    setHands([[],[],[]]);
+    setMultiplier(1);
+    setTotals([props.startScore || 0, props.startScore || 0, props.startScore || 0]);
 
-    // 修改：只在牌局开始时应用 TrueSkill 初始值
+    // 只在牌局开始时应用 TrueSkill 初始值
     applyTsFromStoreByRole(null, '牌局开始');
 
-    const rewrite = makeRewriteRoundLabel(1);
-    for (let round = 0; round < props.rounds; round++) {
-      const rewriteThisRound = makeRewriteRoundLabel(round + 1);
-      setLog(l => [...l, `开始第 ${round + 1} 局（共 ${props.rounds} 局）`]);
+    try {
+      for (let round = 0; round < props.rounds; round++) {
+        if (!props.enabled) break;
 
-      // 重置手牌、地主、出牌记录等
-      setHands([[],[],[]]);
-      setLandlord(null);
-      setPlays([]);
-      setMultiplier(1);
-      setWinner(null);
-      setDelta(null);
+        setLog(l => [...l, `开始第 ${round + 1} 局（共 ${props.rounds} 局）`]);
 
-      // 调用后端 API
-      const params = new URLSearchParams();
-      params.set('rob', String(props.rob));
-      params.set('four2', props.four2);
-      params.set('farmerCoop', String(props.farmerCoop));
-      params.set('rounds', '1');
-      params.set('startScore', String(props.startScore));
-      params.set('seed', String(Date.now() + round));
-      params.set('turnTimeoutSecs', (props.turnTimeoutSecs || [30,30,30]).join(','));
-      params.set('seatDelayMs', (props.seatDelayMs || [0,0,0]).join(','));
-      for (let i = 0; i < 3; i++) {
-        params.set(`seats[${i}]`, props.seats[i]);
-        params.set(`seatModels[${i}]`, props.seatModels[i] || '');
-        if (props.seats[i] === 'http') {
-          params.set(`seatKeys[${i}][httpBase]`, props.seatKeys[i]?.httpBase || '');
-          params.set(`seatKeys[${i}][httpToken]`, props.seatKeys[i]?.httpToken || '');
-        } else {
-          params.set(`seatKeys[${i}][${props.seats[i].split(':')[1]}]`, props.seatKeys[i]?.[props.seats[i].split(':')[1] as keyof typeof props.seatKeys[0]] || '');
+        // 构建请求参数
+        const requestBody = {
+          rounds: 1,
+          startScore: props.startScore,
+          seatDelayMs: props.seatDelayMs || [0,0,0],
+          enabled: props.enabled,
+          rob: props.rob,
+          four2: props.four2,
+          farmerCoop: props.farmerCoop,
+          turnTimeoutSecs: props.turnTimeoutSecs || [30,30,30],
+          seats: props.seats.map((choice, i) => {
+            const normalized = normalizeModelForProvider(choice, props.seatModels[i] || '');
+            const model = normalized || defaultModelFor(choice);
+            const keys = props.seatKeys[i] || {};
+            switch (choice) {
+              case 'ai:openai':   return { choice, model, apiKey: keys.openai || '' };
+              case 'ai:gemini':   return { choice, model, apiKey: keys.gemini || '' };
+              case 'ai:grok':     return { choice, model, apiKey: keys.grok || '' };
+              case 'ai:kimi':     return { choice, model, apiKey: keys.kimi || '' };
+              case 'ai:qwen':     return { choice, model, apiKey: keys.qwen || '' };
+              case 'ai:deepseek': return { choice, model, apiKey: keys.deepseek || '' };
+              case 'http':        return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
+              default:            return { choice };
+            }
+          })
+        };
+
+        setLog(l => [...l, '正在调用后端 API...']);
+
+        // 调用后端 API
+        const response = await fetch('/api/stream_ndjson', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-      }
 
-      const resp = await fetch('/api/doudizhu?' + params.toString());
-      const data = await resp.json();
-      const game = data.games?.[0];
-      if (!game) {
-        setLog(l => [...l, `第 ${round + 1} 局：后端返回数据异常`]);
-        continue;
-      }
+        if (!response.body) {
+          throw new Error('No response body');
+        }
 
-      // 更新手牌
-      const initialHands = game.initialHands || [[],[],[]];
-      setHands(initialHands.map((h:string[]) => decorateHandCycle(h)));
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-      // 确定地主
-      const lordIndex = game.landlord;
-      setLandlord(lordIndex);
-      setRoundLords(rl => [...rl, lordIndex]);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-      // 修改：在确定地主后，按角色应用 TrueSkill 初始值
-      applyTsFromStoreByRole(lordIndex, `第${round+1}局确定地主`);
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-      // 播放出牌过程
-      const moves = game.moves || [];
-      const playRecords: typeof plays = [];
-      for (const move of moves) {
-        const seat = move.seat;
-        const action = move.action;
-        const cards = action === 'play' ? (move.cards || []) : undefined;
-        const reason = move.reason;
-        playRecords.push({ seat, move: action, cards, reason });
-        setPlays([...playRecords]);
-        await new Promise(r => setTimeout(r, 800));
-      }
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            
+            try {
+              const data = JSON.parse(line);
+              console.log('Received data:', data);
 
-      // 更新结果
-      setWinner(game.winner);
-      const deltaScores: [number, number, number] = game.deltaScores || [0,0,0];
-      setDelta(deltaScores);
-      const newTotals: [number,number,number] = [
-        totals[0] + deltaScores[0],
-        totals[1] + deltaScores[1],
-        totals[2] + deltaScores[2],
-      ];
-      setTotals(newTotals);
-      props.onTotals?.(newTotals);
+              // 处理初始化数据
+              if (data.type === 'init') {
+                const gameHands = data.hands || [[],[],[]];
+                setHands(gameHands.map((h:string[]) => decorateHandCycle(h)));
+                const lordIndex = data.landlordIdx ?? data.landlord ?? null;
+                setLandlord(lordIndex);
+                
+                // 确定地主后更新 TrueSkill
+                if (lordIndex !== null) {
+                  applyTsFromStoreByRole(lordIndex, `第${round+1}局确定地主`);
+                }
+                
+                setLog(l => [...l, `发牌完成，${lordIndex !== null ? seatName(lordIndex) : '?'}为地主`]);
+              }
 
-      // 更新 TrueSkill
-      const tsCur = [...tsRef.current];
-      if (game.winner !== null) {
-        const lord = game.landlord;
-        if (lord != null) {
-          if (game.winner === lord) {
-            tsUpdateTwoTeams(tsCur, [lord], lord === 0 ? [1,2] : lord === 1 ? [0,2] : [0,1]);
-          } else {
-            tsUpdateTwoTeams(tsCur, lord === 0 ? [1,2] : lord === 1 ? [0,2] : [0,1], [lord]);
+              // 处理出牌事件
+              if (data.type === 'event' && data.kind === 'play') {
+                const seat = data.seat;
+                const move = data.move;
+                const cards = data.cards || [];
+                const reason = data.reason;
+
+                if (move === 'pass') {
+                  setPlays(prev => [...prev, { seat, move: 'pass', reason }]);
+                  setLog(l => [...l, `${seatName(seat)} 过${reason ? `（${reason}）` : ''}`]);
+                } else {
+                  // 更新手牌
+                  setHands(prev => {
+                    const newHands = [...prev];
+                    const playerHand = [...newHands[seat]];
+                    for (const card of cards) {
+                      const cardIndex = playerHand.findIndex(c => 
+                        c === card || c.replace(/[♠♥♦♣]/, '') === card.replace(/[♠♥♦♣]/, '')
+                      );
+                      if (cardIndex > -1) {
+                        playerHand.splice(cardIndex, 1);
+                      }
+                    }
+                    newHands[seat] = playerHand;
+                    return newHands;
+                  });
+
+                  setPlays(prev => [...prev, { 
+                    seat, 
+                    move: 'play', 
+                    cards: cards.map(card => {
+                      // 确保卡片有花色装饰
+                      if (card.startsWith('🃏') || '♠♥♦♣'.includes(card[0])) {
+                        return card;
+                      }
+                      // 为没有花色的卡片添加默认花色
+                      return `♠${card}`;
+                    }), 
+                    reason 
+                  }]);
+                  setLog(l => [...l, `${seatName(seat)} 出牌：${cards.join(' ')}${reason ? `（理由：${reason}）` : ''}`]);
+                }
+              }
+
+              // 处理游戏结果
+              if ((data.type === 'event' && data.kind === 'win') || data.type === 'result') {
+                const winnerSeat = data.winner;
+                const deltaScores = data.deltaScores || data.delta || [0,0,0];
+                const gameMultiplier = data.multiplier || 1;
+
+                setWinner(winnerSeat);
+                setDelta(deltaScores);
+                setMultiplier(gameMultiplier);
+
+                // 更新总分
+                setTotals(prev => [
+                  prev[0] + deltaScores[0],
+                  prev[1] + deltaScores[1],
+                  prev[2] + deltaScores[2],
+                ]);
+
+                // 更新 TrueSkill
+                const tsCur = [...tsRef.current];
+                if (winnerSeat !== null && landlord !== null) {
+                  if (winnerSeat === landlord) {
+                    tsUpdateTwoTeams(tsCur, [landlord], landlord === 0 ? [1,2] : landlord === 1 ? [0,2] : [0,1]);
+                  } else {
+                    tsUpdateTwoTeams(tsCur, landlord === 0 ? [1,2] : landlord === 1 ? [0,2] : [0,1], [landlord]);
+                  }
+                  setTsArr([...tsCur]);
+                  updateStoreAfterRound(tsCur, landlord);
+                }
+
+                setLog(l => [...l, 
+                  `胜者：${winnerSeat == null ? '—' : seatName(winnerSeat)}，倍数 x${gameMultiplier}，` +
+                  `当局积分：${deltaScores.join(' / ')}`
+                ]);
+
+                // 更新天梯图
+                try {
+                  const ladderDelta = data.ladderDelta || [0,0,0];
+                  const ids = [0,1,2].map(seatIdentity);
+                  const raw = localStorage.getItem('ddz_ladder_store_v1');
+                  const store = raw ? JSON.parse(raw) : { players:{} };
+                  for (let i=0;i<3;i++){
+                    const id = ids[i];
+                    const ent = store.players[id] || { current:{ n:0, deltaR:0, K:20 } };
+                    ent.current = ent.current || { n:0, deltaR:0, K:20 };
+                    ent.current.n += 1;
+                    ent.current.deltaR += ladderDelta[i];
+                    ent.current.K = Math.max(10, Math.min(100, Math.abs(ent.current.deltaR) / Math.max(1, ent.current.n)));
+                    store.players[id] = ent;
+                  }
+                  localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(store));
+                  window.dispatchEvent(new Event('ddz-all-refresh'));
+                } catch (e) {
+                  console.error('更新天梯图失败:', e);
+                }
+              }
+
+              // 处理日志
+              if (data.type === 'log' && data.message) {
+                setLog(l => [...l, data.message]);
+              }
+
+            } catch (error) {
+              console.error('解析数据错误:', error, line);
+            }
           }
-          setTsArr([...tsCur]);
-          updateStoreAfterRound(tsCur, lord);
         }
+
+        setFinishedCount(prev => prev + 1);
+        setLog(l => [...l, `第 ${round + 1} 局结束`]);
+        
+        // 局间延迟
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
-
-      // 更新雷达图数据
-      const radarScores: Score5[] = game.radarScores || Array(3).fill({ coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 });
-      updateRadarStoreAfterRound(radarScores, lordIndex);
-
-      // 更新天梯图数据
-      const ladderDelta = game.ladderDelta || [0,0,0];
-      const ids = [0,1,2].map(seatIdentity);
-      try {
-        const raw = localStorage.getItem('ddz_ladder_store_v1');
-        const store = raw ? JSON.parse(raw) : { players:{} };
-        for (let i=0;i<3;i++){
-          const id = ids[i];
-          const ent = store.players[id] || { current:{ n:0, deltaR:0, K:20 } };
-          ent.current = ent.current || { n:0, deltaR:0, K:20 };
-          ent.current.n += 1;
-          ent.current.deltaR += ladderDelta[i];
-          ent.current.K = Math.max(10, Math.min(100, Math.abs(ent.current.deltaR) / Math.max(1, ent.current.n)));
-          store.players[id] = ent;
-        }
-        localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(store));
-        window.dispatchEvent(new Event('ddz-all-refresh'));
-      } catch {}
-
-      // 更新评分曲线
-      const moveScores = game.moveScores || Array(3).fill([]);
-      setScoreSeries(prev => {
-        const next = [...prev];
-        for (let i=0;i<3;i++) next[i] = [...prev[i], ...(moveScores[i] || [])];
-        return next;
-      });
-      setRoundCuts(prev => [...prev, (roundCutsRef.current[roundCutsRef.current.length-1] + (moveScores[0]?.length || 0))]);
-
-      setFinishedCount(c => c + 1);
-      setLog(l => [...l, rewriteThisRound(`第 ${round + 1} 局结束：${['地主','农民','农民'][game.winner ?? -1]}胜利，得分 ${deltaScores.join(', ')}`)]);
-      await new Promise(r => setTimeout(r, 1200));
+    } catch (error: any) {
+      setLog(l => [...l, `错误：${error?.message || error}`]);
+      console.error('对局错误:', error);
+    } finally {
+      setRunning(false);
+      setLog(l => [...l, `全部 ${props.rounds} 局结束。`]);
     }
-    setRunning(false);
-    setLog(l => [...l, `全部 ${props.rounds} 局结束。`]);
   };
+
+  const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
   return (
     <div style={{ padding:16, border:'1px solid #e5e7eb', borderRadius:8, background:'#f9fafb' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
         <div style={{ fontWeight:700, fontSize:18 }}>对局模拟</div>
-        <div style={{ display:'flex', gap:8 }}>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          <span style={{ fontSize:14, color:'#6b7280' }}>剩余局数：{remainingGames}</span>
           <button onClick={runGame} disabled={running || !props.enabled}
-            style={{ padding:'8px 16px', background: running||!props.enabled ? '#9ca3af' : '#3b82f6', color:'white', border:'none', borderRadius:6, fontWeight:600 }}>
+            style={{ 
+              padding:'8px 16px', 
+              background: running || !props.enabled ? '#9ca3af' : '#3b82f6', 
+              color:'white', 
+              border:'none', 
+              borderRadius:6, 
+              fontWeight:600,
+              cursor: running || !props.enabled ? 'not-allowed' : 'pointer'
+            }}>
             {running ? `运行中 (${finishedCount}/${props.rounds})` : '开始运行'}
           </button>
         </div>
@@ -845,16 +735,6 @@ function LivePanel(props: LiveProps) {
         </div>
       </Section>
 
-      {/* 雷达图存档管理 */}
-      <Section title="战术画像存档">
-        <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
-          <input type="file" accept=".json" ref={radarFileRef} onChange={handleUploadRadarFile} style={{ display:'none' }} />
-          <button onClick={()=>radarFileRef.current?.click()} style={{ padding:'6px 12px', background:'#f3f4f6', border:'1px solid #d1d5db', borderRadius:6, fontSize:14 }}>上传存档</button>
-          <button onClick={handleSaveRadarArchive} style={{ padding:'6px 12px', background:'#f3f4f6', border:'1px solid #d1d5db', borderRadius:6, fontSize:14 }}>导出存档</button>
-          <div style={{ fontSize:12, color:'#6b7280' }}>用于雷达图画像（地主/农民/总体）</div>
-        </div>
-      </Section>
-
       {/* 天梯图 */}
       <LadderPanel />
 
@@ -866,37 +746,16 @@ function LivePanel(props: LiveProps) {
             const current = tsArr[i];
             return (
               <div key={i} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:12, background:'white' }}>
-                <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /> {choiceLabel(props.seats[i])}</div>
+                <div style={{ fontWeight:700, marginBottom:8 }}>
+                  <SeatTitle i={i} /> {choiceLabel(props.seats[i])}
+                  {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
+                </div>
                 <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>身份：{seatIdentity(i)}</div>
                 <div style={{ fontSize:13, marginBottom:4 }}>当前：{muSig(current)}</div>
                 <div style={{ fontSize:13, marginBottom:4 }}>存档-总体：{muSig(stored.overall)}</div>
                 <div style={{ fontSize:13, marginBottom:4 }}>存档-地主：{muSig(stored.landlord)}</div>
                 <div style={{ fontSize:13, marginBottom:4 }}>存档-农民：{muSig(stored.farmer)}</div>
                 <div style={{ fontSize:13, fontWeight:600, color:'#dc2626' }}>保守分：{fmt2(tsCr(current))}</div>
-              </div>
-            );
-          })}
-        </div>
-      </Section>
-
-      {/* 雷达图显示 */}
-      <Section title="战术画像（雷达图）">
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12 }}>
-          {[0,1,2].map(i=>{
-            const stored = getRadarStoredForSeat(i);
-            const fmt = (x:number) => (Math.round(x*100)/100).toFixed(2);
-            const renderScores = (s: Score5) => (
-              <div style={{ fontSize:12 }}>
-                合作{s.coop} 激进{s.agg} 稳健{s.cons} 效率{s.eff} 抢庄{s.rob}
-              </div>
-            );
-            return (
-              <div key={i} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:12, background:'white' }}>
-                <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /> {choiceLabel(props.seats[i])}</div>
-                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>身份：{seatIdentity(i)}</div>
-                <div style={{ fontSize:13, marginBottom:4 }}>存档-总体：{stored.overall ? `(${stored.overall.count}局) ${renderScores(stored.overall.scores)}` : '—'}</div>
-                <div style={{ fontSize:13, marginBottom:4 }}>存档-地主：{stored.landlord ? `(${stored.landlord.count}局) ${renderScores(stored.landlord.scores)}` : '—'}</div>
-                <div style={{ fontSize:13, marginBottom:4 }}>存档-农民：{stored.farmer ? `(${stored.farmer.count}局) ${renderScores(stored.farmer.scores)}` : '—'}</div>
               </div>
             );
           })}
@@ -912,6 +771,7 @@ function LivePanel(props: LiveProps) {
                 <div style={{ fontWeight:600, marginBottom:4 }}>
                   <SeatTitle i={i} /> {choiceLabel(props.seats[i])}
                   {landlord === i && <span style={{ color:'#dc2626', marginLeft:8 }}>👑 地主</span>}
+                  <span style={{ marginLeft:8, fontWeight:400 }}>{h.length}张</span>
                 </div>
                 <Hand cards={h} />
               </div>
@@ -921,7 +781,11 @@ function LivePanel(props: LiveProps) {
         <div>
           <Section title="出牌记录">
             <div style={{ maxHeight:320, overflowY:'auto', border:'1px solid #e5e7eb', borderRadius:8, padding:12, background:'white' }}>
-              {plays.map((p, idx) => <PlayRow key={idx} {...p} />)}
+              {plays.length === 0 ? (
+                <div style={{ opacity:0.6, textAlign:'center', padding:20 }}>（尚无出牌）</div>
+              ) : (
+                plays.map((p, idx) => <PlayRow key={idx} {...p} />)
+              )}
             </div>
           </Section>
         </div>
@@ -960,7 +824,11 @@ function LivePanel(props: LiveProps) {
       {/* 对局日志 */}
       <Section title="对局日志">
         <div style={{ maxHeight:320, overflowY:'auto', border:'1px solid #e5e7eb', borderRadius:8, padding:12, background:'white' }}>
-          {log.map((line, idx) => <LogLine key={idx} text={line} />)}
+          {log.length === 0 ? (
+            <div style={{ opacity:0.6, textAlign:'center', padding:20 }}>（暂无日志）</div>
+          ) : (
+            log.map((line, idx) => <LogLine key={idx} text={line} />)
+          )}
         </div>
       </Section>
     </div>
@@ -969,15 +837,19 @@ function LivePanel(props: LiveProps) {
 
 /* ====== 主页面 ====== */
 export default function Home() {
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(true);
   const [rob, setRob] = useState(true);
   const [four2, setFour2] = useState<Four2Policy>('both');
-  const [farmerCoop, setFarmerCoop] = useState(false);
+  const [farmerCoop, setFarmerCoop] = useState(true);
   const [rounds, setRounds] = useState(1);
-  const [startScore, setStartScore] = useState(0);
-  const [totals, setTotals] = useState<[number,number,number]>([0,0,0]);
+  const [startScore, setStartScore] = useState(100);
+  const [totals, setTotals] = useState<[number,number,number]>([100,100,100]);
 
-  const [seats, setSeats] = useState<BotChoice[]>(['built-in:greedy-max','built-in:greedy-min','built-in:random-legal']);
+  const [seats, setSeats] = useState<BotChoice[]>([
+    'built-in:greedy-max',
+    'built-in:greedy-min', 
+    'built-in:random-legal'
+  ]);
   const [seatModels, setSeatModels] = useState<string[]>(['','','']);
   const [seatKeys, setSeatKeys] = useState<{
     openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; deepseek?: string;
@@ -985,18 +857,26 @@ export default function Home() {
   }[]>([{},{},{}]);
 
   const [turnTimeoutSecs, setTurnTimeoutSecs] = useState<number[]>([30,30,30]);
-  const [seatDelayMs, setSeatDelayMs] = useState<number[]>([0,0,0]);
+  const [seatDelayMs, setSeatDelayMs] = useState<number[]>([1000,1000,1000]);
 
   const handleSeatChange = (i: number, choice: BotChoice) => {
-    const newSeats = [...seats]; newSeats[i] = choice; setSeats(newSeats);
+    const newSeats = [...seats]; 
+    newSeats[i] = choice; 
+    setSeats(newSeats);
+    
     const newModels = [...seatModels];
-    if (choice.startsWith('ai:')) newModels[i] = defaultModelFor(choice);
-    else newModels[i] = '';
+    if (choice.startsWith('ai:')) {
+      newModels[i] = defaultModelFor(choice);
+    } else {
+      newModels[i] = '';
+    }
     setSeatModels(newModels);
   };
 
   const handleModelChange = (i: number, model: string) => {
-    const newModels = [...seatModels]; newModels[i] = model; setSeatModels(newModels);
+    const newModels = [...seatModels]; 
+    newModels[i] = model; 
+    setSeatModels(newModels);
   };
 
   const handleKeyChange = (i: number, key: string, value: string) => {
@@ -1013,12 +893,16 @@ export default function Home() {
 
   const handleTurnTimeoutChange = (i: number, value: string) => {
     const secs = Math.max(1, Math.min(300, Number(value)||30));
-    const newTimeouts = [...turnTimeoutSecs]; newTimeouts[i] = secs; setTurnTimeoutSecs(newTimeouts);
+    const newTimeouts = [...turnTimeoutSecs]; 
+    newTimeouts[i] = secs; 
+    setTurnTimeoutSecs(newTimeouts);
   };
 
   const handleSeatDelayChange = (i: number, value: string) => {
     const ms = Math.max(0, Math.min(10000, Number(value)||0));
-    const newDelays = [...seatDelayMs]; newDelays[i] = ms; setSeatDelayMs(newDelays);
+    const newDelays = [...seatDelayMs]; 
+    newDelays[i] = ms; 
+    setSeatDelayMs(newDelays);
   };
 
   return (
@@ -1030,26 +914,42 @@ export default function Home() {
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:16, marginBottom:16 }}>
           <div>
             <label style={{ display:'block', marginBottom:4, fontWeight:600 }}>局数</label>
-            <input type="number" min="1" max="100" value={rounds} onChange={e=>setRounds(Number(e.target.value))}
-              style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:6 }} />
+            <input 
+              type="number" 
+              min="1" 
+              max="100" 
+              value={rounds} 
+              onChange={e=>setRounds(Math.max(1, Number(e.target.value)))}
+              style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:6 }} 
+            />
           </div>
           <div>
             <label style={{ display:'block', marginBottom:4, fontWeight:600 }}>初始分数</label>
-            <input type="number" value={startScore} onChange={e=>setStartScore(Number(e.target.value))}
-              style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:6 }} />
+            <input 
+              type="number" 
+              value={startScore} 
+              onChange={e=>setStartScore(Number(e.target.value))}
+              style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:6 }} 
+            />
           </div>
           <div>
             <label style={{ display:'block', marginBottom:4, fontWeight:600 }}>抢地主</label>
-            <select value={rob?'true':'false'} onChange={e=>setRob(e.target.value==='true')}
-              style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:6 }}>
+            <select 
+              value={rob?'true':'false'} 
+              onChange={e=>setRob(e.target.value==='true')}
+              style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:6 }}
+            >
               <option value="true">开启</option>
               <option value="false">关闭</option>
             </select>
           </div>
           <div>
             <label style={{ display:'block', marginBottom:4, fontWeight:600 }}>四带二</label>
-            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)}
-              style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:6 }}>
+            <select 
+              value={four2} 
+              onChange={e=>setFour2(e.target.value as Four2Policy)}
+              style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:6 }}
+            >
               <option value="both">四带两对或两张</option>
               <option value="2singles">四带两张</option>
               <option value="2pairs">四带两对</option>
@@ -1057,8 +957,11 @@ export default function Home() {
           </div>
           <div>
             <label style={{ display:'block', marginBottom:4, fontWeight:600 }}>农民协作</label>
-            <select value={farmerCoop?'true':'false'} onChange={e=>setFarmerCoop(e.target.value==='true')}
-              style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:6 }}>
+            <select 
+              value={farmerCoop?'true':'false'} 
+              onChange={e=>setFarmerCoop(e.target.value==='true')}
+              style={{ width:'100%', padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:6 }}
+            >
               <option value="true">开启</option>
               <option value="false">关闭</option>
             </select>
@@ -1075,8 +978,11 @@ export default function Home() {
                 
                 <div style={{ marginBottom:8 }}>
                   <label style={{ display:'block', marginBottom:4, fontSize:14 }}>AI 类型</label>
-                  <select value={seats[i]} onChange={e=>handleSeatChange(i, e.target.value as BotChoice)}
-                    style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }}>
+                  <select 
+                    value={seats[i]} 
+                    onChange={e=>handleSeatChange(i, e.target.value as BotChoice)}
+                    style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }}
+                  >
                     <optgroup label="内置策略">
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
@@ -1100,9 +1006,13 @@ export default function Home() {
                 {seats[i].startsWith('ai:') && (
                   <div style={{ marginBottom:8 }}>
                     <label style={{ display:'block', marginBottom:4, fontSize:14 }}>模型</label>
-                    <input type="text" value={seatModels[i]} onChange={e=>handleModelChange(i, e.target.value)}
+                    <input 
+                      type="text" 
+                      value={seatModels[i]} 
+                      onChange={e=>handleModelChange(i, e.target.value)}
                       placeholder={defaultModelFor(seats[i])}
-                      style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }} />
+                      style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }} 
+                    />
                   </div>
                 )}
 
@@ -1111,35 +1021,55 @@ export default function Home() {
                     <label style={{ display:'block', marginBottom:4, fontSize:14 }}>
                       {seats[i] === 'http' ? 'HTTP 基础 URL' : 'API 密钥'}
                     </label>
-                    <input type="text" value={
-                      seats[i] === 'http' 
-                        ? (seatKeys[i]?.httpBase || '')
-                        : (seatKeys[i]?.[seats[i].split(':')[1] as keyof typeof seatKeys[0]] || '')
-                    } onChange={e=>handleKeyChange(i, seats[i] === 'http' ? 'httpBase' : seats[i].split(':')[1], e.target.value)}
+                    <input 
+                      type="text" 
+                      value={
+                        seats[i] === 'http' 
+                          ? (seatKeys[i]?.httpBase || '')
+                          : (seatKeys[i]?.[seats[i].split(':')[1] as keyof typeof seatKeys[0]] || '')
+                      } 
+                      onChange={e=>handleKeyChange(i, seats[i] === 'http' ? 'httpBase' : seats[i].split(':')[1], e.target.value)}
                       placeholder={seats[i] === 'http' ? 'https://api.example.com' : 'sk-...'}
-                      style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }} />
+                      style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }} 
+                    />
                   </div>
                 )}
 
                 {seats[i] === 'http' && (
                   <div style={{ marginBottom:8 }}>
                     <label style={{ display:'block', marginBottom:4, fontSize:14 }}>HTTP Token（可选）</label>
-                    <input type="text" value={seatKeys[i]?.httpToken || ''} onChange={e=>handleKeyChange(i, 'httpToken', e.target.value)}
+                    <input 
+                      type="text" 
+                      value={seatKeys[i]?.httpToken || ''} 
+                      onChange={e=>handleKeyChange(i, 'httpToken', e.target.value)}
                       placeholder="Bearer token"
-                      style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }} />
+                      style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }} 
+                    />
                   </div>
                 )}
 
                 <div style={{ marginBottom:8 }}>
                   <label style={{ display:'block', marginBottom:4, fontSize:14 }}>出牌超时（秒）</label>
-                  <input type="number" min="1" max="300" value={turnTimeoutSecs[i]} onChange={e=>handleTurnTimeoutChange(i, e.target.value)}
-                    style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }} />
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="300" 
+                    value={turnTimeoutSecs[i]} 
+                    onChange={e=>handleTurnTimeoutChange(i, e.target.value)}
+                    style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }} 
+                  />
                 </div>
 
                 <div>
                   <label style={{ display:'block', marginBottom:4, fontSize:14 }}>出牌延迟（毫秒）</label>
-                  <input type="number" min="0" max="10000" value={seatDelayMs[i]} onChange={e=>handleSeatDelayChange(i, e.target.value)}
-                    style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }} />
+                  <input 
+                    type="number" 
+                    min="0" 
+                    max="10000" 
+                    value={seatDelayMs[i]} 
+                    onChange={e=>handleSeatDelayChange(i, e.target.value)}
+                    style={{ width:'100%', padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:4, fontSize:14 }} 
+                  />
                 </div>
               </div>
             ))}
@@ -1150,7 +1080,17 @@ export default function Home() {
           <div style={{ fontSize:14, color: enabled ? '#16a34a' : '#d97706' }}>
             {enabled ? '✅ 配置就绪' : '⚠ 请检查配置'}
           </div>
-          <button onClick={()=>setEnabled(!enabled)} style={{ padding:'8px 16px', background: enabled ? '#dc2626' : '#16a34a', color:'white', border:'none', borderRadius:6, fontWeight:600 }}>
+          <button 
+            onClick={()=>setEnabled(!enabled)} 
+            style={{ 
+              padding:'8px 16px', 
+              background: enabled ? '#dc2626' : '#16a34a', 
+              color:'white', 
+              border:'none', 
+              borderRadius:6, 
+              fontWeight:600 
+            }}
+          >
             {enabled ? '禁用' : '启用'}
           </button>
         </div>
