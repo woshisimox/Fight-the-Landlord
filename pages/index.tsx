@@ -95,15 +95,15 @@ type LiveProps = {
   onLog?: (lines: string[]) => void;
   turnTimeoutSecs?: number[];};
 
-function SeatTitle({ i }: { i:number }) {
-  return <span style={{ fontWeight:700 }}>{['甲','乙','丙'][i]}</span>;
-}
+// Add this line for landlord state
+const [landlord, setLandlord] = useState<number | null>(null); // Add this line to define state for landlord
 
 // Virtual deal: Update based on actual identities for all players (甲, 乙, 丙)
 const refreshTsVirtualDeal = () => {
   const lord = 0; // 甲
   const roles = ['landlord', 'farmer', 'farmer']; // 甲为地主，乙丙为农民
 
+  // Set the landlord role and update state
   setLandlord(lord);
 
   setRoundCuts(prev => {
