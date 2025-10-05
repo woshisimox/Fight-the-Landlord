@@ -350,13 +350,25 @@ function LivePanel(props: LiveProps) {
 
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
-  const tsRef = useRef(tsArr); useEffect(()=>{ tsRef.current=tsArr; }, [tsArr]);
+  const tsRef = useRef(tsArr); 
+  useEffect(()=>{ tsRef.current=tsArr; }, [tsArr]);
   const tsCr = (r:Rating)=> (r.mu - 3*r.sigma);
 
   // ===== TS 存档 =====
   const tsStoreRef = useRef<TsStore>(emptyStore());
-  useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
-  const fileRef = useRef<HTMLInputElement|null>(null);
+  useEffect(()=>{ 
+    try { 
+      tsStoreRef.current = readStore(); 
+      // 初始化时应用存档中的 TrueSkill 分数
+      applyTsFromStoreByRole(null, '页面加载');
+    } catch {} 
+  }, []);
+
+  // —— 修复：添加 landlordRef 来跟踪当前地主 —— //
+  const landlordRef = useRef<number | null>(null);
+  useEffect(() => {
+    landlordRef.current = landlord;
+  }, [landlord]);
 
   const seatIdentity = (i:number) => {
     const choice = props.seats[i];
@@ -486,38 +498,92 @@ function LivePanel(props: LiveProps) {
     }
   };
 
-  // —— 修复手牌更新逻辑 —— //
+  // —— 修复：改进的手牌更新逻辑 —— //
   const updateHandsForPlay = (seat: number, playedCards: string[]) => {
     setHands(prev => {
       const newHands = [...prev];
       const currentHand = [...newHands[seat]];
       
+      console.log(`更新手牌 - 座位 ${seat}:`, {
+        前手牌: currentHand,
+        打出牌: playedCards
+      });
+
       // 精确移除打出的每张牌
       playedCards.forEach(playedCard => {
         // 找到完全匹配的牌进行移除
         const index = currentHand.findIndex(handCard => {
-          // 如果是带花色的牌，精确匹配
-          if (playedCard.startsWith('🃏') || '♠♥♦♣'.includes(playedCard[0])) {
-            return handCard === playedCard;
-          }
-          // 如果是不带花色的牌，匹配点数（考虑10/T转换）
-          const playedRank = playedCard.replace('10', 'T');
-          const handRank = handCard.replace('10', 'T');
-          return handRank.includes(playedRank);
+          // 统一格式比较
+          const normalizeCard = (card: string) => {
+            if (card === 'x' || card === 'X') return card;
+            if (card.startsWith('🃏')) return card.slice(2); // 🃏X -> X, 🃏Y -> Y
+            if ('♠♥♦♣'.includes(card[0])) return card.slice(1); // ♠A -> A
+            return card; // A -> A
+          };
+          
+          const playedNormalized = normalizeCard(playedCard);
+          const handNormalized = normalizeCard(handCard);
+          
+          return playedNormalized === handNormalized;
         });
+        
         if (index > -1) {
           currentHand.splice(index, 1);
+          console.log(`移除牌: ${playedCard}, 剩余手牌:`, currentHand);
+        } else {
+          console.warn(`未找到匹配的牌: ${playedCard}`, {
+            当前手牌: currentHand,
+            打出牌: playedCard
+          });
         }
       });
       
       newHands[seat] = currentHand;
-      console.log(`座位 ${seat} 手牌更新:`, {
-        played: playedCards,
-        before: prev[seat],
-        after: currentHand
-      });
       return newHands;
     });
+  };
+
+  // —— 修复：改进的 TrueSkill 更新逻辑 —— //
+  const updateTrueSkillForRound = (winnerSeat: number | null) => {
+    if (winnerSeat === null || landlordRef.current === null) {
+      console.log('无法更新 TrueSkill: winnerSeat 或 landlord 为 null');
+      return;
+    }
+
+    const currentTs = [...tsRef.current];
+    console.log('更新 TrueSkill:', {
+      胜者: winnerSeat,
+      地主: landlordRef.current,
+      更新前分数: currentTs.map(r => `${r.mu.toFixed(2)}/${r.sigma.toFixed(2)}`)
+    });
+
+    try {
+      if (winnerSeat === landlordRef.current) {
+        // 地主胜利
+        tsUpdateTwoTeams(currentTs, [landlordRef.current], 
+          landlordRef.current === 0 ? [1,2] : landlordRef.current === 1 ? [0,2] : [0,1]);
+      } else {
+        // 农民胜利
+        tsUpdateTwoTeams(currentTs, 
+          landlordRef.current === 0 ? [1,2] : landlordRef.current === 1 ? [0,2] : [0,1], 
+          [landlordRef.current]);
+      }
+      
+      setTsArr([...currentTs]);
+      updateStoreAfterRound(currentTs, landlordRef.current);
+      
+      console.log('TrueSkill 更新完成:', {
+        更新后分数: currentTs.map(r => `${r.mu.toFixed(2)}/${r.sigma.toFixed(2)}`)
+      });
+      
+      setLog(l => [...l, 
+        `【TS】第${finishedCount + 1}局后更新: ` +
+        currentTs.map((r,i) => `${['甲','乙','丙'][i]} μ=${r.mu.toFixed(2)}`).join(' | ')
+      ]);
+    } catch (error) {
+      console.error('TrueSkill 更新错误:', error);
+      setLog(l => [...l, `【TS】更新失败: ${error}`]);
+    }
   };
 
   // —— 主循环 —— //
@@ -533,6 +599,7 @@ function LivePanel(props: LiveProps) {
     setLog([]);
     setPlays([]);
     setLandlord(null);
+    landlordRef.current = null; // 重置地主引用
     setWinner(null);
     setDelta(null);
     setHands([[],[],[]]);
@@ -611,7 +678,7 @@ function LivePanel(props: LiveProps) {
             
             try {
               const data = JSON.parse(line);
-              console.log('Received data:', data);
+              console.log('收到后端数据:', data);
 
               // 处理初始化数据
               if (data.type === 'init') {
@@ -621,6 +688,7 @@ function LivePanel(props: LiveProps) {
                 setHands(decoratedHands);
                 const lordIndex = data.landlordIdx ?? data.landlord ?? null;
                 setLandlord(lordIndex);
+                landlordRef.current = lordIndex; // 更新地主引用
                 
                 // 确定地主后更新 TrueSkill
                 if (lordIndex !== null) {
@@ -670,18 +738,21 @@ function LivePanel(props: LiveProps) {
               // 处理 turn 事件（包含手牌状态）
               if (data.type === 'turn') {
                 const { seat, move, cards, hand } = data;
+                console.log('收到 turn 事件:', { seat, move, cards, hand });
+                
                 if (move === 'play' && Array.isArray(hand)) {
                   // 使用后端提供的最新手牌状态
                   const decoratedHand = decorateHandCycle(hand);
                   setHands(prev => {
                     const newHands = [...prev];
                     newHands[seat] = decoratedHand;
+                    console.log(`从 turn 事件更新手牌 - 座位 ${seat}:`, decoratedHand);
                     return newHands;
                   });
                 }
               }
 
-              // 处理游戏结果
+              // 处理游戏结果 - 修复 TrueSkill 更新时机
               if ((data.type === 'event' && data.kind === 'win') || data.type === 'result') {
                 const winnerSeat = data.winner;
                 const deltaScores = data.deltaScores || data.delta || [0,0,0];
@@ -698,18 +769,8 @@ function LivePanel(props: LiveProps) {
                   prev[2] + deltaScores[2],
                 ]);
 
-                // 更新 TrueSkill - 确保每局结束后更新
-                const tsCur = [...tsRef.current];
-                if (winnerSeat !== null && landlord !== null) {
-                  if (winnerSeat === landlord) {
-                    tsUpdateTwoTeams(tsCur, [landlord], landlord === 0 ? [1,2] : landlord === 1 ? [0,2] : [0,1]);
-                  } else {
-                    tsUpdateTwoTeams(tsCur, landlord === 0 ? [1,2] : landlord === 1 ? [0,2] : [0,1], [landlord]);
-                  }
-                  setTsArr([...tsCur]);
-                  updateStoreAfterRound(tsCur, landlord);
-                  setLog(l => [...l, `【TS】第${round+1}局后更新完成`]);
-                }
+                // 修复：立即更新 TrueSkill
+                updateTrueSkillForRound(winnerSeat);
 
                 // 更新雷达图数据
                 if (data.radarScores) {
