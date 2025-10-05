@@ -467,7 +467,13 @@ function LivePanel(props: LiveProps) {
   const applyTsFromStore = (why:string) => {
     const ids = [0,1,2].map(seatIdentity);
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
-    setTsArr(init);
+    
+    // Update ladder immediately
+    setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
+
+    // Initially display the default TrueSkill values
+    setTsArr(init);  // Default TrueSkill values are shown before the match starts
+    
     setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
   };
 
@@ -478,7 +484,13 @@ function LivePanel(props: LiveProps) {
       const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
       return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
     });
-    setTsArr(init);
+    
+    // Update ladder immediately
+    setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
+
+    // Initially display the default TrueSkill values
+    setTsArr(init);  // Default TrueSkill values are shown before the match starts
+    
     setLog(l => [...l,
       `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
       init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
@@ -553,8 +565,9 @@ function LivePanel(props: LiveProps) {
   };
 
   // 刷新：按“当前地主身份”应用
-  const handleRefreshApply = () => {
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+  // Removed handleRefreshApply function
+
+    // Removed refresh logic
   };
 
   // —— 用于“区分显示”的帮助函数 —— //
@@ -1522,7 +1535,7 @@ const handleAllSaveInner = () => {
   
 
   const handleAllRefreshInner = () => {
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+    // Removed refresh logic
     applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
