@@ -1,4 +1,5 @@
 
+// pages/index.tsx
 import { useEffect, useRef, useState } from 'react';
 
 type Four2Policy = 'both' | '2singles' | '2pairs';
@@ -45,10 +46,10 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
 /* ===== TrueSkill 本地存档（新增） ===== */
 type TsRole = 'landlord'|'farmer';
 type TsStoreEntry = {
-  id: string;
+  id: string;                 // 身份（详见 seatIdentity）
   label?: string;
-  overall?: Rating | null;
-  roles?: {
+  overall?: Rating | null;    // 总体
+  roles?: {                   // 角色分档
     landlord?: Rating | null;
     farmer?: Rating | null;
   };
@@ -103,39 +104,65 @@ type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
 
-// Function to dynamically get player identity including their selected algorithm
-const seatIdentity = (i:number) => {
-  const choice = props.seats[i];
-  const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
-  const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
-  return `${choice}|${model}|${base}`; // Identity including algorithm info
+const rankOf = (l: string) => {
+  if (!l) return '';
+  const c0 = l[0];
+  if ('♠♥♦♣'.includes(c0)) return l.slice(1).replace(/10/i, 'T').toUpperCase();
+  if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
+  return l.replace(/10/i, 'T').toUpperCase();
 };
-
-// Resolve ratings based on seat identity (and role)
-const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
-  const p = tsStoreRef.current.players[id]; if (!p) return null;
-  if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
-  if (p.overall) return ensureRating(p.overall);
-  const L = p.roles?.landlord, F = p.roles?.farmer;
-  if (L && F) return { mu:(L.mu+F.mu)/2, sigma:(L.sigma+F.sigma)/2 };
-  if (L) return ensureRating(L);
-  if (F) return ensureRating(F);
-  return null;
-};
-
-// Apply ratings from the store dynamically based on role (landlord vs farmer)
-const applyTsFromStoreByRole = (lord: number | null, why: string) => {
-  const ids = [0, 1, 2].map(seatIdentity);  // Dynamically get the seat identities (with algorithms)
-  const init = [0, 1, 2].map(i => {
-    const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
-    return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
+function candDecorations(l: string): string[] {
+  if (!l) return [];
+  if (l === 'x') return ['🃏X'];
+  if (l === 'X') return ['🃏Y'];
+  if (l.startsWith('🃏')) return [l];
+  if ('♠♥♦♣'.includes(l[0])) return [l];
+  const r = rankOf(l);
+  if (r === 'JOKER') return ['🃏Y'];
+  return SUITS.map(s => `${s}${r}`);
+}
+function decorateHandCycle(raw: string[]): string[] {
+  let idx = 0;
+  return raw.map(l => {
+    if (!l) return l;
+    if (l === 'x') return '🃏X';
+    if (l === 'X') return '🃏Y';
+    if (l.startsWith('🃏')) return l;
+    if ('♠♥♦♣'.includes(l[0])) return l;
+    const suit = SUITS[idx % SUITS.length]; idx++;
+    return `${suit}${rankOf(l)}`;
   });
-  setTsArr(init);
-  setLog(l => [...l, `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
-    init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
+}
+
+function Card({ label }: { label:string }) {
+  const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
+  const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
+  const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
+  const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
+  return (
+    <span style={{
+      display:'inline-flex', alignItems:'center', gap:6,
+      border:'1px solid #ddd', borderRadius:8, padding:'6px 10px',
+      marginRight:6, marginBottom:6, fontWeight:800, color: baseColor
+    }}>
+      <span style={{ fontSize:16 }}>{suit}</span>
+      <span style={{ fontSize:16, ...(rankColor ? { color: rankColor } : {}) }}>{rank === 'T' ? '10' : rank}</span>
+    </span>
+  );
+}
+function Hand({ cards }: { cards: string[] }) {
+  if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>（空）</span>;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+      {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
+    </div>
+  );
+}
+
+/* ====== 更新的 TrueSkill 存档应用 ====== */
+const handleRefreshApply = () => {
+    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+    setLog(l => [...l, '【TS】已按当前角色应用TrueSkill数据（包括地主与农民角色）']);
 };
 
-// Use this function to refresh the TrueSkill ratings dynamically
-const handleRefreshApply = () => {
-  applyTsFromStoreByRole(landlordRef.current, '手动刷新');
-};
+// Adding other necessary components and functions...
