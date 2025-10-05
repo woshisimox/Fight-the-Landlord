@@ -454,7 +454,8 @@ function LivePanel(props: LiveProps) {
   };
 
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
-    const p = tsStoreRef.current.players[id]; if (!p) return null;
+  const pickRole = (p: any): Rating | null => {
+    if (!p) return null;
     if (role && p.roles?.[role]) return ensureRating(p.roles[role]);
     if (p.overall) return ensureRating(p.overall);
     const L = p.roles?.landlord, F = p.roles?.farmer;
@@ -463,6 +464,45 @@ function LivePanel(props: LiveProps) {
     if (F) return ensureRating(F);
     return null;
   };
+
+  // 1) exact
+  let r = pickRole(tsStoreRef.current.players[id]);
+  if (r) return r;
+
+  // 2) fallback candidates for legacy IDs
+  const candidates = (() => {
+    const c = new Set<string>();
+    const s = (id || '').trim();
+    c.add(s);
+    const parts = s.split('|');
+    // remove empty trailing fields
+    while (parts.length > 1 && (!parts[parts.length-1] || parts[parts.length-1] === '')) parts.pop();
+    if (parts.length) c.add(parts.join('|'));
+    // only choice
+    if (parts.length >= 1) c.add(parts[0]);
+    // choice|model
+    if (parts.length >= 2) c.add(`${parts[0]}|${parts[1]}`);
+    // normalized 3-part with empties
+    if (parts.length === 1) c.add(`${parts[0]}||`);
+    if (parts.length === 2) c.add(`${parts[0]}|${parts[1]}|`);
+    // friendly label → built-in choice
+    const friendlyMap: Record<string,string> = {
+      'Greedy Max': 'built-in:greedy-max',
+      'Greedy Min': 'built-in:greedy-min',
+      'Random Legal': 'built-in:random-legal',
+    };
+    const choice = parts[0] || s;
+    const alt = friendlyMap[choice];
+    if (alt) { c.add(alt); c.add(`${alt}|`); c.add(`${alt}||`); }
+    return Array.from(c);
+  })();
+
+  for (const key of candidates) {
+    r = pickRole(tsStoreRef.current.players[key]);
+    if (r) return r;
+  }
+  return null;
+};;
 
   const applyTsFromStore = (why:string) => {
     const ids = [0,1,2].map(seatIdentity);
