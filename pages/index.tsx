@@ -1563,6 +1563,56 @@ const handleAllSaveInner = () => {
 
   return (
     <div>
+      {/* === AI 用时（ms） === */}
+      <div style={{ border:'1px solid #eee', borderRadius:10, padding:12, margin:'12px 0' }}>
+        <div style={{ fontSize:16, fontWeight:800, marginBottom:6 }}>AI 用时（最近一次）</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{ border:'1px dashed #eee', borderRadius:8, padding:10 }}>
+              <div style={{ fontWeight:700, marginBottom:6 }}>{seatName(i)}</div>
+              <div style={{ fontSize:20, fontWeight:900 }}>{aiMs[i] ?? 0} ms</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* === 回放时间轴（基于后端 history.t 时间戳） === */}
+      <div style={{ border:'1px solid #eee', borderRadius:10, padding:12, margin:'12px 0' }}>
+        <div style={{ fontSize:16, fontWeight:800, marginBottom:6 }}>回放时间轴</div>
+        <div style={{ maxHeight:240, overflow:'auto', border:'1px dashed #eee', borderRadius:8, padding:8 }}>
+          {timeline && timeline.length>0 ? (
+            <table style={{ width:'100%', fontSize:12, borderCollapse:'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>#</th>
+                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>seat</th>
+                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>action</th>
+                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>cards</th>
+                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>Δt (ms)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {timeline.map((ev:any, idx:number)=>{
+                  const prev = idx>0 ? timeline[idx-1] : null;
+                  const dt = prev ? Math.max(0, (ev.t||0) - (prev.t||0)) : 0;
+                  return (
+                    <tr key={idx}>
+                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{idx+1}</td>
+                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{ev.seat>=0?seatName(ev.seat):'-'}</td>
+                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{ev.action}</td>
+                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{Array.isArray(ev.cards)? ev.cards.join(' '): ''}</td>
+                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{dt}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ color:'#999' }}>等待一局开始后自动出现（依赖后端 turn.history.t）。</div>
+          )}
+        </div>
+      </div>
+
       <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
         <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
           剩余局数：{remainingGames}
@@ -1892,52 +1942,7 @@ function Home() {
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
 
-      {/* === AI 用时（ms） === */}
-      <div style={{ border:'1px solid #eee', borderRadius:10, padding:12, margin:'12px 0' }}>
-        <div style={{ fontSize:16, fontWeight:800, marginBottom:6 }}>AI 用时（最近一次）</div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          {[0,1,2].map(i=>(
-            <div key={i} style={{ border:'1px dashed #eee', borderRadius:8, padding:10 }}>
-              <div style={{ fontWeight:700, marginBottom:6 }}>{seatName(i)}</div>
-              <div style={{ fontSize:20, fontWeight:900 }}>{aiMs[i] ?? 0} ms</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* === 回放时间轴（基于后端 history.t 时间戳） === */}
-      <div style={{ border:'1px solid #eee', borderRadius:10, padding:12, margin:'12px 0' }}>
-        <div style={{ fontSize:16, fontWeight:800, marginBottom:6 }}>回放时间轴</div>
-        <div style={{ maxHeight:240, overflow:'auto', border:'1px dashed #eee', borderRadius:8, padding:8 }}>
-          {timeline && timeline.length>0 ? (
-            <table style={{ width:'100%', fontSize:12, borderCollapse:'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>#</th>
-                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>seat</th>
-                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>action</th>
-                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>cards</th>
-                  <th style={{ textAlign:'left', padding:'4px 6px', borderBottom:'1px solid #eee' }}>Δt (ms)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {timeline.map((ev:any, idx:number)=>{
-                  const prev = idx>0 ? timeline[idx-1] : null;
-                  const dt = prev ? Math.max(0, (ev.t||0) - (prev.t||0)) : 0;
-                  return (
-                    <tr key={idx}>
-                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{idx+1}</td>
-                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{ev.seat>=0?seatName(ev.seat):'-'}</td>
-                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{ev.action}</td>
-                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{Array.isArray(ev.cards)? ev.cards.join(' '): ''}</td>
-                      <td style={{ padding:'4px 6px', borderBottom:'1px dashed #f0f0f0' }}>{dt}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <div style={{ color:'#999' }}>等待一局开始后自动出现（依赖后端 turn.history.t）。</div>
+      
           )}
         </div>
       </div>
