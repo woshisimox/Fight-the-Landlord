@@ -1542,8 +1542,15 @@ const applyTsFromStore = (why:string) => {
   const ids = [0,1,2].map(seatIdentityCurrent);
   const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
   setTsArr(init);
-  try { setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]); } catch {}
+  try {
+    setLog(l => [
+      ...l,
+      `【TS】已从存档应用（${why}）：` +
+      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
+    ]);
+  } catch {}
 };
+;
 
 // 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
 const applyTsFromStoreByRole = (lord: number | null, why: string) => {
@@ -1554,12 +1561,14 @@ const applyTsFromStoreByRole = (lord: number | null, why: string) => {
   });
   setTsArr(init);
   try {
-    setLog(l => [...l,
+    setLog(l => [
+      ...l,
       `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
       init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
     ]);
   } catch {}
 };
+;
 
   const choice = seats[i];
   const model = normalizeModelForProvider(choice, seatModels[i] || '') || defaultModelFor(choice);
