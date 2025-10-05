@@ -1041,8 +1041,6 @@ const start = async () => {
         }
 
         if (batch.length) {
-          const hasTurnFrame = batch.some((x:any)=>x && x.type === 'turn');
-
           let nextHands = handsRef.current.map(x => [...x]);
           let nextPlays = [...playsRef.current];
           let nextTotals = [...totalsRef.current] as [number, number, number];
@@ -1244,18 +1242,20 @@ for (const raw of batch) {
                   }
                 }
 
+              // -------- 记录 turn（含 score） --------
+              
               // -------- 记录 turn（含 score + 手牌/日志回放） --------
               if (m.type === 'turn') {
                 const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                 if (s>=0 && s<3) {
+                  sawAnyTurn = true;
                   // 1) 评分时间序列
                   const val = (typeof m.score === 'number') ? (m.score as number) : null;
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
                   }
-
-                  // 2) 同步 UI：出/过 + 实时扣手牌
+                  // 2) 实时扣手牌 + 追加日志（使用后端 turn 携带的 m.cards / m.reason / m.hand）
                   const reason = (m.reason ?? lastReasonRef.current[s]) || undefined;
                   lastReasonRef.current[s] = null;
                   if (m.move === 'pass') {
@@ -1279,8 +1279,8 @@ for (const raw of batch) {
                 }
                 continue;
               }
-              }
-if (m.type === 'event' && m.kind === 'play' && !hasTurnFrame) {
+
+else if (m.type === 'event' && m.kind === 'play' && !sawAnyTurn) {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
                   lastReasonRef.current[m.seat] = null;
