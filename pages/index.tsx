@@ -307,6 +307,23 @@ function choiceLabel(choice: BotChoice): string {
     default: return String(choice);
   }
 }
+// === 映射：人类可读标签 -> choice 枚举（用于宽松模板兼容） ===
+const CHOICE_BY_LABEL: Record<string, BotChoice> = {
+  'Greedy Max':'built-in:greedy-max',
+  'Greedy Min':'built-in:greedy-min',
+  'Random Legal':'built-in:random-legal',
+  'MiniNet':'built-in:mininet',
+  'AllySupport':'built-in:ally-support',
+  'EndgameRush':'built-in:endgame-rush',
+  'OpenAI':'ai:openai',
+  'Gemini':'ai:gemini',
+  'Grok':'ai:grok',
+  'Kimi':'ai:kimi',
+  'Qwen':'ai:qwen',
+  'DeepSeek':'ai:deepseek',
+  'HTTP':'http',
+};
+
 
 
 /* ====== 雷达图累计（0~5） ====== */
@@ -464,8 +481,41 @@ function LivePanel(props: LiveProps) {
     return null;
   };
 
-  const applyTsFromStore = (why:string) => {
-    const ids = [0,1,2].map(seatIdentity);
+  
+  // 根据当前座位构造 identity，并对 tsStoreRef.current.players 做容错映射
+  const resolveIdsForCurrentSeats = (): string[] => {
+    const ids: string[] = [0,1,2].map((i)=>{
+      const choice = props.seats[i];
+      const model  = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
+      const base   = (choice === 'http') ? (props.seatKeys[i]?.httpBase || '') : '';
+      const direct = `${choice}|${model}|${base}`;
+      if (tsStoreRef.current.players[direct]) return direct;
+
+      // 1) 按 meta 精准匹配
+      const byMeta = Object.entries<any>(tsStoreRef.current.players).find(([_, p])=>{
+        const m = p?.meta || {};
+        if (m.choice !== choice) return false;
+        if (choice === 'http') return (m.httpBase || '') === base;
+        const mnorm = normalizeModelForProvider(choice, m.model || '') || defaultModelFor(choice);
+        return mnorm === model || !m.model;
+      });
+      if (byMeta) return byMeta[0];
+
+      // 2) 内置算法：用 label 推断
+      if ((choice as string).startsWith('built-in')) {
+        const guess = `built-in:${choiceLabel(choice as any).toLowerCase().replace(/\s+/g,'-')}||`;
+        if (tsStoreRef.current.players[guess]) return guess;
+      }
+
+      // 3) 兜底：找任意以 `${choice}|` 开头的条目
+      const starts = Object.keys(tsStoreRef.current.players).find(k => k.startsWith(`${choice}|`));
+      return starts || direct;
+    });
+    try { setLog(l => [...l, '【TS】参赛确认：' + ids.map((id,i)=>`${['甲','乙','丙'][i]}→${id}`).join(' | ')]); } catch {}
+    return ids;
+  };
+const applyTsFromStore = (why:string) => {
+    const ids = resolveIdsForCurrentSeats();
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
     setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
@@ -473,7 +523,7 @@ function LivePanel(props: LiveProps) {
 
   // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
   const applyTsFromStoreByRole = (lord: number | null, why: string) => {
-    const ids = [0,1,2].map(seatIdentity);
+    const ids = resolveIdsForCurrentSeats();
     const init = [0,1,2].map(i => {
       const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
       return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
