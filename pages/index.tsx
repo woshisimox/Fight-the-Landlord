@@ -463,7 +463,68 @@ function LivePanel(props: LiveProps) {
   useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
 
-  const seatIdentity = (i:number) => {
+  
+// —— 待应用的 TrueSkill 存档（上传时暂存，刷新时才写入并应用） ——
+const tsPendingRawRef = useRef<any|null>(null);
+
+// 将 pending 的 TS 存档标准化为 identity 键并写入 tsStoreRef.current.players
+function materializePendingTsStore(): boolean {
+  const j = tsPendingRawRef.current;
+  if (!j) return false;
+
+  if (!tsStoreRef.current) (tsStoreRef as any).current = emptyStore();
+  if (!tsStoreRef.current.players) tsStoreRef.current.players = {} as any;
+
+  const incoming: any = (j?.players && typeof j.players === 'object') ? j.players : j;
+
+  for (const [k, p0] of Object.entries<any>(incoming || {})) {
+    const meta = (p0 && p0.meta) || {};
+    let choice: BotChoice | undefined =
+      meta.choice ||
+      (CHOICE_BY_LABEL as any)[k] ||
+      ((String(k).startsWith('built-in:') || String(k).startsWith('ai:') || String(k) === 'http') ? (k as BotChoice) : undefined);
+
+    if (!choice && typeof (p0 && p0.label) === 'string') {
+      choice = (CHOICE_BY_LABEL as any)[p0.label];
+    }
+
+    if (!choice) {
+      const idRaw = (p0 && p0.id) || k;
+      const id = typeof idRaw === 'string' ? idRaw : String(idRaw);
+      (tsStoreRef.current.players as any)[id] = {
+        id,
+        overall: (p0 && (p0.overall || p0.rating)) || null,
+        roles: (p0 && p0.roles) || null,
+        meta,
+      };
+      continue;
+    }
+
+    const modelNorm =
+      normalizeModelForProvider(choice, (meta && meta.model) || '') ||
+      defaultModelFor(choice);
+
+    const base = (choice === 'http') ? ((meta && meta.httpBase) || '') : '';
+    const id = `${choice}|${modelNorm}|${base}`;
+
+    (tsStoreRef.current.players as any)[id] = {
+      id,
+      overall: (p0 && (p0.overall || p0.rating)) || null,
+      roles: {
+        landlord: (p0 && p0.roles && p0.roles.landlord) ?? (p0 && p0.landlord) ?? null,
+        farmer  : (p0 && p0.roles && p0.roles.farmer)   ?? (p0 && p0.farmer)   ?? null,
+      },
+      meta: { choice, ...(meta && meta.model ? { model: meta.model } : {}), ...(base ? { httpBase: base } : {}) },
+    };
+  }
+
+  tsPendingRawRef.current = null;
+  try { setLog(l => [...l, '【TS】已将待应用存档标准化并写入内存']); } catch {}
+  try { writeStore(tsStoreRef.current); } catch {}
+  return true;
+}
+
+const seatIdentity = (i:number) => {
     const choice = props.seats[i];
     const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
@@ -1545,21 +1606,22 @@ const buildAllBundle = (): AllBundle => {
 
 const applyAllBundleInner = (obj:any) => {
   try {
-    if (obj?.trueskill?.players) {
-      tsStoreRef.current = obj.trueskill as TsStore;
-      writeStore(tsStoreRef.current);
-      applyTsFromStoreByRole(landlordRef.current, '统一上传');
+    if (obj?.trueskill) {
+      // 不立即写入/应用；改为暂存，待“刷新”时写入并按身份套用
+      tsPendingRawRef.current = obj.trueskill;
+      setLog(l => [...l, '【ALL】已载入 TrueSkill 待应用存档（点“刷新”生效）']);
     }
     // radar ignored for ALL upload (persistence disabled)
 
     if (obj?.ladder?.schema === 'ddz-ladder@1') {
       try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {}
     }
-    setLog(l => [...l, '【ALL】统一上传完成（TS / 画像 / 天梯）。']);
+    setLog(l => [...l, '【ALL】统一上传完成（TS 已延迟套用，需“刷新”）。']);
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
-};
+}
+;
 const handleAllSaveInner = () => {
     const payload = buildAllBundle();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
@@ -1572,6 +1634,7 @@ const handleAllSaveInner = () => {
   
 
   const handleAllRefreshInner = () => {
+    try { materializePendingTsStore(); } catch {}
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
     applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
