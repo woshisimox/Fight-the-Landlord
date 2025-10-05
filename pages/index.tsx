@@ -552,7 +552,10 @@ function LivePanel(props: LiveProps) {
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
 
-  // 固定甲(0)为地主的“虚拟发牌”：不打牌，只用于角色就绪与TS映射
+  // 刷新：按“当前地主身份”应用
+  
+
+// 固定甲(0)为地主的“虚拟发牌”：不打牌，只用于角色就绪与TS映射
 const refreshTsVirtualDeal = () => {
   const lord = 0; // 甲
   // 1) 设置地主（让角色生效）
@@ -584,12 +587,14 @@ const refreshTsVirtualDeal = () => {
 };
 
 const handleRefreshApply = () => {
-  // 始终走虚拟发牌，固定甲为地主，确保角色与身份对齐
-  refreshTsVirtualDeal();
+  if (landlordRef.current == null || typeof landlordRef.current === 'undefined') {
+    // 还没选参赛/还没发牌：用“虚拟发牌”完成身份与角色就绪 + 映射
+    refreshTsVirtualDeal();
+  } else {
+    // 已有地主（来自真实发牌/对局中）：按当前地主身份套用
+    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+  }
 };
-
-
-\1  // 始终走虚拟发牌，固定甲为地主，确保角色与身份对齐\n  refreshTsVirtualDeal();\n\3
 
   // —— 用于“区分显示”的帮助函数 —— //
   const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
@@ -1532,8 +1537,8 @@ const applyAllBundleInner = (obj:any) => {
     if (obj?.trueskill?.players) {
       tsStoreRef.current = obj.trueskill as TsStore;
       writeStore(tsStoreRef.current);
-      applyTsFromStoreByRole(landlordRef.current, '统一上传');
-    }
+      setLog(l => [...l, '【TS】已接收存档（未应用，待“刷新”虚拟发牌套用）。']);
+}
     // radar ignored for ALL upload (persistence disabled)
 
     if (obj?.ladder?.schema === 'ddz-ladder@1') {
@@ -1556,12 +1561,12 @@ const handleAllSaveInner = () => {
   
 
   const handleAllRefreshInner = () => {
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
-    applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
-    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
-    setRoundCuts(prev => [...prev]);
-    setRoundLords(prev => [...prev]);
-    setLog(l => [...l, '【ALL】已刷新面板数据。']);
+    refreshTsVirtualDeal();                // 固定甲为地主 + 按角色把 TS 从存档套到当前参赛算法身份
+applyRadarFromStoreByRole(0, '虚拟局-刷新'); // 画像也按虚拟地主=甲来套用
+setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+setRoundCuts(prev => [...prev]);
+setRoundLords(prev => [...prev]);
+setLog(l => [...l, '【ALL】已刷新（虚拟发牌：甲为地主）']);
   };
 
   useEffect(()=>{
