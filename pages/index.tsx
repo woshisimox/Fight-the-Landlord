@@ -511,11 +511,11 @@ const applyTsFromStoreNextRound = (why: string) => {
   } catch {}
 };
  useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
-  const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
-  const const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
-  const const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
-  const const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
-  const const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+  logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
+  const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
+  const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
+  const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
+  const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
 
   const aggStatsRef = useRef(aggStats); useEffect(()=>{ aggStatsRef.current = aggStats; }, [aggStats]);
   const aggCountRef = useRef(aggCount); useEffect(()=>{ aggCountRef.current = aggCount; }, [aggCount]);
