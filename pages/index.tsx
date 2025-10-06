@@ -170,8 +170,7 @@ const TRANSLATIONS: TransRule[] = [
   { zh: /总体档/, en: 'Overall' },
   { zh: /总体(?!均值)/, en: 'Overall' },
 
-];];
-
+];
 function translateTextLiteral(s: string): string {
   let out = s;
   for (const r of TRANSLATIONS) {
