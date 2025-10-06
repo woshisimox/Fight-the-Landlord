@@ -82,6 +82,30 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '当前', en: 'Current' },
   { zh: '未参赛', en: 'Not played' },
   { zh: '历史', en: 'History' },
+
+  // === Added for full UI coverage ===
+  { zh: '局数', en: 'Rounds' },
+  { zh: '初始分', en: 'Initial Score' },
+  { zh: /4带2\s*规则/, en: '4-with-2 Rule' },
+  { zh: '都可', en: 'Allowed' },
+  { zh: '不可', en: 'Not allowed' },
+  { zh: '选择', en: 'Select' },
+  { zh: /每家AI设置（独立）|每家AI设置\s*\(独立\)/, en: 'Per-player AI (independent)' },
+  { zh: /每家出牌最小间隔（ms）|每家出牌最小间隔\s*\(ms\)/, en: 'Per-player min play interval (ms)' },
+  { zh: /每家思考超时（秒）|每家思考超时\s*\(秒\)/, en: 'Per-player think timeout (s)' },
+  { zh: /最小间隔（ms）|最小间隔\s*\(ms\)/, en: 'Min interval (ms)' },
+  { zh: /弃牌时间（秒）|弃牌时间\s*\(秒\)/, en: 'Discard time (s)' },
+  { zh: /（独立）|\(独立\)/, en: '(independent)' },
+  { zh: /（ms）|\(ms\)/, en: '(ms)' },
+  { zh: /（秒）|\(秒\)/, en: '(s)' },
+  { zh: /天梯\s*\/\s*TrueSkill/, en: 'Ladder / TrueSkill' },
+  { zh: '可抢地主', en: 'Can Rob Landlord' },
+  { zh: '局', en: 'round(s)' },
+  { zh: '开始', en: 'Start' },
+  { zh: '暂停', en: 'Pause' },
+  { zh: '继续', en: 'Resume' },
+  { zh: '停止', en: 'Stop' },
+
 ];
 
 function translateTextLiteral(s: string): string {
