@@ -1620,11 +1620,9 @@ nextTotals     = [
                   };
                   
                   // === 以“分差等效多局”更新 ===
-                  const rawS = Number((Array.isArray(ds) && typeof ds[0] === 'number') ? ds[0] : 0);
-                  const S = rawS;                         // 地主分差（正=地主赢；负=农民赢）
-                  const signS = (S>0?1:(S<0?-1:0));
+                  const rawS = Number((Array.isArray(ds) && typeof ds[0] === 'number') ? ds[0] : 0); // 地主分差（正=地主赢；负=农民赢）
                   const Smax = 8;                         // 单手影响上限
-                  const mTimes = Math.max(1, Math.min(Smax, Math.abs(Math.round(S))));
+                  const mTimes = Math.max(1, Math.min(Smax, Math.abs(Math.round(rawS))));
 
                   // —— 更新 Ladder（把权重=等效局数 mTimes）——
                   for (let i=0;i<3;i++) {
@@ -1642,12 +1640,12 @@ nextTotals     = [
                   const farmers = [0,1,2].filter(s => s !== L);
 
                   // —— TrueSkill：把一手当成 mTimes 手 ——
-                  if (signS > 0) {
+                  if (rawS > 0) {
                     for (let k=0; k<mTimes; k++) {
                       const tau = (k === 0) ? TS_TAU : 0;
                       tsUpdateTwoTeamsWithTau(updated, [L], farmers, tau);
                     }
-                  } else if (signS < 0) {
+                  } else if (rawS < 0) {
                     for (let k=0; k<mTimes; k++) {
                       const tau = (k === 0) ? TS_TAU : 0;
                       tsUpdateTwoTeamsWithTau(updated, farmers, [L], tau);
