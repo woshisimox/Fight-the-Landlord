@@ -198,7 +198,8 @@ function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
       if (!txt || !/[\u4e00-\u9fff]/.test(txt)) return NodeFilter.FILTER_REJECT;
     return NodeFilter.FILTER_ACCEPT;
   };
-  const apply = (scope: HTMLElement
+  const apply = (scope: HTMLElement) => {
+  };
     const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, { acceptNode: accept } as any);
     let n: any;
     while ((n = walker.nextNode())) {
