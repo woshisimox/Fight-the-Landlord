@@ -656,12 +656,12 @@ function LivePanel(props: LiveProps) {
   const toggleCard = (label:string)=>{
     setHumanSel(prev => prev.includes(label) ? prev.filter(x=>x!==label) : [...prev, label]);
   };
-  const undecorateToRaw = (labels:string[])=>labels.map(s=>{
-    if (s.startswith('🃏')){
-    return s.find('Y')!=-1 ? 'X' : 'x';
+  const undecorateToRaw = (labels:string[]) => labels.map(s => {
+  if (s.startsWith('🃏')) {
+    return s.includes('Y') ? 'X' : 'x';
   }
-    return s[-1];
-  });
+  return s.slice(-1);
+});
   // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
   const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
