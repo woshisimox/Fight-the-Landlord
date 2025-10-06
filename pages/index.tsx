@@ -211,10 +211,9 @@ function Hand({ cards }: { cards: string[] }) {
     </div>
   );
 }
-function PlayRow({
-  const { t, lang } = useI18n(); seat, move, cards, reason }:{
-  seat:number; move:'play'|'pass'; cards?:string[]; reason?:string
-}) {
+function PlayRow({ seat, move, cards, reason }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string }) {
+  const { t, lang } = useI18n();
+
   return (
     <div style={{ display:'flex', gap:8, alignItems:'center', padding:'6px 0' }}>
       <div style={{ width:32, textAlign:'right', opacity:0.8 }}>{seatLabel(seat, lang)}</div>
