@@ -20,7 +20,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     Empty: '（空）',
     Upload: '上传',
     Save: '存档',
-    FarmerCoop: '农民配合',
+    FarmerCoop: '农民配合'
   },
   en: {
     Title: 'Fight the Landlord',
@@ -35,7 +35,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     Empty: '(empty)',
     Upload: 'Upload',
     Save: 'Save',
-    FarmerCoop: 'Farmer Cooperation',
+    FarmerCoop: 'Farmer Cooperation'
+  }
 };
 
 function useI18n() {
