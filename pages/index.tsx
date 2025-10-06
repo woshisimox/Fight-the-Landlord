@@ -189,7 +189,7 @@ function translateTextLiteral(s: string): string {
 function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
   if (!root) return;
   const tags = new Set(['BUTTON','LABEL','DIV','SPAN','P','H1','H2','H3','H4','H5','H6','TD','TH','A','LI','STRONG','EM','SMALL','CODE','OPTION']);
-  const accept = (node: any
+  const accept = (node: any) => {
     const el = node.parentElement as HTMLElement | null;
     if (!el) return NodeFilter.FILTER_REJECT;
     if (!tags.has(el.tagName)) return NodeFilter.FILTER_REJECT;
