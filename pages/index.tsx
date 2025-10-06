@@ -22,8 +22,8 @@ const I18N: Record<Lang, Record<string, string>> = {
   },
   en: {
     Title: 'Fight the Landlord',
-    Settings: 'Match Settings',
-    Enable: 'Enable Match',
+    Settings: 'Match settings',
+    Enable: 'Enable match',
     Reset: 'Reset',
     EnableHint: 'Disabled matches cannot start/continue; tick again to restore.',
     LadderTitle: 'Ladder (ΔR)',
@@ -33,8 +33,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     Empty: '(empty)',
     Upload: 'Upload',
     Save: 'Save',
-    FarmerCoop: 'Farmer Cooperation',
-  }
+    FarmerCoop: 'Farmer cooperation',}
 };
 
 function useI18n() {
@@ -63,15 +62,15 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '导入', en: 'Import' },
   { zh: '刷新', en: 'Refresh' },
   { zh: '运行日志', en: 'Run Log' },
-  { zh: '对局设置', en: 'Match Settings' },
-  { zh: '启用对局', en: 'Enable Match' },
+  { zh: '对局设置', en: 'Match settings' },
+  { zh: '启用对局', en: 'Enable match' },
   { zh: '清空', en: 'Reset' },
   { zh: '出牌', en: 'Play' },
   { zh: '过', en: 'Pass' },
   { zh: '（空）', en: '(empty)' },
   { zh: '地主', en: 'Landlord' },
   { zh: '农民', en: 'Farmer' },
-  { zh: '农民配合', en: 'Farmer Cooperation' },
+  { zh: '农民配合', en: 'Farmer cooperation' },
   { zh: '开始', en: 'Start' },
   { zh: '暂停', en: 'Pause' },
   { zh: '继续', en: 'Resume' },
@@ -99,7 +98,7 @@ const TRANSLATIONS: TransRule[] = [
   { zh: /（ms）|\(ms\)/, en: '(ms)' },
   { zh: /（秒）|\(秒\)/, en: '(s)' },
   { zh: /天梯\s*\/\s*TrueSkill/, en: 'Ladder / TrueSkill' },
-  { zh: '可抢地主', en: 'Can Rob Landlord' },
+  { zh: '可抢地主', en: 'Outbid the landlord' },
   { zh: '局', en: 'round(s)' },
   { zh: '开始', en: 'Start' },
   { zh: '暂停', en: 'Pause' },
@@ -171,7 +170,7 @@ const TRANSLATIONS: TransRule[] = [
   { zh: /总体档/, en: 'Overall' },
   { zh: /总体(?!均值)/, en: 'Overall' },
 
-];
+];];
 
 function translateTextLiteral(s: string): string {
   let out = s;
