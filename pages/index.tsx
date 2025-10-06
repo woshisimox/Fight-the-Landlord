@@ -386,7 +386,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
 }
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
 const makeRewriteRoundLabel = (n: number) => (msg: string) => {
-  if (typeoff msg !== 'string') return msg;
+  if (typeof msg !== 'string') return msg;
   let out = msg;
   out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
   out = out.replace(/开始第\s*\d+\s*局（/g, `开始第 ${n} 局（`);
@@ -451,7 +451,7 @@ function LivePanel(props: LiveProps) {
           let sum = 0, cnt = 0;
           for (let i=st;i<ed;i++){
             const v = arr[i];
-            if (typeoff v === 'number') { sum += v; cnt++; }
+            if (typeof v === 'number') { sum += v; cnt++; }
           }
           if (cnt>0) perSeatRounds[s].push(sum/cnt);
         }
@@ -569,7 +569,7 @@ function LivePanel(props: LiveProps) {
             meta: p.meta || {}
           };
         }
-      } else if (j?.players && typeoff j.players === 'object') {
+      } else if (j?.players && typeof j.players === 'object') {
         store.players = j.players;
       } else if (Array.isArray(j)) {
         for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p; }
@@ -788,7 +788,7 @@ function LivePanel(props: LiveProps) {
             meta: p.meta || {},
           };
         }
-      } else if (j?.players && typeoff j.players === 'object') {
+      } else if (j?.players && typeof j.players === 'object') {
         for (const [id, p] of Object.entries<any>(j.players)) {
           store.players[id] = {
             id,
@@ -1103,7 +1103,7 @@ for (const raw of batch) {
             if (startShift) {
               const mapMsg = (obj:any)=>{
                 const out:any = { ...obj };
-                const mapSeat = (x:any)=> (typeoff x==='number' ? toUiSeat(x) : x);
+                const mapSeat = (x:any)=> (typeof x==='number' ? toUiSeat(x) : x);
                 const mapArr = (a:any)=> (Array.isArray(a) && a.length===3 ? remap3(a) : a);
                 out.seat = mapSeat(out.seat);
                 if ('landlordIdx' in out) out.landlordIdx = mapSeat(out.landlordIdx);
@@ -1266,10 +1266,10 @@ for (const raw of batch) {
               
                 // （fallback）若本批次没有收到 'turn' 行，则从 event:play 中恢复 score
                 if (!sawAnyTurn) {
-                  const s = (typeoff m.seat === 'number') ? m.seat as number : -1;
+                  const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                   if (s>=0 && s<3) {
-                    let val: number|null = (typeoff (m as any).score === 'number') ? (m as any).score as number : null;
-                    if (typeoff val !== 'number') {
+                    let val: number|null = (typeof (m as any).score === 'number') ? (m as any).score as number : null;
+                    if (typeof val !== 'number') {
                       const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
                       const mm = /score=([+-]?\d+(?:\.\d+)?)/.exec(rr || '');
                       if (mm) { val = parseFloat(mm[1]); }
@@ -1283,10 +1283,10 @@ for (const raw of batch) {
 
               // -------- 记录 turn（含 score） --------
               if (m.type === 'turn') {
-                const s = (typeoff m.seat === 'number') ? m.seat as number : -1;
+                const s = (typeof m.seat === 'number') ? m.seat as number : -1;
                 if (s>=0 && s<3) {
                   sawAnyTurn = true;
-                  const val = (typeoff m.score === 'number') ? (m.score as number) : null;
+                  const val = (typeof m.score === 'number') ? (m.score as number) : null;
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
@@ -1344,7 +1344,7 @@ if (m.type === 'event' && m.kind === 'play') {
 const sumAbs = Math.abs(rot[0]) + Math.abs(rot[1]) + Math.abs(rot[2]);
 const needScale = effMult > 1 && (sumAbs === 4 || (sumAbs % effMult !== 0));
 const rot2 = needScale
-  ? (rot.map(v => (typeoff v === 'number' ? v * effMult : v)) as [number, number, number])
+  ? (rot.map(v => (typeof v === 'number' ? v * effMult : v)) as [number, number, number])
   : rot;
 nextMultiplier = effMult;
 nextDelta      = rot2;
@@ -1463,7 +1463,7 @@ nextTotals     = [
               }
 
               // -------- 文本日志 --------
-              if (m.type === 'log' && typeoff m.message === 'string') {
+              if (m.type === 'log' && typeof m.message === 'string') {
                 nextLog = [...nextLog, rewrite(m.message)];
                 continue;
               }
@@ -1686,7 +1686,7 @@ const handleAllSaveInner = () => {
                 
                 {/* 分布直方图（每手score汇总：横轴=score，纵轴=频次；固定20桶） */}
                 {(() => {
-                  const samples = (scoreSeries[i] || []).filter(v => typeoff v === 'number' && !Number.isNaN(v)) as number[];
+                  const samples = (scoreSeries[i] || []).filter(v => typeof v === 'number' && !Number.isNaN(v)) as number[];
                   if (!samples.length) return null;
                   const pad = 6, W = 220, H = 72;
                   // μ & σ 基于所有出牌评分样本
@@ -1874,14 +1874,14 @@ const DEFAULTS = {
 
 function Home() {
   const [lang, setLang] = useState<Lang>(() => {
-    if (typeoff window === 'undefined') return 'zh';
+    if (typeof window === 'undefined') return 'zh';
     const v = localStorage.getItem('ddz_lang');
     return (v === 'en' || v === 'zh') ? (v as Lang) : 'zh';
   });
   useEffect(()=>{
     try {
       localStorage.setItem('ddz_lang', lang);
-      if (typeoff document !== 'undefined') document.documentElement.lang = lang;
+      if (typeof document !== 'undefined') document.documentElement.lang = lang;
     } catch {}
   }, [lang]);
 
@@ -2265,7 +2265,7 @@ function ScoreTimeline(
   const data = series || [[],[],[]];
   const n = Math.max(data[0]?.length||0, data[1]?.length||0, data[2]?.length||0);
   const values:number[] = [];
-  for (const arr of data) for (const v of (arr||[])) if (typeoff v==='number') values.push(v);
+  for (const arr of data) for (const v of (arr||[])) if (typeof v==='number') values.push(v);
   const vmin = values.length ? Math.min(...values) : -5;
   const vmax = values.length ? Math.max(...values) : 5;
   const pad = (vmax - vmin) * 0.15 + 1e-6;
@@ -2311,7 +2311,7 @@ function ScoreTimeline(
     for (let i=0;i<n;i++){
       if (cutSet.has(i) && i!==0) { open = false; }
       const v = arr[i];
-      if (typeoff v !== 'number') { open=false; continue; }
+      if (typeof v !== 'number') { open=false; continue; }
       const px = x(i), py = y(v);
       d += (open? ` L ${px} ${py}` : `M ${px} ${py}`);
       open = true;
@@ -2378,7 +2378,7 @@ function ScoreTimeline(
           {data.map((arr, si)=>(
             <g key={'g'+si}>
               <path d={makePath(arr)} fill="none" stroke={colors[si]} strokeWidth={2} />
-              {arr.map((v,i)=> (typeoff v==='number') && (
+              {arr.map((v,i)=> (typeof v==='number') && (
                 <circle
                   key={'c'+si+'-'+i}
                   cx={x(i)} cy={y(v)} r={2.5} fill={colors[si]}
