@@ -1651,8 +1651,9 @@ nextTotals     = [
                       tsUpdateTwoTeamsWithTau(updated, farmers, [L], tau);
                     }
                   } else {
-                    // S==0：分差为零，仍按一次普通更新（可选：不更新）
-                    tsUpdateTwoTeams(updated, [L], farmers);
+                    // S==0 理论上不该出现（斗地主无平局）；
+                    // 这里选择“不更新”，作为健壮性保护（例如上游消息缺字段时）。
+                    // no-op
                   }
 
                   setTsArr(updated);
