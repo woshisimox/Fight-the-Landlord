@@ -171,6 +171,8 @@ const TRANSLATIONS: TransRule[] = [
   { zh: /总体(?!均值)/, en: 'Overall' },
 
 ];
+function hasChinese(s: string) { return /[\u4e00-\u9fff]/.test(s); }
+
 function translateTextLiteral(s: string): string {
   let out = s;
   for (const r of TRANSLATIONS) {
@@ -192,7 +194,7 @@ function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
     if (!tags.has(el.tagName)) return NodeFilter.FILTER_REJECT;
     if (el.closest('[data-i18n-ignore]')) return NodeFilter.FILTER_REJECT;
     const txt = String(node.nodeValue || '').trim();
-    if (!txt) return NodeFilter.FILTER_REJECT;
+      if (!txt || !/[\u4e00-\u9fff]/.test(txt)) return NodeFilter.FILTER_REJECT;
     return NodeFilter.FILTER_ACCEPT;
   };
   const apply = (scope: HTMLElement) => {
@@ -207,7 +209,8 @@ function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
         if (orig != null) textNode.nodeValue = orig;
       } else {
         if (!el.hasAttribute('data-i18n-orig')) el.setAttribute('data-i18n-orig', textNode.nodeValue || '');
-        textNode.nodeValue = translateTextLiteral(textNode.nodeValue || '');
+      const v = textNode.nodeValue || '';
+      if (/[\u4e00-\u9fff]/.test(v)) textNode.nodeValue = translateTextLiteral(v);
       if (el) el.setAttribute('data-i18n-en', textNode.nodeValue || '');
 }
     }
@@ -216,14 +219,15 @@ function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
   apply(root);
   // observe dynamic updates once
   if (typeof MutationObserver !== 'undefined' && !root.hasAttribute('data-i18n-observed')) {
+    let i18nBatchQueue = new Set<HTMLElement>();
+    let i18nBatchScheduled = false;
+    const i18nSchedule = () => { if (i18nBatchScheduled) return; i18nBatchScheduled = true; requestAnimationFrame(() => { i18nBatchScheduled = false; i18nBatchQueue.forEach(n=>{ try { apply(n); } catch {} }); i18nBatchQueue.clear(); }); };
     const obs = new MutationObserver((mutations) => {
       for (const m of mutations) {
         if (m.type === 'childList') {
-          (m.addedNodes || []).forEach((node: any) => {
-            if (node && node.nodeType === 1) apply(node as HTMLElement);
-          });
+          (m.addedNodes || []).forEach((node: any) => { if (node && node.nodeType === 1) { i18nBatchQueue.add(node as HTMLElement); i18nSchedule(); } });
         } else if (m.type === 'characterData' && m.target && (m.target as any).parentElement) {
-          apply((m.target as any).parentElement as HTMLElement);
+          i18nBatchQueue.add((m.target as any).parentElement as HTMLElement); i18nSchedule();
         }
 
 
