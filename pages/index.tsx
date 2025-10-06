@@ -490,17 +490,18 @@ function LadderPanel() {
     return { id, label, val, n };
   });
   // --- Dynamic X-axis (±K) auto-scaling ---
-  const niceBucket = (x:number) => {
-    if (!Number.isFinite(x) || x <= 0) return 20;
-    const p = Math.pow(10, Math.floor(Math.log10(x)));
-    const n = x / p;
+  const niceCeil = (x:number) => {
+    if (!Number.isFinite(x) || x <= 0) return 1;
+    const exp = Math.floor(Math.log10(x));
+    const p   = Math.pow(10, exp);
+    const n   = x / p;
     const step = (n <= 1) ? 1 : (n <= 2) ? 2 : (n <= 5) ? 5 : 10;
     return step * p;
   };
-  const maxAbs = arr.length ? Math.max(5, ...arr.map(v => Math.abs(v.val))) : 20;
-  // Grow headroom 10% and round to a nice bucket (1/2/5/10 * 10^k)
-  const K = Math.max(10, niceBucket(maxAbs * 1.1));
-  const items = arr.sort((a,b)=> b.val - a.val);
+  const maxAbs = arr.length ? Math.max(...arr.map(v => Math.abs(v.val))) : 1;
+  // add 10% headroom then round up to a "nice" bound; no large lower bound to keep small ranges visible
+  const K = niceCeil(maxAbs * 1.10);
+const items = arr.sort((a,b)=> b.val - a.val);
 
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
 
