@@ -1950,11 +1950,7 @@ const DEFAULTS = {
   seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
 };
 
-function Home() {
-  const mainRef = useRef<HTMLDivElement | null>(null);
-  useEffect(()=>{ try { if (typeof document !== 'undefined') autoTranslateContainer(mainRef.current, lang); } catch {} }, [lang]);
-
-  const [lang, setLang] = useState<Lang>(() => {
+function Home() {const [lang, setLang] = useState<Lang>(() => {
     if (typeof window === 'undefined') return 'zh';
     const v = localStorage.getItem('ddz_lang');
     return (v === 'en' || v === 'zh') ? (v as Lang) : 'zh';
@@ -1965,6 +1961,9 @@ function Home() {
       if (typeof document !== 'undefined') document.documentElement.lang = lang;
     } catch {}
   }, [lang]);
+  const mainRef = useRef<HTMLDivElement | null>(null);
+  useEffect(()=>{ try { if (typeof document !== 'undefined') autoTranslateContainer(mainRef.current, lang); } catch {} }, [lang]);
+
 
   const [resetKey, setResetKey] = useState<number>(0);
   const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
