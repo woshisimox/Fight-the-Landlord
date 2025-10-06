@@ -271,7 +271,6 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
-  | 'human'
   | 'http';
 
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
@@ -419,7 +418,7 @@ function Hand({ cards }: { cards: string[] }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
       {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
-      </div>\n  </>
+    </div>
   );
 }
 function PlayRow({ seat, move, cards, reason }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string }) {
@@ -2279,9 +2278,6 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="ai:qwen">Qwen</option>
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
-                    </optgroup>
-                    <optgroup label=\"人类\">
-                      <option value=\"human\">Human</option>
                     </optgroup>
                   </select>
                 </label>
