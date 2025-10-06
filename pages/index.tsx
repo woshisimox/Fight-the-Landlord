@@ -140,6 +140,26 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '剩余局数：', en: 'Remaining hands: ' },
   { zh: '剩余局数', en: 'Remaining hands' },
 
+
+  // === Added for extended UI coverage (batch 3) ===
+  { zh: /每家\s*AI\s*设置/, en: 'Per-player AI settings' },
+  { zh: /（独立）/, en: '(independent)' },
+  { zh: /\(独立\)/, en: '(independent)' },
+
+  { zh: '总体档', en: 'Overall' },
+  { zh: /总体(?!均值)/, en: 'Overall' },
+
+  { zh: '汇总方式', en: 'Aggregation' },
+  { zh: '指数加权（推荐）', en: 'Exponentially weighted (recommended)' },
+  { zh: /\(推荐\)/, en: '(recommended)' },
+  { zh: /越大越看重最近几局/, en: 'Larger value emphasizes recent hands' },
+  { zh: /（等待至少一局完成后生成累计画像）/, en: '(Generated after at least one hand completes)' },
+  { zh: /\(等待至少一局完成后生成累计画像\)/, en: '(Generated after at least one hand completes)' },
+
+  { zh: /横轴[:：]\s*/, en: 'X-axis: ' },
+  { zh: /纵轴[:：]\s*/, en: 'Y-axis: ' },
+  { zh: /第几手牌/, en: 'hand index' },
+
 ];
 
 function translateTextLiteral(s: string): string {
