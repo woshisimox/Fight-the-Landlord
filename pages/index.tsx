@@ -194,7 +194,6 @@ function Card({ label }: { label:string }) {
       <span style={{ fontSize:16 }}>{suit}</span>
       <span style={{ fontSize:16, ...(rankColor ? { color: rankColor } : {}) }}>{rank === 'T' ? '10' : rank}</span>
     </span>
-    </LangContext.Provider>
 );
 function Hand({ cards }: { cards: string[] }) {
   const { t } = useI18n();
@@ -1838,6 +1837,7 @@ const [resetKey, setResetKey] = useState<number>(0);
     rd.readAsText(f);
   };
   return (
+    <LangContext.Provider value={lang}>
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
 <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>{t('Title')}</h1>
@@ -2146,6 +2146,7 @@ const [resetKey, setResetKey] = useState<number>(0);
         />
       </div>
     </div>
+    </LangContext.Provider>
   );
 
 export default Home;
