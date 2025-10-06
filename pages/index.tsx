@@ -419,7 +419,7 @@ function Hand({ cards }: { cards: string[] }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
       {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
-      </div>\n  </>
+    </div>
   );
 }
 function PlayRow({ seat, move, cards, reason }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string }) {
@@ -688,12 +688,6 @@ function LivePanel(props: LiveProps) {
   // 每局结束或数据变化时刷新统计
   useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
 
-  // 每局结束或数据变化时刷新统计
-  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
-
-  // 每局结束或数据变化时刷新统计
-  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
-;
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
   const tsRef = useRef(tsArr); useEffect(()=>{ tsRef.current=tsArr; }, [tsArr]);
@@ -1028,7 +1022,6 @@ function LivePanel(props: LiveProps) {
   const handleRadarSave = () => {
   setLog(l => [...l, '【Radar】存档已禁用（仅支持查看/刷新，不再保存到本地或 ALL 文件）。']);
 };
-;
 
   // 累计画像
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
@@ -1093,6 +1086,7 @@ function LivePanel(props: LiveProps) {
     try {
       const f = e.target.files?.[0]; if (!f) return;
       const rd = new FileReader();
+      rd.onerror = () => setLog(l => [...l, '【Score】上传读取失败']);
       rd.onload = () => {
         try {
           const j = JSON.parse(String(rd.result||'{}'));
@@ -1111,7 +1105,7 @@ function LivePanel(props: LiveProps) {
       };
       rd.readAsText(f);
     } catch (err) {
-      console.error('[score upload] error', err);
+      setLog(l => [...l, `【Score】上传错误：${err}`]);
     } finally {
       if (scoreFileRef.current) scoreFileRef.current.value = '';
     }
@@ -1258,7 +1252,7 @@ const start = async () => {
           clientTraceId: traceId,
           stopBelowZero: true,
           farmerCoop: props.farmerCoop,
-        turnTimeoutSec: (props.turnTimeoutSecs ?? [30,30,30])
+        turnTimeoutSecs: (props.turnTimeoutSecs ?? [30,30,30])
         }),
         signal: controllerRef.current!.signal,
       });
@@ -2118,8 +2112,6 @@ const [lang, setLang] = useState<Lang>(() => {
   const [startScore, setStartScore] = useState<number>(DEFAULTS.startScore);
   const [turnTimeoutSecs, setTurnTimeoutSecs] = useState<number[]>([30,30,30]);
 
-  const [turnTimeoutSec, setTurnTimeoutSec] = useState<number>(30);
-
   const [rob, setRob] = useState<boolean>(DEFAULTS.rob);
   const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
   const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
@@ -2128,7 +2120,11 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
   const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
-  const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
+  type SeatKeys = {
+    openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; deepseek?: string;
+    httpBase?: string; httpToken?: string;
+  };
+  const [seatKeys, setSeatKeys] = useState<SeatKeys[]>(DEFAULTS.seatKeys);
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
 
@@ -2136,7 +2132,7 @@ const [lang, setLang] = useState<Lang>(() => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
     setRob(DEFAULTS.rob); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
     setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
-    setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
+    setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:SeatKeys)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
     try { localStorage.removeItem('ddz_ladder_store_v1'); } catch {}
     try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
@@ -2535,6 +2531,8 @@ function ScoreTimeline(
     if (k >= 0) { for (let j=0; j<k; j++) landlordsFilled[j] = landlordsFilled[k]; }
   }
 
+  const defaultLordColor = landlordsFilled.some(l => l >= 0) ? null : '#f3f4f6';  // Gray if all unknown
+
   const makePath = (arr:(number|null)[])=>{
     let d=''; let open=false;
     const cutSet = new Set(cuts);
@@ -2584,7 +2582,7 @@ function ScoreTimeline(
             const x1 = x(Math.max(st, ed-1));
             const w  = Math.max(0.5, x1 - x0);
             const lord = landlordsFilled[i] ?? -1;
-            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
+            const fill = (lord>=0) ? colorBand[lord] : (defaultLordColor || (i%2===0 ? '#ffffff' : '#f8fafc'));
             return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
           })}
 
