@@ -1,5 +1,5 @@
 // pages/index.tsx
-import { useEffect, useRef, useState, createContext, useContext } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -2053,6 +2053,19 @@ const DEFAULTS = {
 };
 
 function Home() {
+  // Ensure language applies before paint on refresh
+  useLayoutEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const v = localStorage.getItem('ddz_lang');
+        if (v === 'en' || v === 'zh') {
+          if (v !== lang) setLang(v as Lang);
+          if (typeof document !== 'undefined') document.documentElement.lang = v;
+        }
+      }
+    } catch {}
+  }, []);
+
 const [lang, setLang] = useState<Lang>(() => {
     if (typeof window === 'undefined') return 'zh';
     const v = localStorage.getItem('ddz_lang');
@@ -2116,7 +2129,7 @@ const [lang, setLang] = useState<Lang>(() => {
   };
   return (
     <LangContext.Provider value={lang}>
-    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef}>
+    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
 <div style={{ marginLeft:'auto' }}>
   <label style={{ fontSize:12, marginRight:8, opacity:0.75 }}>Language</label>
