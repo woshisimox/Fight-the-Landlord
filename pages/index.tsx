@@ -1359,7 +1359,7 @@ for (const raw of batch) {
             }
 
             // m already defined above
-            try {
+            {
               // -------- TS 帧（后端主动提供） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
@@ -1603,7 +1603,7 @@ nextTotals     = [
 
                 
                 // ✅ Ladder（活动积分 ΔR）：按本局分差幅度加权（独立于胜负方向）
-                {
+                try {
                   const pre = tsRef.current.map(r => ({ ...r })); // 局前 TS 快照
                   const farmers = [0,1,2].filter(x => x !== L);
                   const farmerWin = (nextWinner === L) ? false : true;
@@ -1625,28 +1625,6 @@ nextTotals     = [
                   const mTimes = Math.max(1, Math.min(Smax, Math.abs(Math.round(rawS))));
 
                   // —— 更新 Ladder（把权重=等效局数 mTimes）——
-                  
-                {
-                  const pre = tsRef.current;
-                  const farmers = [0,1,2].filter(s => s !== L);
-                  const teamWin = (seat:number) => (seat === L) ? (!farmerWin) : farmerWin;
-                  const teamP = (seat:number) => {
-                    const teamA = (seat === L) ? [L] : farmers;
-                    const teamB = (seat === L) ? farmers : [L];
-                    const muA = teamA.reduce((ss,i)=> ss + pre[i].mu, 0);
-                    const muB = teamB.reduce((ss,i)=> ss + pre[i].mu, 0);
-                    const vA  = teamA.reduce((ss,i)=> ss + pre[i].sigma*pre[i].sigma + TS_BETA*TS_BETA, 0);
-                    const vB  = teamB.reduce((ss,i)=> ss + pre[i].sigma*pre[i].sigma + TS_BETA*TS_BETA, 0);
-                    const c = Math.sqrt(vA + vB);
-                    return Phi( (muA - muB) / c );
-                  };
-
-                  // === 以“分差等效多局”更新 ===
-                  const rawS = Number((Array.isArray(ds) && typeof ds[0] === 'number') ? ds[0] : 0); // 地主分差（正=地主赢；负=农民赢）
-                  const Smax = 8;                         // 单手影响上限
-                  const mTimes = Math.max(1, Math.min(Smax, Math.abs(Math.round(rawS))));
-
-                  // —— 更新 Ladder（把权重=等效局数 mTimes）——
                   for (let i=0;i<3;i++) {
                     const sWinTeam = teamWin(i) ? 1 : 0;
                     const pExpTeam = teamP(i);
@@ -1655,9 +1633,8 @@ nextTotals     = [
                     const label = agentIdForIndex(i);
                     ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, mTimes);
                   }
-                }
-
-                // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
+                } catch {}
+// ✅ TrueSkill：局后更新 + 写入“角色分档”存档
                 {
                   const updated = tsRef.current.map(r => ({ ...r }));
                   const farmers = [0,1,2].filter(s => s !== L);
@@ -1674,12 +1651,15 @@ nextTotals     = [
                       tsUpdateTwoTeamsWithTau(updated, farmers, [L], tau);
                     }
                   } else {
-                    // 斗地主无平局；异常保护时 no-op
+                    // S==0 理论上不该出现（斗地主无平局）；
+                    // 这里选择“不更新”，作为健壮性保护（例如上游消息缺字段时）。
+                    // no-op
                   }
 
                   setTsArr(updated);
                   updateStoreAfterRound(updated, L);
-            
+setTsArr(updated);
+                  updateStoreAfterRound(updated, L);
 
                   nextLog = [
                     ...nextLog,
@@ -1722,8 +1702,7 @@ nextTotals     = [
                   nextAggStats = s3.map(x=>({ ...x }));
                   nextAggCount = 1;
                 } else {
-                  const arr = nextAggStats!; // non-null after guard
-                  nextAggStats = arr.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
+                  nextAggStats = nextAggStats.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
                   nextAggCount = nextAggCount + 1;
                 }
 
@@ -1737,7 +1716,7 @@ nextTotals     = [
                 nextLog = [...nextLog, rewrite(m.message)];
                 continue;
               }
-            }
+            } catch (e) { console.error('[ingest:batch]', e, raw); }
           }
 
           setRoundLords(nextLords);
