@@ -411,7 +411,6 @@ function Card({ label }: { label:string }) {
       <span style={{ fontSize:16 }}>{suit}</span>
       <span style={{ fontSize:16, ...(rankColor ? { color: rankColor } : {}) }}>{rank === 'T' ? '10' : rank}</span>
     </span>
-      {     )}
     );
   }
 
