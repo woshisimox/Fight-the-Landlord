@@ -38,7 +38,7 @@ const I18N: Record<Lang, Record<string, string>> = {
 
 function useI18n() {
   const lang = useContext(LangContext);
-  const t = (key: string, vars: Record<string, any> = {}) => {
+  const t = (key: string, vars: Record<string, any> = {}
     let s = (I18N[lang]?.[key] ?? I18N.zh[key] ?? key);
     s = s.replace(/\{(\w+)\}/g, (_: any, k: string) => (vars[k] ?? `{${k}}`));
     return s;
@@ -189,7 +189,7 @@ function translateTextLiteral(s: string): string {
 function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
   if (!root) return;
   const tags = new Set(['BUTTON','LABEL','DIV','SPAN','P','H1','H2','H3','H4','H5','H6','TD','TH','A','LI','STRONG','EM','SMALL','CODE','OPTION']);
-  const accept = (node: any) => {
+  const accept = (node: any
     const el = node.parentElement as HTMLElement | null;
     if (!el) return NodeFilter.FILTER_REJECT;
     if (!tags.has(el.tagName)) return NodeFilter.FILTER_REJECT;
@@ -198,7 +198,7 @@ function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
       if (!txt || !/[\u4e00-\u9fff]/.test(txt)) return NodeFilter.FILTER_REJECT;
     return NodeFilter.FILTER_ACCEPT;
   };
-  const apply = (scope: HTMLElement) => {
+  const apply = (scope: HTMLElement
     const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, { acceptNode: accept } as any);
     let n: any;
     while ((n = walker.nextNode())) {
@@ -222,11 +222,11 @@ function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
   if (typeof MutationObserver !== 'undefined' && !root.hasAttribute('data-i18n-observed')) {
     let i18nBatchQueue = new Set<HTMLElement>();
     let i18nBatchScheduled = false;
-    const i18nSchedule = () => { if (i18nBatchScheduled) return; i18nBatchScheduled = true; requestAnimationFrame(() => { i18nBatchScheduled = false; i18nBatchQueue.forEach(n=>{ try { apply(n); } catch {} }); i18nBatchQueue.clear(); }); };
-    const obs = new MutationObserver((mutations) => {
+    const i18nSchedule = ( if (i18nBatchScheduled) return; i18nBatchScheduled = true; requestAnimationFrame(( i18nBatchScheduled = false; i18nBatchQueue.forEach(n=>{ try { apply(n); } catch {} }); i18nBatchQueue.clear(); }); };
+    const obs = new MutationObserver((mutations
       for (const m of mutations) {
         if (m.type === 'childList') {
-          (m.addedNodes || []).forEach((node: any) => { if (node && node.nodeType === 1) { i18nBatchQueue.add(node as HTMLElement); i18nSchedule(); } });
+          (m.addedNodes || []).forEach((node: any if (node && node.nodeType === 1) { i18nBatchQueue.add(node as HTMLElement); i18nSchedule(); } });
         } else if (m.type === 'characterData' && m.target && (m.target as any).parentElement) {
           i18nBatchQueue.add((m.target as any).parentElement as HTMLElement); i18nSchedule();
         }
@@ -235,7 +235,7 @@ function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
 // --- i18n click-compat shim ---
 // Ensures buttons translated to English still work if code checks Chinese text at click time.
 if (typeof document !== 'undefined' && !document.body.hasAttribute('data-i18n-click-swapper')) {
-  document.addEventListener('click', (ev) => {
+  document.addEventListener('click', (ev
     try {
       const target = ev.target as HTMLElement | null;
       if (!target) return;
@@ -247,7 +247,7 @@ if (typeof document !== 'undefined' && !document.body.hasAttribute('data-i18n-cl
       const current = (el.textContent || '').trim();
       if (zh && en && current === en.trim()) {
         el.textContent = zh;
-        setTimeout(() => { try { if (el.isConnected) el.textContent = en; } catch {} }, 0);
+        setTimeout(( try { if (el.isConnected) el.textContent = en; } catch {} }, 0);
       }
     } catch {}
   }, true); // capture phase, before app handlers
@@ -335,7 +335,7 @@ const readStore = (): TsStore => {
   } catch {}
   return emptyStore();
 };
-const writeStore = (s: TsStore) => { try { s.updatedAt=new Date().toISOString(); localStorage.setItem(TS_STORE_KEY, JSON.stringify(s)); } catch {} };
+const writeStore = (s: TsStore try { s.updatedAt=new Date().toISOString(); localStorage.setItem(TS_STORE_KEY, JSON.stringify(s)); } catch {} };
 
 /* ====== 其它 UI/逻辑 ====== */
 type LiveProps = {
@@ -367,7 +367,7 @@ type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
 
-const rankOf = (l: string) => {
+const rankOf = (l: string
   if (!l) return '';
   const c0 = l[0];
   if ('♠♥♦♣'.includes(c0)) return l.slice(1).replace(/10/i, 'T').toUpperCase();
@@ -598,7 +598,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
   };
 }
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
-const makeRewriteRoundLabel = (n: number) => (msg: string) => {
+const makeRewriteRoundLabel = (n: number) => (msg: string
   if (typeof msg !== 'string') return msg;
   let out = msg;
   out = out.replace(/第\s*\d+\s*局开始/g, `第 ${n} 局开始`);
@@ -682,7 +682,7 @@ function LivePanel(props: LiveProps) {
   const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
 
   // 依据 scoreSeries（每手评分）与 roundCuts（每局切点）计算每局均值，并汇总到席位统计
-  const recomputeScoreStats = () => {
+  const recomputeScoreStats = (
     try {
       const series = scoreSeriesRef.current;   // number[][]
       const cuts = roundCutsRef.current;       // number[]
@@ -742,7 +742,7 @@ function LivePanel(props: LiveProps) {
   useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
 
-  const seatIdentity = (i:number) => {
+  const seatIdentity = (i:number
     const choice = props.seats[i];
     const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
     const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
@@ -760,7 +760,7 @@ function LivePanel(props: LiveProps) {
     return null;
   };
 
-  const applyTsFromStore = (why:string) => {
+  const applyTsFromStore = (why:string
     const ids = [0,1,2].map(seatIdentity);
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
@@ -768,7 +768,7 @@ function LivePanel(props: LiveProps) {
   };
 
   // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
-  const applyTsFromStoreByRole = (lord: number | null, why: string) => {
+  const applyTsFromStoreByRole = (lord: number | null, why: string
     const ids = [0,1,2].map(seatIdentity);
     const init = [0,1,2].map(i => {
       const role: TsRole | undefined = (lord == null) ? undefined : (i === lord ? 'landlord' : 'farmer');
@@ -781,7 +781,7 @@ function LivePanel(props: LiveProps) {
     ]);
   };
 
-  const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
+  const updateStoreAfterRound = (updated: Rating[], landlordIndex:number
     const ids = [0,1,2].map(seatIdentity);
     for (let i=0;i<3;i++){
       const id = ids[i];
@@ -799,7 +799,7 @@ function LivePanel(props: LiveProps) {
     writeStore(tsStoreRef.current);
   };
 
-  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>
     const f = e.target.files?.[0]; if (!f) return;
     try {
       const text = await f.text();
@@ -833,7 +833,7 @@ function LivePanel(props: LiveProps) {
     } finally { e.target.value = ''; }
   };
 
-  const handleSaveArchive = () => {
+  const handleSaveArchive = (
     const ids = [0,1,2].map(seatIdentity);
     ids.forEach((id,i)=>{
       const entry: TsStoreEntry = tsStoreRef.current.players[id] || { id, roles:{} };
@@ -851,7 +851,7 @@ function LivePanel(props: LiveProps) {
   // —— 用于“区分显示”的帮助函数 —— //
   const fmt2 = (x:number)=> (Math.round(x*100)/100).toFixed(2);
   const muSig = (r: Rating | null | undefined) => r ? `μ ${fmt2(r.mu)}｜σ ${fmt2(r.sigma)}` : '—';
-  const getStoredForSeat = (i:number) => {
+  const getStoredForSeat = (i:number
     const id = seatIdentity(i);
     const p = tsStoreRef.current.players[id];
     return {
@@ -899,7 +899,7 @@ function LivePanel(props: LiveProps) {
     } catch {}
     return emptyRadarStore();
   };
-  const writeRadarStore = (_s: RadarStore) => { /* no-op: radar not persisted */ };
+  const writeRadarStore = (_s: RadarStore /* no-op: radar not persisted */ };
 
   /** 用“均值 + 次数”合并（与前端 mean 聚合一致） */
   function mergeRadarAgg(prev: RadarAgg|null|undefined, inc: Score5): RadarAgg {
@@ -984,7 +984,7 @@ function LivePanel(props: LiveProps) {
     writeLadder(st);
     try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
   }
-    const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
+    const applyRadarFromStoreByRole = (lord: number | null, why: string
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
@@ -996,7 +996,7 @@ function LivePanel(props: LiveProps) {
   };
 
   /** 在收到一帧“本局画像 s3[0..2]”后，写入 Radar 存档（overall + 角色分档） */
-  const updateRadarStoreFromStats = (s3: Score5[], lord: number | null) => {
+  const updateRadarStoreFromStats = (s3: Score5[], lord: number | null
     const ids = [0,1,2].map(seatIdentity);
     for (let i=0;i<3;i++){
       const id = ids[i];
@@ -1017,7 +1017,7 @@ function LivePanel(props: LiveProps) {
   };
 
   /** 上传 Radar 存档（JSON） */
-  const handleRadarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleRadarUpload = async (e: React.ChangeEvent<HTMLInputElement>
     const f = e.target.files?.[0]; if (!f) return;
     try {
       const text = await f.text();
@@ -1063,7 +1063,7 @@ function LivePanel(props: LiveProps) {
   };
 
   /** 导出当前 Radar 存档 */
-  const handleRadarSave = () => {
+  const handleRadarSave = (
   setLog(l => [...l, '【Radar】存档已禁用（仅支持查看/刷新，不再保存到本地或 ALL 文件）。']);
 };
 ;
@@ -1074,19 +1074,19 @@ function LivePanel(props: LiveProps) {
   const [aggStats, setAggStats] = useState<Score5[] | null>(null);
   const [aggCount, setAggCount] = useState<number>(0);
 
-  useEffect(() => { props.onTotals?.(totals); }, [totals]);
-  useEffect(() => { props.onLog?.(log); }, [log]);
+  useEffect(( props.onTotals?.(totals); }, [totals]);
+  useEffect(( props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
-  const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
-  const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
-  const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
-  const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
-  const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
-  const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
-  const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
-  const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
-  const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+  const handsRef = useRef(hands); useEffect(( handsRef.current = hands; }, [hands]);
+  const playsRef = useRef(plays); useEffect(( playsRef.current = plays; }, [plays]);
+  const totalsRef = useRef(totals); useEffect(( totalsRef.current = totals; }, [totals]);
+  const finishedRef = useRef(finishedCount); useEffect(( finishedRef.current = finishedCount; }, [finishedCount]);
+  const logRef = useRef(log); useEffect(( logRef.current = log; }, [log]);
+  const landlordRef = useRef(landlord); useEffect(( landlordRef.current = landlord; }, [landlord]);
+  const winnerRef = useRef(winner); useEffect(( winnerRef.current = winner; }, [winner]);
+  const deltaRef = useRef(delta); useEffect(( deltaRef.current = delta; }, [delta]);
+  const multiplierRef = useRef(multiplier); useEffect(( multiplierRef.current = multiplier; }, [multiplier]);
 
   const aggStatsRef = useRef(aggStats); useEffect(()=>{ aggStatsRef.current = aggStats; }, [aggStats]);
   const aggCountRef = useRef(aggCount); useEffect(()=>{ aggCountRef.current = aggCount; }, [aggCount]);
@@ -1102,7 +1102,7 @@ function LivePanel(props: LiveProps) {
   
   const scoreFileRef = useRef<HTMLInputElement|null>(null);
 
-  const agentIdForIndex = (i:number) => {
+  const agentIdForIndex = (i:number
     const choice = props.seats[i] as BotChoice;
     const label = choiceLabel(choice);
     if ((choice as string).startsWith('built-in')) return label;
@@ -1110,7 +1110,7 @@ function LivePanel(props: LiveProps) {
     return `${label}:${model}`;
   };
 
-  const handleScoreSave = () => {
+  const handleScoreSave = (
     const agents = [0,1,2].map(agentIdForIndex);
     const n = Math.max(scoreSeries[0]?.length||0, scoreSeries[1]?.length||0, scoreSeries[2]?.length||0);
     const payload = {
@@ -1127,11 +1127,11 @@ function LivePanel(props: LiveProps) {
     setTimeout(()=>URL.revokeObjectURL(url), 1500);
   };
 
-  const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleScoreUpload = (e: React.ChangeEvent<HTMLInputElement>
     try {
       const f = e.target.files?.[0]; if (!f) return;
       const rd = new FileReader();
-      rd.onload = () => {
+      rd.onload = (
         try {
           const j = JSON.parse(String(rd.result||'{}'));
           const fileAgents: string[] = j.agents || (Array.isArray(j.seats)? j.seats.map((s:any)=> s.agent || s.label) : []);
@@ -1156,7 +1156,7 @@ function LivePanel(props: LiveProps) {
   };
 
   
-  const handleStatsSave = () => {
+  const handleStatsSave = (
     try {
       const payload = { when: new Date().toISOString(), stats: scoreStats, dists: scoreDists };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
@@ -1167,11 +1167,11 @@ function LivePanel(props: LiveProps) {
       setTimeout(()=> URL.revokeObjectURL(a.href), 0);
     } catch (e) { console.error('[stats] save error', e); }
   };
-  const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleStatsUpload = async (e: React.ChangeEvent<HTMLInputElement>
     try {
       const f = e.target.files?.[0]; if (!f) return;
       const rd = new FileReader();
-      rd.onload = () => {
+      rd.onload = (
         try {
           const obj = JSON.parse(String(rd.result||'{}'));
           if (Array.isArray(obj.stats) && obj.stats.length===3) setScoreStats(obj.stats as any);
@@ -1182,16 +1182,16 @@ function LivePanel(props: LiveProps) {
     } catch (err) { console.error('[stats upload] error', err); }
     finally { if (statsFileRef.current) statsFileRef.current.value = ''; }
   };
-  const handleStatsRefresh = () => { setRoundCuts(prev => [...prev]); };
-const handleScoreRefresh = () => {
+  const handleStatsRefresh = ( setRoundCuts(prev => [...prev]); };
+const handleScoreRefresh = (
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
   };
 const [allLogs, setAllLogs] = useState<string[]>([]);
 const allLogsRef = useRef(allLogs);
-useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
-const start = async () => {
+useEffect(( allLogsRef.current = allLogs; }, [allLogs]);
+const start = async (
     if (running) return;
     if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
 
@@ -1211,7 +1211,7 @@ const start = async () => {
     controllerRef.current = new AbortController();
 
     const buildSeatSpecs = (): any[] => {
-      return props.seats.slice(0,3).map((choice, i) => {
+      return props.seats.slice(0,3).map((choice, i
         const normalized = normalizeModelForProvider(choice, props.seatModels[i] || '');
         const model = normalized || defaultModelFor(choice);
         const keys = props.seatKeys[i] || {};
@@ -1229,7 +1229,7 @@ const start = async () => {
     };
 
     const seatSummaryText = (specs: any[]) =>
-      specs.map((s, i) => {
+      specs.map((s, i
         const nm = seatName(i);
         if (s.choice.startsWith('built-in')) return `${nm}=${choiceLabel(s.choice as BotChoice)}`;
         if (s.choice === 'http') return `${nm}=HTTP(${s.baseUrl ? 'custom' : 'default'})`;
@@ -1240,7 +1240,7 @@ const start = async () => {
       nextFinished:number,
       nextAggStats: Score5[] | null,
       nextAggCount: number
-    ) => {
+    
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
           const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
@@ -1260,7 +1260,7 @@ const start = async () => {
       return { nextFinished, nextAggStats, nextAggCount };
     };
 
-    const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
+    const playOneGame = async (_gameIndex: number, labelRoundNo: number
     let lastEventTs = Date.now();
     const timeoutMs = (()=>{
       const arr = props.turnTimeoutSecs || [30,30,30];
@@ -1304,7 +1304,7 @@ const start = async () => {
       if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
 
       const reader = r.body.getReader();
-      dogId = setInterval(() => {
+      dogId = setInterval((
         if (Date.now() - lastEventTs > timeoutMs) {
           setLog(l => [...l, `⏳ 超过 ${Math.round(timeoutMs/1000)}s 未收到事件，已触发前端提示（后端会按规则自动“过”或出最小牌），继续等待…`]);
           lastEventTs = Date.now(); // 防止重复提示
@@ -1628,7 +1628,7 @@ nextTotals     = [
                   const farmers = [0,1,2].filter(x => x !== L);
                   const farmerWin = (nextWinner === L) ? false : true;
                   const teamWin = (seat:number) => (seat === L) ? (!farmerWin) : farmerWin;
-                  const teamP = (seat:number) => {
+                  const teamP = (seat:number
                     const teamA = (seat === L) ? [L] : farmers;
                     const teamB = (seat === L) ? farmers : [L];
                     const muA = teamA.reduce((ss,i)=> ss + pre[i].mu, 0);
@@ -1751,7 +1751,7 @@ nextTotals     = [
     } finally { setRunning(false); }
   };
 
-  const stop = () => { controllerRef.current?.abort(); setRunning(false); };
+  const stop = ( controllerRef.current?.abort(); setRunning(false); };
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
@@ -1782,7 +1782,7 @@ const buildAllBundle = (): AllBundle => {
   };
 };
 
-const applyAllBundleInner = (obj:any) => {
+const applyAllBundleInner = (obj:any
   try {
     if (obj?.trueskill?.players) {
       tsStoreRef.current = obj.trueskill as TsStore;
@@ -1798,7 +1798,7 @@ const applyAllBundleInner = (obj:any) => {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
 };
-const handleAllSaveInner = () => {
+const handleAllSaveInner = (
     const payload = buildAllBundle();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1809,7 +1809,7 @@ const handleAllSaveInner = () => {
 
   
 
-  const handleAllRefreshInner = () => {
+  const handleAllRefreshInner = (
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
     applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
@@ -1821,7 +1821,7 @@ const handleAllSaveInner = () => {
   useEffect(()=>{
     const onSave = () => handleAllSaveInner();
     const onRefresh = () => handleAllRefreshInner();
-    const onUpload = (e: Event) => {
+    const onUpload = (e: Event
       const ce = e as CustomEvent<any>;
       applyAllBundleInner(ce.detail);
     };
@@ -1829,8 +1829,7 @@ const handleAllSaveInner = () => {
     window.addEventListener('ddz-all-refresh', onRefresh as any);
     window.addEventListener('ddz-all-upload', onUpload as any);
     return (
-      <>
-) => {
+
       window.removeEventListener('ddz-all-save', onSave as any);
       window.removeEventListener('ddz-all-refresh', onRefresh as any);
       window.removeEventListener('ddz-all-upload', onUpload as any);
@@ -1937,7 +1936,7 @@ const handleAllSaveInner = () => {
                 {/* 分布曲线（每局均值的分布） */}
                 
                 {/* 分布直方图（每手score汇总：横轴=score，纵轴=频次；固定20桶） */}
-                {(() => {
+                {((
                   const samples = (scoreSeries[i] || []).filter(v => typeof v === 'number' && !Number.isNaN(v)) as number[];
                   if (!samples.length) return null;
                   const pad = 6, W = 220, H = 72;
@@ -1961,7 +1960,7 @@ const handleAllSaveInner = () => {
                   const binWidthVal = (hi - lo) / bins;
                   const densities = counts.map(c => c / (samples.length * (binWidthVal || 1)));
                   const maxD = Math.max(...densities) || 1;
-                  const bars = densities.map((d, k) => {
+                  const bars = densities.map((d, k
                     const x0 = pad + k * barW + 0.5;
                     const h = (H - 2*pad) * (d / maxD);
                     const y0 = H - pad - h;
@@ -2041,7 +2040,7 @@ const handleAllSaveInner = () => {
   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
     <div style={{ fontWeight:700 }}>运行日志</div>
     <button
-      onClick={() => { try { const lines=(allLogsRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
+      onClick={( try { const lines=(allLogsRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
       style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >存档</button>
   </div>
@@ -2077,8 +2076,7 @@ const handleAllSaveInner = () => {
         </div>
       )}
 
-      </>
-    );
+      );
 }
 
 function RadarPanel({
@@ -2130,7 +2128,6 @@ function RadarPanel({
         )
         : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
       }
-    </>
   );
 }
 
@@ -2151,7 +2148,7 @@ const DEFAULTS = {
 
 function Home() {
   // Ensure language applies before paint on refresh
-  useLayoutEffect(() => {
+  useLayoutEffect((
     try {
       if (typeof window !== 'undefined') {
         const v = localStorage.getItem('ddz_lang');
@@ -2163,7 +2160,7 @@ function Home() {
     } catch {}
   }, []);
 
-const [lang, setLang] = useState<Lang>(() => {
+const [lang, setLang] = useState<Lang>((
     if (typeof window === 'undefined') return 'zh';
     const v = localStorage.getItem('ddz_lang');
     return (v === 'en' || v === 'zh') ? (v as Lang) : 'zh';
@@ -2198,7 +2195,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
 
-  const doResetAll = () => {
+  const doResetAll = (
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
     setRob(DEFAULTS.rob); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
     setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
@@ -2209,10 +2206,10 @@ const [lang, setLang] = useState<Lang>(() => {
   };
   // —— 统一统计（TS + Radar + 出牌评分 + 评分统计）外层上传入口 ——
   const allFileRef = useRef<HTMLInputElement|null>(null);
-  const handleAllFileUploadHome = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAllFileUploadHome = (e: React.ChangeEvent<HTMLInputElement>
     const f = e.target.files?.[0]; if (!f) return;
     const rd = new FileReader();
-    rd.onload = () => {
+    rd.onload = (
       try {
         const obj = JSON.parse(String(rd.result || '{}'));
         window.dispatchEvent(new CustomEvent('ddz-all-upload', { detail: obj }));
@@ -2444,8 +2441,7 @@ const [lang, setLang] = useState<Lang>(() => {
                 )}
 
                 {seats[i] === 'http' && (
-                  <>
-                    <label style={{ display:'block', marginBottom:6 }}>
+                                <label style={{ display:'block', marginBottom:6 }}>
                       HTTP Base / URL
                       <input type="text" value={seatKeys[i]?.httpBase||''}
                         onChange={e=>{
@@ -2463,8 +2459,7 @@ const [lang, setLang] = useState<Lang>(() => {
                         }}
                         style={{ width:'100%' }} />
                     </label>
-                  </>
-                )}
+                              )}
               </div>
             ))}
           </div>
@@ -2626,7 +2621,7 @@ function ScoreTimeline(
 
   // —— 悬浮处理 —— //
   const seatName = (i:number)=> labels?.[i] ?? ['甲','乙','丙'][i];
-  const showTip = (si:number, idx:number, v:number) => {
+  const showTip = (si:number, idx:number, v:number
     setHover({ si, idx, v, x: x(idx), y: y(v) });
   };
   const hideTip = () => setHover(null);
