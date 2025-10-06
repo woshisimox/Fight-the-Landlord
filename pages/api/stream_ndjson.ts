@@ -292,12 +292,12 @@ function traceWrap(
   turnTimeoutMs: number,
   startDelayMs: number,
   seatIndex: number
-){
+), clientTraceId: string{
   const label = providerLabel(choice);
   return async (ctx:any) => {
     if (choice === 'human') {
       try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: 'Human', model: '', phase: ctx?.phase || 'play' }); } catch {}
-      const mv = await Promise.race([ _installHumanWaiter((clientTraceId as any)||'', seatIndex), new Promise(r=>setTimeout(()=>r({ move:'pass' }), Math.max(1000, turnTimeoutMs))) ]);
+      const mv = await Promise.race([ _installHumanWaiter(clientTraceId || '', seatIndex), new Promise(r=>setTimeout(()=>r({ move:'pass' }), Math.max(1000, turnTimeoutMs))) ]);
       // Normalize
       const cards = Array.isArray(mv?.cards) ? mv.cards : [];
       const move = (mv?.move === 'play' && cards.length>0) ? 'play' : 'pass';
@@ -531,7 +531,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot as any, res, onReason, onScore,
                   turnTimeoutMsArr[i] ?? turnTimeoutMsArr[0],
                   Math.max(0, Math.floor(delays[i] ?? 0)),
-                  i)
+                  i, clientTraceId)
       );
 
       await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore }, res, round);
