@@ -489,19 +489,9 @@ function LadderPanel() {
     const label = ent?.label || catalogLabels(id) || id;
     return { id, label, val, n };
   });
-  // --- Dynamic X-axis (±K) auto-scaling ---
-  const niceCeil = (x:number) => {
-    if (!Number.isFinite(x) || x <= 0) return 1;
-    const exp = Math.floor(Math.log10(x));
-    const p   = Math.pow(10, exp);
-    const n   = x / p;
-    const step = (n <= 1) ? 1 : (n <= 2) ? 2 : (n <= 5) ? 5 : 10;
-    return step * p;
-  };
-  const maxAbs = arr.length ? Math.max(...arr.map(v => Math.abs(v.val))) : 1;
-  // add 10% headroom then round up to a "nice" bound; no large lower bound to keep small ranges visible
-  const K = niceCeil(maxAbs * 1.10);
-const items = arr.sort((a,b)=> b.val - a.val);
+
+  const K = Math.max(1, ...arr.map(x=> (players[x.id]?.current?.K ?? 20)), 20);
+  const items = arr.sort((a,b)=> b.val - a.val);
 
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
 
@@ -1694,27 +1684,7 @@ nextTotals     = [
           setRoundCuts(nextCuts);
           setScoreSeries(nextScores);
           setHands(nextHands); setPlays(nextPlays);
-          
-          // —— 增强：把本回合关键细节写入运行日志与全量日志 ——
-          try {
-            const labelRoundNo = (roundRef?.current ?? 0) + 1;
-            const L = nextLandlord ?? 0;
-            const labelsNow = [0,1,2].map(i => agentIdForIndex(i));
-            const idsNow    = [0,1,2].map(i => seatIdentity(i));
-            const roundLine = formatRoundSummary({
-              idx: labelRoundNo,
-              L,
-              winner: nextWinner,
-              mult: nextMultiplier ?? 1,
-              ds: ds as [number,number,number],
-              totals: nextTotals as [number,number,number],
-              labels: labelsNow,
-              ids: idsNow,
-            });
-            nextLog = [...nextLog, roundLine];
-            setAllLogs(prev => [...prev, roundLine]);
-          } catch (e) { console.error('[runlog:round-summary]', e); }
-setTotals(nextTotals); setFinishedCount(nextFinished);
+          setTotals(nextTotals); setFinishedCount(nextFinished);
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
