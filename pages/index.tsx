@@ -36,7 +36,6 @@ const I18N: Record<Lang, Record<string, string>> = {
     Upload: 'Upload',
     Save: 'Save',
     FarmerCoop: 'Farmer Cooperation',
-  }
 };
 
 function useI18n() {
@@ -47,11 +46,9 @@ function useI18n() {
     return s;
   };
   return { lang, t };
-}
 
 function seatLabel(i: number, lang: Lang) {
   return (lang === 'en' ? ['A', 'B', 'C'] : ['甲', '乙', '丙'])[i] || String(i);
-}
 /* ======= Minimal i18n (zh/en) injection: END ======= */
 
 type Four2Policy = 'both' | '2singles' | '2pairs';
@@ -87,13 +84,10 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
     const sig2=r[i].sigma**2, mult=sig2/c, mult2=sig2/c2;
     r[i].mu += mult*v;
     r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + TS_TAU*TS_TAU);
-  }
   for (const i of teamB) {
     const sig2=r[i].sigma**2, mult=sig2/c, mult2=sig2/c2;
     r[i].mu -= mult*v;
     r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + TS_TAU*TS_TAU);
-  }
-}
 
 /* ===== TrueSkill 本地存档（新增） ===== */
 type TsRole = 'landlord'|'farmer';
@@ -152,8 +146,6 @@ function SeatTitle({ i }: { i:number }) {
   const { lang } = useI18n();
   return <span style={{ fontWeight:700 }}>{seatLabel(i, lang)}</span>;
 }
-}>{['甲','乙','丙'][i]}</span>;
-}
 
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
@@ -175,7 +167,6 @@ function candDecorations(l: string): string[] {
   const r = rankOf(l);
   if (r === 'JOKER') return ['🃏Y'];
   return SUITS.map(s => `${s}${r}`);
-}
 function decorateHandCycle(raw: string[]): string[] {
   let idx = 0;
   return raw.map(l => {
@@ -187,7 +178,6 @@ function decorateHandCycle(raw: string[]): string[] {
     const suit = SUITS[idx % SUITS.length]; idx++;
     return `${suit}${rankOf(l)}`;
   });
-}
 
 function Card({ label }: { label:string }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
@@ -205,7 +195,6 @@ function Card({ label }: { label:string }) {
     </span>
     </LangContext.Provider>
 );
-}
 function Hand({ cards }: { cards: string[] }) {
   const { t } = useI18n();
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>{t('Empty')}</span>;
@@ -214,7 +203,6 @@ function Hand({ cards }: { cards: string[] }) {
       {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
     </div>
   );
-}
 function PlayRow({ seat, move, cards, reason }:{
   seat:number; move:'play'|'pass'; cards?:string[]; reason?:string
 }) {
@@ -229,14 +217,12 @@ function PlayRow({ seat, move, cards, reason }:{
       {reason && <div style={{ width:260, fontSize:12, color:'#666' }}>{reason}</div>}
     </div>
   );
-}
 function LogLine({ text }: { text:string }) {
   return (
     <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', fontSize:12, color:'#555', padding:'2px 0' }}>
       {text}
     </div>
   );
-}
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
 function LadderPanel() {
@@ -246,7 +232,6 @@ function LadderPanel() {
     const onAny = () => setTick(k=>k+1);
     if (typeof window !== 'undefined') {
       window.addEventListener('ddz-all-refresh', onAny as any);
-    }
     const t = setInterval(onAny, 2000);
     return ()=> { if (typeof window!=='undefined') window.removeEventListener('ddz-all-refresh', onAny as any); clearInterval(t); };
   }, []);
@@ -256,7 +241,6 @@ function LadderPanel() {
     if (typeof window !== 'undefined') {
       const raw = localStorage.getItem('ddz_ladder_store_v1');
       if (raw) store = JSON.parse(raw) || { players:{} };
-    }
   } catch {}
 
   const CATALOG = [
@@ -314,7 +298,6 @@ function LadderPanel() {
       </div>
     </div>
   );
-}
 function Section({ title, children }:{title:string; children:React.ReactNode}) {
   return (
     <div style={{ marginBottom:16 }}>
@@ -322,7 +305,6 @@ function Section({ title, children }:{title:string; children:React.ReactNode}) {
       <div>{children}</div>
     </div>
   );
-}
 
 /* ====== 模型预设/校验 ====== */
 function defaultModelFor(choice: BotChoice): string {
@@ -334,8 +316,6 @@ function defaultModelFor(choice: BotChoice): string {
     case 'ai:qwen':  return 'qwen-plus';
     case 'ai:deepseek': return 'deepseek-chat';
     default: return '';
-  }
-}
 function normalizeModelForProvider(choice: BotChoice, input: string): string {
   const m = (input || '').trim(); if (!m) return '';
   const low = m.toLowerCase();
@@ -347,8 +327,6 @@ function normalizeModelForProvider(choice: BotChoice, input: string): string {
     case 'ai:qwen':   return /^qwen[-\w.]*/.test(low) ? m : '';
     case 'ai:deepseek': return /^deepseek[-\w.]*/.test(low) ? m : '';
     default: return '';
-  }
-}
 function choiceLabel(choice: BotChoice): string {
   switch (choice) {
     case 'built-in:greedy-max':   return 'Greedy Max';
@@ -365,8 +343,6 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:deepseek':           return 'DeepSeek';
     case 'http':                  return 'HTTP';
     default: return String(choice);
-  }
-}
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
@@ -379,7 +355,6 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
       eff:  (prev.eff *c + curr.eff )/(c+1),
       rob:  (prev.rob *c + curr.rob )/(c+1),
     };
-  }
   const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
   return {
     coop: a*curr.coop + (1-a)*prev.coop,
@@ -388,7 +363,6 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     eff:  a*curr.eff  + (1-a)*prev.eff,
     rob:  a*curr.rob  + (1-a)*prev.rob,
   };
-}
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
 const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   if (typeof msg !== 'string') return msg;
@@ -457,10 +431,7 @@ function LivePanel(props: LiveProps) {
           for (let i=st;i<ed;i++){
             const v = arr[i];
             if (typeof v === 'number') { sum += v; cnt++; }
-          }
           if (cnt>0) perSeatRounds[s].push(sum/cnt);
-        }
-      }
       const stats = [0,1,2].map(s=>{
         const rs = perSeatRounds[s];
         const rounds = rs.length;
@@ -478,7 +449,6 @@ function LivePanel(props: LiveProps) {
       setScoreStats(stats);
       setScoreDists(perSeatRounds);
     } catch (e) { console.error('[stats] recompute error', e); }
-  }
   // 每局结束或数据变化时刷新统计
   useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
 
@@ -551,7 +521,6 @@ function LivePanel(props: LiveProps) {
       const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
       entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
       tsStoreRef.current.players[id] = entry;
-    }
     writeStore(tsStoreRef.current);
   };
 
@@ -573,14 +542,12 @@ function LivePanel(props: LiveProps) {
                      farmer:   p.roles?.farmer   ?? p.farmer   ?? p.F ?? null },
             meta: p.meta || {}
           };
-        }
       } else if (j?.players && typeof j.players === 'object') {
         store.players = j.players;
       } else if (Array.isArray(j)) {
         for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p; }
       } else {
         if (j?.id) store.players[j.id] = j;
-      }
 
       tsStoreRef.current = store; writeStore(store);
       setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
@@ -672,7 +639,6 @@ function LivePanel(props: LiveProps) {
       },
       count: c + 1,
     };
-  }
 
   // —— Radar 存档：读写/应用/上传/导出 —— //
   const radarStoreRef = useRef<RadarStore>(emptyRadarStore());
@@ -700,7 +666,6 @@ function LivePanel(props: LiveProps) {
         },
         count: tot,
       };
-    }
     if (L) return ensureRadarAgg(L);
     if (F) return ensureRadarAgg(F);
     return null;
@@ -719,10 +684,8 @@ function LivePanel(props: LiveProps) {
   function readLadder(): LadderStore {
     try { const raw = localStorage.getItem(LADDER_KEY); if (raw) { const j = JSON.parse(raw); if (j?.schema==='ddz-ladder@1') return j as LadderStore; } } catch {}
     return { ...LADDER_EMPTY, updatedAt:new Date().toISOString() };
-  }
   function writeLadder(s: LadderStore) {
     try { s.updatedAt = new Date().toISOString(); localStorage.setItem(LADDER_KEY, JSON.stringify(s)); } catch {}
-  }
   function ladderUpdateLocal(id:string, label:string, sWin:number, pExp:number, weight:number=1) {
     const st = readLadder();
     const ent = st.players[id] || { id, label, current: { ...LADDER_DEFAULT }, history: [] };
@@ -739,7 +702,6 @@ function LivePanel(props: LiveProps) {
     st.players[id] = ent;
     writeLadder(st);
     try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
-  }
     const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
@@ -762,13 +724,11 @@ function LivePanel(props: LiveProps) {
         const role: 'landlord' | 'farmer' = (i===lord ? 'landlord' : 'farmer');
         entry.roles = entry.roles || {};
         entry.roles[role] = mergeRadarAgg(entry.roles[role], s3[i]);
-      }
       const choice = props.seats[i];
       const model  = (props.seatModels[i] || '').trim();
       const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
       entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
       radarStoreRef.current.players[id] = entry;
-    }
     // writeRadarStore disabled (no radar persistence)
   };
 
@@ -792,7 +752,6 @@ function LivePanel(props: LiveProps) {
             },
             meta: p.meta || {},
           };
-        }
       } else if (j?.players && typeof j.players === 'object') {
         for (const [id, p] of Object.entries<any>(j.players)) {
           store.players[id] = {
@@ -804,12 +763,10 @@ function LivePanel(props: LiveProps) {
             },
             meta: p?.meta || {},
           };
-        }
       } else if (Array.isArray(j)) {
         for (const p of j) { const id = p.id || p.identity; if (!id) continue; store.players[id] = p as any; }
       } else if (j?.id) {
         store.players[j.id] = j as any;
-      }
 
       radarStoreRef.current = store; writeRadarStore(store);
       setLog(l => [...l, `【Radar】已上传存档（${Object.keys(store.players).length} 位）`]);
@@ -896,19 +853,16 @@ function LivePanel(props: LiveProps) {
           for (let i=0;i<3;i++){
             const idx = fileAgents.indexOf(targetAgents[i]);
             mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
-          }
           setScoreSeries(mapped);
           if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
         } catch (err) {
           console.error('[score upload] parse error', err);
-        }
       };
       rd.readAsText(f);
     } catch (err) {
       console.error('[score upload] error', err);
     } finally {
       if (scoreFileRef.current) scoreFileRef.current.value = '';
-    }
   };
 
   
@@ -980,7 +934,6 @@ const start = async () => {
           case 'ai:deepseek': return { choice, model, apiKey: keys.deepseek || '' };
           case 'http':        return { choice, model, baseUrl: keys.httpBase || '', token: keys.httpToken || '' };
           default:            return { choice };
-        }
       });
     };
 
@@ -1008,11 +961,8 @@ const start = async () => {
           } else {
             nextAggStats = nextAggStats.map(prev => mergeScore(prev, neutral, mode, nextAggCount, a));
             nextAggCount = nextAggCount + 1;
-          }
-        }
         roundFinishedRef.current = true;
         nextFinished = nextFinished + 1;
-      }
       return { nextFinished, nextAggStats, nextAggCount };
     };
 
@@ -1063,7 +1013,6 @@ const start = async () => {
         if (Date.now() - lastEventTs > timeoutMs) {
           setLog(l => [...l, `⏳ 超过 ${Math.round(timeoutMs/1000)}s 未收到事件，已触发前端提示（后端会按规则自动“过”或出最小牌），继续等待…`]);
           lastEventTs = Date.now(); // 防止重复提示
-        }
       }, 1000);
     
       const decoder = new TextDecoder('utf-8');
@@ -1082,7 +1031,6 @@ const start = async () => {
           buf = buf.slice(idx + 1);
           if (!line) continue;
           try { batch.push(JSON.parse(line)); } catch {}
-        }
 
         if (batch.length) {
           let nextHands = handsRef.current.map(x => [...x]);
@@ -1125,13 +1073,11 @@ for (const raw of batch) {
                   if ('hands' in p) p.hands = mapArr(p.hands);
                   if ('totals' in p) p.totals = mapArr(p.totals);
                   out.payload = p;
-                }
                 return out;
               };
               m = mapMsg(raw);
             } else {
               const m_any:any = raw; m = m_any;
-            }
 
             // m already defined above
             try {
@@ -1146,9 +1092,7 @@ for (const raw of batch) {
                   nextLog = [...nextLog, `【TS】after-round 已更新 μ/σ`];
                 } else if (m.where === 'before-round') {
                   nextLog = [...nextLog, `【TS】before-round μ/σ 准备就绪`];
-                }
                 continue;
-              }
 
               // -------- 事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
@@ -1159,13 +1103,11 @@ for (const raw of batch) {
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
-              }
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
                 const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 continue;
-              }
 
               // -------- 初始发牌（仅限 init 帧） --------
               if (m.type === 'init') {
@@ -1184,23 +1126,18 @@ for (const raw of batch) {
                     const lordVal = (lord ?? -1) as number | -1;
                     if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
                     else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
-                  }
                   // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
                   if (nextCuts.length > 0) {
                     const idxBand = Math.max(0, nextCuts.length - 1);
                     const lordVal2 = (nextLandlord ?? -1) as number | -1;
                     if (nextLords[idxBand] !== lordVal2) {
                       nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
-                    }
-                  }
 
                   nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
 
                   try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
                   lastReasonRef.current = [null, null, null];
-                }
                 continue;
-              }
 
               
               // -------- 首次手牌兜底注入（若没有 init 帧但消息里带了 hands） --------
@@ -1224,25 +1161,18 @@ for (const raw of batch) {
                     else if (nextCuts[nextCuts.length-1] !== n0) {
                       nextCuts = [...nextCuts, n0];
                       nextLords = [...nextLords, lordVal];
-                    }
                     // 若本局地主刚刚确认，回填最近一段的 roundLords，避免底色为白
                     if (nextCuts.length > 0) {
                       const idxBand = Math.max(0, nextCuts.length - 1);
                       const lordVal2 = (nextLandlord ?? -1) as number | -1;
                       if (nextLords[idxBand] !== lordVal2) {
                         nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
-                      }
-                    }
-                  }
 
-                }
-              }
 
 // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
                 nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
-              }
               if (m.type === 'event' && m.kind === 'bot-done') {
                 nextLog = [
                   ...nextLog,
@@ -1251,21 +1181,18 @@ for (const raw of batch) {
                 ];
                 lastReasonRef.current[m.seat] = m.reason || null;
                 continue;
-              }
 
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'rob') {
   if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
                 nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
                 continue;
-              }
 
               // -------- 起新墩 --------
               if (m.type === 'event' && m.kind === 'trick-reset') {
                 nextLog = [...nextLog, '一轮结束，重新起牌'];
                 nextPlays = [];
                 continue;
-              }
 
               // -------- 出/过 --------
               
@@ -1278,13 +1205,9 @@ for (const raw of batch) {
                       const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
                       const mm = /score=([+-]?\d+(?:\.\d+)?)/.exec(rr || '');
                       if (mm) { val = parseFloat(mm[1]); }
-                    }
                     for (let i=0;i<3;i++){
                       if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                       nextScores[i] = [...nextScores[i], (i===s ? val : null)];
-                    }
-                  }
-                }
 
               // -------- 记录 turn（含 score） --------
               if (m.type === 'turn') {
@@ -1295,10 +1218,7 @@ for (const raw of batch) {
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
-                  }
-                }
                 continue;
-              }
 if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
@@ -1316,16 +1236,13 @@ if (m.type === 'event' && m.kind === 'play') {
                     const k = nh[seat].indexOf(chosen);
                     if (k >= 0) nh[seat].splice(k, 1);
                     pretty.push(chosen);
-                  }
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
                   lastReasonRef.current[m.seat] = null;
 
                   nextHands = nh;
                   nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason }];
                   nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reason ? `（理由：${reason}）` : ''}`];
-                }
                 continue;
-              }
 
               // -------- 结算（多种别名兼容） --------
               const isWinLike =
@@ -1366,15 +1283,12 @@ nextTotals     = [
                   else if (landlordDelta < 0) {
                     const farmer = [0,1,2].find(x => x !== L)!;
                     nextWinnerLocal = farmer;
-                  }
-                }
                 nextWinner = nextWinnerLocal;
 
                 // 标记一局结束 & 雷达图兜底
                 {
                   const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
-                }
 
                 
                 // ✅ Ladder（活动积分 ΔR）：按本局分差幅度加权（独立于胜负方向）
@@ -1403,7 +1317,6 @@ nextTotals     = [
                     const id = seatIdentity(i);
                     const label = agentIdForIndex(i);
                     ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, weight);
-                  }
                 } catch {}
 // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
                 {
@@ -1421,14 +1334,12 @@ nextTotals     = [
                     ...nextLog,
                     `TS(局后)：甲 μ=${fmt2(updated[0].mu)} σ=${fmt2(updated[0].sigma)}｜乙 μ=${fmt2(updated[1].mu)} σ=${fmt2(updated[1].sigma)}｜丙 μ=${fmt2(updated[2].mu)} σ=${fmt2(updated[2].sigma)}`
                   ];
-                }
 
                 nextLog = [
                   ...nextLog,
                   `胜者：${nextWinner == null ? '—' : seatName(nextWinner)}，倍数 x${nextMultiplier}，当局积分（按座位） ${rot.join(' / ')}｜原始（相对地主） ${ds.join(' / ')}｜地主=${seatName(L)}`
                 ];
                 continue;
-              }
 
               // -------- 画像统计（两种形态） --------
               const isStatsTop = (m.type === 'stats' && (Array.isArray(m.perSeat) || Array.isArray(m.seats)));
@@ -1460,20 +1371,16 @@ nextTotals     = [
                 } else {
                   nextAggStats = nextAggStats.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
                   nextAggCount = nextAggCount + 1;
-                }
 
                 const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
                 nextLog = [...nextLog, `战术画像（本局）：${msg}（已累计 ${nextAggCount} 局）`];
                 continue;
-              }
 
               // -------- 文本日志 --------
               if (m.type === 'log' && typeof m.message === 'string') {
                 nextLog = [...nextLog, rewrite(m.message)];
                 continue;
-              }
             } catch (e) { console.error('[ingest:batch]', e, raw); }
-          }
 
           setRoundLords(nextLords);
           setRoundCuts(nextCuts);
@@ -1483,8 +1390,6 @@ nextTotals     = [
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
-        }
-      }
 
           if (dogId) { try { clearInterval(dogId); } catch {} }
     setLog(l => [...l, `—— 本局流结束 ——`]);
@@ -1499,7 +1404,6 @@ nextTotals     = [
         const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
         if (hasNegative) { setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']); break; }
         await new Promise(r => setTimeout(r, 800 + Math.floor(Math.random() * 600)));
-      }
     } catch (e: any) {
       if (e?.name === 'AbortError') setLog(l => [...l, '已手动停止。']);
       else setLog(l => [...l, `错误：${e?.message || e}`]);
@@ -1542,16 +1446,13 @@ const applyAllBundleInner = (obj:any) => {
     if (obj?.trueskill?.players) {
       tsStoreRef.current = obj.trueskill as TsStore;
       writeStore(tsStoreRef.current);
-    }
     // radar ignored for ALL upload (persistence disabled)
 
     if (obj?.ladder?.schema === 'ddz-ladder@1') {
       try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {}
-    }
     setLog(l => [...l, '【ALL】统一上传完成（TS / 画像 / 天梯）。']);
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
-  }
 };
 const handleAllSaveInner = () => {
     const payload = buildAllBundle();
@@ -1710,7 +1611,6 @@ const handleAllSaveInner = () => {
                     let k = Math.floor((v - lo) / (hi - lo) * bins);
                     if (k < 0) k = 0; if (k >= bins) k = bins - 1;
                     counts[k]++;
-                  }
                   const binWidthVal = (hi - lo) / bins;
                   const densities = counts.map(c => c / (samples.length * (binWidthVal || 1)));
                   const maxD = Math.max(...densities) || 1;
@@ -1763,7 +1663,6 @@ const handleAllSaveInner = () => {
           {plays.length === 0
             ? <div style={{ opacity:0.6 }}>（尚无出牌）</div>
             : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)
-          }
         </div>
       </Section>
 
@@ -1807,7 +1706,6 @@ const handleAllSaveInner = () => {
       </div>
     </div>
   );
-}
 
 function RadarPanel({
   aggStats, aggCount, aggMode, alpha,
@@ -1857,10 +1755,8 @@ function RadarPanel({
           </div>
         )
         : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
-      }
     </>
   );
-}
 
 /* ========= 默认值（含“清空”按钮的重置） ========= */
 const DEFAULTS = {
@@ -1937,7 +1833,6 @@ const [resetKey, setResetKey] = useState<number>(0);
         console.error('[ALL-UPLOAD] parse error', err);
       } finally {
         if (allFileRef.current) allFileRef.current.value = '';
-      }
     };
     rd.readAsText(f);
   };
@@ -2251,7 +2146,6 @@ const [resetKey, setResetKey] = useState<number>(0);
       </div>
     </div>
   );
-}
 
 export default Home;
 
@@ -2308,11 +2202,9 @@ function ScoreTimeline(
   for (let j=0; j<landlordsFilled.length; j++) {
     const v = landlordsFilled[j];
     if (!(v===0 || v===1 || v===2)) landlordsFilled[j] = j>0 ? landlordsFilled[j-1] : landlordsFilled[j];
-  }
   if (landlordsFilled.length && !(landlordsFilled[0]===0 || landlordsFilled[0]===1 || landlordsFilled[0]===2)) {
     const k = landlordsFilled.findIndex(v => v===0 || v===1 || v===2);
     if (k >= 0) { for (let j=0; j<k; j++) landlordsFilled[j] = landlordsFilled[k]; }
-  }
 
   const makePath = (arr:(number|null)[])=>{
     let d=''; let open=false;
@@ -2324,7 +2216,6 @@ function ScoreTimeline(
       const px = x(i), py = y(v);
       d += (open? ` L ${px} ${py}` : `M ${px} ${py}`);
       open = true;
-    }
     return d;
   };
 
@@ -2333,7 +2224,6 @@ function ScoreTimeline(
   for (let i=0;i<n;i++){
     const step = Math.ceil(n / maxTicks);
     if (i % step === 0) ticks.push(i);
-  }
   // y 轴刻度（5 条）
   const yTicks = []; for (let k=0;k<=4;k++){ yTicks.push(y0 + (k/4)*(y1-y0)); }
 
@@ -2425,7 +2315,6 @@ function ScoreTimeline(
       </div>
     </div>
   );
-}
 
 /* ================ 雷达图（0~5） ================= */
 function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
@@ -2468,4 +2357,3 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
       <div style={{ minWidth:60, fontSize:12, color:'#374151' }}>{title}</div>
     </div>
   );
-}
