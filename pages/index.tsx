@@ -2051,7 +2051,18 @@ const handleAllSaveInner = () => {
 </Section>
       </div>
     </div>
-  
+style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:10, background: humanSel.includes(c)?'#eff6ff':'#fff' }}>
+                {c}
+              </button>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={()=>submitHuman('play')} style={{ padding:'8px 14px', border:'1px solid #16a34a', color:'#16a34a', background:'#fff', borderRadius:10, fontWeight:700 }}>出牌</button>
+            <button onClick={()=>submitHuman('pass')} style={{ padding:'8px 14px', border:'1px solid #ef4444', color:'#ef4444', background:'#fff', borderRadius:10, fontWeight:700 }}>过</button>
+          </div>
+        </div>
+      )}
+
       {/* Human play panel */}
       {humanAwaitSeat!=null && (
         <div style={{ position:'fixed', left:20, right:20, bottom:20, background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, padding:12, boxShadow:'0 8px 28px rgba(0,0,0,0.18)', zIndex:50 }}>
