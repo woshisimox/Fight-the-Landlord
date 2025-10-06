@@ -8,19 +8,19 @@ const LangContext = createContext<Lang>('zh');
 
 const I18N: Record<Lang, Record<string, string>> = {
   zh: {
-    Title: '{t('Title')}',
-    Settings: '{t('Settings')}',
+    Title: '斗地主 · Fight the Landlord',
+    Settings: '对局设置',
     Enable: '启用对局',
     Reset: '清空',
-    EnableHint: '{t('EnableHint')}',
-    LadderTitle: '{t('LadderTitle')}',
-    LadderRange: '{t('LadderRange', { K })}',
+    EnableHint: '关闭后不可开始/继续对局；再次勾选即可恢复。',
+    LadderTitle: '天梯图（活动积分 ΔR）',
+    LadderRange: '范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）',
     Pass: '过',
     Play: '出牌',
-    Empty: '{t('Empty')}',
+    Empty: '（空）',
     Upload: '上传',
     Save: '存档',
-    FarmerCoop: '{t('FarmerCoop')}',
+    FarmerCoop: '农民配合',
   },
   en: {
     Title: 'Fight the Landlord',
@@ -50,9 +50,7 @@ function useI18n() {
 }
 
 function seatLabel(i: number, lang: Lang) {
-  return (
-    <LangContext.Provider value={lang}>
-lang === 'en' ? ['A', 'B', 'C'] : ['甲', '乙', '丙'])[i] || String(i);
+  return (lang === 'en' ? ['A', 'B', 'C'] : ['甲', '乙', '丙'])[i] || String(i);
 }
 /* ======= Minimal i18n (zh/en) injection: END ======= */
 
