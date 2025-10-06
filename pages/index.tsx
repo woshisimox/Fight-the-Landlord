@@ -411,24 +411,7 @@ function Card({ label }: { label:string }) {
       <span style={{ fontSize:16 }}>{suit}</span>
       <span style={{ fontSize:16, ...(rankColor ? { color: rankColor } : {}) }}>{rank === 'T' ? '10' : rank}</span>
     </span>
-      {/* Human play panel */}
-      {humanAwaitSeat!=null && (
-        <div style={{ position:'fixed', left:20, right:20, bottom:20, background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, padding:12, boxShadow:'0 8px 28px rgba(0,0,0,0.18)', zIndex:50 }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <div style={{ fontWeight:800 }}>玩家出牌（{['甲','乙','丙'][humanAwaitSeat]}）</div>
-            <button onClick={()=>{ setHumanAwaitSeat(null); setHumanSel([]); }} style={{ border:'1px solid #eee', borderRadius:8, padding:'4px 8px', background:'#fff' }}>关闭</button>
-          </div>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:10 }}>
-            {(hands[humanAwaitSeat]||[]).map((c,idx)=>(
-              <button key={idx} onClick={()=>toggleCard(c)} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:10, background: humanSel.includes(c)?'#eff6ff':'#fff' }}>{c}</button>
-            ))}
-          </div>
-          <div style={{ display:'flex', gap:8 }}>
-            <button onClick={()=>submitHuman('play')} style={{ padding:'8px 14px', border:'1px solid #16a34a', color:'#16a34a', background:'#fff', borderRadius:10, fontWeight:700 }}>出牌</button>
-            <button onClick={()=>submitHuman('pass')} style={{ padding:'8px 14px', border:'1px solid #ef4444', color:'#ef4444', background:'#fff', borderRadius:10, fontWeight:700 }}>过</button>
-          </div>
-        </div>
-      )}
+      {     )}
     );
   }
 
@@ -2069,7 +2052,30 @@ const handleAllSaveInner = () => {
 </Section>
       </div>
     </div>
-  );
+  
+      {/* Human play panel */}
+      {humanAwaitSeat!=null && (
+        <div style={{ position:'fixed', left:20, right:20, bottom:20, background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, padding:12, boxShadow:'0 8px 28px rgba(0,0,0,0.18)', zIndex:50 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+            <div style={{ fontWeight:800 }}>玩家出牌（{['甲','乙','丙'][humanAwaitSeat]}）</div>
+            <button onClick={()=>{ setHumanAwaitSeat(null); setHumanSel([]); }} style={{ border:'1px solid #eee', borderRadius:8, padding:'4px 8px', background:'#fff' }}>关闭</button>
+          </div>
+          <div style={{ fontSize:12, color:'#6b7280', marginBottom:8 }}>点击选择要出的牌，再点“出牌”。如要过牌，直接点“过”。</div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:10 }}>
+            {(hands[humanAwaitSeat]||[]).map((c:string,idx:number)=>(
+              <button key={idx} onClick={()=>toggleCard(c)}
+                style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:10, background: humanSel.includes(c)?'#eff6ff':'#fff' }}>
+                {c}
+              </button>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={()=>submitHuman('play')} style={{ padding:'8px 14px', border:'1px solid #16a34a', color:'#16a34a', background:'#fff', borderRadius:10, fontWeight:700 }}>出牌</button>
+            <button onClick={()=>submitHuman('pass')} style={{ padding:'8px 14px', border:'1px solid #ef4444', color:'#ef4444', background:'#fff', borderRadius:10, fontWeight:700 }}>过</button>
+          </div>
+        </div>
+      )}
+);
 }
 
 function RadarPanel({
