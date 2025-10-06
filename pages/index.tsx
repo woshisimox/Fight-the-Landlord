@@ -1737,7 +1737,7 @@ nextTotals     = [
                 nextLog = [...nextLog, rewrite(m.message)];
                 continue;
               }
-            } catch (e) { console.error('[ingest:batch]', e, raw); }
+            }
           }
 
           setRoundLords(nextLords);
