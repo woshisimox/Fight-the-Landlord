@@ -38,7 +38,7 @@ const I18N: Record<Lang, Record<string, string>> = {
 
 function useI18n() {
   const lang = useContext(LangContext);
-  const t = (key: string, vars: Record<string, any> = {}
+  const t = (key: string, vars: Record<string, any> = {}) => {
     let s = (I18N[lang]?.[key] ?? I18N.zh[key] ?? key);
     s = s.replace(/\{(\w+)\}/g, (_: any, k: string) => (vars[k] ?? `{${k}}`));
     return s;
