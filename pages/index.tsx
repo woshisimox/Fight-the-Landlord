@@ -180,7 +180,7 @@ function LogLine({ text }: { text:string }) {
 }
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
-function LadderPanel({ t }: { t: (key: string, params?: any) => string }) {
+function LadderPanel({ t }: { t: (key: string) => string }) {
   const [tick, setTick] = useState(0);
   useEffect(()=>{
     const onAny = () => setTick(k=>k+1);
@@ -985,10 +985,10 @@ const start = async () => {
 
       setLog([]); lastReasonRef.current = [null, null, null];
       const baseSpecs = buildSeatSpecs();
-      const startShift = ((labelRoundNo - 1) % 3 + 3) % 3;
-      const specs = [0,1,2].map(i => baseSpecs[(i + startShift) % 3]);
-      const toUiSeat = (j:number) => (j + startShift) % 3;
-      const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startSh...(truncated 21541 characters)...        setLog(nextLog); setLandlord(nextLandlord);
+      const startShiftift = ((labelRoundNo - 1) % 3 + 3) % 3;
+      const specs = [0,1,2].map(i => baseSpecs[(i + startShiftift) % 3]);
+      const toUiSeat = (j:number) => (j + startShiftift) % 3;
+      const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShiftift + 3) % 3], arr[(1 - startShiftift + 3) % 3], arr[(2 - startShiftift + 3) % 3] ]);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
         }
