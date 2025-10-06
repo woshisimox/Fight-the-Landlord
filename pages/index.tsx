@@ -202,8 +202,8 @@ function Card({ label }: { label:string }) {
     </span>
   );
 }
-function Hand({
-  const { t } = useI18n(); cards }: { cards: string[] }) {
+function Hand({ cards }: { cards: string[] }) {
+  const { t } = useI18n();
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>{t('Empty')}</span>;
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
