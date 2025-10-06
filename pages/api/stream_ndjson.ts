@@ -282,8 +282,8 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
 }
 
 /* ========== Trace 包装（记录 reason + 限时 + 调用事件） ========== */
+/* ========== Trace 包装（记录 reason + 限时 + 调用事件） ========== */
 function traceWrap(
-
   choice: BotChoice,
   spec: SeatSpec|undefined,
   bot: (ctx:any)=>any,
@@ -292,15 +292,15 @@ function traceWrap(
   onScore: (seat:number, sc?:number)=>void,
   turnTimeoutMs: number,
   startDelayMs: number,
-  seatIndex: number
-), clientTraceId: string{
+  seatIndex: number,
+  clientTraceId: string
+): (ctx:any)=>Promise<any> {
   const label = providerLabel(choice);
   return async (ctx:any) => {
-    if (choice === 'human'
-): (ctx:any)=>Promise<any> {
+    if (choice === 'human') {
+      // Normalize
       try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: 'Human', model: '', phase: ctx?.phase || 'play' }); } catch {}
       const mv = await Promise.race([ _installHumanWaiter(clientTraceId || '', seatIndex), new Promise(r=>setTimeout(()=>r({ move:'pass' }), Math.max(1000, turnTimeoutMs))) ]);
-      // Normalize
       const cards = Array.isArray(mv?.cards) ? mv.cards : [];
       const move = (mv?.move === 'play' && cards.length>0) ? 'play' : 'pass';
       return { move, cards, reason: 'human' };
