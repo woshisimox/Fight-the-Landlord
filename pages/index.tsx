@@ -2513,7 +2513,8 @@ const [lang, setLang] = useState<Lang>(() => {
           turnTimeoutSecs={turnTimeoutSecs}
         />
     </div>
-    </LangContext.Provider>
+    </div>
+</LangContext.Provider>
   </>
 );
 }
