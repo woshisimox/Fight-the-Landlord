@@ -106,6 +106,40 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '继续', en: 'Resume' },
   { zh: '停止', en: 'Stop' },
 
+
+  // === Added for extended UI coverage (batch 2) ===
+  { zh: '甲', en: 'A' },
+  { zh: '乙', en: 'B' },
+  { zh: '丙', en: 'C' },
+
+  { zh: '对局', en: 'Match' },
+  { zh: /TrueSkill（实时）|TrueSkill\s*\(实时\)/, en: 'TrueSkill (live)' },
+  { zh: /当前使用：?/, en: 'Current: ' },
+  { zh: '总体档', en: 'Overall' },
+
+  { zh: /战术画像（累计，0[-~~—––]5）|战术画像（累计，0~5）|战术画像\s*\(累计[,，]?\s*0\s*[-–~]\s*5\)/, en: 'Tactical profile (cumulative, 0–5)' },
+  { zh: /汇总方式\s*指数加权（推荐）|汇总方式\s*指数加权\s*\(推荐\)/, en: 'Aggregation: exponentially weighted (recommended)' },
+
+  { zh: /出牌评分（每局动态）|出牌评分\s*\(每局动态\)/, en: 'Play score (per hand, dynamic)' },
+  { zh: /评分统计（每局汇总）|评分统计\s*\(每局汇总\)/, en: 'Score stats (per hand, summary)' },
+
+  { zh: '最近一局均值：', en: 'Last-hand mean: ' },
+  { zh: '最好局均值：', en: 'Best-hand mean: ' },
+  { zh: '最差局均值：', en: 'Worst-hand mean: ' },
+  { zh: '总体均值：', en: 'Overall mean: ' },
+  { zh: '局数：', en: 'Hands: ' },
+
+  { zh: '手牌', en: 'Hand' },
+  { zh: '结果', en: 'Result' },
+  { zh: '倍数', en: 'Multiplier' },
+  { zh: '胜者', en: 'Winner' },
+  { zh: '本局加减分', en: 'Points this hand' },
+
+  { zh: /（尚无出牌）|\(尚无出牌\)/, en: '(no plays yet)' },
+
+  { zh: '剩余局数：', en: 'Remaining hands: ' },
+  { zh: '剩余局数', en: 'Remaining hands' },
+
 ];
 
 function translateTextLiteral(s: string): string {
