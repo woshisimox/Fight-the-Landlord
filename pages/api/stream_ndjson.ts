@@ -10,6 +10,31 @@ import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
+/* ========== HUMAN move waiters ========== */
+declare global {
+  // traceId -> seat -> resolver
+  // Using any to avoid TS friction in a quick patch
+  var __HUMAN_WAITERS: Record<string, Record<number, (mv:any)=>void>> | undefined;
+}
+(globalThis as any).__HUMAN_WAITERS ??= {};
+
+function _installHumanWaiter(traceId:string, seat:number) {
+  const w: any = (globalThis as any).__HUMAN_WAITERS;
+  w[traceId] = w[traceId] || {};
+  let resolver: (mv:any)=>void;
+  const p = new Promise<any>((resolve)=>{ resolver = resolve as any; });
+  w[traceId][seat] = resolver!;
+  return p;
+}
+function _resolveHumanWaiter(traceId:string, seat:number, move:any) {
+  try {
+    const w: any = (globalThis as any).__HUMAN_WAITERS || {};
+    const m = w?.[traceId]?.[seat];
+    if (typeof m === 'function') { m(move); delete w[traceId][seat]; }
+  } catch {}
+}
+
+
 
 /* ========== 已出牌缓存（仅当前请求作用域） ========== */
 declare global {
@@ -194,6 +219,7 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
+  | 'human'
   | 'http';
 
 type SeatSpec = {
@@ -231,8 +257,10 @@ function providerLabel(choice: BotChoice) {
     case 'ai:kimi': return 'Kimi';
     case 'ai:qwen': return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
+    case 'human': return 'Human';
     case 'http': return 'HTTP';
   }
+
 }
 
 function asBot(choice: BotChoice, spec?: SeatSpec) {
@@ -267,6 +295,14 @@ function traceWrap(
 ){
   const label = providerLabel(choice);
   return async (ctx:any) => {
+    if (choice === 'human') {
+      try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: 'Human', model: '', phase: ctx?.phase || 'play' }); } catch {}
+      const mv = await Promise.race([ _installHumanWaiter((clientTraceId as any)||'', seatIndex), new Promise(r=>setTimeout(()=>r({ move:'pass' }), Math.max(1000, turnTimeoutMs))) ]);
+      // Normalize
+      const cards = Array.isArray(mv?.cards) ? mv.cards : [];
+      const move = (mv?.move === 'play' && cards.length>0) ? 'play' : 'pass';
+      return { move, cards, reason: 'human' };
+    }
     if (startDelayMs && startDelayMs>0) {
       await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
     }
@@ -440,6 +476,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(405).json({ error: 'Method Not Allowed' });
     return;
   }
+  // Quick lane: accept human moves (non-stream)
+  try {
+    const bodyAny: any = (req as any).body;
+    if (bodyAny && bodyAny.humanMove) {
+      const t = (bodyAny.clientTraceId || bodyAny.traceId || bodyAny.humanMove.traceId || '').toString();
+      const s = Number(bodyAny.humanMove.seat);
+      const mv = bodyAny.humanMove;
+      _resolveHumanWaiter(t, s, { move: mv.move || 'pass', cards: Array.isArray(mv.cards)? mv.cards : [] });
+      res.status(200).json({ ok: true });
+      return;
+    }
+  } catch {}
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method Not Allowed' });
+    return;
+  }
 
   try {
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
@@ -451,6 +503,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const body: RunBody = (req as any).body as any;
+    const clientTraceId: string = (body as any)?.clientTraceId || Math.random().toString(36).slice(2);
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
     const four2  = (body.four2 || 'both') as 'both'|'2singles'|'2pairs';
 

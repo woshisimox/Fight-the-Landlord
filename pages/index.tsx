@@ -271,7 +271,7 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
-  | 'http';
+  | 'human' | 'http';
 
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
 type Rating = { mu:number; sigma:number };
@@ -466,7 +466,7 @@ function LadderPanel() {
 
   const CATALOG = [
     'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
-    'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http'
+    'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','human','http'
   ];
   const catalogIds = CATALOG.map((choice)=>{
     const model = defaultModelFor(choice as any) || '';
@@ -568,6 +568,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:kimi':               return 'Kimi';
     case 'ai:qwen':               return 'Qwen';
     case 'ai:deepseek':           return 'DeepSeek';
+    case 'human':                 return 'Human';
     case 'http':                  return 'HTTP';
     default: return String(choice);
   }
@@ -1231,6 +1232,48 @@ const start = async () => {
     })();
     let dogId: any = null;
 
+  // —— Human play state ——
+  const [humanAwaitSeat, setHumanAwaitSeat] = useState<number|null>(null);
+  const [humanSel, setHumanSel] = useState<string[]>([]);
+  const traceIdRef = useRef<string>('');
+  const isHumanSeat = (i:number)=> (props.seats?.[i] === 'human');
+
+  const toggleCard = (label:string)=>{
+    setHumanSel((prev)=> prev.includes(label) ? prev.filter(x=>x!==label) : [...prev, label]);
+  };
+  const undecorateToRaw = (labels:string[])=>{
+    const toRaw = (s:string)=>{
+      if (s.startsWith('🃏')){
+        if (s.includes('Y')) return 'X';
+        return 'x';
+      }
+      // suit card, last char is rank
+      const r = s.slice(-1);
+      return r;
+    };
+    return labels.map(toRaw);
+  };
+  const submitHuman = async (move:'play'|'pass')=>{
+    const seat = humanAwaitSeat;
+    if (seat==null) return;
+    const body:any = {
+      humanMove: {
+        seat,
+        move,
+        cards: move==='play' ? undecorateToRaw(humanSel) : []
+      },
+      clientTraceId: traceIdRef.current
+    };
+    try {
+      await fetch('/api/stream_ndjson', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
+      setHumanSel([]);
+      setHumanAwaitSeat(null);
+    } catch (e) {
+      console.error('[human move] submit fail', e);
+    }
+  };
+
+
       setLog([]); lastReasonRef.current = [null, null, null];
       const baseSpecs = buildSeatSpecs();
       const startShift = ((labelRoundNo - 1) % 3 + 3) % 3;
@@ -1238,6 +1281,7 @@ const start = async () => {
       const toUiSeat = (j:number) => (j + startShift) % 3;
       const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
+      traceIdRef.current = traceId;
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       roundFinishedRef.current = false;
