@@ -1603,7 +1603,7 @@ nextTotals     = [
 
                 
                 // ✅ Ladder（活动积分 ΔR）：按本局分差幅度加权（独立于胜负方向）
-                try {
+                {
                   const pre = tsRef.current.map(r => ({ ...r })); // 局前 TS 快照
                   const farmers = [0,1,2].filter(x => x !== L);
                   const farmerWin = (nextWinner === L) ? false : true;
@@ -1655,7 +1655,7 @@ nextTotals     = [
                     const label = agentIdForIndex(i);
                     ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, mTimes);
                   }
-                } catch {}
+                }
 
                 // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
                 {
