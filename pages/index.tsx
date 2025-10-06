@@ -160,6 +160,17 @@ const TRANSLATIONS: TransRule[] = [
   { zh: /纵轴[:：]\s*/, en: 'Y-axis: ' },
   { zh: /第几手牌/, en: 'hand index' },
 
+
+  // === Added for extended UI coverage (batch 4) ===
+  { zh: /按[“\"“]?内置\/AI\+模型\/版本\(\+HTTP Base\)[”\"”]?识别，并区分地主\/农民。?/, en: 'Recognize by "built-in/AI+model/version (+HTTP Base)" and distinguish Landlord/Farmer.' },
+  { zh: /说明[:：]\s*CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。?/, en: 'Note: CR is the lower confidence bound (higher is more stable); updates after each hand (also supports backend-pushed TS).' },
+  { zh: /每局开始时底色按[“\"“]?本局地主[”\"”]?的线色变化提示；上传文件可替换\/叠加历史，必要时点[“\"“]?刷新[”\"”]?。?/, en: 'At the start of each hand, background follows the current Landlord color; uploads can replace/append history; click "Refresh" if needed.' },
+  { zh: /α/, en: 'alpha' },  // symbol label near alpha
+  { zh: /指数加权（推荐）/, en: 'Exponentially weighted (recommended)' },
+  { zh: /当前使用[:：]\s*/, en: 'Current: ' },
+  { zh: /总体档/, en: 'Overall' },
+  { zh: /总体(?!均值)/, en: 'Overall' },
+
 ];
 
 function translateTextLiteral(s: string): string {
@@ -176,34 +187,49 @@ function translateTextLiteral(s: string): string {
 
 function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
   if (!root) return;
-  const tags = new Set(['BUTTON','LABEL','DIV','SPAN','P','H1','H2','H3','H4','H5','H6','TD','TH','A','LI','STRONG','EM','SMALL','CODE']);
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node: any) => {
-      const el = node.parentElement as HTMLElement | null;
-      if (!el) return NodeFilter.FILTER_REJECT;
-      if (!tags.has(el.tagName)) return NodeFilter.FILTER_REJECT;
-      if (el.closest('[data-i18n-ignore]')) return NodeFilter.FILTER_REJECT;
-      const txt = String(node.nodeValue || '').trim();
-      if (!txt) return NodeFilter.FILTER_REJECT;
-      return NodeFilter.FILTER_ACCEPT;
-    }
-  } as any);
-  let n: any;
-  while ((n = walker.nextNode())) {
-    const textNode = n as Text;
-    const el = textNode.parentElement as HTMLElement | null;
-    if (!el) continue;
-    if (lang === 'zh') {
-      // restore original
-      const orig = el.getAttribute('data-i18n-orig');
-      if (orig != null) {
-        textNode.nodeValue = orig;
+  const tags = new Set(['BUTTON','LABEL','DIV','SPAN','P','H1','H2','H3','H4','H5','H6','TD','TH','A','LI','STRONG','EM','SMALL','CODE','OPTION']);
+  const accept = (node: any) => {
+    const el = node.parentElement as HTMLElement | null;
+    if (!el) return NodeFilter.FILTER_REJECT;
+    if (!tags.has(el.tagName)) return NodeFilter.FILTER_REJECT;
+    if (el.closest('[data-i18n-ignore]')) return NodeFilter.FILTER_REJECT;
+    const txt = String(node.nodeValue || '').trim();
+    if (!txt) return NodeFilter.FILTER_REJECT;
+    return NodeFilter.FILTER_ACCEPT;
+  };
+  const apply = (scope: HTMLElement) => {
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, { acceptNode: accept } as any);
+    let n: any;
+    while ((n = walker.nextNode())) {
+      const textNode = n as Text;
+      const el = textNode.parentElement as HTMLElement | null;
+      if (!el) continue;
+      if (lang === 'zh') {
+        const orig = el.getAttribute('data-i18n-orig');
+        if (orig != null) textNode.nodeValue = orig;
+      } else {
+        if (!el.hasAttribute('data-i18n-orig')) el.setAttribute('data-i18n-orig', textNode.nodeValue || '');
+        textNode.nodeValue = translateTextLiteral(textNode.nodeValue || '');
       }
-    } else {
-      // store original once
-      if (!el.hasAttribute('data-i18n-orig')) el.setAttribute('data-i18n-orig', textNode.nodeValue || '');
-      textNode.nodeValue = translateTextLiteral(textNode.nodeValue || '');
     }
+  };
+  // initial pass
+  apply(root);
+  // observe dynamic updates once
+  if (typeof MutationObserver !== 'undefined' && !root.hasAttribute('data-i18n-observed')) {
+    const obs = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'childList') {
+          (m.addedNodes || []).forEach((node: any) => {
+            if (node && node.nodeType === 1) apply(node as HTMLElement);
+          });
+        } else if (m.type === 'characterData' && m.target && (m.target as any).parentElement) {
+          apply((m.target as any).parentElement as HTMLElement);
+        }
+      }
+    });
+    obs.observe(root, { childList: true, characterData: true, subtree: true });
+    root.setAttribute('data-i18n-observed', '1');
   }
 }
 
