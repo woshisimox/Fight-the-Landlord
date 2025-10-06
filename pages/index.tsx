@@ -271,6 +271,7 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
+  | 'human'
   | 'http';
 
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
@@ -410,8 +411,27 @@ function Card({ label }: { label:string }) {
       <span style={{ fontSize:16 }}>{suit}</span>
       <span style={{ fontSize:16, ...(rankColor ? { color: rankColor } : {}) }}>{rank === 'T' ? '10' : rank}</span>
     </span>
-  );
-}
+      {/* Human play panel */}
+      {humanAwaitSeat!=null && (
+        <div style={{ position:'fixed', left:20, right:20, bottom:20, background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, padding:12, boxShadow:'0 8px 28px rgba(0,0,0,0.18)', zIndex:50 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+            <div style={{ fontWeight:800 }}>玩家出牌（{['甲','乙','丙'][humanAwaitSeat]}）</div>
+            <button onClick={()=>{ setHumanAwaitSeat(null); setHumanSel([]); }} style={{ border:'1px solid #eee', borderRadius:8, padding:'4px 8px', background:'#fff' }}>关闭</button>
+          </div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:10 }}>
+            {(hands[humanAwaitSeat]||[]).map((c,idx)=>(
+              <button key={idx} onClick={()=>toggleCard(c)} style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:10, background: humanSel.includes(c)?'#eff6ff':'#fff' }}>{c}</button>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={()=>submitHuman('play')} style={{ padding:'8px 14px', border:'1px solid #16a34a', color:'#16a34a', background:'#fff', borderRadius:10, fontWeight:700 }}>出牌</button>
+            <button onClick={()=>submitHuman('pass')} style={{ padding:'8px 14px', border:'1px solid #ef4444', color:'#ef4444', background:'#fff', borderRadius:10, fontWeight:700 }}>过</button>
+          </div>
+        </div>
+      )}
+    );
+  }
+
 function Hand({ cards }: { cards: string[] }) {
   const { t } = useI18n();
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>{t('Empty')}</span>;
@@ -569,6 +589,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':               return 'Qwen';
     case 'ai:deepseek':           return 'DeepSeek';
     case 'http':                  return 'HTTP';
+    case 'human':                 return 'Human';
     default: return String(choice);
   }
 }
@@ -623,6 +644,42 @@ function LivePanel(props: LiveProps) {
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
   const [finishedCount, setFinishedCount] = useState(0);
+
+  const submitHuman = async (move:'play'|'pass')=>{
+    const seat = humanAwaitSeat;
+    if (seat==null) return;
+    const body:any = {
+      humanMove: {
+        seat,
+        move,
+        cards: move==='play' ? humanSel.map(s=>{
+          if (s.startsWith('🃏')) return s.includes('Y')?'X':'x';
+          return s.slice(-1);
+        }) : []
+      },
+      clientTraceId: traceIdRef.current
+    };
+    try {
+      await fetch('/api/stream_ndjson', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
+      setHumanSel([]); setHumanAwaitSeat(null);
+    } catch (e) { console.error('[human move] submit fail', e); }
+  };
+
+  // —— Human play ——
+  const [humanAwaitSeat, setHumanAwaitSeat] = useState<number|null>(null);
+  const [humanSel, setHumanSel] = useState<string[]>([]);
+  const traceIdRef = useRef<string>('');
+  const isHumanSeat = (i:number)=> (props.seats?.[i] === 'human');
+
+  const toggleCard = (label:string)=>{
+    setHumanSel(prev => prev.includes(label) ? prev.filter(x=>x!==label) : [...prev, label]);
+  };
+  const undecorateToRaw = (labels:string[])=>labels.map(s=>{
+    if (s.startswith('🃏')){
+    return s.find('Y')!=-1 ? 'X' : 'x';
+  }
+    return s[-1];
+  });
   // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
   const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
@@ -1238,6 +1295,7 @@ const start = async () => {
       const toUiSeat = (j:number) => (j + startShift) % 3;
       const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
+      traceIdRef.current = traceId;
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       roundFinishedRef.current = false;
@@ -2278,6 +2336,9 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="ai:qwen">Qwen</option>
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
+                    </optgroup>
+                    <optgroup label=\"人类\">
+                      <option value=\"human\">Human</option>
                     </optgroup>
                   </select>
                 </label>
