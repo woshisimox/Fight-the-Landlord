@@ -1694,7 +1694,27 @@ nextTotals     = [
           setRoundCuts(nextCuts);
           setScoreSeries(nextScores);
           setHands(nextHands); setPlays(nextPlays);
-          setTotals(nextTotals); setFinishedCount(nextFinished);
+          
+          // —— 增强：把本回合关键细节写入运行日志与全量日志 ——
+          try {
+            const labelRoundNo = (roundRef?.current ?? 0) + 1;
+            const L = nextLandlord ?? 0;
+            const labelsNow = [0,1,2].map(i => agentIdForIndex(i));
+            const idsNow    = [0,1,2].map(i => seatIdentity(i));
+            const roundLine = formatRoundSummary({
+              idx: labelRoundNo,
+              L,
+              winner: nextWinner,
+              mult: nextMultiplier ?? 1,
+              ds: ds as [number,number,number],
+              totals: nextTotals as [number,number,number],
+              labels: labelsNow,
+              ids: idsNow,
+            });
+            nextLog = [...nextLog, roundLine];
+            setAllLogs(prev => [...prev, roundLine]);
+          } catch (e) { console.error('[runlog:round-summary]', e); }
+setTotals(nextTotals); setFinishedCount(nextFinished);
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
