@@ -180,7 +180,7 @@ function LogLine({ text }: { text:string }) {
 }
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
-function LadderPanel({ t }: { t: (key: string) => string }) {
+function LadderPanel({ t }: { t: (key: string, params?: any) => string }) {
   const [tick, setTick] = useState(0);
   useEffect(()=>{
     const onAny = () => setTick(k=>k+1);
