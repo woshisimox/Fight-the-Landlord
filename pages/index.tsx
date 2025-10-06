@@ -1828,7 +1828,9 @@ const handleAllSaveInner = () => {
     window.addEventListener('ddz-all-save', onSave as any);
     window.addEventListener('ddz-all-refresh', onRefresh as any);
     window.addEventListener('ddz-all-upload', onUpload as any);
-    return () => {
+    return (
+      <>
+) => {
       window.removeEventListener('ddz-all-save', onSave as any);
       window.removeEventListener('ddz-all-refresh', onRefresh as any);
       window.removeEventListener('ddz-all-upload', onUpload as any);
@@ -2074,7 +2076,9 @@ const handleAllSaveInner = () => {
           </div>
         </div>
       )}
-);
+
+      </>
+    );
 }
 
 function RadarPanel({
