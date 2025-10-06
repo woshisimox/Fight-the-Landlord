@@ -1722,7 +1722,7 @@ nextTotals     = [
                   nextAggStats = s3.map(x=>({ ...x }));
                   nextAggCount = 1;
                 } else {
-                  const arr = nextAggStats; // narrow to non-null for TS
+                  const arr = nextAggStats!; // non-null after guard
                   nextAggStats = arr.map((prev, idx) => mergeScore(prev, s3[idx], mode, nextAggCount, a));
                   nextAggCount = nextAggCount + 1;
                 }
