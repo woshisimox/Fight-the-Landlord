@@ -2324,8 +2324,8 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
                     </optgroup>
-                    <optgroup label=\"人类\">
-                      <option value=\"human\">Human</option>
+                    <optgroup label="人类">
+                      <option value="human">Human</option>
                     </optgroup>
                   </select>
                 </label>
