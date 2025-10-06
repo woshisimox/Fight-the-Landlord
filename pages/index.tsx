@@ -208,7 +208,8 @@ function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
       } else {
         if (!el.hasAttribute('data-i18n-orig')) el.setAttribute('data-i18n-orig', textNode.nodeValue || '');
         textNode.nodeValue = translateTextLiteral(textNode.nodeValue || '');
-      }
+      if (el) el.setAttribute('data-i18n-en', textNode.nodeValue || '');
+}
     }
   };
   // initial pass
@@ -224,6 +225,30 @@ function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
         } else if (m.type === 'characterData' && m.target && (m.target as any).parentElement) {
           apply((m.target as any).parentElement as HTMLElement);
         }
+
+
+// --- i18n click-compat shim ---
+// Ensures buttons translated to English still work if code checks Chinese text at click time.
+if (typeof document !== 'undefined' && !document.body.hasAttribute('data-i18n-click-swapper')) {
+  document.addEventListener('click', (ev) => {
+    try {
+      const target = ev.target as HTMLElement | null;
+      if (!target) return;
+      const el = (target.closest('button, [role="button"], .btn, .Button') as HTMLElement) || null;
+      if (!el) return;
+      if (document.documentElement.lang !== 'en') return;
+      const zh = el.getAttribute('data-i18n-orig');
+      const en = el.getAttribute('data-i18n-en');
+      const current = (el.textContent || '').trim();
+      if (zh && en && current === en.trim()) {
+        el.textContent = zh;
+        setTimeout(() => { try { if (el.isConnected) el.textContent = en; } catch {} }, 0);
+      }
+    } catch {}
+  }, true); // capture phase, before app handlers
+  document.body.setAttribute('data-i18n-click-swapper', '1');
+}
+
       }
     });
     obs.observe(root, { childList: true, characterData: true, subtree: true });
