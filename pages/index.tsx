@@ -129,7 +129,7 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '总体均值：', en: 'Overall mean: ' },
   { zh: '局数：', en: 'Hands: ' },
 
-  { zh: '手牌', en: 'Hand' },
+  { zh: '手牌', en: 'Cards on hand' },
   { zh: '结果', en: 'Result' },
   { zh: '倍数', en: 'Multiplier' },
   { zh: '胜者', en: 'Winner' },
