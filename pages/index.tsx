@@ -38,7 +38,7 @@ const I18N: Record<Lang, Record<string, string>> = {
 
 function useI18n() {
   const lang = useContext(LangContext);
-  const t = (key: string, vars: Record<string, any> = {}) => {
+  const t = (key: string, vars: Record<string, any> = {}() => {
     let s = (I18N[lang]?.[key] ?? I18N.zh[key] ?? key);
     s = s.replace(/\{(\w+)\}/g, (_: any, k: string) => (vars[k] ?? `{${k}}`));
     return s;
@@ -271,6 +271,7 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
+  | 'human'
   | 'http';
 
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
@@ -2278,6 +2279,9 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="ai:qwen">Qwen</option>
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
+                    </optgroup>
+                    <optgroup label=\"人类\">
+                      <option value=\"human\">Human</option>
                     </optgroup>
                   </select>
                 </label>
