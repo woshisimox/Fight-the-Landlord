@@ -1950,7 +1950,8 @@ const DEFAULTS = {
   seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
 };
 
-function Home() {const [lang, setLang] = useState<Lang>(() => {
+function Home() {
+const [lang, setLang] = useState<Lang>(() => {
     if (typeof window === 'undefined') return 'zh';
     const v = localStorage.getItem('ddz_lang');
     return (v === 'en' || v === 'zh') ? (v as Lang) : 'zh';
