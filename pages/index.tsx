@@ -1626,7 +1626,7 @@ nextTotals     = [
 
                   // —— 更新 Ladder（把权重=等效局数 mTimes）——
                   
-                try {
+                {
                   const pre = tsRef.current;
                   const farmers = [0,1,2].filter(s => s !== L);
                   const teamWin = (seat:number) => (seat === L) ? (!farmerWin) : farmerWin;
@@ -1680,8 +1680,6 @@ nextTotals     = [
                   setTsArr(updated);
                   updateStoreAfterRound(updated, L);
             
-setTsArr(updated);
-                  updateStoreAfterRound(updated, L);
 
                   nextLog = [
                     ...nextLog,
