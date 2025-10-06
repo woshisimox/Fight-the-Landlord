@@ -52,6 +52,84 @@ function seatLabel(i: number, lang: Lang) {
 }
 /* ======= Minimal i18n (zh/en) injection: END ======= */
 
+/* ======= UI auto-translation utilities (DOM walker) ======= */
+type TransRule = { zh: string | RegExp; en: string };
+
+const TRANSLATIONS: TransRule[] = [
+  { zh: '存档', en: 'Save' },
+  { zh: '上传', en: 'Upload' },
+  { zh: '下载', en: 'Download' },
+  { zh: '导出', en: 'Export' },
+  { zh: '导入', en: 'Import' },
+  { zh: '刷新', en: 'Refresh' },
+  { zh: '运行日志', en: 'Run Log' },
+  { zh: '对局设置', en: 'Match Settings' },
+  { zh: '启用对局', en: 'Enable Match' },
+  { zh: '清空', en: 'Reset' },
+  { zh: '出牌', en: 'Play' },
+  { zh: '过', en: 'Pass' },
+  { zh: '（空）', en: '(empty)' },
+  { zh: '地主', en: 'Landlord' },
+  { zh: '农民', en: 'Farmer' },
+  { zh: '农民配合', en: 'Farmer Cooperation' },
+  { zh: '开始', en: 'Start' },
+  { zh: '暂停', en: 'Pause' },
+  { zh: '继续', en: 'Resume' },
+  { zh: '停止', en: 'Stop' },
+  { zh: '天梯图', en: 'Ladder' },
+  { zh: '活动积分', en: 'ΔR' },
+  { zh: '范围', en: 'Range' },
+  { zh: '当前', en: 'Current' },
+  { zh: '未参赛', en: 'Not played' },
+  { zh: '历史', en: 'History' },
+];
+
+function translateTextLiteral(s: string): string {
+  let out = s;
+  for (const r of TRANSLATIONS) {
+    if (typeof r.zh === 'string') {
+      if (out === r.zh) out = r.en;
+    } else {
+      out = out.replace(r.zh, r.en);
+    }
+  }
+  return out;
+}
+
+function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
+  if (!root) return;
+  const tags = new Set(['BUTTON','LABEL','DIV','SPAN','P','H1','H2','H3','H4','H5','H6','TD','TH','A','LI','STRONG','EM','SMALL','CODE']);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node: any) => {
+      const el = node.parentElement as HTMLElement | null;
+      if (!el) return NodeFilter.FILTER_REJECT;
+      if (!tags.has(el.tagName)) return NodeFilter.FILTER_REJECT;
+      if (el.closest('[data-i18n-ignore]')) return NodeFilter.FILTER_REJECT;
+      const txt = String(node.nodeValue || '').trim();
+      if (!txt) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  } as any);
+  let n: any;
+  while ((n = walker.nextNode())) {
+    const textNode = n as Text;
+    const el = textNode.parentElement as HTMLElement | null;
+    if (!el) continue;
+    if (lang === 'zh') {
+      // restore original
+      const orig = el.getAttribute('data-i18n-orig');
+      if (orig != null) {
+        textNode.nodeValue = orig;
+      }
+    } else {
+      // store original once
+      if (!el.hasAttribute('data-i18n-orig')) el.setAttribute('data-i18n-orig', textNode.nodeValue || '');
+      textNode.nodeValue = translateTextLiteral(textNode.nodeValue || '');
+    }
+  }
+}
+
+
 type Four2Policy = 'both' | '2singles' | '2pairs';
 type BotChoice =
   | 'built-in:greedy-max'
@@ -1873,6 +1951,9 @@ const DEFAULTS = {
 };
 
 function Home() {
+  const mainRef = useRef<HTMLDivElement | null>(null);
+  useEffect(()=>{ try { if (typeof document !== 'undefined') autoTranslateContainer(mainRef.current, lang); } catch {} }, [lang]);
+
   const [lang, setLang] = useState<Lang>(() => {
     if (typeof window === 'undefined') return 'zh';
     const v = localStorage.getItem('ddz_lang');
@@ -1933,7 +2014,7 @@ function Home() {
   };
   return (
     <LangContext.Provider value={lang}>
-    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }}>
+    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
 <div style={{ marginLeft:'auto' }}>
   <label style={{ fontSize:12, marginRight:8, opacity:0.75 }}>Language</label>
