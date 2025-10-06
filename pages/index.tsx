@@ -95,13 +95,13 @@ type LiveProps = {
   onLog?: (lines: string[]) => void;
   turnTimeoutSecs?: number[];};
 
-function SeatTitle({ i, t }: { i:number; t: (key: string) => string }) {
+function SeatTitle({ i, t }: { i:number; t: (key: string, params?: any) => string }) {
   return <span style={{ fontWeight:700 }}>{t(['甲','乙','丙'][i] || String(i))}</span>;
 }
 
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
-const seatName = (i:number, t: (key: string) => string)=> t(['甲','乙','丙'][i] || String(i));
+const seatName = (i:number, t: (key: string, params?: any) => string)=> t(['甲','乙','丙'][i] || String(i));
 
 const rankOf = (l: string) => {
   if (!l) return '';
@@ -158,7 +158,7 @@ function Hand({ cards }: { cards: string[] }) {
   );
 }
 function PlayRow({ seat, move, cards, reason, t }:{
-  seat:number; move:'play'|'pass'; cards?:string[]; reason?:string; t: (key: string) => string;
+  seat:number; move:'play'|'pass'; cards?:string[]; reason?:string; t: (key: string, params?: any) => string;
 }) {
   return (
     <div style={{ display:'flex', gap:8, alignItems:'center', padding:'6px 0' }}>
@@ -180,7 +180,7 @@ function LogLine({ text }: { text:string }) {
 }
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
-function LadderPanel({ t }: { t: (key: string) => string }) {
+function LadderPanel({ t }: { t: (key: string, params?: any) => string }) {
   const [tick, setTick] = useState(0);
   useEffect(()=>{
     const onAny = () => setTick(k=>k+1);
@@ -255,7 +255,7 @@ function LadderPanel({ t }: { t: (key: string) => string }) {
     </div>
   );
 }
-function Section({ title, children, t }: {title:string; children:React.ReactNode; t: (key: string) => string}) {
+function Section({ title, children, t }: {title:string; children:React.ReactNode; t: (key: string, params?: any) => string}) {
   return (
     <div style={{ marginBottom:16 }}>
       <div style={{ fontWeight:700, marginBottom:8 }}>{title}</div>
@@ -1323,7 +1323,7 @@ function RadarPanel({
   aggStats, aggCount, aggMode, alpha,
   onChangeMode, onChangeAlpha, t
 }:{ aggStats: Score5[] | null; aggCount: number; aggMode:'mean'|'ewma'; alpha:number;
-   onChangeMode:(m:'mean'|'ewma')=>void; onChangeAlpha:(a:number)=>void; t: (key: string) => string; }) {
+   onChangeMode:(m:'mean'|'ewma')=>void; onChangeAlpha:(a:number)=>void; t: (key: string, params?: any) => string; }) {
   const [mode, setMode] = useState<'mean'|'ewma'>(aggMode);
   const [a, setA] = useState<number>(alpha);
 
@@ -1937,7 +1937,7 @@ export default Home;
 /* ================ 实时曲线：每手牌得分（按地主淡色分局） ================= */
 function ScoreTimeline(
   { series, bands = [], landlords = [], labels = ['甲','乙','丙'], height = 220, t }:
-  { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number; t: (key: string) => string }
+  { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number; t: (key: string, params?: any) => string }
 ) {
   const ref = useRef<HTMLDivElement|null>(null);
   const [w, setW] = useState(600);
