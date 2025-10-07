@@ -1737,6 +1737,30 @@ nextTotals     = [
               }
 
               // -------- 文本日志 --------
+
+// -------- 叫牌评分（事件兜底：若服务端发出 bid-score） --------
+if (m.type === 'event' && m.kind === 'bid-score') {
+  const seat = Number(m.seat);
+  const sc = typeof m.score === 'number' ? m.score : Number(m.score||0) || 0;
+  // 尝试把分数补到最近一条该座位的“抢/不抢”行尾部
+  let patched = false;
+  for (let i = nextLog.length - 1; i >= 0; i--) {
+    const s = nextLog[i];
+    if (typeof s !== 'string') continue;
+    if (s.includes('叫牌评分=')) continue;
+    const tag = seatName(seat) + ' ';
+    if (s.startsWith(tag) && (s.includes('抢地主') || s.includes('不抢'))) {
+      nextLog[i] = `${s} ｜ 叫牌评分=${sc.toFixed(2)}`;
+      patched = true;
+      break;
+    }
+  }
+  if (!patched) {
+    nextLog = [...nextLog, `${seatName(seat)} 叫牌评分 = ${sc.toFixed(2)}`];
+  }
+  continue;
+}
+
               if (
 m.type === 'log' && typeof m.message === 'string') {
             const msg = rewrite(m.message);
