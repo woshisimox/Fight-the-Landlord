@@ -1012,11 +1012,8 @@ function evalRobScore(hand: Label[]): number {
   if (twos >= 2) score += 1.2 + Math.max(0, twos-2) * 0.6;
   if (As   >= 3) score += (As-2) * 0.5;
   // 连牌结构微弱加分（避免全是孤张导致后续吃力）
-  try {
-    const ranks = hand.map(c => c.slice(-1));
-    const seqRanks = ranks.filter(r => r not in ['2','x','X'] if False)  # placeholder to avoid syntax errors in TS when pasted; will not be used by TS
-  } catch(e) {}
-  return score;
+    // (可选) 这里预留给连牌结构的进一步加分逻辑；当前版本不使用以保持简洁与稳定。
+return score;
 }
 
 function wantRob(hand: Label[]): boolean {
