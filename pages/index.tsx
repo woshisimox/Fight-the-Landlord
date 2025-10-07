@@ -625,13 +625,13 @@ const computeBidScore = (hand: string[]): number => {
   try {
     const rank = (c:string)=>{
       if (!c) return '';
+      // 兼容花色符号或🃏前缀的表示
       const r = c.startsWith('🃏') ? (c.slice(2)||'X') : (c.replace(/^.*?([A2-9TJQKXx])$/,'$1'));
-      return r.toUpperCase();
+      return (r||'').toUpperCase();
     };
     const cnt = new Map<string,number>();
-    for (const c of hand||[]) { const r = rank(c); if (!r) continue; cnt.set(r,(cnt.get(r)||0)+1); }
-    const hasX = (cnt.get('X')||0)>=1, hasx = (cnt.get('x')||0)>=1;
-    const hasRocket = hasX && hasx;
+    for (const c of (hand||[])) { const r = rank(c); if (!r) continue; cnt.set(r,(cnt.get(r)||0)+1); }
+    const hasRocket = (cnt.get('X')||0)>=1 && (cnt.get('x')||0)>=1;
     let bombs = 0; for (const v of cnt.values()) if (v===4) bombs++;
     const highSingles = ['A','K','Q','X','x'].reduce((s,r)=> s + (cnt.get(r)||0), 0);
     const triples = Array.from(cnt.values()).filter(v=>v===3).length;
@@ -1430,11 +1430,11 @@ for (const raw of batch) {
                 
 // —— 回填叫牌评分（将发牌前记录的“抢/不抢”行补上分数） ——
 try {
-  const mp = pendingBidLineIdxRef.current || {};
+  const mp = (pendingBidLineIdxRef.current||{}) as any;
   for (const seat of [0,1,2]) {
-    const idxs = (mp as any)[seat] as number[] || [];
+    const idxs = mp[seat] as number[] || [];
     if (!idxs.length) continue;
-    const h = (nextHands && nextHands[seat]) ? nextHands[seat] : null;
+    const h = (nextHands && (nextHands as any)[seat]) ? (nextHands as any)[seat] as string[] : null;
     if (!h || !h.length) continue;
     const sc = computeBidScore(h);
     for (const k of idxs) {
@@ -1442,11 +1442,11 @@ try {
         nextLog[k] = `${nextLog[k]} ｜ 叫牌评分=${sc.toFixed(2)}`;
       }
     }
-    (mp as any)[seat] = []; // 清空
+    mp[seat] = [];
   }
 } catch {}
 
-        continue;
+                continue;
               }
 
               
@@ -1504,51 +1504,30 @@ try {
 // -------- 抢/不抢 --------
 if (m.type === 'event' && m.kind === 'rob') {
   if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
-  // 先追加行，再尝试内联补上评分
-  const line = `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`;
-  const idx = (nextLog.length);
-  nextLog = [...nextLog, line];
-  // 如果此时已知手牌（通常在 init 后），立即计算并内联替换；否则记录待补
+
+  const lineBase = `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`;
+  const idxLine = nextLog.length;
+  let line = lineBase;
+
+  // 若已知该座位手牌，则即时计算评分；否则记录索引，待 init 后回填
   try {
-    const h = (hands && hands[m.seat]) ? hands[m.seat] : null;
-    if (h && Array.isArray(h) && h.length) {
+    const h = (nextHands && Array.isArray((nextHands as any)[m.seat])) ? (nextHands as any)[m.seat] as string[] : null;
+    if (h && h.length) {
       const sc = computeBidScore(h);
-      nextLog[idx] = `${line} ｜ 叫牌评分=${sc.toFixed(2)}`;
+      line = `${lineBase} ｜ 叫牌评分=${sc.toFixed(2)}`;
     } else {
-      const mp = pendingBidLineIdxRef.current; (mp[m.seat] ||= []).push(idx);
+      (pendingBidLineIdxRef.current[m.seat] ||= []).push(idxLine);
     }
   } catch {
-    const mp = pendingBidLineIdxRef.current; (mp[m.seat] ||= []).push(idx);
+    (pendingBidLineIdxRef.current[m.seat] ||= []).push(idxLine);
   }
-  continue;
-}
- ${m.rob ? '抢地主' : '不抢'}`];
-                continue;
-              }
 
-              // -------- 明牌后额外加倍 --------
-// -------- 叫牌策略评分（日志显示） --------
-if (m.type === 'event' && m.kind === 'bid-score') {
-  const sc = (typeof m.score === 'number') ? m.score : Number(m.score||0) || 0;
-  nextLog = [...nextLog, `${seatName(m.seat)} 叫牌评分 = ${sc.toFixed(2)}`];
+  nextLog = [...nextLog, line];
   continue;
 }
 
-// -------- 倍数校准（兜底） --------
-if (m.type === 'event' && m.kind === 'multiplier-sync') {
-  const cur = Math.max(1, (nextMultiplier || 1));
-  const mlt = Math.max(1, Number(m.multiplier || 1));
-  nextMultiplier = Math.max(cur, mlt);
-  nextLog = [...nextLog, `倍数校准为 ${nextMultiplier}`];
-  continue;
-}
 
-if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double')) {
-  if (m.do) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
-  nextLog = [...nextLog, `${seatName(m.seat)} ${m.do ? '加倍' : '不加倍'}（明牌后）`];
-  continue;
-}
-// -------- 起新墩 --------
+              // -------- 起新墩 --------
               if (m.type === 'event' && m.kind === 'trick-reset') {
                 nextLog = [...nextLog, '一轮结束，重新起牌'];
                 nextPlays = [];

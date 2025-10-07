@@ -85,7 +85,6 @@ function unifiedScore(ctx:any, mv:string[]): number {
   const unseen = new Map<string,number>(Object.entries(BASE) as any);
   const sub=(arr:string[])=>{ for(const c of arr){ const r=__rank(c); unseen.set(r, Math.max(0,(unseen.get(r)||0)-1)); } };
   sub(ctx.hands||[]); sub(seenAll);
-  if (Array.isArray(ctx.knownBottom)) sub(ctx.knownBottom);
   const cnt = __count(mv);
   const isRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1 && mv.length===2;
   const isBomb = Array.from(cnt.values()).some(n=>n===4);
@@ -280,7 +279,7 @@ function traceWrap(
     let result:any;
     const t0 = Date.now();
     try {
-      const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] , knownBottom: ((globalThis as any).__DDZ_BOTTOM || []) };
+      const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
       try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
       result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
     } catch (e:any) {
@@ -291,24 +290,6 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
       ? unifiedScore(ctx, result.cards)
       : undefined;
     const scoreTag = (typeof unified === 'number') ? ` | score=${unified.toFixed(2)}` : '';
-// === Bidding strength score (for logs) ===
-let __bidScore: number | undefined = undefined;
-try {
-  if (ctx?.phase === 'bid') {
-    const hand: string[] = Array.isArray(ctx?.hands) ? ctx.hands : [];
-    const rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
-    const cnt = new Map<string,number>();
-    for (const c of hand) { const r=rank(c); cnt.set(r,(cnt.get(r)||0)+1); }
-    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1;
-    let bombs = 0; for (const v of cnt.values()) if (v===4) bombs++;
-    const highSingles = ['A','K','Q','X','x'].reduce((s,r)=> s + (cnt.get(r)||0), 0);
-    const triples = Array.from(cnt.values()).filter(v=>v===3).length;
-    // very light heuristic
-    __bidScore = (hasRocket? 12:0) + bombs*9 + triples*3 + highSingles*1.2;
-    // if seat is potential landlord start (ctx.bidRound or similar unavailable), keep generic
-    writeLine(res, { type:'event', kind:'bid-score', seat: seatIndex, score: Number(__bidScore.toFixed(2)) });
-  }
-} catch {}
     const reason =
       (result && typeof result.reason === 'string')
         ? `[${label}] ${result.reason}${scoreTag}`
@@ -378,51 +359,7 @@ for await (const ev of (iter as any)) {
       });
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
-      (globalThis as any).__DDZ_BOTTOM = Array.isArray(ev.bottom) ? ev.bottom : [];
-      // —— 叫牌阶段策略评分（回填日志）：用各自手牌（不含底牌）计算 —— 
-try {
-  const rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
-  const count = (arr:string[])=>{ const m=new Map<string,number>(); for(const c of arr){ const r=rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
-  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
-  for (let s=0; s<3; s++){
-    const cnt = count(hands[s]||[]);
-    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1;
-    let bombs = 0; for (const v of cnt.values()) if (v===4) bombs++;
-    const highSingles = ['A','K','Q','X','x'].reduce((acc,r)=> acc + (cnt.get(r)||0), 0);
-    const triples = Array.from(cnt.values()).filter(v=>v===3).length;
-    const score = (hasRocket?12:0) + bombs*9 + triples*3 + highSingles*1.2;
-    writeLine(res, { type:'event', kind:'bid-score', seat: s, score: Number(score.toFixed(2)) });
-  }
-} catch {}
-// —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
-try {
-  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
-  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
-  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
-  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
-  let extraMult = 1;
-  const decideExtraDouble = (seat:number)=>{
-    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
-    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
-    const cnt = __count(all);
-    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
-    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
-    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
-    if (role==='landlord') return hasBomb;
-    return (hasRocket || hasBomb);
-  };
-  for (let k=0;k<3;k++){
-    const s=(landlordIdx + k) % 3;
-    const will = decideExtraDouble(s);
-    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
-    if (will) extraMult *= 2;
-  }
-  if (extraMult > 1) {
-    // 同步一次倍数（可被前端用于兜底校准）
-    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
-  }
-} catch {}
-continue;
+      continue;
     }
 
     // 兼容两种出牌事件：turn 或 event:play
@@ -443,35 +380,7 @@ continue;
         score: (lastScore[seat] ?? undefined), 
         totals 
       });
-      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
-try {
-  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
-  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
-  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
-  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
-  let extraMult = 1;
-  const decideExtraDouble = (seat:number)=>{
-    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
-    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
-    const cnt = __count(all);
-    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
-    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
-    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
-    if (role==='landlord') return hasBomb;
-    return (hasRocket || hasBomb);
-  };
-  for (let k=0;k<3;k++){
-    const s=(landlordIdx + k) % 3;
-    const will = decideExtraDouble(s);
-    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
-    if (will) extraMult *= 2;
-  }
-  if (extraMult > 1) {
-    // 同步一次倍数（可被前端用于兜底校准）
-    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
-  }
-} catch {}
-continue;
+      continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
       const { seat, move, cards } = ev;
