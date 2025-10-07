@@ -311,6 +311,13 @@ async function runOneRoundWithGuard(
   res: NextApiResponse,
   round: number
 ){
+  
+// True-redeal wrapper
+let startSeat = (typeof bidStartSeat==='number' && isFinite(bidStartSeat)) ? ((bidStartSeat%3)+3)%3 : ((round-1)%3);
+let tried = 0;
+while (true) {
+  tried++;
+
   const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
 
@@ -324,178 +331,113 @@ async function runOneRoundWithGuard(
     rockets: 0
   }));
 
-  const countPlay = (seat:number, move:'play'|'pass', cards?:string[])=>{
-    const cc: string[] = Array.isArray(cards) ? cards : [];
-    if (move === 'play') {
-      try {
-        const seenA: string[] = (globalThis as any).__DDZ_SEEN ?? ((globalThis as any).__DDZ_SEEN = []);
-        const bySeat: string[][] = (globalThis as any).__DDZ_SEEN_BY_SEAT ?? ((globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]]);
-        seenA.push(...cc);
-        if (bySeat[seat]) bySeat[seat].push(...cc);
-      } catch {}
-
-      stats[seat].plays++;
-      stats[seat].cardsPlayed += cc.length;
-      const isRocket = cc.length === 2 && cc.includes('x') && cc.includes('X');
-      const isBomb   = !isRocket && cc.length === 4 && (new Set(cc)).size === 1;
-      if (isBomb)   stats[seat].bombs++;
-      if (isRocket) stats[seat].rockets++;
-    } else {
-      stats[seat].passes++;
-    }
+  const countPlay = (seat: number, cc: string[]) => {
+    try {
+      if (Array.isArray(cc) && cc.length) {
+        stats[seat].plays++;
+        stats[seat].cardsPlayed += cc.length;
+        const isRocket = cc.length === 2 && cc.includes('x') && cc.includes('X');
+        const isBomb   = !isRocket && cc.length === 4 && (new Set(cc)).size === 1;
+        if (isBomb)   stats[seat].bombs++;
+        if (isRocket) stats[seat].rockets++;
+      } else {
+        stats[seat].passes++;
+      }
+    } catch {}
   };
 
-for await (const ev of (iter as any)) {
+  let keepThisDeal = false;
+
+  for await (const ev of (iter as any)) {
     // 初始发牌/地主
     if (!sentInit && ev?.type==='init') {
-      sentInit = true;
-      landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
-      // 修复：添加 landlord 字段确保前端能正确识别地主
-      writeLine(res, { 
-        type:'init', 
-        landlordIdx, 
-        landlord: landlordIdx,  // 添加 landlord 字段
-        bottom: ev.bottom, 
-        hands: ev.hands 
-      });
-      
-      // ---- Bidding (Scheme B: call/rob/pass; rotate starter on all-pass (log only)) ----
-      try {
-        if (rob) {
-          const seatLabel = (i:number)=>(['甲','乙','丙'][i]||String(i));
-          const startSeat = (typeof bidStartSeat==='number' && isFinite(bidStartSeat)) ? ((bidStartSeat%3)+3)%3 : ((round-1)%3);
-          const hands3: string[][] = Array.isArray(ev.hands)? ev.hands : [[],[],[]];
-          const bottom3: string[] = Array.isArray(ev.bottom)? ev.bottom : [];
-          // Show bottom explicitly
-          writeLine(res, { type:'bottom', cards: bottom3 });
-          // Heuristic score: weights for ranks + bonus for pairs/trips/quads
-          const normRank = (c:string)=>{
-            if (c==='x'||c==='X') return c;
-            const r = c.replace(/[♠♥♦♣]/g,'').replace(/10/i,'T').toUpperCase();
-            return (r==='JOKER' || r==='X' || r==='Y') ? 'X' : r;
-          };
-          const countRanks = (arr:string[])=>{
-            const m: Record<string,number> = {};
-            for (const c of arr) { const r=normRank(c); m[r]=(m[r]||0)+1; }
-            return m;
-          };
-          const scoreFor = (hand:string[], bottom:string[])=>{
-            const all = [...hand, ...bottom];
-            const cnt = countRanks(all);
-            let s = 0;
-            const W: Record<string,number> = { 'X':9, '2':6, 'A':5, 'K':4, 'Q':3, 'J':2, 'T':1 };
-            for (const r in cnt) s += (W[r]||0)*cnt[r];
-            for (const r in cnt) { const c=cnt[r]; if (c>=4) s+=6; else if (c===3) s+=4; else if (c===2) s+=2; }
-            return s;
-          };
-          const passed = new Set<number>();
-          let calledSeat: number|null = null;
-          let bestSeat: number|null = null;
-          let robCount = 0;
-          const nextActive = (x:number)=>{ for(let k=1;k<=3;k++){ const y=(x+k)%3; if(!passed.has(y)) return y; } return x; };
-          let cur = startSeat;
-          let steps = 0;
-          writeLine(res, { type:'bid-start', startSeat });
-          while (steps < 12) {
-            steps++;
-            if (passed.has(cur)) { cur = nextActive(cur); continue; }
-            const canCall = (calledSeat==null);
-            const canRob  = (calledSeat!=null);
-            const sc = scoreFor(hands3[cur]||[], bottom3);
-            let action:'call'|'rob'|'pass' = 'pass';
-            if (canCall) action = (sc>=20 ? 'call':'pass'); else action = (sc>=24 ? 'rob':'pass');
-            writeLine(res, { type:'bid', seat:cur, action });
-            if (action==='call') { calledSeat = cur; bestSeat = cur; }
-            else if (action==='rob') { if (bestSeat !== cur) { bestSeat = cur; robCount++; writeLine(res, { type:'event', kind:'rob', rob:true, seat:cur }); } }
-            else { passed.add(cur); }
-            if (calledSeat!=null) { const active=[0,1,2].filter(i=>!passed.has(i)); if (active.length<=1) break; }
-            else if (passed.size>=3) break;
-            cur = nextActive(cur);
-          }
-          if (calledSeat==null) {
-            const nextStart = (startSeat + 1) % 3;
-            writeLine(res, { type:'redeal', tried:1, reason:'nobody-called', nextStart });
-            // 注意：这里仅记录日志，不改变引擎本局的发牌与地主；后续仍以引擎的 landlordIdx 进行对局。
-          } else {
-            writeLine(res, { type:'bid-result', landlord: (bestSeat as number), tried:1, robCount });
-          }
+      // run bidding on this deal (based on init.hands & bottom)
+      const hands3 = Array.isArray(ev.hands)? ev.hands : [[],[],[]];
+      const bottom3 = Array.isArray(ev.bottom)? ev.bottom : [];
+
+      if (rob) {
+        // Bidding
+        const normRank = (c)=>{ const r=c.replace(/[♠♥♦♣]/g,'').replace(/10/i,'T').toUpperCase(); return (c.startsWith('🃏')?'X':r); };
+        const countRanks = (arr)=>{ const m={}; for(const c of arr){ const r=normRank(c); m[r]=(m[r]||0)+1; } return m; };
+        const scoreFor = (hand, bottom)=>{ const all=[...hand,...bottom]; const cnt=countRanks(all); let s=0; const W={'X':9,'2':6,'A':5,'K':4,'Q':3,'J':2,'T':1}; for(const r in cnt)s+=(W[r]||0)*cnt[r]; for(const r in cnt){const c=cnt[r]; if(c>=4)s+=6; else if(c===3)s+=4; else if(c===2)s+=2;} return s; };
+
+        writeLine(res, { type:'bottom', cards: bottom3 });
+        writeLine(res, { type:'bid-start', startSeat });
+
+        const passed = new Set();
+        let calledSeat = null;
+        let bestSeat = null;
+        let robCount = 0;
+        const nextActive = (x)=>{ for(let k=1;k<=3;k++){ const y=(x+k)%3; if(!passed.has(y)) return y; } return x; };
+        let cur = startSeat;
+        let steps = 0;
+        while (steps < 12) {
+          steps++;
+          if (passed.has(cur)) { cur = nextActive(cur); continue; }
+          const canCall = (calledSeat==null);
+          const canRob  = (calledSeat!=null);
+          const sc = scoreFor(hands3[cur]||[], bottom3);
+          let action = 'pass';
+          if (canCall) action = (sc>=20 ? 'call':'pass'); else action = (sc>=24 ? 'rob':'pass');
+          writeLine(res, { type:'bid', seat:cur, action });
+          if (action==='call') { calledSeat = cur; bestSeat = cur; }
+          else if (action==='rob') { if (bestSeat !== cur) { bestSeat = cur; robCount++; writeLine(res, { type:'event', kind:'rob', rob:true, seat:cur }); } }
+          else { passed.add(cur); }
+          if (calledSeat!=null) { const active=[0,1,2].filter(i=>!passed.has(i)); if (active.length<=1) break; }
+          else if (passed.size>=3) break;
+          cur = nextActive(cur);
         }
-      } catch(e) { writeLine(res, { type:'log', message: '【后端】竞拍阶段错误：' + (e as any)?.message }); }
-    (globalThis as any).__DDZ_SEEN.length = 0;
-      (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
+
+        if (calledSeat==null) {
+          // all pass => abandon deal, rotate starter, and restart outer loop
+          startSeat = (startSeat + 1) % 3;
+          writeLine(res, { type:'redeal', tried, reason:'nobody-called', nextStart:startSeat });
+          keepThisDeal = false;
+          break; // exit for-await
+        } else {
+          writeLine(res, { type:'bid-result', landlord: (bestSeat), tried, robCount });
+          // keep the deal; now forward init and continue streaming
+          sentInit = true;
+          landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
+          writeLine(res, { type:'init', landlordIdx, landlord: (typeof ev.landlord !== 'undefined' ? ev.landlord : undefined), hands: ev.hands, bottom: ev.bottom });
+          keepThisDeal = true;
+          continue;
+        }
+      } else {
+        // no bidding mode
+        sentInit = true;
+        landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
+        writeLine(res, { type:'init', landlordIdx, landlord: (typeof ev.landlord !== 'undefined' ? ev.landlord : undefined), hands: ev.hands, bottom: ev.bottom });
+        keepThisDeal = true;
+        continue;
+      }
+    }
+
+    if (!sentInit) {
+      // ignore any pre-init noise
       continue;
     }
 
-    // 兼容两种出牌事件：turn 或 event:play
-    if (ev?.type==='turn') {
-      const { seat, move, cards, hand, totals } = ev;
-      countPlay(seat, move, cards);
-      const moveStr = stringifyMove({ move, cards });
-      const reason = lastReason[seat] || null;
-      // 确保发送完整的手牌信息
-      writeLine(res, { 
-        type:'turn', 
-        seat, 
-        move, 
-        cards, 
-        hand: hand || [],  // 确保手牌不为空
-        moveStr, 
-        reason, 
-        score: (lastScore[seat] ?? undefined), 
-        totals 
-      });
-      continue;
-    }
-    if (ev?.type==='event' && ev?.kind==='play') {
-      const { seat, move, cards } = ev;
-      countPlay(seat, move, cards);
+    // 转发普通事件
+    if (ev?.type==='event') {
+      if (ev?.kind==='play' && Array.isArray(ev?.cards) && typeof ev?.seat==='number') {
+        countPlay(ev.seat, ev.cards);
+      }
       writeLine(res, ev);
-      continue;
+    } else if (ev?.type==='log' && typeof ev?.message==='string') {
+      writeLine(res, ev);
+    } else if (ev?.type==='result') {
+      writeLine(res, ev);
+    } else {
+      writeLine(res, ev);
     }
+  } // end for-await iter
 
-    // 兼容多种"结果"别名
-    const isResultLike =
-      (ev?.type==='result') ||
-      (ev?.type==='event' && (ev.kind==='win' || ev.kind==='result' || ev.kind==='game-over' || ev.kind==='game_end')) ||
-      (ev?.type==='game-over') || (ev?.type==='game_end');
-
-    if (isResultLike) {
-      // —— 在 result 之前产出画像（前端会立即累计，避免兜底 2.5）——
-      const perSeat = [0,1,2].map((i)=>{
-        const s = stats[i];
-        const total = Math.max(1, s.plays + s.passes);
-        const passRate = s.passes / total;
-        const avgCards = s.plays ? (s.cardsPlayed / s.plays) : 0;
-
-        const agg   = clamp(1.5*s.bombs + 2.0*s.rockets + (1-passRate)*3 + Math.min(4, avgCards)*0.25);
-        const cons  = clamp(3 + passRate*2 - (s.bombs + s.rockets)*0.6);
-        let   eff   = clamp(2 + avgCards*0.6 - passRate*1.5);
-        if ((ev as any).winner === i) eff = clamp(eff + 0.8);
-        const coop  = clamp((i===landlordIdx ? 2.0 : 2.5) + passRate*2.5 - (s.bombs + s.rockets)*0.4);
-        const rob   = clamp((i===landlordIdx ? 3.5 : 2.0) + 0.3*s.bombs + 0.6*s.rockets - passRate);
-
-        return { seat: i, scaled: {
-          coop: +coop.toFixed(2),
-          agg : +agg.toFixed(2),
-          cons: +cons.toFixed(2),
-          eff : +eff.toFixed(2),
-          rob : +rob.toFixed(2),
-        }};
-      });
-
-      // 两种画像格式都发，前端任一命中都不会兜底
-      writeLine(res, { type:'stats', perSeat });
-      writeLine(res, { type:'event', kind:'stats', perSeat });
-
-      // 再写 result（展开 & 带 lastReason）
-      const baseResult = (ev?.type==='result') ? ev : { type:'result', ...(ev||{}) };
-      writeLine(res, { ...(baseResult||{}), lastReason: [...lastReason] });
-      break;
-    }
-
-    // 其它事件透传
-    if (ev && ev.type) writeLine(res, ev);
+  if (keepThisDeal) {
+    break; // streamed this round
   }
+} // end while(true)
+
 }
 
 /* ========== HTTP 处理 ========== */
