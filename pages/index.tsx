@@ -37,6 +37,44 @@ const I18N: Record<Lang, Record<string, string>> = {
 };
 
 function useI18n() {
+
+/** 确保导出日志中包含当前最后一局；若缺失则基于当前状态临时补一行（仅用于导出，不改UI状态） */
+function ensureLastRoundLogged(): string[] {
+  try {
+    const full  = (allLogsRef?.current || []) as string[];
+    const curr  = (logRef?.current  || []) as string[];
+
+    const labelRoundNo =
+      (typeof nextRoundIndex !== 'undefined' && (nextRoundIndex as any) !== null) ? ((nextRoundIndex as any) + 1) :
+      (Array.isArray(nextHands) ? nextHands.length : (Array.isArray(nextScores) ? nextScores.length : 0));
+
+    const combined = [...full, ...curr];
+    const already = combined.some(line => line.includes(`【回合 ${labelRoundNo}】`));
+    if (already) return combined;
+
+    const L = Number(nextLandlord ?? 0);
+    const d = Array.isArray(nextDelta) ? (nextDelta as [number,number,number]) : [0,0,0];
+    const dsNow = [ d[(0+L)%3], d[(1+L)%3], d[(2+L)%3] ] as [number,number,number];
+
+    const totalsNow = Array.isArray(nextTotals) ? ([nextTotals[0], nextTotals[1], nextTotals[2]] as [number,number,number]) : [0,0,0];
+    const labelsNow = [0,1,2].map(i => String(agentIdForIndex(i)));
+    const idsNow    = [0,1,2].map(i => String(seatIdentity(i)));
+    const mult = Number(nextMultiplier ?? 1);
+    const winSeat = (typeof nextWinner === 'number') ? nextWinner : null;
+
+    const roundLine = formatRoundSummary({
+      idx: labelRoundNo, L, winner: winSeat, mult,
+      ds: dsNow, totals: totalsNow, labels: labelsNow, ids: idsNow,
+    });
+    return [...combined, roundLine];
+  } catch {
+    const full  = (allLogsRef?.current || []) as string[];
+    const curr  = (logRef?.current  || []) as string[];
+    return [...full, ...curr];
+  }
+}
+
+
   const lang = useContext(LangContext);
   const t = (key: string, vars: Record<string, any> = {}) => {
     let s = (I18N[lang]?.[key] ?? I18N.zh[key] ?? key);
@@ -1999,7 +2037,7 @@ const handleAllSaveInner = () => {
   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
     <div style={{ fontWeight:700 }}>运行日志</div>
     <button
-      onClick={() => { try { const lines=(allLogsRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
+      onClick={()=>{ try { const lines=(allLogsRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200); } catch(e) { console.error('[runlog] save error', e); } }}
       style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >存档</button>
   </div>
