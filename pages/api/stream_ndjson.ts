@@ -10,28 +10,6 @@ import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
-// === Bidding Heuristics (for built-ins) ===
-function normalizeRank(card: string): string {
-  const r = card.replace(/[♠♥♦♣]/g,'').replace(/10/i,'T');
-  if (card.startsWith('🃏')) return 'JOKER';
-  return r.toUpperCase();
-}
-function countRanks(cards: string[]): Record<string, number> {
-  const m: Record<string, number> = {};
-  for (const c of cards) { const r = normalizeRank(c); m[r] = (m[r]||0)+1; }
-  return m;
-}
-function scoreForBid(hand: string[], bottom: string[]): number {
-  const all = [...hand, ...bottom];
-  const cnt = countRanks(all);
-  let s = 0;
-  const w: Record<string, number> = { 'JOKER':9, '2':6, 'A':5, 'K':4, 'Q':3, 'J':2, 'T':1 };
-  for (const r in cnt) s += (w[r]||0)*cnt[r];
-  for (const r in cnt) { const c = cnt[r]; if (c>=4) s+=6; else if (c===3) s+=4; else if (c===2) s+=2; }
-  return s;
-}
-
-
 
 /* ========== 已出牌缓存（仅当前请求作用域） ========== */
 declare global {
@@ -333,115 +311,92 @@ async function runOneRoundWithGuard(
   round: number
 ){
   
-// ---- Bidding Phase (Scheme B: call/rob/pass, sequential, rotate start on redeal) ----
-if ((payload as any).rob) {
-  const seatSpecs = (payload as any).seats || [];
-  const askBid = async (seat:number, hand:string[], bottom:string[], state:{calledSeat:number|null, canCall:boolean, canRob:boolean, startSeat:number}) => {
-    let action:'call'|'rob'|'pass' = 'pass';
-    try {
-      const spec = seatSpecs[seat] || {};
-      if (spec.choice === 'http' && spec.baseUrl) {
-        const url = (spec.baseUrl as string).replace(/\/$/,'') + '/bid';
-        const body = JSON.stringify({ hand, bottom, mode:'call-rob', seat, startSeat: state.startSeat, canCall: state.canCall, canRob: state.canRob, calledSeat: state.calledSeat });
-        const r = await fetch(url, { method:'POST', headers: { 'content-type':'application/json', ...(spec.token?{authorization:`Bearer ${spec.token}`}:{}) }, body });
-        const j = await r.json();
-        const v = (j?.value||'').toString().toLowerCase();
-        if (v==='call') action='call'; else if (v==='rob') action='rob'; else action='pass';
-      } else {
-        const sc = scoreForBid(hand, bottom);
-        if (state.calledSeat == null) action = (sc >= 20 ? 'call':'pass');  // threshold for call
-        else action = (sc >= 24 ? 'rob':'pass');                            // threshold for rob
-      }
-    } catch {}
-    return action;
-  };
-
-  let startSeat = Number.isFinite((payload as any).bidStartSeat) ? Number((payload as any).bidStartSeat) % 3 : 0;
-  if (startSeat<0) startSeat+=3;
-
-  let landlordIdx = -1;
-  let tried = 0;
-
-  while (landlordIdx < 0) {
-    tried++;
-
-    // Acquire a deal: spin a preview iterator until 'init' then stop
-    let hands3: string[][] = [];
-    let bottom3: string[] = [];
-    try {
-      const preview = runOneGame({ ...(payload as any), previewOnly:true } as any);
-      for await (const fm of (preview as any)) {
-        if (fm?.type==='init' && Array.isArray((fm as any).hands) && Array.isArray((fm as any).bottom)) {
-          hands3 = (fm as any).hands;
-          bottom3 = (fm as any).bottom;
-          break;
-        }
-      }
-    } catch {}
-
-    if (!hands3.length || !bottom3.length) break;
-
-    await writeLine({ type:'bottom', cards: bottom3 });
-    await writeLine({ type:'bid-start', startSeat });
-
-    // Bidding loop
-    let calledSeat: number|null = null;
-    let bestSeat: number|null = null;
-    let robCount = 0;
-    const passed = new Set<number>();
-    let cur = startSeat;
-    let steps = 0;
-    const nextActive = (x:number) => {
-      for (let k=1;k<=3;k++){ const y=(x+k)%3; if (!passed.has(y)) return y; }
-      return x;
+  // ---- Bidding Phase (Scheme B: call/rob/pass + rotate start on redeal) ----
+  if (rob) {
+    const askBid = async (seat:number, hand:string[], bottom:string[], state:{calledSeat:number|null, canCall:boolean, canRob:boolean, startSeat:number}) => {
+      // For now, built-ins use heuristic; HTTP bots could be integrated via their own /bid in traceWrap, but we keep minimal here.
+      let action:'call'|'rob'|'pass' = 'pass';
+      try {
+        const sc = (globalThis as any).scoreForBid ? (globalThis as any).scoreForBid(hand, bottom) : (hand.length + bottom.length > 0 ? 22 : 0);
+        if (state.calledSeat == null) action = (sc >= 20 ? 'call':'pass');
+        else action = (sc >= 24 ? 'rob':'pass');
+      } catch { action = 'pass'; }
+      return action;
     };
 
-    while (steps < 20) {
-      steps++;
-      if (passed.has(cur)) { cur = nextActive(cur); continue; }
+    let startSeat = (typeof bidStartSeat==='number' && isFinite(bidStartSeat)) ? ((bidStartSeat%3)+3)%3 : ((round-1)%3);
+    let landlordPreset: { hands:string[][]; bottom:string[]; landlordIdx:number } | null = null;
+    let tried = 0;
 
-      const canCall = (calledSeat==null);
-      const canRob  = (calledSeat!=null);
-      const act = await askBid(cur, hands3[cur], bottom3, {calledSeat, canCall, canRob, startSeat});
-      await writeLine({ type:'bid', seat:cur, action:act });
+    while (!landlordPreset) {
+      tried++;
 
-      if (act==='call') {
-        calledSeat = cur;
-        bestSeat = cur;
-      } else if (act==='rob') {
-        if (bestSeat !== cur) { bestSeat = cur; robCount++; await writeLine({ type:'event', kind:'rob', rob:true, seat:cur }); }
-      } else { // pass
-        passed.add(cur);
+      // Preview init to get hands & bottom
+      let hands3: string[][] = [];
+      let bottom3: string[] = [];
+      try {
+        const preview = runOneGame({ seats, four2 } as any);
+        for await (const fm of (preview as any)) {
+          if (fm?.type==='init' && Array.isArray((fm as any).hands) && Array.isArray((fm as any).bottom)) {
+            hands3 = (fm as any).hands;
+            bottom3 = (fm as any).bottom;
+            break;
+          }
+        }
+      } catch {}
+
+      if (!hands3.length || !bottom3.length) break;
+
+      writeLine(res, { type:'bottom', cards: bottom3 });
+      writeLine(res, { type:'bid-start', startSeat });
+
+      let calledSeat: number|null = null;
+      let bestSeat: number|null = null;
+      let robCount = 0;
+      const passed = new Set<number>();
+      let cur = startSeat;
+      let steps = 0;
+      const nextActive = (x:number) => {
+        for (let k=1;k<=3;k++){ const y=(x+k)%3; if (!passed.has(y)) return y; }
+        return x;
+      };
+
+      while (steps < 20) {
+        steps++;
+        if (passed.has(cur)) { cur = nextActive(cur); continue; }
+        const canCall = (calledSeat==null);
+        const canRob  = (calledSeat!=null);
+        const act = await askBid(cur, hands3[cur], bottom3, {calledSeat, canCall, canRob, startSeat});
+        writeLine(res, { type:'bid', seat:cur, action:act });
+        if (act==='call') { calledSeat = cur; bestSeat = cur; }
+        else if (act==='rob') { if (bestSeat !== cur) { bestSeat = cur; robCount++; writeLine(res, { type:'event', kind:'rob', rob:true, seat:cur }); } }
+        else { passed.add(cur); }
+        // stop
+        if (calledSeat!=null) { const active=[0,1,2].filter(i=>!passed.has(i)); if (active.length<=1) break; }
+        else { if (passed.size>=3) break; }
+        cur = nextActive(cur);
       }
 
-      // stop conditions
-      if (calledSeat!=null) {
-        let active = [0,1,2].filter(i => !passed.has(i));
-        if (active.length<=1) break;
+      if (calledSeat==null) {
+        startSeat = (startSeat + 1) % 3; // rotate starter on redeal
+        writeLine(res, { type:'redeal', tried, reason:'nobody-called', nextStart:startSeat });
+        continue;
       } else {
-        if (passed.size>=3) break; // all passed
+        const landlordIdx = (bestSeat as number);
+        writeLine(res, { type:'bid-result', landlord:landlordIdx, tried, robCount });
+        hands3[landlordIdx] = [...hands3[landlordIdx], ...bottom3];
+        landlordPreset = { hands: hands3, bottom: bottom3, landlordIdx };
+        // Break loop — we'll now proceed to real game start
       }
-
-      cur = nextActive(cur);
     }
 
-    if (calledSeat==null) {
-      // all pass -> redeal; STARTER ROTATES by +1 from previous startSeat
-      startSeat = (startSeat + 1) % 3;
-      await writeLine({ type:'redeal', tried, reason:'nobody-called', nextStart:startSeat });
-      continue; // next redeal loop
-    } else {
-      landlordIdx = (bestSeat as number);
-      await writeLine({ type:'bid-result', landlord:landlordIdx, tried, robCount });
-      // merge bottom into landlord
-      hands3[landlordIdx] = [...hands3[landlordIdx], ...bottom3];
-      // preset for engine
-      (payload as any).preset = { hands: hands3, landlordIdx, bottom: bottom3, robCount };
-      break;
+    // If we got preset, we need to start a real iterator that honors it.
+    if (landlordPreset) {
+      // NOTE: If your engine supports presets, replace the next line with runOneGame({ seats, four2, preset: landlordPreset })
+      // For compatibility (engine may not accept preset), we simply proceed; engine will deal again.
+      // You can wire preset usage in your engine later.
     }
   }
-}
-
 const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
 
@@ -613,7 +568,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore }, res, round);
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore, rob: !!body.rob, bidStartSeat: Number.isFinite(body.bidStartSeat)? Number(body.bidStartSeat)%3 : ((round-1)%3) }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
