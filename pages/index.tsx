@@ -373,6 +373,23 @@ const rankOf = (l: string) => {
   if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
   return l.replace(/10/i, 'T').toUpperCase();
 };
+/** 回合总结：用于把地主/胜者/倍数/分差/累计分/参赛标签写入运行日志 */
+function formatRoundSummary(args: {
+  idx: number; L: number; winner: number | null; mult: number;
+  ds: [number,number,number]; rot?: [number,number,number];
+  totals?: [number,number,number]; labels?: string[]; ids?: string[];
+}) {
+  const seat = (i:number)=> ['甲','乙','丙'][i] || String(i);
+  const winnerText = args.winner==null ? '—' : seat(args.winner);
+  const landlordText = seat(args.L);
+  const raw = `原始(相对地主) ${args.ds[0]}/${args.ds[1]}/${args.ds[2]}`;
+  const rot = args.rot ? ` | 按座位 ${args.rot[0]}/${args.rot[1]}/${args.rot[2]}` : '';
+  const tot = args.totals ? ` | 累计 ${args.totals[0]}/${args.totals[1]}/${args.totals[2]}` : '';
+  const lab = (args.labels && args.labels.length===3) ? ` | 参赛 ${args.labels[0]} / ${args.labels[1]} / ${args.labels[2]}` : '';
+  const idt = (args.ids && args.ids.length===3) ? ` | id ${args.ids[0]} / ${args.ids[1]} / ${args.ids[2]}` : '';
+  return `【回合 ${args.idx}】地主=${landlordText} | 胜者=${winnerText} | 倍数=${args.mult} | ${raw}${rot}${tot}${lab}${idt}`;
+}
+
 function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l === 'x') return ['🃏X'];
@@ -1684,7 +1701,32 @@ nextTotals     = [
           setRoundCuts(nextCuts);
           setScoreSeries(nextScores);
           setHands(nextHands); setPlays(nextPlays);
-          setTotals(nextTotals); setFinishedCount(nextFinished);
+          
+          // —— 增强：把本回合关键细节写入运行日志与全量日志 ——
+          try {
+            const dsNow = Array.isArray(ds) ? ([ds[0], ds[1], ds[2]] as [number,number,number]) : [0,0,0];
+            const totalsNow = Array.isArray(nextTotals) ? ([nextTotals[0], nextTotals[1], nextTotals[2]] as [number,number,number]) : [0,0,0];
+            const labelsNow = [0,1,2].map(i => String(agentIdForIndex(i)));
+            const idsNow    = [0,1,2].map(i => String(seatIdentity(i)));
+            const labelRoundNo = (
+              (typeof nextRoundIndex !== 'undefined' && (nextRoundIndex as any) !== null) ? ((nextRoundIndex as any) + 1) :
+              (Array.isArray(nextHands) ? nextHands.length : (Array.isArray(nextScores) ? nextScores.length : 0))
+            );
+            const L = Number(nextLandlord ?? 0);
+            const mult = Number(nextMultiplier ?? 1);
+            const winSeat = (typeof nextWinner === 'number') ? nextWinner : null;
+            const roundLine = formatRoundSummary({
+              idx: labelRoundNo, L, winner: winSeat, mult,
+              ds: dsNow, totals: totalsNow, labels: labelsNow, ids: idsNow,
+            });
+            nextLog = [...nextLog, roundLine];
+            setAllLogs(prev => {
+              const nl = [...prev, roundLine];
+              allLogsRef.current = nl;
+              return nl;
+            });
+          } catch (e) { console.error('[runlog:round-summary]', e); }
+setTotals(nextTotals); setFinishedCount(nextFinished);
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
