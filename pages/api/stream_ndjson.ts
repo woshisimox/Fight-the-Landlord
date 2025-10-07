@@ -214,6 +214,7 @@ type RunBody = {
   turnTimeoutSecs?: number[];  // [s0,s1,s2]
   turnTimeoutSec?: number | number[];
   rob?: boolean;
+  bidStartSeat?: number;
   debug?: any;
 };
 
@@ -305,102 +306,18 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
 async function runOneRoundWithGuard(
-  { seats, four2, lastReason, lastScore }:
-  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; lastReason: (string|null)[]; lastScore: (number|null)[] },
+  { seats, four2, lastReason, lastScore, rob, bidStartSeat }:
+  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; lastReason: (string|null)[]; lastScore: (number|null)[]; rob?: boolean; bidStartSeat?: number },
   res: NextApiResponse,
   round: number
 ){
-  
-  // ---- Bidding Phase (Scheme B: call/rob/pass + rotate start on redeal) ----
-  if (rob) {
-    const askBid = async (seat:number, hand:string[], bottom:string[], state:{calledSeat:number|null, canCall:boolean, canRob:boolean, startSeat:number}) => {
-      // For now, built-ins use heuristic; HTTP bots could be integrated via their own /bid in traceWrap, but we keep minimal here.
-      let action:'call'|'rob'|'pass' = 'pass';
-      try {
-        const sc = (globalThis as any).scoreForBid ? (globalThis as any).scoreForBid(hand, bottom) : (hand.length + bottom.length > 0 ? 22 : 0);
-        if (state.calledSeat == null) action = (sc >= 20 ? 'call':'pass');
-        else action = (sc >= 24 ? 'rob':'pass');
-      } catch { action = 'pass'; }
-      return action;
-    };
+  // True-redeal wrapper
+let startSeat = (typeof bidStartSeat==='number' && isFinite(bidStartSeat)) ? (((bidStartSeat % 3) + 3) % 3) : ((round - 1) % 3);
+let tried = 0;
+while (true) {
+  tried++;
 
-    let startSeat = (typeof bidStartSeat==='number' && isFinite(bidStartSeat)) ? ((bidStartSeat%3)+3)%3 : ((round-1)%3);
-    let landlordPreset: { hands:string[][]; bottom:string[]; landlordIdx:number } | null = null;
-    let tried = 0;
-
-    while (!landlordPreset) {
-      tried++;
-
-      // Preview init to get hands & bottom
-      let hands3: string[][] = [];
-      let bottom3: string[] = [];
-      try {
-        const preview = runOneGame({ seats, four2 } as any);
-        for await (const fm of (preview as any)) {
-          if (fm?.type==='init' && Array.isArray((fm as any).hands) && Array.isArray((fm as any).bottom)) {
-            hands3 = (fm as any).hands;
-            bottom3 = (fm as any).bottom;
-            break;
-          }
-        }
-      } catch {}
-
-      if (!hands3.length || !bottom3.length) break;
-
-      writeLine(res, { type:'bottom', cards: bottom3 });
-      writeLine(res, { type:'bid-start', startSeat });
-        let bidsCount = 0; // number of successful bids in this auction
-        let currentMult = 1; // starts at 1x; doubles from the 2nd bid onward
-
-
-      let calledSeat: number|null = null;
-      let bestSeat: number|null = null;
-      let robCount = 0;
-      const passed = new Set<number>();
-      let cur = startSeat;
-      let steps = 0;
-      const nextActive = (x:number) => {
-        for (let k=1;k<=3;k++){ const y=(x+k)%3; if (!passed.has(y)) return y; }
-        return x;
-      };
-
-      while (steps < 20) {
-        steps++;
-        if (passed.has(cur)) { cur = nextActive(cur); continue; }
-        const canCall = (calledSeat==null);
-        const canRob  = (calledSeat!=null);
-        const act = await askBid(cur, hands3[cur], bottom3, {calledSeat, canCall, canRob, startSeat});
-        writeLine(res, { type:'bid', seat:cur, action:act });
-        if (act==='call') { calledSeat = cur; bestSeat = cur; }
-        else if (act==='rob') { if (bestSeat !== cur) { bestSeat = cur; robCount++; writeLine(res, { type:'event', kind:'rob', rob:true, seat:cur }); } }
-        else { passed.add(cur); }
-        // stop
-        if (calledSeat!=null) { const active=[0,1,2].filter(i=>!passed.has(i)); if (active.length<=1) break; }
-        else { if (passed.size>=3) break; }
-        cur = nextActive(cur);
-      }
-
-      if (calledSeat==null) {
-        startSeat = (startSeat + 1) % 3; // rotate starter on redeal
-        writeLine(res, { type:'redeal', tried, reason:'nobody-called', nextStart:startSeat });
-        continue;
-      } else {
-        const landlordIdx = (bestSeat as number);
-        writeLine(res, { type:'bid-result', landlord:landlordIdx, tried, robCount });
-        hands3[landlordIdx] = [...hands3[landlordIdx], ...bottom3];
-        landlordPreset = { hands: hands3, bottom: bottom3, landlordIdx };
-        // Break loop — we'll now proceed to real game start
-      }
-    }
-
-    // If we got preset, we need to start a real iterator that honors it.
-    if (landlordPreset) {
-      // NOTE: If your engine supports presets, replace the next line with runOneGame({ seats, four2, preset: landlordPreset })
-      // For compatibility (engine may not accept preset), we simply proceed; engine will deal again.
-      // You can wire preset usage in your engine later.
-    }
-  }
-const iter = runOneGame({ seats, four2 } as any);
+  const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
 
   // 画像统计
@@ -413,115 +330,151 @@ const iter = runOneGame({ seats, four2 } as any);
     rockets: 0
   }));
 
-  const countPlay = (seat:number, move:'play'|'pass', cards?:string[])=>{
-    const cc: string[] = Array.isArray(cards) ? cards : [];
-    if (move === 'play') {
-      try {
-        const seenA: string[] = (globalThis as any).__DDZ_SEEN ?? ((globalThis as any).__DDZ_SEEN = []);
-        const bySeat: string[][] = (globalThis as any).__DDZ_SEEN_BY_SEAT ?? ((globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]]);
-        seenA.push(...cc);
-        if (bySeat[seat]) bySeat[seat].push(...cc);
-      } catch {}
-
-      stats[seat].plays++;
-      stats[seat].cardsPlayed += cc.length;
-      const isRocket = cc.length === 2 && cc.includes('x') && cc.includes('X');
-      const isBomb   = !isRocket && cc.length === 4 && (new Set(cc)).size === 1;
-      if (isBomb)   stats[seat].bombs++;
-      if (isRocket) stats[seat].rockets++;
-    } else {
-      stats[seat].passes++;
-    }
+  const countPlay = (seat: number, cc: string[]) => {
+    try {
+      if (Array.isArray(cc) && cc.length) {
+        stats[seat].plays++;
+        stats[seat].cardsPlayed += cc.length;
+        const isRocket = cc.length === 2 && cc.includes('x') && cc.includes('X');
+        const isBomb   = !isRocket && cc.length === 4 && (new Set(cc)).size === 1;
+        if (isBomb)   stats[seat].bombs++;
+        if (isRocket) stats[seat].rockets++;
+      } else {
+        stats[seat].passes++;
+      }
+    } catch {}
   };
 
-for await (const ev of (iter as any)) {
-    // 初始发牌/地主
+  let keepThisDeal = false;
+
+  for await (const ev of (iter as any)) {
     if (!sentInit && ev?.type==='init') {
-      sentInit = true;
-      landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
-      // 修复：添加 landlord 字段确保前端能正确识别地主
-      writeLine(res, { 
-        type:'init', 
-        landlordIdx, 
-        landlord: landlordIdx,  // 添加 landlord 字段
-        bottom: ev.bottom, 
-        hands: ev.hands 
-      });
-      (globalThis as any).__DDZ_SEEN.length = 0;
-      (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
-      continue;
+      // Use init to run bidding
+      const hands3: string[][] = Array.isArray(ev.hands)? ev.hands : [[],[],[]];
+      const bottom3: string[] = Array.isArray(ev.bottom)? ev.bottom : [];
+
+      if (rob) {
+        // --- Bidding (call/rob/pass) ---
+
+        // helpers with TS types
+        const normRank = (c: string): string => {
+          const r = c.replace(/[♠♥♦♣]/g, '').replace(/10/i, 'T').toUpperCase();
+          return c.startsWith('🃏') ? 'X' : r;
+        };
+        const countRanks = (arr: string[]): Record<string, number> => {
+          const mm: Record<string, number> = {};
+          for (const cc of arr) {
+            const r = normRank(cc);
+            mm[r] = (mm[r] || 0) + 1;
+          }
+          return mm;
+        };
+        const scoreFor = (hand: string[], bottom: string[]): number => {
+          const all = [...hand, ...bottom];
+          const cnt = countRanks(all);
+          let s = 0;
+          const W: Record<string, number> = { X: 9, '2': 6, A: 5, K: 4, Q: 3, J: 2, T: 1 };
+          for (const r in cnt) s += (W[r] || 0) * cnt[r];
+          for (const r in cnt) {
+            const cnum = cnt[r];
+            if (cnum >= 4) s += 6;
+            else if (cnum === 3) s += 4;
+            else if (cnum === 2) s += 2;
+          }
+          return s;
+        };
+
+        // show bottom & start
+        writeLine(res, { type:'bottom', cards: bottom3 });
+        writeLine(res, { type:'bid-start', startSeat });
+
+        const passed = new Set<number>();
+        let calledSeat: number|null = null;
+        let bestSeat: number|null = null;
+        let robCount = 0;
+
+        // new doubling rule: first successful bid doesn't double
+        let bidsCount = 0;
+        let currentMult = 1;
+
+        const nextActive = (x:number)=>{ for(let k=1;k<=3;k++){ const y=(x+k)%3; if(!passed.has(y)) return y; } return x; };
+        let cur = startSeat;
+        let steps = 0;
+        while (steps < 20) {
+          steps++;
+          if (passed.has(cur)) { cur = nextActive(cur); continue; }
+          const canCall = (calledSeat==null);
+          const canRob  = (calledSeat!=null);
+          const sc = scoreFor(hands3[cur]||[], bottom3);
+          let action:'call'|'rob'|'pass' = 'pass';
+          if (canCall) action = (sc>=20 ? 'call':'pass'); else action = (sc>=24 ? 'rob':'pass');
+
+          // successful bid
+          if (action!=='pass') {
+            bidsCount += 1;
+            if (bidsCount >= 2) {
+              currentMult *= 2;
+              writeLine(res, { type:'event', kind:'rob', rob:true, seat:cur }); // legacy event to trigger x2 in existing UI
+            }
+            writeLine(res, { type:'bid', seat:cur, action, mult: currentMult, bidsCount });
+          } else {
+            writeLine(res, { type:'bid', seat:cur, action, mult: currentMult, bidsCount });
+          }
+
+          if (action==='call') {
+            calledSeat = cur;
+            bestSeat = cur;
+          } else if (action==='rob') {
+            if (bestSeat !== cur) {
+              bestSeat = cur;
+              robCount++;
+            }
+          } else { // pass
+            passed.add(cur);
+          }
+
+          if (calledSeat!=null) {
+            const active=[0,1,2].filter(i=>!passed.has(i));
+            if (active.length<=1) break;
+          } else if (passed.size>=3) {
+            break;
+          }
+
+          cur = nextActive(cur);
+        }
+
+        if (calledSeat==null) {
+          // all pass => abandon this iter; rotate starter and redeal
+          startSeat = (startSeat + 1) % 3;
+          writeLine(res, { type:'redeal', tried, reason:'nobody-called', nextStart:startSeat });
+          keepThisDeal = false; // will restart outer while(true)
+          break;
+        } else {
+          writeLine(res, { type:'bid-result', landlord: (bestSeat as number), tried, robCount, mult: currentMult, bidsCount });
+          // forward init and continue streaming
+          sentInit = true;
+          landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
+          writeLine(res, { type:'init', landlordIdx, landlord: (typeof ev.landlord !== 'undefined' ? ev.landlord : undefined), hands: ev.hands, bottom: ev.bottom });
+          keepThisDeal = true;
+          continue;
+        }
+      } else {
+        // no bidding mode
+        sentInit = true;
+        landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
+        writeLine(res, { type:'init', landlordIdx, landlord: (typeof ev.landlord !== 'undefined' ? ev.landlord : undefined), hands: ev.hands, bottom: ev.bottom });
+        keepThisDeal = true;
+        continue;
+      }
     }
 
-    // 兼容两种出牌事件：turn 或 event:play
-    if (ev?.type==='turn') {
-      const { seat, move, cards, hand, totals } = ev;
-      countPlay(seat, move, cards);
-      const moveStr = stringifyMove({ move, cards });
-      const reason = lastReason[seat] || null;
-      // 确保发送完整的手牌信息
-      writeLine(res, { 
-        type:'turn', 
-        seat, 
-        move, 
-        cards, 
-        hand: hand || [],  // 确保手牌不为空
-        moveStr, 
-        reason, 
-        score: (lastScore[seat] ?? undefined), 
-        totals 
-      });
-      continue;
-    }
-    if (ev?.type==='event' && ev?.kind==='play') {
-      const { seat, move, cards } = ev;
-      countPlay(seat, move, cards);
-      writeLine(res, ev);
-      continue;
-    }
+    if (!sentInit) continue;
+    // forward rest
+    writeLine(res, ev);
+  } // end for-await iter
 
-    // 兼容多种"结果"别名
-    const isResultLike =
-      (ev?.type==='result') ||
-      (ev?.type==='event' && (ev.kind==='win' || ev.kind==='result' || ev.kind==='game-over' || ev.kind==='game_end')) ||
-      (ev?.type==='game-over') || (ev?.type==='game_end');
-
-    if (isResultLike) {
-      // —— 在 result 之前产出画像（前端会立即累计，避免兜底 2.5）——
-      const perSeat = [0,1,2].map((i)=>{
-        const s = stats[i];
-        const total = Math.max(1, s.plays + s.passes);
-        const passRate = s.passes / total;
-        const avgCards = s.plays ? (s.cardsPlayed / s.plays) : 0;
-
-        const agg   = clamp(1.5*s.bombs + 2.0*s.rockets + (1-passRate)*3 + Math.min(4, avgCards)*0.25);
-        const cons  = clamp(3 + passRate*2 - (s.bombs + s.rockets)*0.6);
-        let   eff   = clamp(2 + avgCards*0.6 - passRate*1.5);
-        if ((ev as any).winner === i) eff = clamp(eff + 0.8);
-        const coop  = clamp((i===landlordIdx ? 2.0 : 2.5) + passRate*2.5 - (s.bombs + s.rockets)*0.4);
-        const rob   = clamp((i===landlordIdx ? 3.5 : 2.0) + 0.3*s.bombs + 0.6*s.rockets - passRate);
-
-        return { seat: i, scaled: {
-          coop: +coop.toFixed(2),
-          agg : +agg.toFixed(2),
-          cons: +cons.toFixed(2),
-          eff : +eff.toFixed(2),
-          rob : +rob.toFixed(2),
-        }};
-      });
-
-      // 两种画像格式都发，前端任一命中都不会兜底
-      writeLine(res, { type:'stats', perSeat });
-      writeLine(res, { type:'event', kind:'stats', perSeat });
-
-      // 再写 result（展开 & 带 lastReason）
-      const baseResult = (ev?.type==='result') ? ev : { type:'result', ...(ev||{}) };
-      writeLine(res, { ...(baseResult||{}), lastReason: [...lastReason] });
-      break;
-    }
-
-    // 其它事件透传
-    if (ev && ev.type) writeLine(res, ev);
-  }
+  if (keepThisDeal) break; // streamed this round
+} // end while(true)
 }
 
 /* ========== HTTP 处理 ========== */
@@ -571,7 +524,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore, rob: !!body.rob, bidStartSeat: Number.isFinite(body.bidStartSeat)? Number(body.bidStartSeat)%3 : ((round-1)%3) }, res, round);
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore, rob: !!(body as any).rob, bidStartSeat: Number.isFinite((body as any).bidStartSeat) ? (((Number((body as any).bidStartSeat) % 3) + 3) % 3) : ((round - 1) % 3) }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
