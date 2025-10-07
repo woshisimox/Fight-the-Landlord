@@ -1647,6 +1647,14 @@ nextTotals     = [
                   const farmers = [0,1,2].filter(s => s !== L);
 
                   // —— TrueSkill：把一手当成 mTimes 手 ——
+                  // —— 局部兜底：确保 rawS/mTimes 在本作用域可用 ——
+                  const Smax = 8;
+                  const Lnum = Number((typeof nextLandlord !== 'undefined' && nextLandlord !== null) ? nextLandlord : (typeof L !== 'undefined' ? L : 0));
+                  const d_local = Array.isArray(nextDelta) ? (nextDelta as [number,number,number]) : (Array.isArray((deltaRef as any)?.current) ? ((deltaRef as any).current as [number,number,number]) : [0,0,0]);
+                  const dsLocal = [ d_local[(0+Lnum)%3], d_local[(1+Lnum)%3], d_local[(2+Lnum)%3] ] as [number,number,number];
+                  const rawS = Number(dsLocal[0] || 0);
+                  const mTimes = Math.max(1, Math.min(Smax, Math.abs(Math.round(rawS))));
+
                   if (rawS > 0) {
                     for (let k=0; k<mTimes; k++) {
                       const tau = (k === 0) ? TS_TAU : 0;
