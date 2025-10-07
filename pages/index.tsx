@@ -626,7 +626,8 @@ const computeBidScore = (hand: string[]): number => {
     const rank = (c:string)=>{
       if (!c) return '';
       // 兼容花色符号或🃏前缀的表示；把🃏Y标准化为小王 'x'
-      let r = c.startsWith('🃏') ? (c.slice(2)||'X') : (c.replace(/^.*?([A2-9TJQKXxYy])$/,'$1'));
+      let s = c.replace(/10/g, 'T');
+      let r = s.startsWith('🃏') ? (s.slice(2)||'X') : (s.replace(/^.*?([A2-9TJQKXxYy])$/,'$1'));
       if (!r) return '';
       if (r==='Y' || r==='y') r='x';
       return (r||'').toUpperCase();
