@@ -1757,27 +1757,38 @@ nextTotals     = [
 // -------- 叫牌评分（事件兜底：若服务端发出 bid-score） --------
 if (m.type === 'event' && m.kind === 'bid-score') {
   const seat = Number(m.seat);
-  const sc = typeof m.score === 'number' ? m.score : Number(m.score||0) || 0;
-    // 记录当局叫牌评分
-  setBidScoresRound(prev => { const a=[...prev]; a[seat]=sc; return a; });
-// 尝试把分数补到最近一条该座位的“抢/不抢”行尾部
-  let patched = false;
-  for (let i = nextLog.length - 1; i >= 0; i--) {
-    const s = nextLog[i];
-    if (typeof s !== 'string') continue;
-    if (s.includes('叫牌评分=')) continue;
-    const tag = seatName(seat) + ' ';
-    if (s.startsWith(tag) && (s.includes('抢地主') || s.includes('不抢'))) {
-      nextLog[i] = `${s} ｜ 叫牌评分=${sc.toFixed(2)}`;
-      patched = true;
-      break;
+  let sc = (typeof m.score === 'number' ? m.score : Number(m.score||0)) || 0;
+
+  // 若服务端给 0，则尝试用已知手牌本地重算；仍为 0 则暂不落日志，等待 rob/init/hands 触发补写
+  try {
+    if (sc <= 0) {
+      const h = (nextHands && Array.isArray((nextHands as any)[seat])) ? (nextHands as any)[seat] as string[] : null;
+      if (h && h.length) sc = computeBidScore(h);
     }
-  }
-  if (!patched) {
-    nextLog = [...nextLog, `${seatName(seat)} 叫牌评分 = ${sc.toFixed(2)}`];
+  } catch {}
+
+  if (sc > 0) {
+    setBidScoresRound(prev => { const a=[...prev]; a[seat]=sc; return a; });
+    // 优先补到最近一条“抢/不抢”行
+    let patched = false;
+    for (let i = nextLog.length - 1; i >= 0; i--) {
+      const s = nextLog[i];
+      if (typeof s !== 'string') continue;
+      if (s.includes('叫牌评分=')) continue;
+      const tag = seatName(seat) + ' ';
+      if (s.startsWith(tag) && (s.includes('抢地主') || s.includes('不抢'))) {
+        nextLog[i] = `${s} ｜ 叫牌评分=${sc.toFixed(2)}`;
+        patched = true;
+        break;
+      }
+    }
+    if (!patched) {
+      nextLog = [...nextLog, `${seatName(seat)} 叫牌评分 = ${sc.toFixed(2)}`];
+    }
   }
   continue;
 }
+
 
               if (
 m.type === 'log' && typeof m.message === 'string') {
