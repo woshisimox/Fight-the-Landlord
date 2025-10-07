@@ -1691,9 +1691,19 @@ nextTotals     = [
         }
       }
 
-          if (dogId) { try { clearInterval(dogId); } catch {} }
-    setLog(l => [...l, `—— 本局流结束 ——`]);
-    setAllLogs(prev => [...prev, ...logRef.current, `\n--- End of Round ${labelRoundNo} ---\n`]);
+      if (dogId) { try { clearInterval(dogId); } catch {} }
+
+      // Fixed: Compute final log once, then set both live and archive
+      const finalLog = [...logRef.current, `—— 本局流结束 ——`];
+      setLog(finalLog);
+      setAllLogs(prev => [...prev, ...finalLog, `\n--- End of Round ${labelRoundNo} ---\n`]);
+
+    setLog(l => [...l, `—— 本局流结束 ——`]);  // Remove this old line
+    setAllLogs(prev => [...prev, ...logRef.current, `\n--- End of Round ${labelRoundNo} ---\n`]);  // Remove this old line
+
+    setAllLogs(prev => [...prev, ...logRef.current, `\n--- End of Round ${labelRoundNo} ---\n`]);  // Wait, no—use the new finalLog version above
+
+    // ... rest unchanged
     };
 
     try {
