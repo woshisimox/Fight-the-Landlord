@@ -1469,6 +1469,12 @@ for (const raw of batch) {
                 nextMultiplier = isFinite(mm) && mm > 0 ? mm : Math.max(1, (nextMultiplier || 1) * 2);
                 const margin = (typeof m.margin === 'number') ? m.margin : Number(m.margin || 0);
                 nextLog = [...nextLog, `${seatName(m.seat)} 二轮比差｜margin=${margin.toFixed(2)}｜x${nextMultiplier}`];
+{
+  const sc = (typeof m.score === 'number' ? m.score : Number(m.score || NaN));
+  const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
+  nextLog = [...nextLog, `${seatName(m.seat)} 抢地主｜score=${scTxt}｜${m.rob ? '抢' : '不抢'}｜x${nextMultiplier}`];
+}
+
                 continue;
               }
 
