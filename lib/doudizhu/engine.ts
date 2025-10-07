@@ -670,6 +670,64 @@ export const GreedyMin: BotFunc = (ctx) => {
 };
 
 
+
+// ===== 内置 Bot 的“抢地主内部打分” =====
+export function GreedyMaxBidScore(hand: Label[]): number {
+  // 贴合 GreedyMax 的进攻倾向：炸力、火箭、2、A、连对/顺子的可控性
+  const map = countByRank(hand);
+  const hasRocket = !!rocketFrom(map);
+  const bombs = [...bombsFrom(map)].length;
+  const twos = map.get(ORDER['2'])?.length ?? 0;
+  const As   = map.get(ORDER['A'])?.length ?? 0;
+  // 估算连对/顺子潜力（粗略）：统计 3..A 的覆盖与对子的数量
+  const ranks = (RANKS.slice(0, 12) as unknown as string[]);
+  let coverage = 0, pairs = 0, triples = 0, singles = 0;
+  for (const r of ranks) {
+    const idx = (ORDER as any)[r as string];
+    const n = map.get(idx)?.length ?? 0;
+    if (n>0) coverage++;
+    if (n>=2) pairs++;
+    if (n>=3) triples++;
+    if (n===1) singles++;
+  }
+  let score = 0;
+  if (hasRocket) score += 4.0;
+  score += bombs * 2.0;
+  if (twos>=2) score += 1.2 + (twos-2)*0.7;
+  if (As>=3)   score += (As-2)*0.6;
+  score += Math.min(4, coverage/3) * 0.2; // 覆盖增强出牌灵活性
+  score += Math.min(3, pairs) * 0.25;
+  score += Math.min(2, triples) * 0.35;
+  score -= Math.min(4, singles) * 0.05;   // 孤张略减分
+  return score;
+}
+
+export function GreedyMinBidScore(hand: Label[]): number {
+  // 贴合 GreedyMin 的保守倾向：更强调安全牌（2/A/炸），弱化连牌收益
+  const map = countByRank(hand);
+  const hasRocket = !!rocketFrom(map);
+  const bombs = [...bombsFrom(map)].length;
+  const twos = map.get(ORDER['2'])?.length ?? 0;
+  const As   = map.get(ORDER['A'])?.length ?? 0;
+  let score = 0;
+  if (hasRocket) score += 4.5;
+  score += bombs * 2.2;
+  score += twos * 0.9;
+  score += Math.max(0, As-1) * 0.5;
+  // 轻微考虑结构但不鼓励冒进
+  const ranks = RANKS.slice(0, 12) as unknown as string[];
+  let pairs = 0;
+  for (const r of ranks) {
+    const idx = (ORDER as any)[r as string];
+    const n = map.get(idx)?.length ?? 0; if (n>=2) pairs++; }
+  score += Math.min(2, pairs) * 0.15;
+  return score;
+}
+
+export function RandomLegalBidScore(_hand: Label[]): number {
+  // 随机策略不具“内部打分”，返回 NaN 代表无内部分
+  return Number.NaN;
+}
 export const GreedyMax: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
@@ -996,6 +1054,26 @@ function shuffle<T>(a: T[]): T[] {
   return a;
 }
 
+
+export function evalRobScore(hand: Label[]): number {
+  // 基于 wantRob 的同口径启发，返回一个连续评分（越高越倾向抢）
+  // 设计：火箭=4；每个炸弹=1.8；第2张'2'=1.2，第3张及以上每张'2'=0.6；第3个A开始每张A=0.5；
+  // 另外给顺子/连对/飞机形态一些微弱加分以偏好“可控”牌型。
+  const map = countByRank(hand);
+  const hasRocket = !!rocketFrom(map);
+  const bombs = [...bombsFrom(map)].length;
+  const twos = map.get(ORDER['2'])?.length ?? 0;
+  const As = map.get(ORDER['A'])?.length ?? 0;
+  let score = 0;
+  if (hasRocket) score += 4;
+  score += bombs * 1.8;
+  if (twos >= 2) score += 1.2 + Math.max(0, twos-2) * 0.6;
+  if (As   >= 3) score += (As-2) * 0.5;
+  // 连牌结构微弱加分（避免全是孤张导致后续吃力）
+    // (可选) 这里预留给连牌结构的进一步加分逻辑；当前版本不使用以保持简洁与稳定。
+return score;
+}
+
 function wantRob(hand: Label[]): boolean {
   // 很简单的启发：有王炸/炸弹/≥2个2/≥3个A 就抢
   const map = countByRank(hand);
@@ -1029,66 +1107,37 @@ export async function* runOneGame(opts: {
   let multiplier = 1;
   if (opts.rob !== false) {
     let last = -1;
+  const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
+
     for (let s=0;s<3;s++) {
-      const score = (() => {
-  const cnt = new Map<string, number>();
-  for (const c of (hands[s] || [])) {
-    const r = String(c ?? '').slice(-1); // 3..9,T,J,Q,K,A,2,x,X
-    cnt.set(r, (cnt.get(r) || 0) + 1);
-  }
-  const hasRocket = (cnt.get('x') || 0) > 0 && (cnt.get('X') || 0) > 0;
-  let bombs = 0;
-  for (const n of cnt.values()) if (n === 4) bombs++;
-  const twos = cnt.get('2') || 0;
-  const As   = cnt.get('A') || 0;
-  let sc = 0;
-  if (hasRocket) sc += 4;
-  sc += bombs * 2;
-  if (twos >= 2) sc += 1 + Math.max(0, twos - 2) * 0.5;
-  if (As >= 3)   sc += (As - 2) * 0.4;
-  return sc;
-})();
-const __thMap: Record<string, number> = {
-  greedymax: 1.6,
-  allysupport: 1.8,
-  randomlegal: 2.0,
-  endgamerush: 2.1,
-  mininet: 2.2,
-  greedymin: 2.4,
-};
-const __thMapChoice: Record<string, number> = {
-  'built-in:greedy-max':   1.6,
-  'built-in:ally-support': 1.8,
-  'built-in:random-legal': 2.0,
-  'built-in:endgame-rush': 2.1,
-  'built-in:mininet':      2.2,
-  'built-in:greedy-min':   2.4,
-  // 外置 AI / HTTP / 大模型等统一用稍稳的阈值（可按需要微调）
-  'external':              2.2,
-  'external:ai':           2.2,
-  'external:http':         2.2,
-  'ai':                    2.2,
-  'http':                  2.2,
-  'openai':                2.2,
-  'gpt':                   2.2,
-  'claude':                2.2,
-};
-const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
-const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-const __key    = __choice || __name;
-const __th = (__thMapChoice[__key] ?? __thMap[__name] ?? 1.8);
-const rob = Number.isFinite(score) ? (score >= __th) : false;
-yield { type:'event', kind:'rob', seat:s, rob, score };
-if (rob) {
-        if (last === -1) {
-          last = s; // 叫
-        } else {
-          last = s; multiplier *= 2; // 抢 ×2
-        }
+      const rob = wantRob(hands[s]);
+      const sc = evalRobScore(hands[s]); yield { type:'event', kind:'rob', seat:s, rob, score: sc };
+      if (rob) {
+        __bidders.push({ seat: s, score, threshold: __th, margin: score - __th });
+        multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
+        last = s;
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
-    if (last !== -1) landlord = last;
+    
+    // 第二轮：在第一轮所有“抢”的人里，用“(score - threshold)”差值比较；
+    // 从同一起始座位顺序再过一遍，遇到同分用“后手优先”（>=）规则；
+    // 每个进入第二轮的座位再次“叫”一次，倍率依次 ×2，封顶 64。
+    if (__bidders.length > 0) {
+      let bestSeat = -1;
+      let bestMargin = -Infinity;
+      for (let t = 0; t < 3; t++) {
+        const hit = __bidders.find(b => b.seat === t);
+        if (!hit) continue;
+        multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
+        yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), mult: multiplier };
+        if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; }
+      }
+      landlord = bestSeat;
+    } else if (last !== -1) {
+      landlord = last;
+    }
+
   }
   // 亮底 & 地主收底
   yield { type:'event', kind:'reveal', bottom: bottom.slice() };
