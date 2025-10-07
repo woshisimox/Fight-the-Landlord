@@ -38,41 +38,6 @@ const I18N: Record<Lang, Record<string, string>> = {
 
 function useI18n() {
 
-/** 确保导出日志中包含当前最后一局；若缺失则基于当前状态临时补一行（仅用于导出，不改UI状态） */
-function ensureLastRoundLogged(): string[] {
-  try {
-    const full  = (allLogsRef?.current || []) as string[];
-    const curr  = (logRef?.current  || []) as string[];
-
-    const labelRoundNo =
-      (typeof nextRoundIndex !== 'undefined' && (nextRoundIndex as any) !== null) ? ((nextRoundIndex as any) + 1) :
-      (Array.isArray(nextHands) ? nextHands.length : (Array.isArray(nextScores) ? nextScores.length : 0));
-
-    const combined = [...full, ...curr];
-    const already = combined.some(line => line.includes(`【回合 ${labelRoundNo}】`));
-    if (already) return combined;
-
-    const L = Number(nextLandlord ?? 0);
-    const d = Array.isArray(nextDelta) ? (nextDelta as [number,number,number]) : [0,0,0];
-    const dsNow = [ d[(0+L)%3], d[(1+L)%3], d[(2+L)%3] ] as [number,number,number];
-
-    const totalsNow = Array.isArray(nextTotals) ? ([nextTotals[0], nextTotals[1], nextTotals[2]] as [number,number,number]) : [0,0,0];
-    const labelsNow = [0,1,2].map(i => String(agentIdForIndex(i)));
-    const idsNow    = [0,1,2].map(i => String(seatIdentity(i)));
-    const mult = Number(nextMultiplier ?? 1);
-    const winSeat = (typeof nextWinner === 'number') ? nextWinner : null;
-
-    const roundLine = formatRoundSummary({
-      idx: labelRoundNo, L, winner: winSeat, mult,
-      ds: dsNow, totals: totalsNow, labels: labelsNow, ids: idsNow,
-    });
-    return [...combined, roundLine];
-  } catch {
-    const full  = (allLogsRef?.current || []) as string[];
-    const curr  = (logRef?.current  || []) as string[];
-    return [...full, ...curr];
-  }
-}
 
 
   const lang = useContext(LangContext);
@@ -1190,6 +1155,46 @@ const handleScoreRefresh = () => {
 const [allLogs, setAllLogs] = useState<string[]>([]);
 const allLogsRef = useRef(allLogs);
 useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
+
+  /** 确保导出日志中包含当前最后一局；若缺失则基于当前状态临时补一行（仅用于导出，不改UI状态） */
+  const ensureLastRoundLogged = (): string[] => {
+    try {
+      const full  = (allLogsRef?.current || []) as string[];
+      const curr  = (logRef?.current  || []) as string[];
+
+      const labelRoundNo =
+        (typeof nextRoundIndex !== 'undefined' && (nextRoundIndex as any) !== null) ? ((nextRoundIndex as any) + 1) :
+        (Array.isArray(nextHands) ? nextHands.length : (Array.isArray(nextScores) ? nextScores.length : 0));
+
+      const combined = [...full, ...curr];
+      const already = combined.some(line => line.includes(`【回合 ${labelRoundNo}】`));
+      if (already) return combined;
+
+      const L = Number(landlordRef.current ?? nextLandlord ?? 0);
+      const d = Array.isArray(deltaRef.current) ? (deltaRef.current as [number,number,number]) :
+                Array.isArray(nextDelta) ? (nextDelta as [number,number,number]) : [0,0,0];
+      const dsNow = [ d[(0+L)%3], d[(1+L)%3], d[(2+L)%3] ] as [number,number,number];
+
+      const totals = totalsRef.current || nextTotals || [0,0,0];
+      const totalsNow = Array.isArray(totals) ? ([totals[0], totals[1], totals[2]] as [number,number,number]) : [0,0,0];
+      const labelsNow = [0,1,2].map(i => String(agentIdForIndex(i)));
+      const idsNow    = [0,1,2].map(i => String(seatIdentity(i)));
+      const mult = Number(multiplierRef.current ?? nextMultiplier ?? 1);
+      const w = (typeof winnerRef.current === 'number') ? winnerRef.current :
+                (typeof nextWinner === 'number') ? nextWinner : null;
+
+      const roundLine = formatRoundSummary({
+        idx: labelRoundNo, L, winner: w, mult,
+        ds: dsNow, totals: totalsNow, labels: labelsNow, ids: idsNow,
+      });
+      return [...combined, roundLine];
+    } catch {
+      const full  = (allLogsRef?.current || []) as string[];
+      const curr  = (logRef?.current  || []) as string[];
+      return [...full, ...curr];
+    }
+  };
+
 const start = async () => {
     if (running) return;
     if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
