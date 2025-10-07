@@ -1056,8 +1056,27 @@ const __thMap: Record<string, number> = {
   mininet: 2.2,
   greedymin: 2.4,
 };
-const __botName = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-const __th = __thMap[__botName] ?? 1.8;
+const __thMapChoice: Record<string, number> = {
+  'built-in:greedy-max':   1.6,
+  'built-in:ally-support': 1.8,
+  'built-in:random-legal': 2.0,
+  'built-in:endgame-rush': 2.1,
+  'built-in:mininet':      2.2,
+  'built-in:greedy-min':   2.4,
+  // 外置 AI / HTTP / 大模型等统一用稍稳的阈值（可按需要微调）
+  'external':              2.2,
+  'external:ai':           2.2,
+  'external:http':         2.2,
+  'ai':                    2.2,
+  'http':                  2.2,
+  'openai':                2.2,
+  'gpt':                   2.2,
+  'claude':                2.2,
+};
+const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
+const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
+const __key    = __choice || __name;
+const __th = (__thMapChoice[__key] ?? __thMap[__name] ?? 1.8);
 const rob = Number.isFinite(score) ? (score >= __th) : false;
 yield { type:'event', kind:'rob', seat:s, rob, score };
 if (rob) {
