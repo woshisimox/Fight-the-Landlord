@@ -214,6 +214,7 @@ type RunBody = {
   turnTimeoutSecs?: number[];  // [s0,s1,s2]
   turnTimeoutSec?: number | number[];
   rob?: boolean;
+  bidStartSeat?: number;
   debug?: any;
 };
 
