@@ -1757,17 +1757,25 @@ nextTotals     = [
 // -------- 叫牌评分（事件兜底：若服务端发出 bid-score） --------
 if (m.type === 'event' && m.kind === 'bid-score') {
   const seat = Number(m.seat);
-  let sc = (typeof m.score === 'number' ? m.score : Number(m.score||0)) || 0;
+  let scFromServer = (typeof m.score === 'number' ? m.score : Number(m.score||0));
+  if (!isFinite(scFromServer)) scFromServer = 0;
 
-  // 若服务端给 0，则尝试用已知手牌本地重算；仍为 0 则暂不落日志，等待 rob/init/hands 触发补写
+  // 若服务端为 0，尝试用已知手牌重算；
+  // 结论：只在“手牌未知 且 仍为 0”时延迟显示，其余情况（包括真实 0）都要显示。
+  let scFinal = scFromServer;
+  let haveHand = false;
   try {
-    if (sc <= 0) {
-      const h = (nextHands && Array.isArray((nextHands as any)[seat])) ? (nextHands as any)[seat] as string[] : null;
-      if (h && h.length) sc = computeBidScore(h);
+    const h = (nextHands && Array.isArray((nextHands as any)[seat])) ? (nextHands as any)[seat] as string[] : null;
+    haveHand = !!(h && h.length);
+    if (haveHand && scFinal <= 0) {
+      const recompute = computeBidScore(h);
+      // 即使重算得 0，也算“已知手牌的真实 0”，应该显示
+      scFinal = (isFinite(recompute) ? recompute : scFinal);
     }
   } catch {}
 
-  if (sc > 0) {
+  if (scFinal > 0 || haveHand) {
+    const sc = Math.max(0, scFinal); // 保证非负
     setBidScoresRound(prev => { const a=[...prev]; a[seat]=sc; return a; });
     // 优先补到最近一条“抢/不抢”行
     let patched = false;
@@ -1775,6 +1783,20 @@ if (m.type === 'event' && m.kind === 'bid-score') {
       const s = nextLog[i];
       if (typeof s !== 'string') continue;
       if (s.includes('叫牌评分=')) continue;
+      const tag = seatName(seat) + ' ';
+      if (s.startsWith(tag) && (s.includes('抢地主') || s.includes('不抢'))) {
+        nextLog[i] = `${s} ｜ 叫牌评分=${sc.toFixed(2)}`;
+        patched = true;
+        break;
+      }
+    }
+    if (!patched) {
+      nextLog = [...nextLog, `${seatName(seat)} 叫牌评分 = ${sc.toFixed(2)}`];
+    }
+  }
+  continue;
+}
+
       const tag = seatName(seat) + ' ';
       if (s.startsWith(tag) && (s.includes('抢地主') || s.includes('不抢'))) {
         nextLog[i] = `${s} ｜ 叫牌评分=${sc.toFixed(2)}`;
