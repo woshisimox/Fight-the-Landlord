@@ -314,7 +314,6 @@ async function runOneRoundWithGuard(
   let sentInit = false;
   let currentHands: string[][] = [[],[],[]];
   let currentChoices: string[] = [];
-  let currentHands: string[][] = [[],[],[]];
 
   // 画像统计
   let landlordIdx: number = -1;
