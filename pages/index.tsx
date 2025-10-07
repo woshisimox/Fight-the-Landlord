@@ -619,6 +619,29 @@ function LivePanel(props: LiveProps) {
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [log, setLog] = useState<string[]>([]);
+
+// —— 叫牌评分（前端复算，用于“抢/不抢”行内联补全） ——
+const computeBidScore = (hand: string[]): number => {
+  try {
+    const rank = (c:string)=>{
+      if (!c) return '';
+      const r = c.startsWith('🃏') ? (c.slice(2)||'X') : (c.replace(/^.*?([A2-9TJQKXx])$/,'$1'));
+      return r.toUpperCase();
+    };
+    const cnt = new Map<string,number>();
+    for (const c of hand||[]) { const r = rank(c); if (!r) continue; cnt.set(r,(cnt.get(r)||0)+1); }
+    const hasX = (cnt.get('X')||0)>=1, hasx = (cnt.get('x')||0)>=1;
+    const hasRocket = hasX && hasx;
+    let bombs = 0; for (const v of cnt.values()) if (v===4) bombs++;
+    const highSingles = ['A','K','Q','X','x'].reduce((s,r)=> s + (cnt.get(r)||0), 0);
+    const triples = Array.from(cnt.values()).filter(v=>v===3).length;
+    const score = (hasRocket?12:0) + bombs*9 + triples*3 + highSingles*1.2;
+    return Math.round(score*100)/100;
+  } catch { return 0; }
+};
+// —— 待补全的“叫牌评分”行索引映射（seat -> index[]） ——
+const pendingBidLineIdxRef = useRef<{[seat:number]: number[]}>({0:[],1:[],2:[]});
+
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
@@ -1404,7 +1427,26 @@ for (const raw of batch) {
                   try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
                   lastReasonRef.current = [null, null, null];
                 }
-                continue;
+                
+// —— 回填叫牌评分（将发牌前记录的“抢/不抢”行补上分数） ——
+try {
+  const mp = pendingBidLineIdxRef.current || {};
+  for (const seat of [0,1,2]) {
+    const idxs = (mp as any)[seat] as number[] || [];
+    if (!idxs.length) continue;
+    const h = (nextHands && nextHands[seat]) ? nextHands[seat] : null;
+    if (!h || !h.length) continue;
+    const sc = computeBidScore(h);
+    for (const k of idxs) {
+      if (typeof nextLog[k] === 'string' && !/叫牌评分=/.test(nextLog[k])) {
+        nextLog[k] = `${nextLog[k]} ｜ 叫牌评分=${sc.toFixed(2)}`;
+      }
+    }
+    (mp as any)[seat] = []; // 清空
+  }
+} catch {}
+
+        continue;
               }
 
               
@@ -1458,10 +1500,29 @@ for (const raw of batch) {
                 continue;
               }
 
-              // -------- 抢/不抢 --------
-              if (m.type === 'event' && m.kind === 'rob') {
+              
+// -------- 抢/不抢 --------
+if (m.type === 'event' && m.kind === 'rob') {
   if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
-                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
+  // 先追加行，再尝试内联补上评分
+  const line = `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`;
+  const idx = (nextLog.length);
+  nextLog = [...nextLog, line];
+  // 如果此时已知手牌（通常在 init 后），立即计算并内联替换；否则记录待补
+  try {
+    const h = (hands && hands[m.seat]) ? hands[m.seat] : null;
+    if (h && Array.isArray(h) && h.length) {
+      const sc = computeBidScore(h);
+      nextLog[idx] = `${line} ｜ 叫牌评分=${sc.toFixed(2)}`;
+    } else {
+      const mp = pendingBidLineIdxRef.current; (mp[m.seat] ||= []).push(idx);
+    }
+  } catch {
+    const mp = pendingBidLineIdxRef.current; (mp[m.seat] ||= []).push(idx);
+  }
+  continue;
+}
+ ${m.rob ? '抢地主' : '不抢'}`];
                 continue;
               }
 
