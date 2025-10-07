@@ -997,7 +997,7 @@ function shuffle<T>(a: T[]): T[] {
 }
 
 
-function evalRobScore(hand: Label[]): number {
+export function evalRobScore(hand: Label[]): number {
   // 基于 wantRob 的同口径启发，返回一个连续评分（越高越倾向抢）
   // 设计：火箭=4；每个炸弹=1.8；第2张'2'=1.2，第3张及以上每张'2'=0.6；第3个A开始每张A=0.5；
   // 另外给顺子/连对/飞机形态一些微弱加分以偏好“可控”牌型。

@@ -1,6 +1,6 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush, evalRobScore } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -312,6 +312,7 @@ async function runOneRoundWithGuard(
 ){
   const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
+  let currentHands: string[][] = [[],[],[]];
 
   // 画像统计
   let landlordIdx: number = -1;
@@ -357,7 +358,8 @@ for await (const ev of (iter as any)) {
         bottom: ev.bottom, 
         hands: ev.hands 
       });
-      (globalThis as any).__DDZ_SEEN.length = 0;
+        try { currentHands = Array.isArray(ev.hands) ? ev.hands.map((h:any)=>Array.isArray(h)?[...h]:[]) : [[],[],[]]; } catch {}
+(globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
       // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
 try {
@@ -487,6 +489,14 @@ continue;
 
     // 其它事件透传
     if (ev?.type==='event' && ev?.kind==='rob') { try { console.log('[rob pass-through]', ev); } catch {} }
+    if (ev?.type==='event' && ev?.kind==='rob') {
+      try {
+        if (typeof (ev as any).score !== 'number' && currentHands && Array.isArray(currentHands[ev.seat])) {
+          const bid = evalRobScore(currentHands[ev.seat] as any);
+          (ev as any).score = Number.isFinite(bid) ? bid : undefined;
+        }
+      } catch {}
+    }
     if (ev && ev.type) writeLine(res, ev);
   }
 }
