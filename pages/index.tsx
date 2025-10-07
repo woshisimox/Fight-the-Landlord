@@ -439,7 +439,6 @@ function Hand({ cards }: { cards: string[] }) {
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
       {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
     </div>
-</div>
   );
 }
 function PlayRow({ seat, move, cards, reason }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string }) {
