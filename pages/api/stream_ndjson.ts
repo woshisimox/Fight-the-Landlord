@@ -305,8 +305,8 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
 async function runOneRoundWithGuard(
-  { seats, four2, lastReason, lastScore }:
-  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; lastReason: (string|null)[]; lastScore: (number|null)[] },
+  { seats, four2, lastReason, lastScore, rob, bidStartSeat }:
+  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; lastReason: (string|null)[]; lastScore: (number|null)[]; rob?: boolean; bidStartSeat?: number },
   res: NextApiResponse,
   round: number
 ){
@@ -568,16 +568,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
-      await runOneRoundWithGuard({
-        seats: wrapped as any,
-        four2,
-        lastReason,
-        lastScore,
-        rob: !!(body as any).rob,
-        bidStartSeat: Number.isFinite((body as any).bidStartSeat)
-          ? (Number((body as any).bidStartSeat)%3+3)%3
-          : ((round-1)%3)
-      }, res, round);
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore, rob: !!body.rob, bidStartSeat: Number.isFinite(body.bidStartSeat)? Number(body.bidStartSeat)%3 : ((round-1)%3) }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
