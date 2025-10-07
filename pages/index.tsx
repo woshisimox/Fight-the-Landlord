@@ -1465,7 +1465,22 @@ for (const raw of batch) {
                 continue;
               }
 
-              // -------- 起新墩 --------
+              // -------- 明牌后额外加倍 --------
+// -------- 倍数校准（兜底） --------
+if (m.type === 'event' && m.kind === 'multiplier-sync') {
+  const cur = Math.max(1, (nextMultiplier || 1));
+  const mlt = Math.max(1, Number(m.multiplier || 1));
+  nextMultiplier = Math.max(cur, mlt);
+  nextLog = [...nextLog, `倍数校准为 ${nextMultiplier}`];
+  continue;
+}
+
+if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double')) {
+  if (m.do) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
+  nextLog = [...nextLog, `${seatName(m.seat)} ${m.do ? '加倍' : '不加倍'}（明牌后）`];
+  continue;
+}
+// -------- 起新墩 --------
               if (m.type === 'event' && m.kind === 'trick-reset') {
                 nextLog = [...nextLog, '一轮结束，重新起牌'];
                 nextPlays = [];
