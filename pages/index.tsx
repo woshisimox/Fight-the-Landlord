@@ -1854,13 +1854,14 @@ type AllBundle = {
   identities: string[];
   trueskill?: TsStore;
   /* radar?: RadarStore;  // disabled */
-  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> 
+  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
   // 叫牌评分存档（每局三家）
   bids?: {
     schema: 'ddz-bids@1';
     perRound: (number|null)[][];
     lords?: number[];
   };
+};;
 };
 };
 
