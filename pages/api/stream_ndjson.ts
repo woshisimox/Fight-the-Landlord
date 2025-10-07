@@ -1,6 +1,6 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush, GreedyMaxBidScore, GreedyMinBidScore, RandomLegalBidScore } from '../../lib/doudizhu/engine';
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -312,8 +312,6 @@ async function runOneRoundWithGuard(
 ){
   const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
-  let currentHands: string[][] = [[],[],[]];
-  let currentChoices: string[] = [];
 
   // 画像统计
   let landlordIdx: number = -1;
@@ -359,8 +357,7 @@ for await (const ev of (iter as any)) {
         bottom: ev.bottom, 
         hands: ev.hands 
       });
-        try { currentHands = Array.isArray(ev.hands) ? ev.hands.map((h:any)=>Array.isArray(h)?[...h]:[]) : [[],[],[]]; } catch {}
-(globalThis as any).__DDZ_SEEN.length = 0;
+      (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
       // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
 try {
@@ -489,23 +486,7 @@ continue;
     }
 
     // 其它事件透传
-    
-if (ev?.type==='event' && ev?.kind==='rob') {
-  try {
-    const hand = Array.isArray(currentHands?.[ev.seat]) ? currentHands[ev.seat] : null;
-    const choice = (currentChoices?.[ev.seat]) || '';
-    let sc:number|undefined = undefined;
-    if (hand && choice) {
-      if (choice==='built-in:greedy-max') sc = GreedyMaxBidScore(hand as any);
-      else if (choice==='built-in:greedy-min') sc = GreedyMinBidScore(hand as any);
-      else if (choice==='built-in:random-legal') sc = RandomLegalBidScore(hand as any);
-      // 其它（AI/HTTP）不强行填充，等待它们自身提供（若未来支持）
-    }
-    if (typeof sc === 'number' && Number.isFinite(sc)) (ev as any).score = sc;
-    (ev as any).scoreType = 'internal';
-  } catch {}
-}
-if (ev && ev.type) writeLine(res, ev);
+    if (ev && ev.type) writeLine(res, ev);
   }
 }
 
