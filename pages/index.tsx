@@ -1768,7 +1768,7 @@ if (m.type === 'event' && m.kind === 'bid-score') {
     const h = (nextHands && Array.isArray((nextHands as any)[seat])) ? (nextHands as any)[seat] as string[] : null;
     haveHand = !!(h && h.length);
     if (haveHand && scFinal <= 0) {
-      const recompute = computeBidScore(h);
+      const recompute = computeBidScore(h as string[]);
       // 即使重算得 0，也算“已知手牌的真实 0”，应该显示
       scFinal = (isFinite(recompute) ? recompute : scFinal);
     }
