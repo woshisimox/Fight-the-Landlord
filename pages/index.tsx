@@ -1386,6 +1386,7 @@ for (const raw of batch) {
 
               // -------- 事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
+  robDecidedRef.current = [false,false,false];
                 // 清空上一局残余手牌/出牌；等待 init/hands 再填充
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
@@ -1516,6 +1517,7 @@ try {
               
 // -------- 抢/不抢 --------
 if (m.type === 'event' && m.kind === 'rob') {
+  if (robDecidedRef.current[m.seat]) { continue; } robDecidedRef.current[m.seat] = true;
   if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
 
   const lineBase = `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`;

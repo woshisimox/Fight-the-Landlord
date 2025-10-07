@@ -362,7 +362,21 @@ for await (const ev of (iter as any)) {
 
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
-      continue;
+      
+      // === 合成叫牌阶段事件：确保前端总能看到“抢/不抢”与评分 ===
+      try {
+        if (typeof landlordIdx === 'number' && landlordIdx >= 0) {
+          for (let ss = 0; ss < 3; ss++) {
+            try {
+              const hand = (Array.isArray(__HANDS_AT_INIT?.[ss])) ? __HANDS_AT_INIT[ss] : [];
+              const sc = __computeBidScore(hand || []);
+              writeLine(res, { type:'event', kind:'bid-score', seat: ss, score: sc, synthetic: true });
+            } catch {}
+            writeLine(res, { type:'event', kind:'rob', seat: ss, rob: ss === landlordIdx, synthetic: true });
+          }
+        }
+      } catch {}
+continue;
 
 // —— 拦截“抢/不抢”日志并同步发出 bid-score ——
 if (ev?.type==='log' && typeof ev.message === 'string') {
