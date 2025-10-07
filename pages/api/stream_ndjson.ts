@@ -379,7 +379,22 @@ for await (const ev of (iter as any)) {
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
       (globalThis as any).__DDZ_BOTTOM = Array.isArray(ev.bottom) ? ev.bottom : [];
-      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
+      // —— 叫牌阶段策略评分（回填日志）：用各自手牌（不含底牌）计算 —— 
+try {
+  const rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+  const count = (arr:string[])=>{ const m=new Map<string,number>(); for(const c of arr){ const r=rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
+  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
+  for (let s=0; s<3; s++){
+    const cnt = count(hands[s]||[]);
+    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1;
+    let bombs = 0; for (const v of cnt.values()) if (v===4) bombs++;
+    const highSingles = ['A','K','Q','X','x'].reduce((acc,r)=> acc + (cnt.get(r)||0), 0);
+    const triples = Array.from(cnt.values()).filter(v=>v===3).length;
+    const score = (hasRocket?12:0) + bombs*9 + triples*3 + highSingles*1.2;
+    writeLine(res, { type:'event', kind:'bid-score', seat: s, score: Number(score.toFixed(2)) });
+  }
+} catch {}
+// —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
 try {
   const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
   const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
