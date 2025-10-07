@@ -1113,7 +1113,7 @@ export async function* runOneGame(opts: {
       const rob = wantRob(hands[s]);
       const sc = evalRobScore(hands[s]); yield { type:'event', kind:'rob', seat:s, rob, score: sc };
       if (rob) {
-        __bidders.push({ seat: s, score, threshold: __th, margin: score - __th });
+        __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
         last = s;
       }
