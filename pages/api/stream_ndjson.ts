@@ -291,6 +291,24 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
       ? unifiedScore(ctx, result.cards)
       : undefined;
     const scoreTag = (typeof unified === 'number') ? ` | score=${unified.toFixed(2)}` : '';
+// === Bidding strength score (for logs) ===
+let __bidScore: number | undefined = undefined;
+try {
+  if (ctx?.phase === 'bid') {
+    const hand: string[] = Array.isArray(ctx?.hands) ? ctx.hands : [];
+    const rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+    const cnt = new Map<string,number>();
+    for (const c of hand) { const r=rank(c); cnt.set(r,(cnt.get(r)||0)+1); }
+    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1;
+    let bombs = 0; for (const v of cnt.values()) if (v===4) bombs++;
+    const highSingles = ['A','K','Q','X','x'].reduce((s,r)=> s + (cnt.get(r)||0), 0);
+    const triples = Array.from(cnt.values()).filter(v=>v===3).length;
+    // very light heuristic
+    __bidScore = (hasRocket? 12:0) + bombs*9 + triples*3 + highSingles*1.2;
+    // if seat is potential landlord start (ctx.bidRound or similar unavailable), keep generic
+    writeLine(res, { type:'event', kind:'bid-score', seat: seatIndex, score: Number(__bidScore.toFixed(2)) });
+  }
+} catch {}
     const reason =
       (result && typeof result.reason === 'string')
         ? `[${label}] ${result.reason}${scoreTag}`

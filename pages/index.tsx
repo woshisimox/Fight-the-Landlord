@@ -1466,6 +1466,13 @@ for (const raw of batch) {
               }
 
               // -------- 明牌后额外加倍 --------
+// -------- 叫牌策略评分（日志显示） --------
+if (m.type === 'event' && m.kind === 'bid-score') {
+  const sc = (typeof m.score === 'number') ? m.score : Number(m.score||0) || 0;
+  nextLog = [...nextLog, `${seatName(m.seat)} 叫牌评分 = ${sc.toFixed(2)}`];
+  continue;
+}
+
 // -------- 倍数校准（兜底） --------
 if (m.type === 'event' && m.kind === 'multiplier-sync') {
   const cur = Math.max(1, (nextMultiplier || 1));
