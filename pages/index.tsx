@@ -1735,10 +1735,33 @@ nextTotals     = [
               }
 
               // -------- 文本日志 --------
-              if (m.type === 'log' && typeof m.message === 'string') {
-                nextLog = [...nextLog, rewrite(m.message)];
-                continue;
+              if (
+m.type === 'log' && typeof m.message === 'string') {
+            const msg = rewrite(m.message);
+            // 若是“甲/乙/丙 抢地主/不抢”日志，则内联叫牌评分
+            const mBid = msg.match(/^([甲乙丙])\s*(抢地主|不抢)/);
+            if (mBid) {
+              const seatMap:Record<string,number> = { '甲':0, '乙':1, '丙':2 };
+              const seat = seatMap[mBid[1]];
+              const idx = nextLog.length;
+              let line = msg;
+              try {
+                const h = (nextHands && Array.isArray((nextHands as any)[seat])) ? (nextHands as any)[seat] as string[] : null;
+                if (h && h.length) {
+                  const sc = computeBidScore(h);
+                  line = `${msg} ｜ 叫牌评分=${sc.toFixed(2)}`;
+                } else {
+                  (pendingBidLineIdxRef.current[seat] ||= []).push(idx);
+                }
+              } catch {
+                (pendingBidLineIdxRef.current[seat] ||= []).push(idx);
               }
+              nextLog = [...nextLog, line];
+            } else {
+              nextLog = [...nextLog, msg];
+            }
+            continue;
+          }
             } catch (e) { console.error('[ingest:batch]', e, raw); }
           }
 
