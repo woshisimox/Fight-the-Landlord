@@ -1861,10 +1861,7 @@ type AllBundle = {
     perRound: (number|null)[][];
     lords?: number[];
   };
-};;
 };
-};
-
 const buildAllBundle = (): AllBundle => {
   const identities = [0,1,2].map(seatIdentity);
   let ladder: any = null;
