@@ -680,10 +680,11 @@ export function GreedyMaxBidScore(hand: Label[]): number {
   const twos = map.get(ORDER['2'])?.length ?? 0;
   const As   = map.get(ORDER['A'])?.length ?? 0;
   // 估算连对/顺子潜力（粗略）：统计 3..A 的覆盖与对子的数量
-  const ranks = RANKS.slice(0, 12) as unknown as string[];
+  const ranks = (RANKS.slice(0, 12) as unknown as string[]);
   let coverage = 0, pairs = 0, triples = 0, singles = 0;
   for (const r of ranks) {
-    const n = map.get(r)?.length ?? 0;
+    const idx = (ORDER as any)[r as string];
+    const n = map.get(idx)?.length ?? 0;
     if (n>0) coverage++;
     if (n>=2) pairs++;
     if (n>=3) triples++;
@@ -716,7 +717,9 @@ export function GreedyMinBidScore(hand: Label[]): number {
   // 轻微考虑结构但不鼓励冒进
   const ranks = RANKS.slice(0, 12) as unknown as string[];
   let pairs = 0;
-  for (const r of ranks) { const n = map.get(r)?.length ?? 0; if (n>=2) pairs++; }
+  for (const r of ranks) {
+    const idx = (ORDER as any)[r as string];
+    const n = map.get(idx)?.length ?? 0; if (n>=2) pairs++; }
   score += Math.min(2, pairs) * 0.15;
   return score;
 }
