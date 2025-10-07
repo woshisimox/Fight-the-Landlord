@@ -486,6 +486,7 @@ continue;
     }
 
     // 其它事件透传
+    if (ev?.type==='event' && ev?.kind==='rob') { try { console.log('[rob pass-through]', ev); } catch {} }
     if (ev && ev.type) writeLine(res, ev);
   }
 }
