@@ -362,23 +362,20 @@ for await (const ev of (iter as any)) {
 
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
-      
-      // === 合成叫牌阶段事件：确保前端总能看到“抢/不抢”与评分 ===
-      try {
-        if (typeof landlordIdx === 'number' && landlordIdx >= 0) {
-          for (let ss = 0; ss < 3; ss++) {
-            try {
-              const hand = (Array.isArray(__HANDS_AT_INIT?.[ss]) && (__HANDS_AT_INIT[ss]?.length>0)) ? __HANDS_AT_INIT[ss] : null;
-              if (hand) { const sc = __computeBidScore(hand); writeLine(res, { type:'event', kind:'bid-score', seat: ss, score: sc, synthetic: true }); }
-} catch {}
-            writeLine(res, { type:'event', kind:'rob', seat: ss, rob: ss === landlordIdx, synthetic: true });
-          }
-        }
-      } catch {}
-continue;
+      continue;
 
 // —— 拦截“抢/不抢”日志并同步发出 bid-score ——
 if (ev?.type==='log' && typeof ev.message === 'string') {
+  // 文本形式的内部叫牌决策，转为结构化事件
+  try {
+    const m = ev.message.match(/【BID】\s*seat=(\d+)\s*score=([\-\d\.]+)\s*thr=([\-\d\.]+)\s*take=(true|false)\s*(.*)?/);
+    if (m) {
+      const seat = Number(m[1]); const score = Number(m[2]); const threshold = Number(m[3]); const take = (m[4]==='true');
+      const features = (m[5]||'').trim();
+      writeLine(res, { type:'event', kind:'bid-decision', seat, score, threshold, take, features });
+    }
+  } catch {}
+  
   try {
     const m = ev.message.match(/([甲乙丙])\s*(抢地主|不抢)/);
     if (m) {
@@ -393,6 +390,13 @@ if (ev?.type==='log' && typeof ev.message === 'string') {
   continue;
 }
 
+    }
+
+    // 拦截引擎原生的 internal bid decision 事件（若引擎发出）
+    if (ev?.type==='event' && ev?.kind==='bid-decision') {
+      // 期望结构：{ type:'event', kind:'bid-decision', seat, score, threshold, take, features? }
+      writeLine(res, ev);
+      continue;
     }
 
     // 兼容两种出牌事件：turn 或 event:play
@@ -422,20 +426,7 @@ if (ev?.type==='log' && typeof ev.message === 'string') {
       continue;
     }
 
-    
-    // 新增：结构化抢/不抢事件也产出 bid-score
-    if (ev?.type==='event' && ev?.kind==='rob') {
-      try {
-        const s = Number((ev as any).seat);
-        const hand: string[] = (Array.isArray(__HANDS_AT_INIT?.[s])) ? __HANDS_AT_INIT[s] : [];
-        const sc = __computeBidScore(hand || []);
-        writeLine(res, { type:'event', kind:'bid-score', seat: s, score: sc });
-      } catch {}
-      writeLine(res, ev);
-      continue;
-    }
-
-// 兼容多种"结果"别名
+    // 兼容多种"结果"别名
     const isResultLike =
       (ev?.type==='result') ||
       (ev?.type==='event' && (ev.kind==='win' || ev.kind==='result' || ev.kind==='game-over' || ev.kind==='game_end')) ||
@@ -488,8 +479,7 @@ function __computeBidScore(hand: string[]): number {
     const rank = (c:string)=>{
       if (!c) return '';
       // 兼容花色/🃏前缀；把Y视为小王x
-      let s = c.replace(/10/g, 'T');
-      let r = s.startsWith('🃏') ? (s.slice(2)||'X') : (s.replace(/^.*?([A2-9TJQKXxYy])$/,'$1'));
+      let r = c.startsWith('🃏') ? (c.slice(2)||'X') : (c.replace(/^.*?([A2-9TJQKXxYy])$/,'$1'));
       if (!r) return '';
       if (r==='Y' || r==='y') r='x';
       return r.toUpperCase();
