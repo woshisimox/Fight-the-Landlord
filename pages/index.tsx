@@ -1858,6 +1858,131 @@ const handleAllSaveInner = () => {
       </div>
 
       {/* ========= TrueSkill（实时） ========= */}
+// ---- RadarPanel with ECharts (canvas based) ----
+type RadarPanelProps = {
+  aggStats: any;     // expected: array of 3 objects or similar map per seat
+  aggCount: any;     // not strictly required for drawing but kept for API compatibility
+  aggMode: string;   // mode string shown in subtitle
+  alpha: number;     // smoothing/alpha shown in subtitle
+  onChangeMode: (m: string) => void;
+  onChangeAlpha: (a: number) => void;
+};
+
+function loadEcharts(): Promise<any> {
+  return new Promise((resolve, reject) => {
+    if ((window as any).echarts) return resolve((window as any).echarts);
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js';
+    s.async = true;
+    s.onload = () => {
+      const e = (window as any).echarts;
+      if (e) resolve(e); else reject(new Error('echarts failed to load'));
+    };
+    s.onerror = () => reject(new Error('echarts script load error'));
+    document.head.appendChild(s);
+  });
+}
+
+function RadarPanel({ aggStats, aggCount, aggMode, alpha, onChangeMode, onChangeAlpha }: RadarPanelProps) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<any>(null);
+
+  // derive axes and values
+  function getAxesAndSeries() {
+    // Prefer array [0,1,2], else try object with keys '0','1','2', else fallback
+    const seats = [0,1,2];
+    const sample = (aggStats && (aggStats[0] || aggStats['0'] || aggStats.overall)) || {};
+    const axes = Object.keys(sample).filter(k => typeof sample[k] === 'number' && isFinite(sample[k]));
+    const fallbackAxes = ['进攻','防守','控场','效率','稳定'];
+    const usedAxes = axes.length ? axes : fallbackAxes;
+
+    const seatLabel = (i:number) => {
+      try { return (window as any).agentIdForIndex ? (window as any).agentIdForIndex(i) : ['甲','乙','丙'][i]; }
+      catch { return ['甲','乙','丙'][i]; }
+    };
+
+    const values = seats.map(i => {
+      const src = (aggStats && (aggStats[i] || aggStats[String(i)])) || {};
+      return usedAxes.map(k => {
+        const v = Number(src[k] ?? 0);
+        if (!isFinite(v)) return 0;
+        // clamp to [0,5]
+        return Math.max(0, Math.min(5, v));
+      });
+    });
+
+    const series = seats.map(i => ({
+      name: seatLabel(i),
+      value: values[i]
+    }));
+
+    return { usedAxes, series };
+  }
+
+  useEffect(() => {
+    let disposed = false;
+    loadEcharts().then((echarts) => {
+      if (disposed) return;
+      const el = ref.current!;
+      if (!el) return;
+      if (chartRef.current) {
+        try { chartRef.current.dispose(); } catch {}
+        chartRef.current = null;
+      }
+      const inst = echarts.init(el/*, null, { renderer: 'canvas' }*/);
+      chartRef.current = inst;
+
+      const { usedAxes, series } = getAxesAndSeries();
+
+      const option = {
+        tooltip: { trigger: 'item' },
+        legend: { top: 0 },
+        radar: {
+          shape: 'polygon',
+          indicator: usedAxes.map((name:string) => ({ name, max: 5 })),
+          splitNumber: 5
+        },
+        series: [{
+          type: 'radar',
+          data: series
+        }]
+      };
+      inst.setOption(option);
+
+      const onResize = () => inst.resize();
+      window.addEventListener('resize', onResize);
+      // keep a ref to remove
+      (inst as any).__onResize = onResize;
+    }).catch((e) => {
+      // Fallback: show a minimal text if echarts fails to load
+      if (ref.current) {
+        ref.current.innerHTML = '<div style="font-size:12px;color:#888">Radar 渲染失败：' + String(e) + '</div>';
+      }
+    });
+    return () => {
+      disposed = true;
+      const inst = chartRef.current;
+      if (inst) {
+        try { window.removeEventListener('resize', (inst as any).__onResize); } catch {}
+        try { inst.dispose(); } catch {}
+        chartRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(aggStats), aggMode, alpha]);
+
+  return (
+    <div style={{ border:'1px solid #eee', borderRadius:12, padding:12, background:'#fff' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+        <div style={{ fontWeight:700 }}>雷达图</div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>模式：{aggMode}　α：{alpha}</div>
+      </div>
+      <div ref={ref} style={{ width:'100%', height:280 }} />
+    </div>
+  );
+}
+// ---- end RadarPanel ----
+
       <Section title="TrueSkill（实时）">
         {/* 上传 / 存档 / 刷新 */}
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
