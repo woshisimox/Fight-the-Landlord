@@ -1692,15 +1692,9 @@ nextTotals     = [
       }
 
           if (dogId) { try { clearInterval(dogId); } catch {} }
-    setLog((l:any)=>{
-  const __snapshot = [...(Array.isArray(l)?l:[]), `—— 本局流结束 ——`];
-  (logRef as any).current = __snapshot;
-  setAllLogs((prev:any)=>[...(Array.isArray(prev)?prev:[]), ...__snapshot, `
---- End of Round ${labelRoundNo} ---
-`]);
-  return __snapshot;
-});
-};
+    setLog(l => [...l, `—— 本局流结束 ——`]);
+    setAllLogs(prev => [...prev, ...logRef.current, `\n--- End of Round ${labelRoundNo} ---\n`]);
+    };
 
     try {
       for (let i = 0; i < props.rounds; i++) {
