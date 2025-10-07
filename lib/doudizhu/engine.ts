@@ -670,6 +670,61 @@ export const GreedyMin: BotFunc = (ctx) => {
 };
 
 
+
+// ===== 内置 Bot 的“抢地主内部打分” =====
+export function GreedyMaxBidScore(hand: Label[]): number {
+  // 贴合 GreedyMax 的进攻倾向：炸力、火箭、2、A、连对/顺子的可控性
+  const map = countByRank(hand);
+  const hasRocket = !!rocketFrom(map);
+  const bombs = [...bombsFrom(map)].length;
+  const twos = map.get(ORDER['2'])?.length ?? 0;
+  const As   = map.get(ORDER['A'])?.length ?? 0;
+  // 估算连对/顺子潜力（粗略）：统计 3..A 的覆盖与对子的数量
+  const ranks = ORDER.slice(0, 12);
+  let coverage = 0, pairs = 0, triples = 0, singles = 0;
+  for (const r of ranks) {
+    const n = map.get(r)?.length ?? 0;
+    if (n>0) coverage++;
+    if (n>=2) pairs++;
+    if (n>=3) triples++;
+    if (n===1) singles++;
+  }
+  let score = 0;
+  if (hasRocket) score += 4.0;
+  score += bombs * 2.0;
+  if (twos>=2) score += 1.2 + (twos-2)*0.7;
+  if (As>=3)   score += (As-2)*0.6;
+  score += Math.min(4, coverage/3) * 0.2; // 覆盖增强出牌灵活性
+  score += Math.min(3, pairs) * 0.25;
+  score += Math.min(2, triples) * 0.35;
+  score -= Math.min(4, singles) * 0.05;   // 孤张略减分
+  return score;
+}
+
+export function GreedyMinBidScore(hand: Label[]): number {
+  // 贴合 GreedyMin 的保守倾向：更强调安全牌（2/A/炸），弱化连牌收益
+  const map = countByRank(hand);
+  const hasRocket = !!rocketFrom(map);
+  const bombs = [...bombsFrom(map)].length;
+  const twos = map.get(ORDER['2'])?.length ?? 0;
+  const As   = map.get(ORDER['A'])?.length ?? 0;
+  let score = 0;
+  if (hasRocket) score += 4.5;
+  score += bombs * 2.2;
+  score += twos * 0.9;
+  score += Math.max(0, As-1) * 0.5;
+  // 轻微考虑结构但不鼓励冒进
+  const ranks = ORDER.slice(0, 12);
+  let pairs = 0;
+  for (const r of ranks) { const n = map.get(r)?.length ?? 0; if (n>=2) pairs++; }
+  score += Math.min(2, pairs) * 0.15;
+  return score;
+}
+
+export function RandomLegalBidScore(_hand: Label[]): number {
+  // 随机策略不具“内部打分”，返回 NaN 代表无内部分
+  return Number.NaN;
+}
 export const GreedyMax: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);

@@ -1,6 +1,6 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush, evalRobScore } from '../../lib/doudizhu/engine';
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush, GreedyMaxBidScore, GreedyMinBidScore, RandomLegalBidScore } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -488,16 +488,23 @@ continue;
     }
 
     // 其它事件透传
-    if (ev?.type==='event' && ev?.kind==='rob') { try { console.log('[rob pass-through]', ev); } catch {} }
-    if (ev?.type==='event' && ev?.kind==='rob') {
-      try {
-        if (typeof (ev as any).score !== 'number' && currentHands && Array.isArray(currentHands[ev.seat])) {
-          const bid = evalRobScore(currentHands[ev.seat] as any);
-          (ev as any).score = Number.isFinite(bid) ? bid : undefined;
-        }
-      } catch {}
+    
+if (ev?.type==='event' && ev?.kind==='rob') {
+  try {
+    const hand = Array.isArray(currentHands?.[ev.seat]) ? currentHands[ev.seat] : null;
+    const choice = (seatSpecs?.[ev.seat]?.choice) || '';
+    let sc:number|undefined = undefined;
+    if (hand && choice) {
+      if (choice==='built-in:greedy-max') sc = GreedyMaxBidScore(hand as any);
+      else if (choice==='built-in:greedy-min') sc = GreedyMinBidScore(hand as any);
+      else if (choice==='built-in:random-legal') sc = RandomLegalBidScore(hand as any);
+      // 其它（AI/HTTP）不强行填充，等待它们自身提供（若未来支持）
     }
-    if (ev && ev.type) writeLine(res, ev);
+    if (typeof sc === 'number' && Number.isFinite(sc)) (ev as any).score = sc;
+    (ev as any).scoreType = 'internal';
+  } catch {}
+}
+if (ev && ev.type) writeLine(res, ev);
   }
 }
 

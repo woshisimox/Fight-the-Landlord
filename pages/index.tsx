@@ -1460,12 +1460,9 @@ for (const raw of batch) {
 
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'rob') {
-  if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
-  try { console.debug('[rob event]', m); } catch {}
-  const rawScore = (typeof (m as any).score === 'number') ? (m as any).score : (typeof (m as any).bidScore === 'number' ? (m as any).bidScore : undefined);
-  const tag = (typeof rawScore === 'number') ? `｜score=${Number(rawScore).toFixed(2)}` : '｜score:-';
-  nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}${tag}`];
-
+    const rawScore = (typeof (m as any).score === 'number') ? (m as any).score : (typeof (m as any).bidScore === 'number' ? (m as any).bidScore : undefined);
+if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
+                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
                 continue;
               }
 
