@@ -1999,11 +1999,32 @@ const handleAllSaveInner = () => {
   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
     <div style={{ fontWeight:700 }}>运行日志</div>
     <button
-      onClick={() => { try { const lines = [
-  ...(((allLogsRef && allLogsRef.current) ? allLogsRef.current : []) as string[]),
-  ...(((logRef && logRef.current) ? logRef.current : []) as string[]),
-  '\\n--- End of Round (buffer flush) ---\\n',
-]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
+      onClick={() => { try {
+      // 强制 flush 当前缓冲日志到 allLogs，然后在下一帧导出
+      const _buffer = [
+        ...(((logRef && logRef.current) ? logRef.current : []) as string[]),
+        '\n--- End of Round (manual flush) ---\n',
+      ];
+      if (typeof setAllLogs === 'function') {
+        setAllLogs((prev:any) => [...(prev||[]), ..._buffer]);
+      }
+      // 等待 React 提交 state 后再读取 allLogsRef，避免 race
+      requestAnimationFrame(() => {
+        try {
+          const lines = [
+            ...(((allLogsRef && allLogsRef.current) ? allLogsRef.current : []) as string[]),
+          ];
+          const ts = new Date().toISOString().replace(/[:.]/g,'-');
+          const text = lines.length ? lines.join('\n') : '（暂无）';
+          const blob = new Blob([text],{type:'text/plain;charset=utf-8'});
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = `run-log_${ts}.txt`; a.click();
+          setTimeout(()=>URL.revokeObjectURL(url),1200);
+        } catch(e) { console.error('[runlog] save error (rAF)', e); }
+      });
+      return;
+    } catch(e){ console.error('[runlog] save error', e); } }}
       style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >存档</button>
   </div>
