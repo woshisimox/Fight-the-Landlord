@@ -311,94 +311,7 @@ async function runOneRoundWithGuard(
   res: NextApiResponse,
   round: number
 ){
-  
-  // ---- Bidding Phase (Scheme B: call/rob/pass + rotate start on redeal) ----
-  if (rob) {
-    const askBid = async (seat:number, hand:string[], bottom:string[], state:{calledSeat:number|null, canCall:boolean, canRob:boolean, startSeat:number}) => {
-      // For now, built-ins use heuristic; HTTP bots could be integrated via their own /bid in traceWrap, but we keep minimal here.
-      let action:'call'|'rob'|'pass' = 'pass';
-      try {
-        const sc = (globalThis as any).scoreForBid ? (globalThis as any).scoreForBid(hand, bottom) : (hand.length + bottom.length > 0 ? 22 : 0);
-        if (state.calledSeat == null) action = (sc >= 20 ? 'call':'pass');
-        else action = (sc >= 24 ? 'rob':'pass');
-      } catch { action = 'pass'; }
-      return action;
-    };
-
-    let startSeat = (typeof bidStartSeat==='number' && isFinite(bidStartSeat)) ? ((bidStartSeat%3)+3)%3 : ((round-1)%3);
-    let landlordPreset: { hands:string[][]; bottom:string[]; landlordIdx:number } | null = null;
-    let tried = 0;
-
-    while (!landlordPreset) {
-      tried++;
-
-      // Preview init to get hands & bottom
-      let hands3: string[][] = [];
-      let bottom3: string[] = [];
-      try {
-        const preview = runOneGame({ seats, four2 } as any);
-        for await (const fm of (preview as any)) {
-          if (fm?.type==='init' && Array.isArray((fm as any).hands) && Array.isArray((fm as any).bottom)) {
-            hands3 = (fm as any).hands;
-            bottom3 = (fm as any).bottom;
-            break;
-          }
-        }
-      } catch {}
-
-      if (!hands3.length || !bottom3.length) break;
-
-      writeLine(res, { type:'bottom', cards: bottom3 });
-      writeLine(res, { type:'bid-start', startSeat });
-
-      let calledSeat: number|null = null;
-      let bestSeat: number|null = null;
-      let robCount = 0;
-      const passed = new Set<number>();
-      let cur = startSeat;
-      let steps = 0;
-      const nextActive = (x:number) => {
-        for (let k=1;k<=3;k++){ const y=(x+k)%3; if (!passed.has(y)) return y; }
-        return x;
-      };
-
-      while (steps < 20) {
-        steps++;
-        if (passed.has(cur)) { cur = nextActive(cur); continue; }
-        const canCall = (calledSeat==null);
-        const canRob  = (calledSeat!=null);
-        const act = await askBid(cur, hands3[cur], bottom3, {calledSeat, canCall, canRob, startSeat});
-        writeLine(res, { type:'bid', seat:cur, action:act });
-        if (act==='call') { calledSeat = cur; bestSeat = cur; }
-        else if (act==='rob') { if (bestSeat !== cur) { bestSeat = cur; robCount++; writeLine(res, { type:'event', kind:'rob', rob:true, seat:cur }); } }
-        else { passed.add(cur); }
-        // stop
-        if (calledSeat!=null) { const active=[0,1,2].filter(i=>!passed.has(i)); if (active.length<=1) break; }
-        else { if (passed.size>=3) break; }
-        cur = nextActive(cur);
-      }
-
-      if (calledSeat==null) {
-        startSeat = (startSeat + 1) % 3; // rotate starter on redeal
-        writeLine(res, { type:'redeal', tried, reason:'nobody-called', nextStart:startSeat });
-        continue;
-      } else {
-        const landlordIdx = (bestSeat as number);
-        writeLine(res, { type:'bid-result', landlord:landlordIdx, tried, robCount });
-        hands3[landlordIdx] = [...hands3[landlordIdx], ...bottom3];
-        landlordPreset = { hands: hands3, bottom: bottom3, landlordIdx };
-        // Break loop — we'll now proceed to real game start
-      }
-    }
-
-    // If we got preset, we need to start a real iterator that honors it.
-    if (landlordPreset) {
-      // NOTE: If your engine supports presets, replace the next line with runOneGame({ seats, four2, preset: landlordPreset })
-      // For compatibility (engine may not accept preset), we simply proceed; engine will deal again.
-      // You can wire preset usage in your engine later.
-    }
-  }
-const iter = runOneGame({ seats, four2 } as any);
+  const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
 
   // 画像统计
@@ -445,7 +358,70 @@ for await (const ev of (iter as any)) {
         bottom: ev.bottom, 
         hands: ev.hands 
       });
-      (globalThis as any).__DDZ_SEEN.length = 0;
+      
+      // ---- Bidding (Scheme B: call/rob/pass; rotate starter on all-pass (log only)) ----
+      try {
+        if (rob) {
+          const seatLabel = (i:number)=>(['甲','乙','丙'][i]||String(i));
+          const startSeat = (typeof bidStartSeat==='number' && isFinite(bidStartSeat)) ? ((bidStartSeat%3)+3)%3 : ((round-1)%3);
+          const hands3: string[][] = Array.isArray(ev.hands)? ev.hands : [[],[],[]];
+          const bottom3: string[] = Array.isArray(ev.bottom)? ev.bottom : [];
+          // Show bottom explicitly
+          writeLine(res, { type:'bottom', cards: bottom3 });
+          // Heuristic score: weights for ranks + bonus for pairs/trips/quads
+          const normRank = (c:string)=>{
+            if (c==='x'||c==='X') return c;
+            const r = c.replace(/[♠♥♦♣]/g,'').replace(/10/i,'T').toUpperCase();
+            return (r==='JOKER' || r==='X' || r==='Y') ? 'X' : r;
+          };
+          const countRanks = (arr:string[])=>{
+            const m: Record<string,number> = {};
+            for (const c of arr) { const r=normRank(c); m[r]=(m[r]||0)+1; }
+            return m;
+          };
+          const scoreFor = (hand:string[], bottom:string[])=>{
+            const all = [...hand, ...bottom];
+            const cnt = countRanks(all);
+            let s = 0;
+            const W: Record<string,number> = { 'X':9, '2':6, 'A':5, 'K':4, 'Q':3, 'J':2, 'T':1 };
+            for (const r in cnt) s += (W[r]||0)*cnt[r];
+            for (const r in cnt) { const c=cnt[r]; if (c>=4) s+=6; else if (c===3) s+=4; else if (c===2) s+=2; }
+            return s;
+          };
+          const passed = new Set<number>();
+          let calledSeat: number|null = null;
+          let bestSeat: number|null = null;
+          let robCount = 0;
+          const nextActive = (x:number)=>{ for(let k=1;k<=3;k++){ const y=(x+k)%3; if(!passed.has(y)) return y; } return x; };
+          let cur = startSeat;
+          let steps = 0;
+          writeLine(res, { type:'bid-start', startSeat });
+          while (steps < 12) {
+            steps++;
+            if (passed.has(cur)) { cur = nextActive(cur); continue; }
+            const canCall = (calledSeat==null);
+            const canRob  = (calledSeat!=null);
+            const sc = scoreFor(hands3[cur]||[], bottom3);
+            let action:'call'|'rob'|'pass' = 'pass';
+            if (canCall) action = (sc>=20 ? 'call':'pass'); else action = (sc>=24 ? 'rob':'pass');
+            writeLine(res, { type:'bid', seat:cur, action });
+            if (action==='call') { calledSeat = cur; bestSeat = cur; }
+            else if (action==='rob') { if (bestSeat !== cur) { bestSeat = cur; robCount++; writeLine(res, { type:'event', kind:'rob', rob:true, seat:cur }); } }
+            else { passed.add(cur); }
+            if (calledSeat!=null) { const active=[0,1,2].filter(i=>!passed.has(i)); if (active.length<=1) break; }
+            else if (passed.size>=3) break;
+            cur = nextActive(cur);
+          }
+          if (calledSeat==null) {
+            const nextStart = (startSeat + 1) % 3;
+            writeLine(res, { type:'redeal', tried:1, reason:'nobody-called', nextStart });
+            // 注意：这里仅记录日志，不改变引擎本局的发牌与地主；后续仍以引擎的 landlordIdx 进行对局。
+          } else {
+            writeLine(res, { type:'bid-result', landlord: (bestSeat as number), tried:1, robCount });
+          }
+        }
+      } catch(e) { writeLine(res, { type:'log', message: '【后端】竞拍阶段错误：' + (e as any)?.message }); }
+    (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
       continue;
     }
@@ -569,9 +545,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore, rob: !!body.rob, bidStartSeat: Number.isFinite(body.bidStartSeat)? Number(body.bidStartSeat)%3 : ((round-1)%3) }, res, round);
-
-      writeLine(res, { type:'event', kind:'round-end', round });
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore, rob: !!body.rob, bidStartSeat: Number.isFinite((body as any).bidStartSeat) ? (Number((body as any).bidStartSeat)%3+3)%3 : ((round-1)%3) }, res, round);
+writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
   } catch (e:any) {

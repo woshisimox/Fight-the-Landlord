@@ -1673,11 +1673,7 @@ nextTotals     = [
               }
 
               // -------- 文本日志 --------
-              if (m.type === 'redeal') {
-                const __ns = (typeof m.nextStart==='number') ? (['甲','乙','丙'][m.nextStart]||m.nextStart) : '未知';
-                nextLog = [...nextLog, `【流拍】第 ${m.tried} 次，重新起牌；下一轮起始家：${__ns}`];
-                continue;
-              } else if (m.type === 'log' && typeof m.message === 'string') {
+              if (m.type === 'log' && typeof m.message === 'string') {
                 nextLog = [...nextLog, rewrite(m.message)];
                 continue;
               }
@@ -1696,9 +1692,15 @@ nextTotals     = [
       }
 
           if (dogId) { try { clearInterval(dogId); } catch {} }
-    setLog(l => [...l, `—— 本局流结束 ——`]);
-    setAllLogs(prev => [...prev, ...logRef.current, `\n--- End of Round ${labelRoundNo} ---\n`]);
-    };
+    setLog((l:any)=>{
+  const __snapshot = [...(Array.isArray(l)?l:[]), `—— 本局流结束 ——`];
+  (logRef as any).current = __snapshot;
+  setAllLogs((prev:any)=>[...(Array.isArray(prev)?prev:[]), ...__snapshot, `
+--- End of Round ${labelRoundNo} ---
+`]);
+  return __snapshot;
+});
+};
 
     try {
       for (let i = 0; i < props.rounds; i++) {
