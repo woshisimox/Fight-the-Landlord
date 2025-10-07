@@ -344,7 +344,6 @@ async function runOneRoundWithGuard(
     }
   };
 
-let __HANDS_AT_INIT: string[][] = [];
 for await (const ev of (iter as any)) {
     // 初始发牌/地主
     if (!sentInit && ev?.type==='init') {
@@ -358,45 +357,37 @@ for await (const ev of (iter as any)) {
         bottom: ev.bottom, 
         hands: ev.hands 
       });
-      __HANDS_AT_INIT = Array.isArray(ev.hands) ? ev.hands as string[][] : [];
-
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
-      continue;
-
-// —— 拦截“抢/不抢”日志并同步发出 bid-score ——
-if (ev?.type==='log' && typeof ev.message === 'string') {
-  // 文本形式的内部叫牌决策，转为结构化事件
-  try {
-    const m = ev.message.match(/【BID】\s*seat=(\d+)\s*score=([\-\d\.]+)\s*thr=([\-\d\.]+)\s*take=(true|false)\s*(.*)?/);
-    if (m) {
-      const seat = Number(m[1]); const score = Number(m[2]); const threshold = Number(m[3]); const take = (m[4]==='true');
-      const features = (m[5]||'').trim();
-      writeLine(res, { type:'event', kind:'bid-decision', seat, score, threshold, take, features });
-    }
-  } catch {}
-  
-  try {
-    const m = ev.message.match(/([甲乙丙])\s*(抢地主|不抢)/);
-    if (m) {
-      const seatMap: any = { '甲':0, '乙':1, '丙':2 };
-      const s = seatMap[m[1]];
-      const hand = (Array.isArray(__HANDS_AT_INIT?.[s])) ? __HANDS_AT_INIT[s] : [];
-      const sc = __computeBidScore(hand);
-      writeLine(res, { type:'event', kind:'bid-score', seat: s, score: sc });
-    }
-  } catch {}
-  writeLine(res, ev);
-  continue;
-}
-
-    }
-
-    // 拦截引擎原生的 internal bid decision 事件（若引擎发出）
-    if (ev?.type==='event' && ev?.kind==='bid-decision') {
-      // 期望结构：{ type:'event', kind:'bid-decision', seat, score, threshold, take, features? }
-      writeLine(res, ev);
-      continue;
+      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
+try {
+  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
+  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
+  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
+  let extraMult = 1;
+  const decideExtraDouble = (seat:number)=>{
+    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
+    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
+    const cnt = __count(all);
+    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
+    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
+    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
+    if (role==='landlord') return hasBomb;
+    return (hasRocket || hasBomb);
+  };
+  for (let k=0;k<3;k++){
+    const s=(landlordIdx + k) % 3;
+    const will = decideExtraDouble(s);
+    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
+    if (will) extraMult *= 2;
+  }
+  if (extraMult > 1) {
+    // 同步一次倍数（可被前端用于兜底校准）
+    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
+  }
+} catch {}
+continue;
     }
 
     // 兼容两种出牌事件：turn 或 event:play
@@ -417,7 +408,35 @@ if (ev?.type==='log' && typeof ev.message === 'string') {
         score: (lastScore[seat] ?? undefined), 
         totals 
       });
-      continue;
+      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
+try {
+  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
+  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
+  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
+  let extraMult = 1;
+  const decideExtraDouble = (seat:number)=>{
+    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
+    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
+    const cnt = __count(all);
+    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
+    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
+    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
+    if (role==='landlord') return hasBomb;
+    return (hasRocket || hasBomb);
+  };
+  for (let k=0;k<3;k++){
+    const s=(landlordIdx + k) % 3;
+    const will = decideExtraDouble(s);
+    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
+    if (will) extraMult *= 2;
+  }
+  if (extraMult > 1) {
+    // 同步一次倍数（可被前端用于兜底校准）
+    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
+  }
+} catch {}
+continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
       const { seat, move, cards } = ev;
@@ -472,29 +491,6 @@ if (ev?.type==='log' && typeof ev.message === 'string') {
 }
 
 /* ========== HTTP 处理 ========== */
-
-// 叫牌评分（轻量启发，用于日志回填/事件）
-function __computeBidScore(hand: string[]): number {
-  try {
-    const rank = (c:string)=>{
-      if (!c) return '';
-      // 兼容花色/🃏前缀；把Y视为小王x
-      let r = c.startsWith('🃏') ? (c.slice(2)||'X') : (c.replace(/^.*?([A2-9TJQKXxYy])$/,'$1'));
-      if (!r) return '';
-      if (r==='Y' || r==='y') r='x';
-      return r.toUpperCase();
-    };
-    const cnt = new Map<string,number>();
-    for (const c of (hand||[])) { const r = rank(c); if (!r) continue; cnt.set(r,(cnt.get(r)||0)+1); }
-    const hasRocket = (cnt.get('X')||0)>=1 && (cnt.get('x')||0)>=1;
-    let bombs = 0; for (const v of cnt.values()) if (v===4) bombs++;
-    const highSingles = ['A','K','Q','X','x'].reduce((s,r)=> s + (cnt.get(r)||0), 0);
-    const triples = Array.from(cnt.values()).filter(v=>v===3).length;
-    const score = (hasRocket?12:0) + bombs*9 + triples*3 + highSingles*1.2;
-    return Math.round(score*100)/100;
-  } catch { return 0; }
-}
-
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method Not Allowed' });

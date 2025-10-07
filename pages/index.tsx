@@ -619,35 +619,6 @@ function LivePanel(props: LiveProps) {
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [log, setLog] = useState<string[]>([]);
-
-// —— 叫牌评分（前端复算，用于“抢/不抢”行内联补全） ——
-const computeBidScore = (hand: string[]): number => {
-  try {
-    const rank = (c:string)=>{
-      if (!c) return '';
-      // 兼容花色符号或🃏前缀的表示；把🃏Y标准化为小王 'x'
-      let r = c.startsWith('🃏') ? (c.slice(2)||'X') : (c.replace(/^.*?([A2-9TJQKXxYy])$/,'$1'));
-      if (!r) return '';
-      if (r==='Y' || r==='y') r='x';
-      return (r||'').toUpperCase();
-    };
-    const cnt = new Map<string,number>();
-    for (const c of (hand||[])) { const r = rank(c); if (!r) continue; cnt.set(r,(cnt.get(r)||0)+1); }
-    const hasRocket = (cnt.get('X')||0)>=1 && (cnt.get('x')||0)>=1;
-    let bombs = 0; for (const v of cnt.values()) if (v===4) bombs++;
-    const highSingles = ['A','K','Q','X','x'].reduce((s,r)=> s + (cnt.get(r)||0), 0);
-    const triples = Array.from(cnt.values()).filter(v=>v===3).length;
-    const score = (hasRocket?12:0) + bombs*9 + triples*3 + highSingles*1.2;
-    return Math.round(score*100)/100;
-  } catch { return 0; }
-};
-// —— 待补全的“叫牌评分”行索引映射（seat -> index[]） ——
-const pendingBidLineIdxRef = useRef<{[seat:number]: number[]}>({0:[],1:[],2:[]});
-// —— 引擎内部叫牌决策（每局三家） ——
-const [bidDecisionRound, setBidDecisionRound] = useState<{score:number|null, threshold:number|null, take:boolean|null, features?:string}[]>([{score:null,threshold:null,take:null},{score:null,threshold:null,take:null},{score:null,threshold:null,take:null}]);
-const [bidDecisionHistory, setBidDecisionHistory] = useState<{score:number|null, threshold:number|null, take:boolean|null, features?:string}[][]>([]);
-
-
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
@@ -1386,7 +1357,6 @@ for (const raw of batch) {
 
               // -------- 事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
-  bidDecisionRound && setBidDecisionRound([{score:null,threshold:null,take:null},{score:null,threshold:null,take:null},{score:null,threshold:null,take:null}]);
                 // 清空上一局残余手牌/出牌；等待 init/hands 再填充
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
@@ -1396,7 +1366,6 @@ for (const raw of batch) {
                 continue;
               }
               if (m.type === 'event' && m.kind === 'round-end') {
-  setBidDecisionHistory(h => [...h, (bidDecisionRound||[{score:null,threshold:null,take:null},{score:null,threshold:null,take:null},{score:null,threshold:null,take:null}])]);
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
                 const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
@@ -1435,25 +1404,6 @@ for (const raw of batch) {
                   try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
                   lastReasonRef.current = [null, null, null];
                 }
-                
-// —— 回填叫牌评分（将发牌前记录的“抢/不抢”行补上分数） ——
-try {
-  const mp = (pendingBidLineIdxRef.current||{}) as any;
-  for (const seat of [0,1,2]) {
-    const idxs = mp[seat] as number[] || [];
-    if (!idxs.length) continue;
-    const h = (nextHands && (nextHands as any)[seat]) ? (nextHands as any)[seat] as string[] : null;
-    if (!h || !h.length) continue;
-    const sc = computeBidScore(h);
-    for (const k of idxs) {
-      if (typeof nextLog[k] === 'string' && !/叫牌评分=/.test(nextLog[k])) {
-        nextLog[k] = `${nextLog[k]} ｜ 叫牌评分=${sc.toFixed(2)}`;
-      }
-    }
-    mp[seat] = [];
-  }
-} catch {}
-
                 continue;
               }
 
@@ -1508,34 +1458,29 @@ try {
                 continue;
               }
 
-              
-// -------- 抢/不抢 --------
-if (m.type === 'event' && m.kind === 'rob') {
+              // -------- 抢/不抢 --------
+              if (m.type === 'event' && m.kind === 'rob') {
   if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
+                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
+                continue;
+              }
 
-  const lineBase = `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`;
-  const idxLine = nextLog.length;
-  let line = lineBase;
-
-  // 若已知该座位手牌，则即时计算评分；否则记录索引，待 init 后回填
-  try {
-    const h = (nextHands && Array.isArray((nextHands as any)[m.seat])) ? (nextHands as any)[m.seat] as string[] : null;
-    if (h && h.length) {
-      const sc = computeBidScore(h);
-      line = `${lineBase} ｜ 叫牌评分=${sc.toFixed(2)}`;
-    } else {
-      (pendingBidLineIdxRef.current[m.seat] ||= []).push(idxLine);
-    }
-  } catch {
-    (pendingBidLineIdxRef.current[m.seat] ||= []).push(idxLine);
-  }
-
-  nextLog = [...nextLog, line];
+              // -------- 明牌后额外加倍 --------
+// -------- 倍数校准（兜底） --------
+if (m.type === 'event' && m.kind === 'multiplier-sync') {
+  const cur = Math.max(1, (nextMultiplier || 1));
+  const mlt = Math.max(1, Number(m.multiplier || 1));
+  nextMultiplier = Math.max(cur, mlt);
+  nextLog = [...nextLog, `倍数校准为 ${nextMultiplier}`];
   continue;
 }
 
-
-              // -------- 起新墩 --------
+if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double')) {
+  if (m.do) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
+  nextLog = [...nextLog, `${seatName(m.seat)} ${m.do ? '加倍' : '不加倍'}（明牌后）`];
+  continue;
+}
+// -------- 起新墩 --------
               if (m.type === 'event' && m.kind === 'trick-reset') {
                 nextLog = [...nextLog, '一轮结束，重新起牌'];
                 nextPlays = [];
@@ -1742,81 +1687,11 @@ nextTotals     = [
                 continue;
               }
 
-              // -------- 引擎内部叫牌决策（bid-decision） --------
-if (m.type === 'event' && m.kind === 'bid-decision') {
-  const seat = Number(m.seat);
-  const sc = (typeof m.score==='number') ? m.score : Number(m.score||0);
-  const thr = (typeof m.threshold==='number') ? m.threshold : Number(m.threshold||0);
-  const take = (typeof m.take==='boolean') ? m.take : (m.take===true || m.take==='true');
-  const features = (m.features && String(m.features)) || undefined;
-
-  setBidDecisionRound(prev => {
-    const a = [...prev];
-    a[seat] = { score: isFinite(sc)?sc:null, threshold: isFinite(thr)?thr:null, take: take, features };
-    return a;
-  });
-
-  // 输出到日志（座位名 + 内部分/阈值/是否抢）
-  const seatN = seatName(seat);
-  const tagTake = (take===true) ? '抢' : (take===false ? '不抢' : '—');
-  let line = `${seatN} 叫牌决策｜internal=${isFinite(sc)?sc.toFixed(2):'NA'}  thr=${isFinite(thr)?thr.toFixed(2):'NA'}  → ${tagTake}`;
-  if (features) line += ` ｜ ${features}`;
-  nextLog = [...nextLog, line];
-  continue;
-}
-
-// -------- 文本日志 --------
-
-// -------- 叫牌评分（事件兜底：若服务端发出 bid-score） --------
-if (m.type === 'event' && m.kind === 'bid-score') {
-  const seat = Number(m.seat);
-  const sc = typeof m.score === 'number' ? m.score : Number(m.score||0) || 0;
-  // 尝试把分数补到最近一条该座位的“抢/不抢”行尾部
-  let patched = false;
-  for (let i = nextLog.length - 1; i >= 0; i--) {
-    const s = nextLog[i];
-    if (typeof s !== 'string') continue;
-    if (s.includes('叫牌评分=')) continue;
-    const tag = seatName(seat) + ' ';
-    if (s.startsWith(tag) && (s.includes('抢地主') || s.includes('不抢'))) {
-      nextLog[i] = `${s} ｜ 叫牌评分=${sc.toFixed(2)}`;
-      patched = true;
-      break;
-    }
-  }
-  if (!patched) {
-    nextLog = [...nextLog, `${seatName(seat)} 叫牌评分 = ${sc.toFixed(2)}`];
-  }
-  continue;
-}
-
-              if (
-m.type === 'log' && typeof m.message === 'string') {
-            const msg = rewrite(m.message);
-            // 若是“甲/乙/丙 抢地主/不抢”日志，则内联叫牌评分
-            const mBid = msg.match(/([甲乙丙])\s*[\u0020\u00A0\u3000]*\s*(抢地主|不抢)/);
-            if (mBid) {
-              const seatMap:Record<string,number> = { '甲':0, '乙':1, '丙':2 };
-              const seat = seatMap[mBid[1]];
-              const idx = nextLog.length;
-              let line = msg;
-              try {
-                const h = (nextHands && Array.isArray((nextHands as any)[seat])) ? (nextHands as any)[seat] as string[] : null;
-                if (h && h.length) {
-                  const sc = computeBidScore(h);
-                  line = `${msg} ｜ 叫牌评分=${sc.toFixed(2)}`;
-                } else {
-                  (pendingBidLineIdxRef.current[seat] ||= []).push(idx);
-                }
-              } catch {
-                (pendingBidLineIdxRef.current[seat] ||= []).push(idx);
+              // -------- 文本日志 --------
+              if (m.type === 'log' && typeof m.message === 'string') {
+                nextLog = [...nextLog, rewrite(m.message)];
+                continue;
               }
-              nextLog = [...nextLog, line];
-            } else {
-              nextLog = [...nextLog, msg];
-            }
-            continue;
-          }
             } catch (e) { console.error('[ingest:batch]', e, raw); }
           }
 
@@ -1885,7 +1760,6 @@ const buildAllBundle = (): AllBundle => {
     trueskill: tsStoreRef.current,
     /* radar excluded */
     ladder,
-    bidDecision: { schema: 'ddz-bid-decision@1', perRound: bidDecisionHistory },
   };
 };
 
