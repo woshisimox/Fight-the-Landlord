@@ -344,6 +344,7 @@ async function runOneRoundWithGuard(
     }
   };
 
+let __HANDS_AT_INIT: string[][] = [];
 for await (const ev of (iter as any)) {
     // 初始发牌/地主
     if (!sentInit && ev?.type==='init') {
@@ -357,9 +358,28 @@ for await (const ev of (iter as any)) {
         bottom: ev.bottom, 
         hands: ev.hands 
       });
+      __HANDS_AT_INIT = Array.isArray(ev.hands) ? ev.hands as string[][] : [];
+
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
       continue;
+
+// —— 拦截“抢/不抢”日志并同步发出 bid-score ——
+if (ev?.type==='log' && typeof ev.message === 'string') {
+  try {
+    const m = ev.message.match(/([甲乙丙])\s*(抢地主|不抢)/);
+    if (m) {
+      const seatMap: any = { '甲':0, '乙':1, '丙':2 };
+      const s = seatMap[m[1]];
+      const hand = (Array.isArray(__HANDS_AT_INIT?.[s])) ? __HANDS_AT_INIT[s] : [];
+      const sc = __computeBidScore(hand);
+      writeLine(res, { type:'event', kind:'bid-score', seat: s, score: sc });
+    }
+  } catch {}
+  writeLine(res, ev);
+  continue;
+}
+
     }
 
     // 兼容两种出牌事件：turn 或 event:play
@@ -435,6 +455,29 @@ for await (const ev of (iter as any)) {
 }
 
 /* ========== HTTP 处理 ========== */
+
+// 叫牌评分（轻量启发，用于日志回填/事件）
+function __computeBidScore(hand: string[]): number {
+  try {
+    const rank = (c:string)=>{
+      if (!c) return '';
+      // 兼容花色/🃏前缀；把Y视为小王x
+      let r = c.startsWith('🃏') ? (c.slice(2)||'X') : (c.replace(/^.*?([A2-9TJQKXxYy])$/,'$1'));
+      if (!r) return '';
+      if (r==='Y' || r==='y') r='x';
+      return r.toUpperCase();
+    };
+    const cnt = new Map<string,number>();
+    for (const c of (hand||[])) { const r = rank(c); if (!r) continue; cnt.set(r,(cnt.get(r)||0)+1); }
+    const hasRocket = (cnt.get('X')||0)>=1 && (cnt.get('x')||0)>=1;
+    let bombs = 0; for (const v of cnt.values()) if (v===4) bombs++;
+    const highSingles = ['A','K','Q','X','x'].reduce((s,r)=> s + (cnt.get(r)||0), 0);
+    const triples = Array.from(cnt.values()).filter(v=>v===3).length;
+    const score = (hasRocket?12:0) + bombs*9 + triples*3 + highSingles*1.2;
+    return Math.round(score*100)/100;
+  } catch { return 0; }
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method Not Allowed' });
