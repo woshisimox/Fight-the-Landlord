@@ -313,6 +313,8 @@ async function runOneRoundWithGuard(
   const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
   let currentHands: string[][] = [[],[],[]];
+  let currentChoices: string[] = [];
+  let currentHands: string[][] = [[],[],[]];
 
   // 画像统计
   let landlordIdx: number = -1;
@@ -492,7 +494,7 @@ continue;
 if (ev?.type==='event' && ev?.kind==='rob') {
   try {
     const hand = Array.isArray(currentHands?.[ev.seat]) ? currentHands[ev.seat] : null;
-    const choice = (seatSpecs?.[ev.seat]?.choice) || '';
+    const choice = (currentChoices?.[ev.seat]) || '';
     let sc:number|undefined = undefined;
     if (hand && choice) {
       if (choice==='built-in:greedy-max') sc = GreedyMaxBidScore(hand as any);
