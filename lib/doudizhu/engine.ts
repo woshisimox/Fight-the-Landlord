@@ -1112,7 +1112,37 @@ export async function* runOneGame(opts: {
     for (let s=0;s<3;s++) {
       const rob = wantRob(hands[s]);
       const sc = evalRobScore(hands[s]); yield { type:'event', kind:'rob', seat:s, rob, score: sc };
-      if (rob) {
+      
+// ---- compute threshold (__th) for this seat (built-ins + external AI) ----
+const __thMap: Record<string, number> = {
+  greedymax: 1.6,
+  allysupport: 1.8,
+  randomlegal: 2.0,
+  endgamerush: 2.1,
+  mininet: 2.2,
+  greedymin: 2.4,
+};
+const __thMapChoice: Record<string, number> = {
+  'built-in:greedy-max':   1.6,
+  'built-in:ally-support': 1.8,
+  'built-in:random-legal': 2.0,
+  'built-in:endgame-rush': 2.1,
+  'built-in:mininet':      2.2,
+  'built-in:greedy-min':   2.4,
+  'external':              2.2,
+  'external:ai':           2.2,
+  'external:http':         2.2,
+  'ai':                    2.2,
+  'http':                  2.2,
+  'openai':                2.2,
+  'gpt':                   2.2,
+  'claude':                2.2,
+};
+const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
+const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
+const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
+// -------------------------------------------------------------------------
+if (rob) {
         __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
         last = s;
