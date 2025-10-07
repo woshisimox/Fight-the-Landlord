@@ -655,6 +655,10 @@ const pendingBidLineIdxRef = useRef<{[seat:number]: number[]}>({0:[],1:[],2:[]})
   const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
 
   const [roundLords, setRoundLords] = useState<number[]>([]);
+  // 叫牌评分：当局缓存与历史
+  const [bidScoresRound, setBidScoresRound] = useState<(number|null)[]>([null,null,null]);
+  const [bidScoresHistory, setBidScoresHistory] = useState<(number|null)[][]>([]);
+
 
   /* ====== 评分统计（每局） ====== */
   type SeatStat = { rounds:number; overallAvg:number; lastAvg:number; best:number; worst:number; mean:number; sigma:number };
@@ -1387,11 +1391,18 @@ for (const raw of batch) {
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
 
+                // 重置当局叫牌评分缓存
+                setBidScoresRound([null,null,null]);
+
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
               }
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
+
+                // 记录当局叫牌评分 -> 历史，并为下一局重置
+                setBidScoresHistory(hist => [...hist, (bidScoresRound || [null,null,null]).slice(0,3)]);
+                setBidScoresRound([null,null,null]);
                 const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
                 continue;
@@ -1516,6 +1527,7 @@ if (m.type === 'event' && m.kind === 'rob') {
     const h = (nextHands && Array.isArray((nextHands as any)[m.seat])) ? (nextHands as any)[m.seat] as string[] : null;
     if (h && h.length) {
       const sc = computeBidScore(h);
+      setBidScoresRound(prev => { const a=[...prev]; a[m.seat]=sc; return a; });
       line = `${lineBase} ｜ 叫牌评分=${sc.toFixed(2)}`;
     } else {
       (pendingBidLineIdxRef.current[m.seat] ||= []).push(idxLine);
@@ -1742,7 +1754,9 @@ nextTotals     = [
 if (m.type === 'event' && m.kind === 'bid-score') {
   const seat = Number(m.seat);
   const sc = typeof m.score === 'number' ? m.score : Number(m.score||0) || 0;
-  // 尝试把分数补到最近一条该座位的“抢/不抢”行尾部
+    // 记录当局叫牌评分
+  setBidScoresRound(prev => { const a=[...prev]; a[seat]=sc; return a; });
+// 尝试把分数补到最近一条该座位的“抢/不抢”行尾部
   let patched = false;
   for (let i = nextLog.length - 1; i >= 0; i--) {
     const s = nextLog[i];
@@ -1775,6 +1789,7 @@ m.type === 'log' && typeof m.message === 'string') {
                 const h = (nextHands && Array.isArray((nextHands as any)[seat])) ? (nextHands as any)[seat] as string[] : null;
                 if (h && h.length) {
                   const sc = computeBidScore(h);
+                  setBidScoresRound(prev => { const a=[...prev]; a[seat]=sc; return a; });
                   line = `${msg} ｜ 叫牌评分=${sc.toFixed(2)}`;
                 } else {
                   (pendingBidLineIdxRef.current[seat] ||= []).push(idx);
@@ -1839,7 +1854,14 @@ type AllBundle = {
   identities: string[];
   trueskill?: TsStore;
   /* radar?: RadarStore;  // disabled */
-  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+  ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> 
+  // 叫牌评分存档（每局三家）
+  bids?: {
+    schema: 'ddz-bids@1';
+    perRound: (number|null)[][];
+    lords?: number[];
+  };
+};
 };
 
 const buildAllBundle = (): AllBundle => {
@@ -1856,7 +1878,13 @@ const buildAllBundle = (): AllBundle => {
     trueskill: tsStoreRef.current,
     /* radar excluded */
     ladder,
-  };
+  
+    bids: {
+      schema: 'ddz-bids@1',
+      perRound: bidScoresHistory,
+      lords: roundLords,
+    },
+};
 };
 
 const applyAllBundleInner = (obj:any) => {

@@ -409,7 +409,20 @@ if (ev?.type==='log' && typeof ev.message === 'string') {
       continue;
     }
 
-    // 兼容多种"结果"别名
+    
+    // 新增：结构化抢/不抢事件也产出 bid-score
+    if (ev?.type==='event' && ev?.kind==='rob') {
+      try {
+        const s = Number((ev as any).seat);
+        const hand: string[] = (Array.isArray(__HANDS_AT_INIT?.[s])) ? __HANDS_AT_INIT[s] : [];
+        const sc = __computeBidScore(hand || []);
+        writeLine(res, { type:'event', kind:'bid-score', seat: s, score: sc });
+      } catch {}
+      writeLine(res, ev);
+      continue;
+    }
+
+// 兼容多种"结果"别名
     const isResultLike =
       (ev?.type==='result') ||
       (ev?.type==='event' && (ev.kind==='win' || ev.kind==='result' || ev.kind==='game-over' || ev.kind==='game_end')) ||
