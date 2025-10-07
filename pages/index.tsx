@@ -2002,9 +2002,7 @@ const handleAllSaveInner = () => {
       onClick={() => { try { const lines = [
   ...(((allLogsRef && allLogsRef.current) ? allLogsRef.current : []) as string[]),
   ...(((logRef && logRef.current) ? logRef.current : []) as string[]),
-  '
---- End of Round (buffer flush) ---
-',
+  '\\n--- End of Round (buffer flush) ---\\n',
 ]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
       style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >存档</button>
