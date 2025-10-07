@@ -1461,9 +1461,17 @@ for (const raw of batch) {
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'rob') {
   if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
-                const sc = (typeof (m as any).score === 'number') ? `｜score=${(m as any).score.toFixed(2)}` : '';
-                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}${sc}`];
+                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
                 continue;
+              // -------- 第二轮比差（增量翻倍 + 可视化） --------
+              if (m.type === 'event' && m.kind === 'rob2') {
+                const mm = Math.max(1, Number(m.mult || 0));
+                nextMultiplier = isFinite(mm) && mm > 0 ? mm : Math.max(1, (nextMultiplier || 1) * 2);
+                const margin = (typeof m.margin === 'number') ? m.margin : Number(m.margin || 0);
+                nextLog = [...nextLog, `${seatName(m.seat)} 二轮比差｜margin=${margin.toFixed(2)}｜x${nextMultiplier}`];
+                continue;
+              }
+
               }
 
               // -------- 明牌后额外加倍 --------
