@@ -1068,6 +1068,7 @@ const pendingBidLineIdxRef = useRef<{[seat:number]: number[]}>({0:[],1:[],2:[]})
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
+  const robDecidedRef = useRef<boolean[]>([false,false,false]);
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
