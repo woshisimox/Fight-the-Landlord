@@ -2079,3 +2079,14 @@ const handleAllSaveInner = () => {
     const a     = document.createElement('a'); a.href = url; a.download = `run-log_${now}.txt`; a.click();
     setTimeout(()=>URL.revokeObjectURL(url),1200);
 } catch(e){ console.error('[runlog] save error', e); } }}
+>存档</button>
+  </div>
+
+  <div style={{ border:'1px solid #eee', borderRadius:12, padding:10, maxHeight:240, overflow:'auto' }}>
+    {log.map((l, i) => <LogLine key={i} text={l} />)}
+  </div>
+</Section>
+
+    </div>
+  );
+}
