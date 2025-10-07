@@ -368,8 +368,8 @@ for await (const ev of (iter as any)) {
         if (typeof landlordIdx === 'number' && landlordIdx >= 0) {
           for (let ss = 0; ss < 3; ss++) {
             try {
-              const hand = (Array.isArray(__HANDS_AT_INIT?.[ss])) ? __HANDS_AT_INIT[ss] : [];
-              const sc = __computeBidScore(hand || []);
+              const hand = (Array.isArray(__HANDS_AT_INIT?.[ss]) && (__HANDS_AT_INIT[ss]?.length>0)) ? __HANDS_AT_INIT[ss] : null;
+              if (hand) { const sc = __computeBidScore(hand); writeLine(res, { type:'event', kind:'bid-score', seat: ss, score: sc, synthetic: true }); }
               writeLine(res, { type:'event', kind:'bid-score', seat: ss, score: sc, synthetic: true });
             } catch {}
             writeLine(res, { type:'event', kind:'rob', seat: ss, rob: ss === landlordIdx, synthetic: true });
