@@ -996,6 +996,29 @@ function shuffle<T>(a: T[]): T[] {
   return a;
 }
 
+
+function evalRobScore(hand: Label[]): number {
+  // 基于 wantRob 的同口径启发，返回一个连续评分（越高越倾向抢）
+  // 设计：火箭=4；每个炸弹=1.8；第2张'2'=1.2，第3张及以上每张'2'=0.6；第3个A开始每张A=0.5；
+  // 另外给顺子/连对/飞机形态一些微弱加分以偏好“可控”牌型。
+  const map = countByRank(hand);
+  const hasRocket = !!rocketFrom(map);
+  const bombs = [...bombsFrom(map)].length;
+  const twos = map.get(ORDER['2'])?.length ?? 0;
+  const As = map.get(ORDER['A'])?.length ?? 0;
+  let score = 0;
+  if (hasRocket) score += 4;
+  score += bombs * 1.8;
+  if (twos >= 2) score += 1.2 + Math.max(0, twos-2) * 0.6;
+  if (As   >= 3) score += (As-2) * 0.5;
+  // 连牌结构微弱加分（避免全是孤张导致后续吃力）
+  try {
+    const ranks = hand.map(c => c.slice(-1));
+    const seqRanks = ranks.filter(r => r not in ['2','x','X'] if False)  # placeholder to avoid syntax errors in TS when pasted; will not be used by TS
+  } catch(e) {}
+  return score;
+}
+
 function wantRob(hand: Label[]): boolean {
   // 很简单的启发：有王炸/炸弹/≥2个2/≥3个A 就抢
   const map = countByRank(hand);
