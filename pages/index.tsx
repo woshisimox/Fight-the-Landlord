@@ -37,9 +37,6 @@ const I18N: Record<Lang, Record<string, string>> = {
 };
 
 function useI18n() {
-
-
-
   const lang = useContext(LangContext);
   const t = (key: string, vars: Record<string, any> = {}) => {
     let s = (I18N[lang]?.[key] ?? I18N.zh[key] ?? key);
@@ -305,6 +302,26 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
     r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + TS_TAU*TS_TAU);
   }
 }
+/** Variant with explicit tau control (used when expanding one hand into multiple pseudo-rounds). */
+function tsUpdateTwoTeamsWithTau(r:Rating[], teamA:number[], teamB:number[], tauOverride:number){
+  const varA = teamA.reduce((s,i)=>s+r[i].sigma**2,0), varB = teamB.reduce((s,i)=>s+r[i].sigma**2,0);
+  const muA  = teamA.reduce((s,i)=>s+r[i].mu,0),     muB  = teamB.reduce((s,i)=>s+r[i].mu,0);
+  const c2   = varA + varB + 2*TS_BETA*TS_BETA;
+  const c    = Math.sqrt(c2);
+  const t    = (muA - muB) / c;
+  const v = V_exceeds(t), w = W_exceeds(t);
+  for (const i of teamA) {
+    const sig2=r[i].sigma**2, mult=sig2/c, mult2=sig2/c2;
+    r[i].mu += mult*v;
+    r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + tauOverride*tauOverride);
+  }
+  for (const i of teamB) {
+    const sig2=r[i].sigma**2, mult=sig2/c, mult2=sig2/c2;
+    r[i].mu -= mult*v;
+    r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + tauOverride*tauOverride);
+  }
+}
+
 
 /* ===== TrueSkill 本地存档（新增） ===== */
 type TsRole = 'landlord'|'farmer';
@@ -1155,46 +1172,6 @@ const handleScoreRefresh = () => {
 const [allLogs, setAllLogs] = useState<string[]>([]);
 const allLogsRef = useRef(allLogs);
 useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
-
-  /** 确保导出日志中包含当前最后一局；若缺失则基于当前状态临时补一行（仅用于导出，不改UI状态） */
-  const ensureLastRoundLogged = (): string[] => {
-    try {
-      const full  = (allLogsRef?.current || []) as string[];
-      const curr  = (logRef?.current  || []) as string[];
-
-      const labelRoundNo =
-        (typeof nextRoundIndex !== 'undefined' && (nextRoundIndex as any) !== null) ? ((nextRoundIndex as any) + 1) :
-        (Array.isArray(nextHands) ? nextHands.length : (Array.isArray(nextScores) ? nextScores.length : 0));
-
-      const combined = [...full, ...curr];
-      const already = combined.some(line => line.includes(`【回合 ${labelRoundNo}】`));
-      if (already) return combined;
-
-      const L = Number(landlordRef.current ?? nextLandlord ?? 0);
-      const d = Array.isArray(deltaRef.current) ? (deltaRef.current as [number,number,number]) :
-                Array.isArray(nextDelta) ? (nextDelta as [number,number,number]) : [0,0,0];
-      const dsNow = [ d[(0+L)%3], d[(1+L)%3], d[(2+L)%3] ] as [number,number,number];
-
-      const totals = totalsRef.current || nextTotals || [0,0,0];
-      const totalsNow = Array.isArray(totals) ? ([totals[0], totals[1], totals[2]] as [number,number,number]) : [0,0,0];
-      const labelsNow = [0,1,2].map(i => String(agentIdForIndex(i)));
-      const idsNow    = [0,1,2].map(i => String(seatIdentity(i)));
-      const mult = Number(multiplierRef.current ?? nextMultiplier ?? 1);
-      const w = (typeof winnerRef.current === 'number') ? winnerRef.current :
-                (typeof nextWinner === 'number') ? nextWinner : null;
-
-      const roundLine = formatRoundSummary({
-        idx: labelRoundNo, L, winner: w, mult,
-        ds: dsNow, totals: totalsNow, labels: labelsNow, ids: idsNow,
-      });
-      return [...combined, roundLine];
-    } catch {
-      const full  = (allLogsRef?.current || []) as string[];
-      const curr  = (logRef?.current  || []) as string[];
-      return [...full, ...curr];
-    }
-  };
-
 const start = async () => {
     if (running) return;
     if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
@@ -1641,28 +1618,47 @@ nextTotals     = [
                     const c = Math.sqrt(vA + vB);
                     return Phi( (muA - muB) / c );
                   };
-                  const mag = Math.max(Math.abs(ds[0]||0), Math.abs(ds[1]||0), Math.abs(ds[2]||0));
-                  const base = 20, cap = 3, gamma = 1;
-                  const weight = 1 + gamma * Math.min(cap, mag / base);
+                  
+                  // === 以“分差等效多局”更新 ===
+                  const rawS = Number((Array.isArray(ds) && typeof ds[0] === 'number') ? ds[0] : 0); // 地主分差（正=地主赢；负=农民赢）
+                  const Smax = 8;                         // 单手影响上限
+                  const mTimes = Math.max(1, Math.min(Smax, Math.abs(Math.round(rawS))));
+
+                  // —— 更新 Ladder（把权重=等效局数 mTimes）——
                   for (let i=0;i<3;i++) {
                     const sWinTeam = teamWin(i) ? 1 : 0;
                     const pExpTeam = teamP(i);
-                    const scale    = (i === L) ? 1 : 0.5;  // 地主记一份，两个农民各记半份
+                    const scale    = (i === L) ? 1 : 0.5;  // 地主记一份，两个农民各半份
                     const id = seatIdentity(i);
                     const label = agentIdForIndex(i);
-                    ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, weight);
+                    ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, mTimes);
                   }
                 } catch {}
 // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
                 {
                   const updated = tsRef.current.map(r => ({ ...r }));
                   const farmers = [0,1,2].filter(s => s !== L);
-                  const landlordDelta = ds[0] ?? 0;
-                  const landlordWin = (nextWinner === L) || (landlordDelta > 0);
-                  if (landlordWin) tsUpdateTwoTeams(updated, [L], farmers);
-                  else             tsUpdateTwoTeams(updated, farmers, [L]);
+
+                  // —— TrueSkill：把一手当成 mTimes 手 ——
+                  if (rawS > 0) {
+                    for (let k=0; k<mTimes; k++) {
+                      const tau = (k === 0) ? TS_TAU : 0;
+                      tsUpdateTwoTeamsWithTau(updated, [L], farmers, tau);
+                    }
+                  } else if (rawS < 0) {
+                    for (let k=0; k<mTimes; k++) {
+                      const tau = (k === 0) ? TS_TAU : 0;
+                      tsUpdateTwoTeamsWithTau(updated, farmers, [L], tau);
+                    }
+                  } else {
+                    // S==0 理论上不该出现（斗地主无平局）；
+                    // 这里选择“不更新”，作为健壮性保护（例如上游消息缺字段时）。
+                    // no-op
+                  }
 
                   setTsArr(updated);
+                  updateStoreAfterRound(updated, L);
+setTsArr(updated);
                   updateStoreAfterRound(updated, L);
 
                   nextLog = [
@@ -2042,7 +2038,7 @@ const handleAllSaveInner = () => {
   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
     <div style={{ fontWeight:700 }}>运行日志</div>
     <button
-      onClick={()=>{ try { const lines=(allLogsRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200); } catch(e) { console.error('[runlog] save error', e); } }}
+      onClick={() => { try { const lines=(allLogsRef.current||[]) as string[]; const ts=new Date().toISOString().replace(/[:.]/g,'-'); const text=lines.length?lines.join('\n'):'（暂无）'; const blob=new Blob([text],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`run-log_${ts}.txt`; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1200);} catch(e){ console.error('[runlog] save error', e); } }}
       style={{ padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
     >存档</button>
   </div>
