@@ -42,7 +42,7 @@ function __bidThresholdFor(botOrChoice: any): number {
   return 1.8; // 默认兜底
 }
 
-export function __decideRobByThreshold(bot: any, hand: Label[]): { rob: boolean; score: number } {
+export function __decideRobByThreshold(bot: any, hand: any[]): { rob: boolean; score: number } {
   const score = evalRobScore(hand);            // 统一口径的 bidScore（不含底牌）
   const th = __bidThresholdFor(bot);
   const rob = Number.isFinite(score) ? (score >= th) : false;
