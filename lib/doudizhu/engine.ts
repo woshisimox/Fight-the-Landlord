@@ -43,9 +43,29 @@ function __bidThresholdFor(botOrChoice: any): number {
 }
 
 export function __decideRobByThreshold(bot: any, hand: any[]): { rob: boolean; score: number } {
-  const score = evalRobScore(hand);            // 统一口径的 bidScore（不含底牌）
+  const score = __sharedBidScore(hand);            // 统一口径的 bidScore（不含底牌）
   const th = __bidThresholdFor(bot);
   const rob = Number.isFinite(score) ? (score >= th) : false;
   return { rob, score };
 }
 
+
+// 统一口径评分：只看各自手牌（不含底牌）
+function __sharedBidScore(hand: any[]): number {
+  try {
+    const map = countByRank(hand as any);
+    const hasRocket = !!rocketFrom(map);
+    let bombs = 0;
+    for (const [, arr] of map as any) if (arr.length === 4) bombs++;
+    const twos = map.get(ORDER['2'])?.length ?? 0;
+    const As   = map.get(ORDER['A'])?.length ?? 0;
+    let score = 0;
+    if (hasRocket) score += 4;
+    score += bombs * 2;
+    if (twos >= 2) score += 1 + Math.max(0, twos - 2) * 0.5;
+    if (As >= 3) score += (As - 2) * 0.4;
+    return score;
+  } catch {
+    return 0;
+  }
+}
