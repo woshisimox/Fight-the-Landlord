@@ -1109,7 +1109,7 @@ export async function* runOneGame(opts: {
     let last = -1;
     for (let s=0;s<3;s++) {
       const rob = wantRob(hands[s]);
-      yield { type:'event', kind:'rob', seat:s, rob };
+      const sc = evalRobScore(hands[s]); yield { type:'event', kind:'rob', seat:s, rob, score: sc };
       if (rob) {
         if (last === -1) {
           last = s; // 叫

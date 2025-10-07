@@ -1461,7 +1461,8 @@ for (const raw of batch) {
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'rob') {
   if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
-                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
+                const sc = (typeof (m as any).score === 'number') ? `｜score=${(m as any).score.toFixed(2)}` : '';
+                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}${sc}`];
                 continue;
               }
 
