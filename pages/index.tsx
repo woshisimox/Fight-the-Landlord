@@ -302,6 +302,26 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
     r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + TS_TAU*TS_TAU);
   }
 }
+/** Variant with explicit tau control (used when expanding one hand into multiple pseudo-rounds). */
+function tsUpdateTwoTeamsWithTau(r:Rating[], teamA:number[], teamB:number[], tauOverride:number){
+  const varA = teamA.reduce((s,i)=>s+r[i].sigma**2,0), varB = teamB.reduce((s,i)=>s+r[i].sigma**2,0);
+  const muA  = teamA.reduce((s,i)=>s+r[i].mu,0),     muB  = teamB.reduce((s,i)=>s+r[i].mu,0);
+  const c2   = varA + varB + 2*TS_BETA*TS_BETA;
+  const c    = Math.sqrt(c2);
+  const t    = (muA - muB) / c;
+  const v = V_exceeds(t), w = W_exceeds(t);
+  for (const i of teamA) {
+    const sig2=r[i].sigma**2, mult=sig2/c, mult2=sig2/c2;
+    r[i].mu += mult*v;
+    r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + tauOverride*tauOverride);
+  }
+  for (const i of teamB) {
+    const sig2=r[i].sigma**2, mult=sig2/c, mult2=sig2/c2;
+    r[i].mu -= mult*v;
+    r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + tauOverride*tauOverride);
+  }
+}
+
 
 /* ===== TrueSkill 本地存档（新增） ===== */
 type TsRole = 'landlord'|'farmer';
@@ -619,13 +639,6 @@ function LivePanel(props: LiveProps) {
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [log, setLog] = useState<string[]>([]);
-  // 统一写日志：console / 当前回合log / 全量log（并同步到 ref）
-  const appendLog = (line: string, opts?: { console?: boolean; toAll?: boolean }) => {
-    if (opts?.console) console.log(line);
-    setLog(prev => { const nl = [...prev, line]; logRef.current = nl; return nl; });
-    if (opts?.toAll) setAllLogs(prev => { const nl = [...prev, line]; allLogsRef.current = nl; return nl; });
-  };
-
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
@@ -1605,28 +1618,47 @@ nextTotals     = [
                     const c = Math.sqrt(vA + vB);
                     return Phi( (muA - muB) / c );
                   };
-                  const mag = Math.max(Math.abs(ds[0]||0), Math.abs(ds[1]||0), Math.abs(ds[2]||0));
-                  const base = 20, cap = 3, gamma = 1;
-                  const weight = 1 + gamma * Math.min(cap, mag / base);
+                  
+                  // === 以“分差等效多局”更新 ===
+                  const rawS = Number((Array.isArray(ds) && typeof ds[0] === 'number') ? ds[0] : 0); // 地主分差（正=地主赢；负=农民赢）
+                  const Smax = 8;                         // 单手影响上限
+                  const mTimes = Math.max(1, Math.min(Smax, Math.abs(Math.round(rawS))));
+
+                  // —— 更新 Ladder（把权重=等效局数 mTimes）——
                   for (let i=0;i<3;i++) {
                     const sWinTeam = teamWin(i) ? 1 : 0;
                     const pExpTeam = teamP(i);
-                    const scale    = (i === L) ? 1 : 0.5;  // 地主记一份，两个农民各记半份
+                    const scale    = (i === L) ? 1 : 0.5;  // 地主记一份，两个农民各半份
                     const id = seatIdentity(i);
                     const label = agentIdForIndex(i);
-                    ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, weight);
+                    ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, mTimes);
                   }
                 } catch {}
 // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
                 {
                   const updated = tsRef.current.map(r => ({ ...r }));
                   const farmers = [0,1,2].filter(s => s !== L);
-                  const landlordDelta = ds[0] ?? 0;
-                  const landlordWin = (nextWinner === L) || (landlordDelta > 0);
-                  if (landlordWin) tsUpdateTwoTeams(updated, [L], farmers);
-                  else             tsUpdateTwoTeams(updated, farmers, [L]);
+
+                  // —— TrueSkill：把一手当成 mTimes 手 ——
+                  if (rawS > 0) {
+                    for (let k=0; k<mTimes; k++) {
+                      const tau = (k === 0) ? TS_TAU : 0;
+                      tsUpdateTwoTeamsWithTau(updated, [L], farmers, tau);
+                    }
+                  } else if (rawS < 0) {
+                    for (let k=0; k<mTimes; k++) {
+                      const tau = (k === 0) ? TS_TAU : 0;
+                      tsUpdateTwoTeamsWithTau(updated, farmers, [L], tau);
+                    }
+                  } else {
+                    // S==0 理论上不该出现（斗地主无平局）；
+                    // 这里选择“不更新”，作为健壮性保护（例如上游消息缺字段时）。
+                    // no-op
+                  }
 
                   setTsArr(updated);
+                  updateStoreAfterRound(updated, L);
+setTsArr(updated);
                   updateStoreAfterRound(updated, L);
 
                   nextLog = [
