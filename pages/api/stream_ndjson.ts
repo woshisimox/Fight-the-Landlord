@@ -85,6 +85,7 @@ function unifiedScore(ctx:any, mv:string[]): number {
   const unseen = new Map<string,number>(Object.entries(BASE) as any);
   const sub=(arr:string[])=>{ for(const c of arr){ const r=__rank(c); unseen.set(r, Math.max(0,(unseen.get(r)||0)-1)); } };
   sub(ctx.hands||[]); sub(seenAll);
+  if (Array.isArray(ctx.knownBottom)) sub(ctx.knownBottom);
   const cnt = __count(mv);
   const isRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1 && mv.length===2;
   const isBomb = Array.from(cnt.values()).some(n=>n===4);
@@ -279,7 +280,7 @@ function traceWrap(
     let result:any;
     const t0 = Date.now();
     try {
-      const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
+      const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] , knownBottom: ((globalThis as any).__DDZ_BOTTOM || []) };
       try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
       result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
     } catch (e:any) {
@@ -359,6 +360,7 @@ for await (const ev of (iter as any)) {
       });
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
+      (globalThis as any).__DDZ_BOTTOM = Array.isArray(ev.bottom) ? ev.bottom : [];
       // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
 try {
   const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
