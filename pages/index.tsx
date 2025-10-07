@@ -625,8 +625,10 @@ const computeBidScore = (hand: string[]): number => {
   try {
     const rank = (c:string)=>{
       if (!c) return '';
-      // 兼容花色符号或🃏前缀的表示
-      const r = c.startsWith('🃏') ? (c.slice(2)||'X') : (c.replace(/^.*?([A2-9TJQKXx])$/,'$1'));
+      // 兼容花色符号或🃏前缀的表示；把🃏Y标准化为小王 'x'
+      let r = c.startsWith('🃏') ? (c.slice(2)||'X') : (c.replace(/^.*?([A2-9TJQKXxYy])$/,'$1'));
+      if (!r) return '';
+      if (r==='Y' || r==='y') r='x';
       return (r||'').toUpperCase();
     };
     const cnt = new Map<string,number>();
@@ -1739,7 +1741,7 @@ nextTotals     = [
 m.type === 'log' && typeof m.message === 'string') {
             const msg = rewrite(m.message);
             // 若是“甲/乙/丙 抢地主/不抢”日志，则内联叫牌评分
-            const mBid = msg.match(/^([甲乙丙])\s*(抢地主|不抢)/);
+            const mBid = msg.match(/([甲乙丙])\s*[\u0020\u00A0\u3000]*\s*(抢地主|不抢)/);
             if (mBid) {
               const seatMap:Record<string,number> = { '甲':0, '乙':1, '丙':2 };
               const seat = seatMap[mBid[1]];
