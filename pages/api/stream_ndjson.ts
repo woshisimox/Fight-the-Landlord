@@ -10,6 +10,9 @@ import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
+// ---- stable hash for ruleId ----
+function stableHash(s: string): string { let h = 5381; for (let i=0;i<s.length;i++){ h = ((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); }
+
 
 /* ========== 已出牌缓存（仅当前请求作用域） ========== */
 declare global {
@@ -215,6 +218,9 @@ type RunBody = {
   turnTimeoutSec?: number | number[];
   rob?: boolean;
   debug?: any;
+  // —— 新增：规则传递 ——
+  rule?: any;
+  ruleId?: string;
 };
 
 /* ========== Bot 工厂 ========== */
@@ -525,7 +531,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 
 
-      // —— per-request buffers for reason/score ——
+            writeLine(res, { type:'log', message:`规则快照: ruleId=${ruleId} four2=${four2} rob=${String(!!(rule?.rob))}` });
+// —— per-request buffers for reason/score ——
       const lastReason: (string|null)[] = [null, null, null];
       const lastScore:  (number|null)[] = [null, null, null];
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
@@ -537,7 +544,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore }, res, round);
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });

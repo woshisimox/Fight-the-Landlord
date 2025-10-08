@@ -34,6 +34,10 @@ export type BotCtx = {
   canPass: boolean;
   policy?: { four2?: Four2Policy };
 
+  // —— 规则快照 ——
+  ruleId?: string;
+  rule?: any;
+
   // --- 新增：对局上下文（记牌 / 历史 / 角色信息） ---
   seat: number;             // 当前出牌座位（0/1/2）
   landlord: number;         // 地主座位
@@ -1095,10 +1099,15 @@ export async function* runOneGame(opts: {
   delayMs?: number;
   bid?: boolean;                // true => 叫/抢
   four2?: Four2Policy;
-}): AsyncGenerator<any, void, unknown> {
+  ruleId?: string;
+  rule?: any;
+}: AsyncGenerator<any, void, unknown> {
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
   const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
   const four2 = opts.four2 || 'both';
+  // —— 规则快照与ID ——
+  const __rule = (opts as any).rule ?? { four2, bid: (opts as any).bid !== false };
+  const __ruleId = (opts as any).ruleId ?? (function __stableHash(s:string){ let h=5381; for (let i=0;i<s.length;i++){ h=((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); })(JSON.stringify(__rule));
 
   // 发牌
   let deck = shuffle(freshDeck());
@@ -1362,6 +1371,8 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
       require,
       canPass: !isLeader,
       policy: { four2 },
+      ruleId: __ruleId,
+      rule: __rule,
       seat: turn,
       landlord,
       leader,
