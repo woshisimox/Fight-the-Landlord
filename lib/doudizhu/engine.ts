@@ -1,6 +1,9 @@
 // lib/doudizhu/engine.ts
-/* === Inject: rob-skip helper === */
-function emitRobSkipEvent(gen:any){ try { gen && gen.next && gen.next({ type:'event', kind:'rob-skip', reason:'allPass-or-below-threshold' }); } catch(e){} }
+
+/* === Inject: rob-eval helper (bidding debug) === */
+function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'rob'|'pass', roundNo?:number){
+  try { gen && gen.next && gen.next({ type:'event', kind:'rob-eval', seat, score, threshold, decision, roundNo }); } catch(e){}
+}
 // Dou Dizhu (斗地主) “真引擎”实现（适配 Bot Arena 项目）。
 // - 牌型完整（单、对、三、三带、顺子、连对、飞机/带翅膀、四带二、炸弹、王炸）
 // - 比较完整
@@ -1098,10 +1101,10 @@ export async function* runOneGame(opts: {
   const four2 = opts.four2 || 'both';
 
   // 发牌
-  const deck = shuffle(freshDeck());
-  const hands: Label[][] = [[],[],[]];
+  let deck = shuffle(freshDeck());
+  let hands: Label[][] = [[],[],[]];
   for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
-  const bottom = deck.slice(17*3); // 3 张
+  let bottom = deck.slice(17*3); // 3 张
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
 
   // 抢地主流程（简单实现）
@@ -1111,7 +1114,12 @@ export async function* runOneGame(opts: {
 if (opts.rob !== false) {
     let last = -1;
     
-      const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
+      for (let __attempt=0; __attempt<5; __attempt++) {
+  const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
+  // 每次重试重置叫抢状态
+  last = -1;
+  bidMultiplier = 1;
+  multiplier = 1;
 for (let s=0;s<3;s++) {
       const rob = wantRob(hands[s]);
       const sc = evalRobScore(hands[s]); 
@@ -1144,6 +1152,9 @@ for (let s=0;s<3;s++) {
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
+
+// 记录本轮评估（即使未达到阈值也写日志/存档）
+yield { type:'event', kind:'rob-eval', seat: s, score: sc, threshold: __th, decision: (rob ? 'rob' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
 if (rob) {
         __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
@@ -1168,8 +1179,23 @@ yield { type:'event', kind:'rob', seat:s, rob, score: sc, bidMult: bidMultiplier
         landlord = bestSeat;
       }
       
-      yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: bidMultiplier };multiplier = bidMultiplier;
+      
+// 若无人抢，则记录并重发，随后重新叫牌
+if (__bidders.length === 0) {
+  try { yield { type:'event', kind:'rob-skip', reason:'no-bidders' }; } catch {}
+  // 重新发牌
+  deck = shuffle(freshDeck());
+  hands = [[],[],[]] as any;
+  for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
+  bottom = deck.slice(17*3);
+  for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
+  continue; // 回到下一轮尝试，重新进行叫抢（会继续产出 rob-eval）
+}
+yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: bidMultiplier };multiplier = bidMultiplier;
     if (last !== -1) landlord = last;
+      break;
+    }
+
   }
   // 亮底 & 地主收底
   yield { type:'event', kind:'reveal', bottom: bottom.slice() };

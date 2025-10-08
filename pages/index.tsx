@@ -1476,17 +1476,6 @@ for (const raw of batch) {
   nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
   continue;
               }
-else if (m.type === 'event' && m.kind === 'rob-skip') {
-  // 前端显式展示“无人叫地主 → 重新发牌”
-  const idxLine = nextLog.length;
-  const line = `（无人叫地主｜低于阈值或全员Pass → 本局重发）`;
-  nextLog.push(line);
-  // 为了可视化，一并把叫抢倍数重置到1（不会计入roundCuts）
-  nextMultiplier = 1; nextBidMultiplier = 1;
-  // 记录一次“重发”提示，避免空白局头
-  // 不推进 roundCuts；等待下一次发牌事件
-}
-
 
               // -------- 明牌后额外加倍 --------
 // -------- 倍数校准（兜底） --------
@@ -2736,4 +2725,12 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
       <div style={{ minWidth:60, fontSize:12, color:'#374151' }}>{title}</div>
     </div>
   );
+}
+else if (m.type === 'event' && m.kind === 'rob-eval') {
+  const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
+  const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
+  const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
+  const dec = m.decision || 'pass';
+  const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
+  nextLog.push(line);
 }
