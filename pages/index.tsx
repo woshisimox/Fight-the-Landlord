@@ -2726,7 +2726,7 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
     </div>
   );
 }
-else if (m.type === 'event' && m.kind === 'rob-eval') {
+if (m.type === 'event' && m.kind === 'rob-eval') {
   const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
   const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
   const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
