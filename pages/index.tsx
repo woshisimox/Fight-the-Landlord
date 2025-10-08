@@ -902,7 +902,7 @@ function LivePanel(props: LiveProps) {
           agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
           cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
           eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
-          bid : w(ll.scores.bid ?? ll.scores.bid, ff.scores.bid ?? ff.scores.bid, ll.count, ff.count),
+          bid : w(ll.scores.bid, ff.scores.bid, ll.count, ff.count),
         },
         count: tot,
       };
@@ -2122,15 +2122,13 @@ const DEFAULTS = {
   bid: true,
   rounds: 10,
   startScore: 100,
-  bid: true,
   four2: 'both' as Four2Policy,
   farmerCoop: true,
   seatDelayMs: [1000,1000,1000] as number[],
   seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
   // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
   seatModels: ['', '', ''],
-  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
-};
+  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],};
 
 function Home() {
   // Ensure language applies before paint on refresh
