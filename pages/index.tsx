@@ -616,6 +616,7 @@ function LivePanel(props: LiveProps) {
   const [landlord, setLandlord] = useState<number|null>(null);
   const [plays, setPlays] = useState<{seat:number; move:'play'|'pass'; cards?:string[]; reason?:string}[]>([]);
   const [multiplier, setMultiplier] = useState(1);
+  const [bidMultiplier, setBidMultiplier] = useState(1);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [log, setLog] = useState<string[]>([]);
@@ -1048,6 +1049,7 @@ function LivePanel(props: LiveProps) {
   const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
   const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
   const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+  const bidMultiplierRef = useRef(bidMultiplier); useEffect(() => { bidMultiplierRef.current = bidMultiplier; }, [bidMultiplier]);
 
   const aggStatsRef = useRef(aggStats); useEffect(()=>{ aggStatsRef.current = aggStats; }, [aggStats]);
   const aggCountRef = useRef(aggCount); useEffect(()=>{ aggCountRef.current = aggCount; }, [aggCount]);
@@ -1299,6 +1301,7 @@ const start = async () => {
           let nextWinner = winnerRef.current as number | null;
           let nextDelta = deltaRef.current as [number, number, number] | null;
           let nextMultiplier = multiplierRef.current;
+          let nextBidMultiplier = bidMultiplierRef.current;
           let nextAggStats = aggStatsRef.current;
           let nextAggCount = aggCountRef.current;
 
@@ -1357,6 +1360,8 @@ for (const raw of batch) {
 
               // -------- 事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
+                nextBidMultiplier = 1;
+                nextMultiplier = 1;
                 // 清空上一局残余手牌/出牌；等待 init/hands 再填充
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
@@ -1460,31 +1465,28 @@ for (const raw of batch) {
 
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'rob') {
-  if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
-                              {
-                const sc = (typeof m.score === 'number' ? m.score : Number(m.score || NaN));
-                const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
-                nextLog = [...nextLog, `${seatName(m.seat)} 抢地主｜score=${scTxt}｜${m.rob ? '抢' : '不抢'}｜x${nextMultiplier}`];
-              }
-                continue;
-              // -------- 第二轮比差（增量翻倍 + 可视化） --------
-              if (m.type === 'event' && m.kind === 'rob2') {
-                const mm = Math.max(1, Number(m.mult || 0));
-                nextMultiplier = isFinite(mm) && mm > 0 ? mm : Math.max(1, (nextMultiplier || 1) * 2);
-                const margin = (typeof m.margin === 'number') ? m.margin : Number(m.margin || 0);
-                nextLog = [...nextLog, `${seatName(m.seat)} 二轮比差｜margin=${margin.toFixed(2)}｜x${nextMultiplier}`];
-                continue;
-              }
-
+  const mm = Number((m as any).mult || 0);
+  const bb = Number((m as any).bidMult || 0);
+  if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
+  else if (m.rob) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
+  if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
+  else if (m.rob) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
+  const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
+  const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
+  nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
+  continue;
               }
 
               // -------- 明牌后额外加倍 --------
 // -------- 倍数校准（兜底） --------
 if (m.type === 'event' && m.kind === 'multiplier-sync') {
   const cur = Math.max(1, (nextMultiplier || 1));
-  const mlt = Math.max(1, Number(m.multiplier || 1));
+  const mlt = Math.max(1, Number((m as any).multiplier || 1));
   nextMultiplier = Math.max(cur, mlt);
-  nextLog = [...nextLog, `倍数校准为 ${nextMultiplier}`];
+  const bcur = Math.max(1, (nextBidMultiplier || 1));
+  const bmlt = Math.max(1, Number((m as any).bidMult || 1));
+  nextBidMultiplier = Math.max(bcur, bmlt);
+  nextLog = [...nextLog, `倍数校准为 叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
   continue;
 }
 
@@ -1714,7 +1716,7 @@ nextTotals     = [
           setHands(nextHands); setPlays(nextPlays);
           setTotals(nextTotals); setFinishedCount(nextFinished);
           setLog(nextLog); setLandlord(nextLandlord);
-          setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
+          setWinner(nextWinner); setMultiplier(nextMultiplier); setBidMultiplier(nextBidMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
         }
       }
@@ -2009,7 +2011,11 @@ const handleAllSaveInner = () => {
       <Section title="结果">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>倍数</div>
+            <div>叫抢倍数</div>
+            <div style={{ fontSize:24, fontWeight:800 }}>{bidMultiplier}</div>
+          </div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>对局倍数</div>
             <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
           </div>
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
