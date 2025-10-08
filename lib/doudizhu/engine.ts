@@ -1107,67 +1107,67 @@ export async function* runOneGame(opts: {
   let multiplier = 1;
   if (opts.rob !== false) {
     let last = -1;
-  const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
-
-    for (let s=0;s<3;s++) {
+    
+      const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
+for (let s=0;s<3;s++) {
       const rob = wantRob(hands[s]);
-      const sc = evalRobScore(hands[s]); yield { type:'event', kind:'rob', seat:s, rob, score: sc };
-      
-// ---- compute threshold (__th) for this seat (built-ins + external AI) ----
-const __thMap: Record<string, number> = {
-  greedymax: 1.6,
-  allysupport: 1.8,
-  randomlegal: 2.0,
-  endgamerush: 2.1,
-  mininet: 2.2,
-  greedymin: 2.4,
-};
-const __thMapChoice: Record<string, number> = {
-  'built-in:greedy-max':   1.6,
-  'built-in:ally-support': 1.8,
-  'built-in:random-legal': 2.0,
-  'built-in:endgame-rush': 2.1,
-  'built-in:mininet':      2.2,
-  'built-in:greedy-min':   2.4,
-  'external':              2.2,
-  'external:ai':           2.2,
-  'external:http':         2.2,
-  'ai':                    2.2,
-  'http':                  2.2,
-  'openai':                2.2,
-  'gpt':                   2.2,
-  'claude':                2.2,
-};
-const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
-const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-// -------------------------------------------------------------------------
+      const sc = evalRobScore(hands[s]); 
+
+      // thresholds for both built-ins and external choices (inline for scope)
+      const __thMap: Record<string, number> = {
+        greedymax: 1.6,
+        allysupport: 1.8,
+        randomlegal: 2.0,
+        endgamerush: 2.1,
+        mininet: 2.2,
+        greedymin: 2.4,
+      };
+      const __thMapChoice: Record<string, number> = {
+        'built-in:greedy-max':   1.6,
+        'built-in:ally-support': 1.8,
+        'built-in:random-legal': 2.0,
+        'built-in:endgame-rush': 2.1,
+        'built-in:mininet':      2.2,
+        'built-in:greedy-min':   2.4,
+        'external':              2.2,
+        'external:ai':           2.2,
+        'external:http':         2.2,
+        'ai':                    2.2,
+        'http':                  2.2,
+        'openai':                2.2,
+        'gpt':                   2.2,
+        'claude':                2.2,
+      };
+      const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
+      const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
+      const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
 if (rob) {
         __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
-        last = s;
+
+        if (last === -1) {
+          last = s; // 叫
+        }       yield { type:'event', kind:'rob', seat:s, rob, score: sc, mult: multiplier };
+else {
+          last = s; multiplier *= 2; // 抢 ×2
+        }
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
-    
-    // 第二轮：在第一轮所有“抢”的人里，用“(score - threshold)”差值比较；
-    // 从同一起始座位顺序再过一遍，遇到同分用“后手优先”（>=）规则；
-    // 每个进入第二轮的座位再次“叫”一次，倍率依次 ×2，封顶 64。
-    if (__bidders.length > 0) {
-      let bestSeat = -1;
-      let bestMargin = -Infinity;
-      for (let t = 0; t < 3; t++) {
-        const hit = __bidders.find(b => b.seat === t);
-        if (!hit) continue;
-        multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
-        yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), mult: multiplier };
-        if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; }
+      // 第二轮：仅对第一轮“抢”的人（__bidders）按同样座次再过一遍，比较 margin；同分后手优先（>=）；每次再 ×2，封顶 64。
+      if (__bidders.length > 0) {
+        let bestSeat = -1;
+        let bestMargin = -Infinity;
+        for (let t = 0; t < 3; t++) {
+          const hit = __bidders.find(b => b.seat === t);
+          if (!hit) continue;
+          multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
+          yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), mult: multiplier };
+          if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
+        }
+        landlord = bestSeat;
       }
-      landlord = bestSeat;
-    } else if (last !== -1) {
-      landlord = last;
-    }
-
+    if (last !== -1) landlord = last;
   }
   // 亮底 & 地主收底
   yield { type:'event', kind:'reveal', bottom: bottom.slice() };
