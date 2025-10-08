@@ -364,7 +364,7 @@ type LiveProps = {
   
   seatDelayMs?: number[];
   enabled: boolean;
-  rob: boolean;
+    bid: boolean;
   four2: Four2Policy;
   seats: BotChoice[];
   seatModels: string[];
@@ -594,7 +594,7 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 /* ====== 雷达图累计（0~5） ====== */
-type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
+type Score5 = { coop:number; agg:number; cons:number; eff:number; bid:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
   if (mode === 'mean') {
     const c = Math.max(0, count);
@@ -603,7 +603,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
       agg:  (prev.agg *c + curr.agg )/(c+1),
       cons: (prev.cons*c + curr.cons)/(c+1),
       eff:  (prev.eff *c + curr.eff )/(c+1),
-      rob:  (prev.rob *c + curr.rob )/(c+1),
+      bid :  (prev.bid *c + curr.bid )/(c+1),
     };
   }
   const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
@@ -612,7 +612,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     agg:  a*curr.agg  + (1-a)*prev.agg,
     cons: a*curr.cons + (1-a)*prev.cons,
     eff:  a*curr.eff  + (1-a)*prev.eff,
-    rob:  a*curr.rob  + (1-a)*prev.rob,
+    bid :  a*curr.bid  + (1-a)*prev.bid,
   };
 }
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
@@ -863,7 +863,7 @@ function LivePanel(props: LiveProps) {
     agg : Number(x?.agg  ?? 2.5),
     cons: Number(x?.cons ?? 2.5),
     eff : Number(x?.eff  ?? 2.5),
-    rob : Number(x?.bid ?? x?.rob ?? 2.5),
+    bid : Number(x?.bid ?? x?.rob ?? 2.5),
   });
   const ensureRadarAgg = (x:any): RadarAgg => ({
     scores: ensureScore5(x?.scores),
@@ -895,7 +895,7 @@ function LivePanel(props: LiveProps) {
         agg : mean(prev.scores.agg , inc.agg ),
         cons: mean(prev.scores.cons, inc.cons),
         eff : mean(prev.scores.eff , inc.eff ),
-        rob : mean(prev.scores.rob , inc.rob ),
+        bid : mean(prev.scores.bid , inc.bid ),
       },
       count: c + 1,
     };
@@ -923,7 +923,7 @@ function LivePanel(props: LiveProps) {
           agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
           cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
           eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
-          rob : w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
+          bid : w(ll.scores.bid , ff.scores.bid , ll.count, ff.count),
         },
         count: tot,
       };
@@ -971,7 +971,7 @@ function LivePanel(props: LiveProps) {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
-      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 }, count: 0 };
+      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid :2.5 }, count: 0 };
     });
     setAggStats(s3.map(x=>({ ...x.scores })));
     setAggCount(Math.max(s3[0].count, s3[1].count, s3[2].count));
@@ -1227,7 +1227,7 @@ const start = async () => {
     ) => {
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
-          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
+          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid :2.5 };
           const mode = aggModeRef.current;
           const a    = alphaRef.current;
           if (!nextAggStats) {
@@ -1709,7 +1709,7 @@ nextTotals     = [
                     agg : Number(sc.agg  ?? 2.5),
                     cons: Number(sc.cons ?? 2.5),
                     eff : Number(sc.eff  ?? 2.5),
-                    rob : Number(sc.rob  ?? 2.5),
+                    bid : Number(sc.rob  ?? 2.5),
                   };
                 }) as Score5[];
 
@@ -1727,7 +1727,7 @@ nextTotals     = [
                   nextAggCount = nextAggCount + 1;
                 }
 
-                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
+                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Bid ${v.bid}`).join(' ｜ ');
                 nextLog = [...nextLog, `战术画像（本局）：${msg}（已累计 ${nextAggCount} 局）`];
                 continue;
               }
@@ -2524,7 +2524,7 @@ const [lang, setLang] = useState<Lang>(() => {
           startScore={startScore}
           seatDelayMs={seatDelayMs}
           enabled={enabled}
-          rob={bid}
+          bid={bid}
           four2={four2}
           seats={seats}
           seatModels={seatModels}
@@ -2716,7 +2716,7 @@ function ScoreTimeline(
 
 /* ================ 雷达图（0~5） ================= */
 function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
-  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
+  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.bid];
   const labels = ['配合','激进','保守','效率','抢地主'];
   const size = 180, R = 70, cx = size/2, cy = size/2;
 
