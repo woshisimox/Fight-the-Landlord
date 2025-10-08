@@ -1121,7 +1121,6 @@ if (opts.bid !== false) {
   bidMultiplier = 1;
   multiplier = 1;
 for (let s=0;s<3;s++) {
-      const bid = wantRob(hands[s]);
       const sc = evalRobScore(hands[s]); 
 
       // thresholds for both built-ins and external choices (inline for scope)
