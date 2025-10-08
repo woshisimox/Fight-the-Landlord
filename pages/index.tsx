@@ -1490,9 +1490,9 @@ for (const raw of batch) {
   const mm = Number((m as any).mult || 0);
   const bb = Number((m as any).bidMult || 0);
   if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
-  else if (m.rob) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
+  else if (isBidFlag(m)) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
   if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
-  else if (m.rob) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
+  else if (isBidFlag(m)) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
   const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
   const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
   nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
