@@ -365,7 +365,7 @@ type LiveProps = {
   
   seatDelayMs?: number[];
   enabled: boolean;
-  rob: boolean;
+  bid: boolean;
   four2: Four2Policy;
   seats: BotChoice[];
   seatModels: string[];
@@ -595,7 +595,7 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 /* ====== 雷达图累计（0~5） ====== */
-type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
+type Score5 = { coop:number; agg:number; cons:number; eff:number; bid:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
   if (mode === 'mean') {
     const c = Math.max(0, count);
@@ -613,7 +613,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     agg:  a*curr.agg  + (1-a)*prev.agg,
     cons: a*curr.cons + (1-a)*prev.cons,
     eff:  a*curr.eff  + (1-a)*prev.eff,
-    rob:  a*curr.rob  + (1-a)*prev.rob,
+    bid:  a*curr.rob  + (1-a)*prev.rob,
   };
 }
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
@@ -864,7 +864,7 @@ function LivePanel(props: LiveProps) {
     agg : Number(x?.agg  ?? 2.5),
     cons: Number(x?.cons ?? 2.5),
     eff : Number(x?.eff  ?? 2.5),
-    rob: Number(x?.rob  ?? 2.5),
+    bid: Number(x?.rob  ?? 2.5),
   });
   const ensureRadarAgg = (x:any): RadarAgg => ({
     scores: ensureScore5(x?.scores),
@@ -896,7 +896,7 @@ function LivePanel(props: LiveProps) {
         agg : mean(prev.scores.agg , inc.agg ),
         cons: mean(prev.scores.cons, inc.cons),
         eff : mean(prev.scores.eff , inc.eff ),
-        rob: mean(prev.scores.rob , inc.rob ),
+        bid: mean(prev.scores.rob , inc.rob ),
       },
       count: c + 1,
     };
@@ -924,7 +924,7 @@ function LivePanel(props: LiveProps) {
           agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
           cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
           eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
-          rob: w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
+          bid: w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
         },
         count: tot,
       };
@@ -972,7 +972,7 @@ function LivePanel(props: LiveProps) {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
-      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 }, count: 0 };
+      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid:2.5 }, count: 0 };
     });
     setAggStats(s3.map(x=>({ ...x.scores })));
     setAggCount(Math.max(s3[0].count, s3[1].count, s3[2].count));
@@ -1228,7 +1228,7 @@ const start = async () => {
     ) => {
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
-          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
+          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid:2.5 };
           const mode = aggModeRef.current;
           const a    = alphaRef.current;
           if (!nextAggStats) {
@@ -1275,7 +1275,7 @@ const start = async () => {
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
-          rob: props.rob,
+          bid: props.bid,
           four2: props.four2,
           seats: specs,
           clientTraceId: traceId,
@@ -1710,7 +1710,7 @@ nextTotals     = [
                     agg : Number(sc.agg  ?? 2.5),
                     cons: Number(sc.cons ?? 2.5),
                     eff : Number(sc.eff  ?? 2.5),
-                    rob: Number(sc.rob  ?? 2.5),
+                    bid: Number(sc.rob  ?? 2.5),
                   };
                 }) as Score5[];
 
@@ -2143,7 +2143,7 @@ const DEFAULTS = {
   enabled: true,
   rounds: 10,
   startScore: 100,
-  rob: true,
+  bid: true,
   four2: 'both' as Four2Policy,
   farmerCoop: true,
   seatDelayMs: [1000,1000,1000] as number[],
