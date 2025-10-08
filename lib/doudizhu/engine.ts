@@ -1121,6 +1121,9 @@ if (opts.rob !== false) {
   bidMultiplier = 1;
   multiplier = 1;
 for (let s=0;s<3;s++) {
+      const rob = wantRob(hands[s]);
+      const sc = evalRobScore(hands[s]); 
+
       // thresholds for both built-ins and external choices (inline for scope)
       const __thMap: Record<string, number> = {
         greedymax: 1.6,
@@ -1149,14 +1152,9 @@ for (let s=0;s<3;s++) {
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-      
-      const sc = evalRobScore(hands[s]);
-      const rob = (sc >= __th); 
-
-      
 
 // 记录本轮评估（即使未达到阈值也写日志/存档）
-yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (rob ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
 if (rob) {
         __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
@@ -1167,24 +1165,19 @@ yield { type:'event', kind:'bid', seat:s, rob, score: sc, bidMult: bidMultiplier
       if (opts.delayMs) await wait(opts.delayMs);
     }
       // 第二轮：仅对第一轮“抢”的人（__bidders）按同样座次再过一遍，比较 margin；同分后手优先（>=）；每次再 ×2，封顶 64。
-      if (__bidders.length >= 2) {
-  let bestSeat = -1;
-  let bestMargin = -Infinity;
-  for (let t = 0; t < 3; t++) {
-    const hit = __bidders.find(b => b.seat === t);
-    if (!hit) continue;
-    bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
-    multiplier = bidMultiplier;
-    try {
-      yield { type:'event', kind:'bid-eval', seat: t, score: hit.score, threshold: hit.threshold,
-              callThr: hit.threshold, robThr: hit.threshold, phase: 'bid', round: 2,
-              decision: 'bid', margin: Number(String(hit.margin).slice(0, 8)),
-              bidMult: bidMultiplier, mult: multiplier };
-    } catch {}
-    if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; }
-  }
-  landlord = bestSeat;
-}
+      if (__bidders.length > 0) {
+        let bestSeat = -1;
+        let bestMargin = -Infinity;
+        for (let t = 0; t < 3; t++) {
+          const hit = __bidders.find(b => b.seat === t);
+          if (!hit) continue;
+          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+          multiplier = bidMultiplier;
+          yield { type:'event', kind:'bid2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
+          if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
+        }
+        landlord = bestSeat;
+      }
       
       
 // 若无人抢，则记录并重发，随后重新叫牌

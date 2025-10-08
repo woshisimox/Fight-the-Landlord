@@ -1,27 +1,6 @@
 // pages/index.tsx
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
-
-/* ===== Bid/Rob compatibility shim (events) ===== */
-function normalizeKind(kind: string): string {
-  if (kind === 'rob-eval') return 'bid-eval';
-  if (kind === 'rob') return 'bid';
-  if (kind === 'rob2') return 'bid2';
-  if (kind === 'rob-round-end') return 'bid-round-end';
-  if (kind === 'rob-summary') return 'bid-summary';
-  if (kind === 'rob-skip') return 'bid-skip';
-  return kind;
-}
-function normalizeDecision(decision?: string) {
-  return decision === 'rob' ? 'bid' : decision;
-}
-function isBidFlag(ev: any): boolean {
-  if (typeof ev?.bid === 'boolean') return ev.bid;
-  if (typeof ev?.rob === 'boolean') return ev.rob;
-  if (ev && typeof ev.decision === 'string') return normalizeDecision(ev.decision) === 'bid';
-  return false;
-}
-
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
 
@@ -364,7 +343,7 @@ type LiveProps = {
   
   seatDelayMs?: number[];
   enabled: boolean;
-    bid: boolean;
+  bid: boolean;
   four2: Four2Policy;
   seats: BotChoice[];
   seatModels: string[];
@@ -603,7 +582,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
       agg:  (prev.agg *c + curr.agg )/(c+1),
       cons: (prev.cons*c + curr.cons)/(c+1),
       eff:  (prev.eff *c + curr.eff )/(c+1),
-      bid :  (prev.bid *c + curr.bid )/(c+1),
+      bid: (prev.bid *c + curr.bid )/(c+1),
     };
   }
   const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
@@ -612,7 +591,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     agg:  a*curr.agg  + (1-a)*prev.agg,
     cons: a*curr.cons + (1-a)*prev.cons,
     eff:  a*curr.eff  + (1-a)*prev.eff,
-    bid :  a*curr.bid  + (1-a)*prev.bid,
+    bid: a*curr.bid  + (1-a)*prev.bid,
   };
 }
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
@@ -971,7 +950,7 @@ function LivePanel(props: LiveProps) {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
-      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid :2.5 }, count: 0 };
+      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid:2.5 }, count: 0 };
     });
     setAggStats(s3.map(x=>({ ...x.scores })));
     setAggCount(Math.max(s3[0].count, s3[1].count, s3[2].count));
@@ -1227,7 +1206,7 @@ const start = async () => {
     ) => {
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
-          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid :2.5 };
+          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid:2.5 };
           const mode = aggModeRef.current;
           const a    = alphaRef.current;
           if (!nextAggStats) {
@@ -1274,7 +1253,7 @@ const start = async () => {
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
-          rob: props.bid,
+          bid: props.bid,
           four2: props.four2,
           seats: specs,
           clientTraceId: traceId,
@@ -1485,23 +1464,23 @@ for (const raw of batch) {
               }
 
               // -------- 抢/不抢 --------
-              if (m.type === 'event' && m.kind === 'rob') {
+              if (m.type === 'event' && m.kind==='bid') {
   const mm = Number((m as any).mult || 0);
   const bb = Number((m as any).bidMult || 0);
   if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
-  else if (isBidFlag(m)) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
+  else if (m.bid) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
   if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
-  else if (isBidFlag(m)) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
+  else if (m.bid) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
   const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
   const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
-  nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
+  nextLog = [...nextLog, `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
   continue;
               }
-else if (m.type === 'event' && m.kind === 'rob-eval') {
+else if (m.type === 'event' && m.kind==='bid-eval') {
   const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
   const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
   const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
-  const dec = m.decision || 'pass';
+  const dec = (m.decision==='bid' || m.bid ? '抢' : '不抢');
   const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
   nextLog.push(line);
 }
@@ -1709,7 +1688,7 @@ nextTotals     = [
                     agg : Number(sc.agg  ?? 2.5),
                     cons: Number(sc.cons ?? 2.5),
                     eff : Number(sc.eff  ?? 2.5),
-                    bid : Number(sc.rob  ?? 2.5),
+                    bid : Number(sc.bid ?? sc.rob ?? 2.5),
                   };
                 }) as Score5[];
 
@@ -1727,7 +1706,7 @@ nextTotals     = [
                   nextAggCount = nextAggCount + 1;
                 }
 
-                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Bid ${v.bid}`).join(' ｜ ');
+                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.bid}`).join(' ｜ ');
                 nextLog = [...nextLog, `战术画像（本局）：${msg}（已累计 ${nextAggCount} 局）`];
                 continue;
               }
@@ -2140,10 +2119,9 @@ function RadarPanel({
 /* ========= 默认值（含“清空”按钮的重置） ========= */
 const DEFAULTS = {
   enabled: true,
-  bid: true,
   rounds: 10,
   startScore: 100,
-  rob: true,
+  bid: true,
   four2: 'both' as Four2Policy,
   farmerCoop: true,
   seatDelayMs: [1000,1000,1000] as number[],
@@ -2190,7 +2168,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const [turnTimeoutSec, setTurnTimeoutSec] = useState<number>(30);
 
-  const [bid, setBid] = useState<boolean>(DEFAULTS.bid);
+  const [rob, setRob] = useState<boolean>(DEFAULTS.bid);
   const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
   const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
   const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
@@ -2204,7 +2182,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
-    setBid(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
+    setRob(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
     setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
@@ -2266,7 +2244,7 @@ const [lang, setLang] = useState<Lang>(() => {
   <div style={{ display:'flex', alignItems:'center', gap:24 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       可抢地主
-      <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
+      <input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} />
     </label>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       农民配合
