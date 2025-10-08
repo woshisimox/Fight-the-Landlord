@@ -1151,7 +1151,6 @@ for (let s=0;s<3;s++) {
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-      const sc = evalRobScore(hands[s]);
       const bid = (sc >= __th);
 
 
