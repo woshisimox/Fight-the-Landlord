@@ -1165,19 +1165,27 @@ yield { type:'event', kind:'rob', seat:s, rob, score: sc, bidMult: bidMultiplier
       if (opts.delayMs) await wait(opts.delayMs);
     }
       // 第二轮：仅对第一轮“抢”的人（__bidders）按同样座次再过一遍，比较 margin；同分后手优先（>=）；每次再 ×2，封顶 64。
-      if (__bidders.length > 0) {
-        let bestSeat = -1;
-        let bestMargin = -Infinity;
-        for (let t = 0; t < 3; t++) {
-          const hit = __bidders.find(b => b.seat === t);
-          if (!hit) continue;
-          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
-          multiplier = bidMultiplier;
-          yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
-          if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
-        }
-        landlord = bestSeat;
-      }
+      if (__bidders.length >= 2) {
+  let bestSeat = -1;
+  let bestMargin = -Infinity;
+  for (let t = 0; t < 3; t++) {
+    const hit = __bidders.find(b => b.seat === t);
+    if (!hit) continue;
+    const rob2 = (hit.margin >= 0); // 二轮仅在候选者中再次“是否抢”判断（此处沿用第一轮 margin≥0 的准则）
+    try {
+      yield { type:'event', kind:'rob-eval', seat: t, score: hit.score, threshold: hit.threshold,
+              callThr: hit.threshold, robThr: hit.threshold, phase:'rob', round:2,
+              decision: (rob2 ? 'rob' : 'pass'), margin: Number(String(hit.margin).slice(0,8)),
+              bidMult: bidMultiplier, mult: multiplier };
+    } catch {}
+    if (rob2) {
+      bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+      multiplier = bidMultiplier;
+      if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
+    }
+  }
+  if (bestSeat !== -1) landlord = bestSeat;
+}
       
       
 // 若无人抢，则记录并重发，随后重新叫牌
