@@ -490,8 +490,7 @@ function LadderPanel() {
     return { id, label, val, n };
   });
 
-  const maxAbs = Math.max(1, ...arr.map(x=> Math.abs(x.val)));
-  const K = Math.max(1, maxAbs * 1.1);  // 自动缩放：±10%边距
+  const K = Math.max(1, ...arr.map(x=> (players[x.id]?.current?.K ?? 20)), 20);
   const items = arr.sort((a,b)=> b.val - a.val);
 
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
