@@ -1145,12 +1145,8 @@ if (rob) {
         __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
 
-        if (last === -1) {
-          last = s; // 叫
-        }       yield { type:'event', kind:'rob', seat:s, rob, score: sc, mult: multiplier };
-else {
-          last = s; multiplier *= 2; // 抢 ×2
-        }
+        last = s;
+yield { type:'event', kind:'rob', seat:s, rob, score: sc, mult: multiplier };
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
