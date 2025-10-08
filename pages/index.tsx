@@ -1,6 +1,27 @@
 // pages/index.tsx
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
+
+/* ===== Bid/Rob compatibility shim (events) ===== */
+function normalizeKind(kind: string): string {
+  if (kind === 'rob-eval') return 'bid-eval';
+  if (kind === 'rob') return 'bid';
+  if (kind === 'rob2') return 'bid2';
+  if (kind === 'rob-round-end') return 'bid-round-end';
+  if (kind === 'rob-summary') return 'bid-summary';
+  if (kind === 'rob-skip') return 'bid-skip';
+  return kind;
+}
+function normalizeDecision(decision?: string) {
+  return decision === 'rob' ? 'bid' : decision;
+}
+function isBidFlag(ev: any): boolean {
+  if (typeof ev?.bid === 'boolean') return ev.bid;
+  if (typeof ev?.rob === 'boolean') return ev.rob;
+  if (ev && typeof ev.decision === 'string') return normalizeDecision(ev.decision) === 'bid';
+  return false;
+}
+
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
 
@@ -343,7 +364,7 @@ type LiveProps = {
   
   seatDelayMs?: number[];
   enabled: boolean;
-  bid: boolean;
+  rob: boolean;
   four2: Four2Policy;
   seats: BotChoice[];
   seatModels: string[];
@@ -573,7 +594,7 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 /* ====== 雷达图累计（0~5） ====== */
-type Score5 = { coop:number; agg:number; cons:number; eff:number; bid:number };
+type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
   if (mode === 'mean') {
     const c = Math.max(0, count);
@@ -582,7 +603,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
       agg:  (prev.agg *c + curr.agg )/(c+1),
       cons: (prev.cons*c + curr.cons)/(c+1),
       eff:  (prev.eff *c + curr.eff )/(c+1),
-      bid: (prev.bid *c + curr.bid )/(c+1),
+      rob:  (prev.rob *c + curr.rob )/(c+1),
     };
   }
   const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
@@ -591,7 +612,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     agg:  a*curr.agg  + (1-a)*prev.agg,
     cons: a*curr.cons + (1-a)*prev.cons,
     eff:  a*curr.eff  + (1-a)*prev.eff,
-    bid: a*curr.bid  + (1-a)*prev.bid,
+    rob:  a*curr.rob  + (1-a)*prev.rob,
   };
 }
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
@@ -842,7 +863,7 @@ function LivePanel(props: LiveProps) {
     agg : Number(x?.agg  ?? 2.5),
     cons: Number(x?.cons ?? 2.5),
     eff : Number(x?.eff  ?? 2.5),
-    bid : Number(x?.bid ?? x?.rob ?? 2.5),
+    rob : Number(x?.rob  ?? 2.5),
   });
   const ensureRadarAgg = (x:any): RadarAgg => ({
     scores: ensureScore5(x?.scores),
@@ -874,7 +895,7 @@ function LivePanel(props: LiveProps) {
         agg : mean(prev.scores.agg , inc.agg ),
         cons: mean(prev.scores.cons, inc.cons),
         eff : mean(prev.scores.eff , inc.eff ),
-        bid : mean(prev.scores.bid , inc.bid ),
+        rob : mean(prev.scores.rob , inc.rob ),
       },
       count: c + 1,
     };
@@ -902,7 +923,7 @@ function LivePanel(props: LiveProps) {
           agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
           cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
           eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
-          bid : w(ll.scores.bid , ff.scores.bid , ll.count, ff.count),
+          rob : w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
         },
         count: tot,
       };
@@ -950,7 +971,7 @@ function LivePanel(props: LiveProps) {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
-      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid:2.5 }, count: 0 };
+      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 }, count: 0 };
     });
     setAggStats(s3.map(x=>({ ...x.scores })));
     setAggCount(Math.max(s3[0].count, s3[1].count, s3[2].count));
@@ -1206,7 +1227,7 @@ const start = async () => {
     ) => {
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
-          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid:2.5 };
+          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
           const mode = aggModeRef.current;
           const a    = alphaRef.current;
           if (!nextAggStats) {
@@ -1253,7 +1274,7 @@ const start = async () => {
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
-          bid: props.bid,
+          rob: props.rob,
           four2: props.four2,
           seats: specs,
           clientTraceId: traceId,
@@ -1468,9 +1489,9 @@ for (const raw of batch) {
   const mm = Number((m as any).mult || 0);
   const bb = Number((m as any).bidMult || 0);
   if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
-  else if (m.rob) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
+  else if (isBidFlag(m)) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
   if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
-  else if (m.rob) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
+  else if (isBidFlag(m)) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
   const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
   const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
   nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
@@ -1688,7 +1709,7 @@ nextTotals     = [
                     agg : Number(sc.agg  ?? 2.5),
                     cons: Number(sc.cons ?? 2.5),
                     eff : Number(sc.eff  ?? 2.5),
-                    bid : Number(sc.bid ?? sc.rob ?? 2.5),
+                    rob : Number(sc.rob  ?? 2.5),
                   };
                 }) as Score5[];
 
@@ -1706,7 +1727,7 @@ nextTotals     = [
                   nextAggCount = nextAggCount + 1;
                 }
 
-                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.bid}`).join(' ｜ ');
+                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
                 nextLog = [...nextLog, `战术画像（本局）：${msg}（已累计 ${nextAggCount} 局）`];
                 continue;
               }
@@ -2121,7 +2142,7 @@ const DEFAULTS = {
   enabled: true,
   rounds: 10,
   startScore: 100,
-  bid: true,
+  rob: true,
   four2: 'both' as Four2Policy,
   farmerCoop: true,
   seatDelayMs: [1000,1000,1000] as number[],
@@ -2168,7 +2189,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const [turnTimeoutSec, setTurnTimeoutSec] = useState<number>(30);
 
-  const [rob, setRob] = useState<boolean>(DEFAULTS.bid);
+  const [rob, setRob] = useState<boolean>(DEFAULTS.rob);
   const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
   const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
   const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
@@ -2182,7 +2203,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
-    setRob(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
+    setRob(DEFAULTS.rob); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
     setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
@@ -2503,7 +2524,7 @@ const [lang, setLang] = useState<Lang>(() => {
           startScore={startScore}
           seatDelayMs={seatDelayMs}
           enabled={enabled}
-          bid={bid}
+          rob={rob}
           four2={four2}
           seats={seats}
           seatModels={seatModels}
