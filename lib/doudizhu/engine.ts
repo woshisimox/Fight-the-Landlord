@@ -1121,9 +1121,6 @@ if (opts.rob !== false) {
   bidMultiplier = 1;
   multiplier = 1;
 for (let s=0;s<3;s++) {
-      const sc = evalRobScore(hands[s]);
-      const rob = (sc >= __th); 
-
       // thresholds for both built-ins and external choices (inline for scope)
       const __thMap: Record<string, number> = {
         greedymax: 1.6,
@@ -1152,6 +1149,11 @@ for (let s=0;s<3;s++) {
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
+      
+      const sc = evalRobScore(hands[s]);
+      const rob = (sc >= __th); 
+
+      
 
 // 记录本轮评估（即使未达到阈值也写日志/存档）
 yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (rob ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
