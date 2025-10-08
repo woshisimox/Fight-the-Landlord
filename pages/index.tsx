@@ -863,7 +863,7 @@ function LivePanel(props: LiveProps) {
     agg : Number(x?.agg  ?? 2.5),
     cons: Number(x?.cons ?? 2.5),
     eff : Number(x?.eff  ?? 2.5),
-    rob : Number(x?.rob  ?? 2.5),
+    rob : Number(x?.bid ?? x?.rob ?? 2.5),
   });
   const ensureRadarAgg = (x:any): RadarAgg => ({
     scores: ensureScore5(x?.scores),
@@ -1274,7 +1274,7 @@ const start = async () => {
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
-          rob: props.rob,
+          rob: props.bid,
           four2: props.four2,
           seats: specs,
           clientTraceId: traceId,
@@ -2189,7 +2189,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const [turnTimeoutSec, setTurnTimeoutSec] = useState<number>(30);
 
-  const [rob, setRob] = useState<boolean>(DEFAULTS.rob);
+  const [bid, setBid] = useState<boolean>(DEFAULTS.bid);
   const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
   const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
   const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
@@ -2203,7 +2203,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
-    setRob(DEFAULTS.rob); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
+    setBid(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
     setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
@@ -2265,7 +2265,7 @@ const [lang, setLang] = useState<Lang>(() => {
   <div style={{ display:'flex', alignItems:'center', gap:24 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       可抢地主
-      <input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} />
+      <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
     </label>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       农民配合
@@ -2524,7 +2524,7 @@ const [lang, setLang] = useState<Lang>(() => {
           startScore={startScore}
           seatDelayMs={seatDelayMs}
           enabled={enabled}
-          rob={rob}
+          rob={bid}
           four2={four2}
           seats={seats}
           seatModels={seatModels}
