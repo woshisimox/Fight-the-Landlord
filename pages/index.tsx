@@ -1455,13 +1455,13 @@ for (const raw of batch) {
 
 // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
-                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
+                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
                 nextLog = [
                   ...nextLog,
-                  `AI完成｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
+                  `AI完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
                   ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
                 ];
                 lastReasonRef.current[m.seat] = m.reason || null;
