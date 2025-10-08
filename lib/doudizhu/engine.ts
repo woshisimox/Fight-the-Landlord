@@ -1121,8 +1121,8 @@ if (opts.rob !== false) {
   bidMultiplier = 1;
   multiplier = 1;
 for (let s=0;s<3;s++) {
-      const rob = (sc >= __th);
-      const sc = evalRobScore(hands[s]); 
+      const sc = evalRobScore(hands[s]);
+      const rob = (sc >= __th); 
 
       // thresholds for both built-ins and external choices (inline for scope)
       const __thMap: Record<string, number> = {
