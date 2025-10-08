@@ -1,6 +1,6 @@
 // lib/doudizhu/engine.ts
 
-/* === Inject: rob-eval helper (bidding debug) === */
+/* === Inject: bid-eval helper (bidding debug) === */
 function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'bid'|'pass', roundNo?:number){
   try { gen && gen.next && gen.next({ type:'event', kind:'bid-eval', seat, score, threshold, decision, roundNo }); } catch(e){}
 }
@@ -1093,7 +1093,7 @@ function wantRob(hand: Label[]): boolean {
 export async function* runOneGame(opts: {
   seats: [BotFunc, BotFunc, BotFunc] | BotFunc[];
   delayMs?: number;
-  rob?: boolean;                // true => 叫/抢
+  bid?: boolean;                // true => 叫/抢
   four2?: Four2Policy;
 }): AsyncGenerator<any, void, unknown> {
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -1121,7 +1121,7 @@ if (opts.rob !== false) {
   bidMultiplier = 1;
   multiplier = 1;
 for (let s=0;s<3;s++) {
-      const rob = wantRob(hands[s]);
+      const bid = wantRob(hands[s]);
       const sc = evalRobScore(hands[s]); 
 
       // thresholds for both built-ins and external choices (inline for scope)
@@ -1152,15 +1152,18 @@ for (let s=0;s<3;s++) {
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
+      const sc = evalRobScore(hands[s]);
+      const bid = (sc >= __th);
+
 
 // 记录本轮评估（即使未达到阈值也写日志/存档）
 yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
-if (rob) {
+if (bid) {
         __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
 
         last = s;
-yield { type:'event', kind:'bid', seat:s, rob, score: sc, bidMult: bidMultiplier, mult: multiplier };
+yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier, mult: multiplier };
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
@@ -1173,7 +1176,7 @@ yield { type:'event', kind:'bid', seat:s, rob, score: sc, bidMult: bidMultiplier
           if (!hit) continue;
           bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
           multiplier = bidMultiplier;
-          yield { type:'event', kind:'bid2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
+          yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
           if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
         }
         landlord = bestSeat;
@@ -1189,7 +1192,7 @@ if (__bidders.length === 0) {
   for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
   bottom = deck.slice(17*3);
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
-  continue; // 回到下一轮尝试，重新进行叫抢（会继续产出 rob-eval）
+  continue; // 回到下一轮尝试，重新进行叫抢（会继续产出 bid-eval）
 }
 yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: bidMultiplier };multiplier = bidMultiplier;
     if (last !== -1) landlord = last;
