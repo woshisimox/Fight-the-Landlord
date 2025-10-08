@@ -1105,7 +1105,8 @@ export async function* runOneGame(opts: {
   // 抢地主流程（简单实现）
   let landlord = 0;
   let multiplier = 1;
-  if (opts.rob !== false) {
+        let bidMultiplier = 1;
+if (opts.rob !== false) {
     let last = -1;
     
       const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
@@ -1146,7 +1147,7 @@ if (rob) {
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
 
         last = s;
-yield { type:'event', kind:'rob', seat:s, rob, score: sc, mult: multiplier };
+yield { type:'event', kind:'rob', seat:s, rob, score: sc, bidMult: bidMultiplier, mult: multiplier };
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
@@ -1157,12 +1158,15 @@ yield { type:'event', kind:'rob', seat:s, rob, score: sc, mult: multiplier };
         for (let t = 0; t < 3; t++) {
           const hit = __bidders.find(b => b.seat === t);
           if (!hit) continue;
-          multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
-          yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), mult: multiplier };
+          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+          multiplier = bidMultiplier;
+          yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
           if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
         }
         landlord = bestSeat;
       }
+      
+      yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: bidMultiplier };multiplier = bidMultiplier;
     if (last !== -1) landlord = last;
   }
   // 亮底 & 地主收底
