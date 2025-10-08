@@ -1,4 +1,6 @@
 // lib/doudizhu/engine.ts
+/* === Inject: rob-skip helper === */
+function emitRobSkipEvent(gen:any){ try { gen && gen.next && gen.next({ type:'event', kind:'rob-skip', reason:'allPass-or-below-threshold' }); } catch(e){} }
 // Dou Dizhu (斗地主) “真引擎”实现（适配 Bot Arena 项目）。
 // - 牌型完整（单、对、三、三带、顺子、连对、飞机/带翅膀、四带二、炸弹、王炸）
 // - 比较完整
