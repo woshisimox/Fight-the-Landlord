@@ -842,7 +842,7 @@ function LivePanel(props: LiveProps) {
     agg : Number(x?.agg  ?? 2.5),
     cons: Number(x?.cons ?? 2.5),
     eff : Number(x?.eff  ?? 2.5),
-    bid : Number(x?.bid ?? x?.rob ?? 2.5),
+    bid : Number(x?.bid ?? 2.5),
   });
   const ensureRadarAgg = (x:any): RadarAgg => ({
     scores: ensureScore5(x?.scores),
@@ -874,7 +874,7 @@ function LivePanel(props: LiveProps) {
         agg : mean(prev.scores.agg , inc.agg ),
         cons: mean(prev.scores.cons, inc.cons),
         eff : mean(prev.scores.eff , inc.eff ),
-        bid : mean(prev.scores.bid , inc.bid ),
+        bid : mean(prev.scores.bid, inc.bid),
       },
       count: c + 1,
     };
@@ -902,7 +902,7 @@ function LivePanel(props: LiveProps) {
           agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
           cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
           eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
-          bid : w(ll.scores.bid , ff.scores.bid , ll.count, ff.count),
+          bid : w(ll.scores.bid ?? ll.scores.bid, ff.scores.bid ?? ff.scores.bid, ll.count, ff.count),
         },
         count: tot,
       };
@@ -1464,7 +1464,7 @@ for (const raw of batch) {
               }
 
               // -------- 抢/不抢 --------
-              if (m.type === 'event' && m.kind==='bid') {
+              if (m.type === 'event' && m.kind === 'bid') {
   const mm = Number((m as any).mult || 0);
   const bb = Number((m as any).bidMult || 0);
   if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
@@ -1476,11 +1476,11 @@ for (const raw of batch) {
   nextLog = [...nextLog, `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
   continue;
               }
-else if (m.type === 'event' && m.kind==='bid-eval') {
+else if (m.type === 'event' && m.kind === 'bid-eval') {
   const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
   const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
   const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
-  const dec = (m.decision==='bid' || m.bid ? '抢' : '不抢');
+  const dec = m.decision || 'pass';
   const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
   nextLog.push(line);
 }
@@ -1688,7 +1688,7 @@ nextTotals     = [
                     agg : Number(sc.agg  ?? 2.5),
                     cons: Number(sc.cons ?? 2.5),
                     eff : Number(sc.eff  ?? 2.5),
-                    bid : Number(sc.bid ?? sc.rob ?? 2.5),
+                    bid : Number(sc.bid ?? 2.5),
                   };
                 }) as Score5[];
 
@@ -1706,7 +1706,7 @@ nextTotals     = [
                   nextAggCount = nextAggCount + 1;
                 }
 
-                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.bid}`).join(' ｜ ');
+                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜抢地主倾向 ${v.bid}`).join(' ｜ ');
                 nextLog = [...nextLog, `战术画像（本局）：${msg}（已累计 ${nextAggCount} 局）`];
                 continue;
               }
@@ -2119,6 +2119,7 @@ function RadarPanel({
 /* ========= 默认值（含“清空”按钮的重置） ========= */
 const DEFAULTS = {
   enabled: true,
+  bid: true,
   rounds: 10,
   startScore: 100,
   bid: true,
@@ -2168,7 +2169,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const [turnTimeoutSec, setTurnTimeoutSec] = useState<number>(30);
 
-  const [rob, setRob] = useState<boolean>(DEFAULTS.bid);
+  const [bid, setBid] = useState<boolean>(DEFAULTS.bid);
   const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
   const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
   const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
@@ -2182,7 +2183,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
-    setRob(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
+    setBid(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
     setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
@@ -2244,7 +2245,7 @@ const [lang, setLang] = useState<Lang>(() => {
   <div style={{ display:'flex', alignItems:'center', gap:24 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       可抢地主
-      <input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} />
+      <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
     </label>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       农民配合

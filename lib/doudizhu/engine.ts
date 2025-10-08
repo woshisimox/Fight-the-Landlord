@@ -1111,7 +1111,7 @@ export async function* runOneGame(opts: {
   let landlord = 0;
   let multiplier = 1;
         let bidMultiplier = 1;
-if (opts.rob !== false) {
+if (opts.bid !== false) {
     let last = -1;
     
       for (let __attempt=0; __attempt<5; __attempt++) {
