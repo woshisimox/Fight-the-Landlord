@@ -1,27 +1,5 @@
 // pages/index.tsx
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
-
-/* ===== Bid/Robo compatibility shim ===== */
-function normalizeKind(kind: string): string {
-  if (kind === 'bid-eval') return 'bid-eval';
-  if (kind === 'bid') return 'bid';
-  if (kind === 'bid2') return 'bid2';
-  if (kind === 'bid-round-end') return 'bid-round-end';
-  if (kind === 'bid-summary') return 'bid-summary';
-  if (kind === 'bid-skip') return 'bid-skip';
-  return kind;
-}
-function normalizeDecision(decision: string | undefined) {
-  if (decision === 'bid') return 'bid';
-  return decision;
-}
-function isBidFlag(ev: any): boolean {
-  if (typeof ev?.bid === 'boolean') return ev.bid;
-  if (typeof ev?.rob === 'boolean') return ev.rob;
-  if (ev && typeof ev.decision === 'string') return normalizeDecision(ev.decision) === 'bid';
-  return false;
-}
-
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -604,7 +582,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
       agg:  (prev.agg *c + curr.agg )/(c+1),
       cons: (prev.cons*c + curr.cons)/(c+1),
       eff:  (prev.eff *c + curr.eff )/(c+1),
-      rob:  (prev.rob *c + curr.rob )/(c+1),
+      bid: (prev.bid *c + curr.bid )/(c+1),
     };
   }
   const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
@@ -613,7 +591,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     agg:  a*curr.agg  + (1-a)*prev.agg,
     cons: a*curr.cons + (1-a)*prev.cons,
     eff:  a*curr.eff  + (1-a)*prev.eff,
-    bid:  a*curr.rob  + (1-a)*prev.rob,
+    bid: a*curr.bid  + (1-a)*prev.bid,
   };
 }
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
@@ -864,7 +842,7 @@ function LivePanel(props: LiveProps) {
     agg : Number(x?.agg  ?? 2.5),
     cons: Number(x?.cons ?? 2.5),
     eff : Number(x?.eff  ?? 2.5),
-    bid: Number(x?.rob  ?? 2.5),
+    bid : Number(x?.bid ?? x?.rob ?? 2.5),
   });
   const ensureRadarAgg = (x:any): RadarAgg => ({
     scores: ensureScore5(x?.scores),
@@ -896,7 +874,7 @@ function LivePanel(props: LiveProps) {
         agg : mean(prev.scores.agg , inc.agg ),
         cons: mean(prev.scores.cons, inc.cons),
         eff : mean(prev.scores.eff , inc.eff ),
-        bid: mean(prev.scores.rob , inc.rob ),
+        bid : mean(prev.scores.bid , inc.bid ),
       },
       count: c + 1,
     };
@@ -924,7 +902,7 @@ function LivePanel(props: LiveProps) {
           agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
           cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
           eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
-          bid: w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
+          bid : w(ll.scores.bid , ff.scores.bid , ll.count, ff.count),
         },
         count: tot,
       };
@@ -1486,19 +1464,19 @@ for (const raw of batch) {
               }
 
               // -------- 抢/不抢 --------
-              if (m.type === 'event' && m.kind === 'bid') {
+              if (m.type === 'event' && m.kind === 'rob') {
   const mm = Number((m as any).mult || 0);
   const bb = Number((m as any).bidMult || 0);
   if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
-  else if (isBidFlag(m)) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
+  else if (m.rob) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
   if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
-  else if (isBidFlag(m)) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
+  else if (m.rob) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
   const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
   const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
   nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
   continue;
               }
-else if (m.type === 'event' && m.kind === 'bid-eval') {
+else if (m.type === 'event' && m.kind === 'rob-eval') {
   const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
   const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
   const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
@@ -1710,7 +1688,7 @@ nextTotals     = [
                     agg : Number(sc.agg  ?? 2.5),
                     cons: Number(sc.cons ?? 2.5),
                     eff : Number(sc.eff  ?? 2.5),
-                    bid: Number(sc.rob  ?? 2.5),
+                    bid : Number(sc.bid ?? sc.rob ?? 2.5),
                   };
                 }) as Score5[];
 
