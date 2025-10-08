@@ -471,7 +471,7 @@ continue;
           agg : +agg.toFixed(2),
           cons: +cons.toFixed(2),
           eff : +eff.toFixed(2),
-          rob : +rob.toFixed(2),
+          bid: +rob.toFixed(2),
         }};
       });
 

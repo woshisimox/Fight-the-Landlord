@@ -1,5 +1,27 @@
 // pages/index.tsx
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+
+/* ===== Bid/Robo compatibility shim ===== */
+function normalizeKind(kind: string): string {
+  if (kind === 'bid-eval') return 'bid-eval';
+  if (kind === 'bid') return 'bid';
+  if (kind === 'bid2') return 'bid2';
+  if (kind === 'bid-round-end') return 'bid-round-end';
+  if (kind === 'bid-summary') return 'bid-summary';
+  if (kind === 'bid-skip') return 'bid-skip';
+  return kind;
+}
+function normalizeDecision(decision: string | undefined) {
+  if (decision === 'bid') return 'bid';
+  return decision;
+}
+function isBidFlag(ev: any): boolean {
+  if (typeof ev?.bid === 'boolean') return ev.bid;
+  if (typeof ev?.rob === 'boolean') return ev.rob;
+  if (ev && typeof ev.decision === 'string') return normalizeDecision(ev.decision) === 'bid';
+  return false;
+}
+
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -343,7 +365,7 @@ type LiveProps = {
   
   seatDelayMs?: number[];
   enabled: boolean;
-  rob: boolean;
+  \1bid: boolean;
   four2: Four2Policy;
   seats: BotChoice[];
   seatModels: string[];
@@ -573,7 +595,7 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 /* ====== 雷达图累计（0~5） ====== */
-type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
+type Score5 = { coop:number; agg:number; cons:number; eff:number; \1bid:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
   if (mode === 'mean') {
     const c = Math.max(0, count);
@@ -582,7 +604,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
       agg:  (prev.agg *c + curr.agg )/(c+1),
       cons: (prev.cons*c + curr.cons)/(c+1),
       eff:  (prev.eff *c + curr.eff )/(c+1),
-      rob:  (prev.rob *c + curr.rob )/(c+1),
+      \1bid:  (prev.rob *c + curr.rob )/(c+1),
     };
   }
   const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
@@ -591,7 +613,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     agg:  a*curr.agg  + (1-a)*prev.agg,
     cons: a*curr.cons + (1-a)*prev.cons,
     eff:  a*curr.eff  + (1-a)*prev.eff,
-    rob:  a*curr.rob  + (1-a)*prev.rob,
+    \1bid:  a*curr.rob  + (1-a)*prev.rob,
   };
 }
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
@@ -842,7 +864,7 @@ function LivePanel(props: LiveProps) {
     agg : Number(x?.agg  ?? 2.5),
     cons: Number(x?.cons ?? 2.5),
     eff : Number(x?.eff  ?? 2.5),
-    rob : Number(x?.rob  ?? 2.5),
+    \1bid: Number(x?.rob  ?? 2.5),
   });
   const ensureRadarAgg = (x:any): RadarAgg => ({
     scores: ensureScore5(x?.scores),
@@ -874,7 +896,7 @@ function LivePanel(props: LiveProps) {
         agg : mean(prev.scores.agg , inc.agg ),
         cons: mean(prev.scores.cons, inc.cons),
         eff : mean(prev.scores.eff , inc.eff ),
-        rob : mean(prev.scores.rob , inc.rob ),
+        \1bid: mean(prev.scores.rob , inc.rob ),
       },
       count: c + 1,
     };
@@ -902,7 +924,7 @@ function LivePanel(props: LiveProps) {
           agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
           cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
           eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
-          rob : w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
+          \1bid: w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
         },
         count: tot,
       };
@@ -950,7 +972,7 @@ function LivePanel(props: LiveProps) {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
-      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 }, count: 0 };
+      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, \1bid:2.5 }, count: 0 };
     });
     setAggStats(s3.map(x=>({ ...x.scores })));
     setAggCount(Math.max(s3[0].count, s3[1].count, s3[2].count));
@@ -1206,7 +1228,7 @@ const start = async () => {
     ) => {
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
-          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
+          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, \1bid:2.5 };
           const mode = aggModeRef.current;
           const a    = alphaRef.current;
           if (!nextAggStats) {
@@ -1253,7 +1275,7 @@ const start = async () => {
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
-          rob: props.rob,
+          \1bid: props.rob,
           four2: props.four2,
           seats: specs,
           clientTraceId: traceId,
@@ -1464,7 +1486,7 @@ for (const raw of batch) {
               }
 
               // -------- 抢/不抢 --------
-              if (m.type === 'event' && m.kind === 'rob') {
+              if (m.type === 'event' && m.kind === 'bid') {
   const mm = Number((m as any).mult || 0);
   const bb = Number((m as any).bidMult || 0);
   if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
@@ -1476,7 +1498,7 @@ for (const raw of batch) {
   nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
   continue;
               }
-else if (m.type === 'event' && m.kind === 'rob-eval') {
+else if (m.type === 'event' && m.kind === 'bid-eval') {
   const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
   const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
   const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
@@ -1688,7 +1710,7 @@ nextTotals     = [
                     agg : Number(sc.agg  ?? 2.5),
                     cons: Number(sc.cons ?? 2.5),
                     eff : Number(sc.eff  ?? 2.5),
-                    rob : Number(sc.rob  ?? 2.5),
+                    \1bid: Number(sc.rob  ?? 2.5),
                   };
                 }) as Score5[];
 
@@ -2121,7 +2143,7 @@ const DEFAULTS = {
   enabled: true,
   rounds: 10,
   startScore: 100,
-  rob: true,
+  \1bid: true,
   four2: 'both' as Four2Policy,
   farmerCoop: true,
   seatDelayMs: [1000,1000,1000] as number[],
