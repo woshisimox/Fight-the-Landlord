@@ -1476,6 +1476,15 @@ for (const raw of batch) {
   nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
   continue;
               }
+else if (m.type === 'event' && m.kind === 'rob-eval') {
+  const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
+  const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
+  const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
+  const dec = m.decision || 'pass';
+  const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
+  nextLog.push(line);
+}
+
 
               // -------- 明牌后额外加倍 --------
 // -------- 倍数校准（兜底） --------
@@ -2725,12 +2734,4 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
       <div style={{ minWidth:60, fontSize:12, color:'#374151' }}>{title}</div>
     </div>
   );
-}
-if (m.type === 'event' && m.kind === 'rob-eval') {
-  const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
-  const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
-  const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
-  const dec = m.decision || 'pass';
-  const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
-  nextLog.push(line);
 }
