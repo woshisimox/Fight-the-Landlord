@@ -2140,6 +2140,7 @@ function RadarPanel({
 /* ========= 默认值（含“清空”按钮的重置） ========= */
 const DEFAULTS = {
   enabled: true,
+  bid: true,
   rounds: 10,
   startScore: 100,
   rob: true,
