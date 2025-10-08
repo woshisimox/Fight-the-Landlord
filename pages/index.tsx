@@ -2503,7 +2503,7 @@ const [lang, setLang] = useState<Lang>(() => {
           startScore={startScore}
           seatDelayMs={seatDelayMs}
           enabled={enabled}
-          rob={rob}
+          bid={bid}
           four2={four2}
           seats={seats}
           seatModels={seatModels}
