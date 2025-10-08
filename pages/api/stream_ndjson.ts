@@ -10,6 +10,10 @@ import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
+// ---- stable hash for ruleId ----
+function stableHash(s: string): string { let h=5381; for (let i=0;i<s.length;i++){ h=((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); }
+
+
 
 /* ========== 已出牌缓存（仅当前请求作用域） ========== */
 declare global {
@@ -510,6 +514,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
     const four2  = (body.four2 || 'both') as 'both'|'2singles'|'2pairs';
 
+
+    const rule = (body as any).rule ?? { four2, rob: body.rob !== false, farmerCoop: !!body.farmerCoop };
+    const ruleId = (body as any).ruleId ?? stableHash(JSON.stringify(rule));
+
     const turnTimeoutMsArr = parseTurnTimeoutMsArr(req);
     const seatSpecs = (body.seats || []).slice(0,3) as SeatSpec[];
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
@@ -537,7 +545,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore }, res, round);
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
