@@ -54,43 +54,37 @@ async function __callExternalBid(bots:any[], seat:number, payload: DecideLandlor
   return null;
 }
 
+
 function __scoreToAction(sc:number, choiceName:string): { action: LandlordAction; threshold: number } {
   const __thMap: Record<string, number> = {
-    greedymax: 1.6, allysupport: 1.8, randomlegal: 2.0, endgamerush: 2.1, mininet: 2.2, greedymin: 2.4,
+    greedymax: 1.6,
+    allysupport: 1.8,
+    randomlegal: 2.0,
+    endgamerush: 2.1,
+    mininet: 2.2,
+    greedymin: 2.4,
   };
-  
-const __thMapChoice: Record<string, number> = {
-  'built-in:greedy-max':   1.6,
-  'built-in:ally-support': 1.8,
-  'built-in:random-legal': 2.0,
-  'built-in:endgame-rush': 2.1,
-  'built-in:mininet':      2.2,
-  'built-in:greedy-min':   2.4,
-  'external':              2.2,
-  'external:ai':           2.2,
-  'external:http':         2.2,
-  'ai':                    2.2,
-  'http':                  2.2,
-  'openai':                2.2,
-  'gpt':                   2.2,
-  'claude':                2.2,
-};
-const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
-const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
+  const __thMapChoice: Record<string, number> = {
+    'built-in:greedy-max':   1.6,
+    'built-in:ally-support': 1.8,
+    'built-in:random-legal': 2.0,
+    'built-in:endgame-rush': 2.1,
+    'built-in:mininet':      2.2,
+    'built-in:greedy-min':   2.4,
+    'external':              2.2,
+    'external:ai':           2.2,
+    'external:http':         2.2,
+    'ai':                    2.2,
+    'http':                  2.2,
+    'openai':                2.2,
+    'gpt':                   2.2,
+    'claude':                2.2,
+  };
+  const th = (__thMapChoice[choiceName] ?? __thMap[choiceName] ?? 1.8);
+  const action: LandlordAction = (sc >= th) ? 'rob' : 'pass';
+  return { action, threshold: th };
+}
 
-// —— 外置优先：尝试拿到直接行动 —— //
-let decision: LandlordAction = 'pass';
-let confidence: number|undefined;
-let pwin: number|undefined;
-let threshold: number|undefined;
-
-const extReq: DecideLandlordRequest = {
-  version:'ddz.v1', task:'decide_landlord',
-  meta:{ deadline_ms: 1200, lang:'zh' },
-  seat: s,
-  visibility: { hand: (hands[s] as any as string[]).slice(), history: [], start_seat: 0, bid_round: 1 },
-  rules: { scheme:'call-rob-pass', four2: (four2 as any), farmer_coop: true },
-  provider_hints: { temperature: 0.1, deterministic: true }
 };
 const ext = await __callExternalBid(bots as any, s, extReq, 1200);
 if (ext && (ext.action==='call'||ext.action==='rob'||ext.action==='pass')) {
