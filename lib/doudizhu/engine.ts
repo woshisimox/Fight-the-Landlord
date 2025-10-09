@@ -1,6 +1,46 @@
 // lib/doudizhu/engine.ts
 
 /* === Bid-only reason sanitizer === */
+/* === Probability-based bidding helpers (inserted) === */
+function __clamp01(x:number){ return Math.max(0, Math.min(1, x)); }
+function __sigmoid(z:number){ return 1/(1+Math.exp(-z)); }
+// tuneable mapping params (can be calibrated offline later)
+const __SCORE2PROB_ALPHA = 0.5;
+const __SCORE2PROB_BETA  = 0.0;
+
+function scoreToProb(score?: number|null): number|null {
+  if (typeof score !== 'number' || !isFinite(score)) return null;
+  return __clamp01(__sigmoid(__SCORE2PROB_ALPHA * score + __SCORE2PROB_BETA));
+}
+
+type __BidReply = {
+  action?: 'call'|'rob'|'pass'|string;
+  reason?: string;
+  score?: number;
+  winProbAsLord?: number;
+  [k: string]: any;
+};
+
+function resolveLordWinProb(
+  reply: __BidReply|undefined,
+  handScore?: number|null
+): { p:number; source:'bot'|'score2prob'|'hand2prob'; from:number|null } {
+  if (reply && typeof reply.winProbAsLord === 'number') {
+    const v = reply.winProbAsLord;
+    const p = (isFinite(v) ? __clamp01(v) : 0.5);
+    return { p, source:'bot', from: v };
+  }
+  const pFromScore = scoreToProb((reply && typeof reply.score==='number') ? reply.score : null);
+  if (pFromScore != null) return { p: pFromScore, source:'score2prob', from: (reply?.score ?? null) as any };
+  const pFromHand = scoreToProb(handScore ?? null);
+  const fromNum = (typeof handScore === 'number' && isFinite(handScore)) ? handScore : null;
+  return { p: (pFromHand ?? 0.5), source:'hand2prob', from: fromNum };
+}
+
+function decideRobByProb(p:number, threshold=0.5): 'rob'|'pass' {
+  return (p > threshold) ? 'rob' : 'pass';
+}
+
 function __sanitizeBidReason(raw: any): string {
   const s = (typeof raw === 'string' ? raw : '').trim();
   if (!s) return '';
@@ -1190,35 +1230,29 @@ if (typeof rraw === 'string' && rraw.trim()) {
   } catch {}
 }
 const sc = __external ? 0 : evalRobScore(hands[s]);
-// thresholds for both built-ins && external choices (inline for scope)
+// (kept legacy threshold map for reference/calibration; not used for decision now)
       const __thMap: Record<string, number> = {
-        greedymax: 1.6,
-        allysupport: 1.8,
-        randomlegal: 2.0,
-        endgamerush: 2.1,
-        mininet: 2.2,
-        greedymin: 2.4,
+        greedymax: 1.6, allysupport: 1.8, randomlegal: 2.0, endgamerush: 2.1, mininet: 2.2, greedymin: 2.4,
       };
       const __thMapChoice: Record<string, number> = {
-        'built-in:greedy-max':   1.6,
-        'built-in:ally-support': 1.8,
-        'built-in:random-legal': 2.0,
-        'built-in:endgame-rush': 2.1,
-        'built-in:mininet':      2.2,
-        'built-in:greedy-min':   2.4,
-        'external':              2.2,
-        'external:ai':           2.2,
-        'external:http':         2.2,
-        'ai':                    2.2,
-        'http':                  2.2,
-        'openai':                2.2,
-        'gpt':                   2.2,
-        'claude':                2.2,
+        'built-in:greedy-max': 1.6, 'built-in:ally-support': 1.8, 'built-in:random-legal': 2.0, 'built-in:endgame-rush': 2.1,
+        'built-in:mininet': 2.2, 'built-in:greedy-min': 2.4, 'external': 2.2, 'external:ai': 2.2, 'external:http': 2.2,
+        'ai': 2.2, 'http': 2.2, 'openai': 2.2, 'gpt': 2.2, 'claude': 2.2,
       };
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
-const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-let bid: boolean = __external ? !!__aiBid : (sc >= __th);
+      const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
+      const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8); // legacy
+
+// —— New: probability-based decision ——
+      const __handScore = __external ? (typeof (r as any)?.score === 'number' ? (r as any).score : sc) : sc;
+      const { p:__pwin, source:__pwSource, from:__pwFrom } = resolveLordWinProb((__external ? (r as any) : undefined), __handScore);
+      const __thresholdProb = 0.5;
+      const __decision = decideRobByProb(__pwin, __thresholdProb);
+      let bid: boolean = (__decision === 'rob');
+// Log probability-based evaluation (for front-end alignment)
+try { yield { type:'event', kind:'rob-eval', seat:s, p_win: __pwin, threshold: __thresholdProb, decision: (__decision), score: (__external ? ((r as any)?.score ?? null) : sc), source: __pwSource, from: __pwFrom }; } catch {}
+
+
 // 记录本轮评估（即使未达到阈值也写日志/存档）
 if (__external) { try { yield { type:'event', kind:'bid-eval', seat: s, source:'external-ai', decision: (bid ? 'bid' : 'pass'), reason: __aiBidReason, bidMult: bidMultiplier, mult: multiplier }; } catch{} } else { yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier }; }
 if (bid) {
