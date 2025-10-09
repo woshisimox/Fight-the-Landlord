@@ -1,5 +1,19 @@
 // lib/doudizhu/engine.ts
 
+/* === helper: external-bot detector (explicit flag > meta > heuristics) === */
+function __isExternalBot(b: any): boolean {
+  try {
+    if (!b) return false;
+    if ((b as any).external === true || (b as any).isExternal === true) return true;
+    const meta = (b as any).meta;
+    if (meta && (meta.source === 'external-ai' || meta.kind === 'external')) return true;
+    const tag = String((b as any).choice || (b as any).provider || (b as any).name || (b as any).label || '').toLowerCase();
+    if (/^(ai:|ai$|http)/.test(tag)) return true;
+    if (/(openai|gpt|qwen|glm|deepseek|claude|anthropic|cohere|mistral|vertex|dashscope|external)/.test(tag)) return true;
+  } catch {}
+  return false;
+}
+
 /* === Inject: bid-eval helper (bidding debug) === */
 function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'bid'|'pass', roundNo?:number){
   try { gen && gen.next && gen.next({ type:'event', kind:'bid-eval', seat, score, threshold, decision, roundNo }); } catch(e){}
