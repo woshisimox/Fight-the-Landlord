@@ -1,46 +1,16 @@
 // lib/doudizhu/engine.ts
 
 /* === Bid-only reason sanitizer === */
+
 /* === Probability-based bidding helpers (inserted) === */
 function __clamp01(x:number){ return Math.max(0, Math.min(1, x)); }
 function __sigmoid(z:number){ return 1/(1+Math.exp(-z)); }
-// tuneable mapping params (can be calibrated offline later)
 const __SCORE2PROB_ALPHA = 0.5;
 const __SCORE2PROB_BETA  = 0.0;
-
 function scoreToProb(score?: number|null): number|null {
   if (typeof score !== 'number' || !isFinite(score)) return null;
   return __clamp01(__sigmoid(__SCORE2PROB_ALPHA * score + __SCORE2PROB_BETA));
 }
-
-type __BidReply = {
-  action?: 'call'|'rob'|'pass'|string;
-  reason?: string;
-  score?: number;
-  winProbAsLord?: number;
-  [k: string]: any;
-};
-
-function resolveLordWinProb(
-  reply: __BidReply|undefined,
-  handScore?: number|null
-): { p:number; source:'bot'|'score2prob'|'hand2prob'; from:number|null } {
-  if (reply && typeof reply.winProbAsLord === 'number') {
-    const v = reply.winProbAsLord;
-    const p = (isFinite(v) ? __clamp01(v) : 0.5);
-    return { p, source:'bot', from: v };
-  }
-  const pFromScore = scoreToProb((reply && typeof reply.score==='number') ? reply.score : null);
-  if (pFromScore != null) return { p: pFromScore, source:'score2prob', from: (reply?.score ?? null) as any };
-  const pFromHand = scoreToProb(handScore ?? null);
-  const fromNum = (typeof handScore === 'number' && isFinite(handScore)) ? handScore : null;
-  return { p: (pFromHand ?? 0.5), source:'hand2prob', from: fromNum };
-}
-
-function decideRobByProb(p:number, threshold=0.5): 'rob'|'pass' {
-  return (p > threshold) ? 'rob' : 'pass';
-}
-
 function __sanitizeBidReason(raw: any): string {
   const s = (typeof raw === 'string' ? raw : '').trim();
   if (!s) return '';
@@ -1183,6 +1153,7 @@ const __tag = String(__bot?.choice || __bot?.provider || __bot?.name || __bot?.l
 const __external = !!(__bot?.external === true || __bot?.isExternal === true || (__bot?.meta && (__bot.meta.source === 'external-ai' || __bot.meta.kind === 'external')) || /^(ai:|ai$|http)/.test(__tag) || /(openai|gpt|qwen|glm|deepseek|claude|anthropic|cohere|mistral|vertex|dashscope|external)/.test(__tag));
 let __aiBid: null | boolean = null;
 let __aiBidReason: string | null = null;
+let __dec_ext: 'rob'|'pass'|null = null;
 if (__external) {
   try {
     const ctxForBid:any = {
@@ -1226,33 +1197,51 @@ if (typeof rraw === 'string' && rraw.trim()) {
       const act = String(r.action ?? r.move ?? r.decision ?? '').toLowerCase();
       if (['bid','rob','call','qiang','play','yes','y','true','1','叫','抢'].includes(act)) __aiBid = true;
       else if (['pass','skip','nobid','no','n','false','0','不叫','不抢'].includes(act)) __aiBid = false;
+  // === emit probability-based rob-eval for external AI ===
+  let __pwin_ext:number = (typeof (r as any)?.winProbAsLord === 'number' && isFinite((r as any).winProbAsLord))
+        ? __clamp01((r as any).winProbAsLord) : (scoreToProb((typeof (r as any)?.score==='number' ? (r as any).score : null)) ?? 0.5);
+  const __thr_ext = 0.5;
+  __dec_ext = (__pwin_ext > __thr_ext) ? 'rob' : 'pass';
+  try { yield { type:'event', kind:'rob-eval', seat:s, p_win: __pwin_ext, threshold: __thr_ext, decision: __dec_ext, score: (typeof (r as any)?.score==='number' ? (r as any).score : null), source: ((typeof (r as any)?.winProbAsLord==='number') ? 'bot' : 'score2prob') }; } catch {}
+
     }
   } catch {}
 }
 const sc = __external ? 0 : evalRobScore(hands[s]);
-// (kept legacy threshold map for reference/calibration; not used for decision now)
+// thresholds for both built-ins && external choices (inline for scope)
       const __thMap: Record<string, number> = {
-        greedymax: 1.6, allysupport: 1.8, randomlegal: 2.0, endgamerush: 2.1, mininet: 2.2, greedymin: 2.4,
+        greedymax: 1.6,
+        allysupport: 1.8,
+        randomlegal: 2.0,
+        endgamerush: 2.1,
+        mininet: 2.2,
+        greedymin: 2.4,
       };
       const __thMapChoice: Record<string, number> = {
-        'built-in:greedy-max': 1.6, 'built-in:ally-support': 1.8, 'built-in:random-legal': 2.0, 'built-in:endgame-rush': 2.1,
-        'built-in:mininet': 2.2, 'built-in:greedy-min': 2.4, 'external': 2.2, 'external:ai': 2.2, 'external:http': 2.2,
-        'ai': 2.2, 'http': 2.2, 'openai': 2.2, 'gpt': 2.2, 'claude': 2.2,
+        'built-in:greedy-max':   1.6,
+        'built-in:ally-support': 1.8,
+        'built-in:random-legal': 2.0,
+        'built-in:endgame-rush': 2.1,
+        'built-in:mininet':      2.2,
+        'built-in:greedy-min':   2.4,
+        'external':              2.2,
+        'external:ai':           2.2,
+        'external:http':         2.2,
+        'ai':                    2.2,
+        'http':                  2.2,
+        'openai':                2.2,
+        'gpt':                   2.2,
+        'claude':                2.2,
       };
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
-      const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-      const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8); // legacy
-
-// —— New: probability-based decision ——
-      const __handScore = __external ? (typeof (r as any)?.score === 'number' ? (r as any).score : sc) : sc;
-      const { p:__pwin, source:__pwSource, from:__pwFrom } = resolveLordWinProb((__external ? (r as any) : undefined), __handScore);
-      const __thresholdProb = 0.5;
-      const __decision = decideRobByProb(__pwin, __thresholdProb);
-      let bid: boolean = (__decision === 'rob');
-// Log probability-based evaluation (for front-end alignment)
-try { yield { type:'event', kind:'rob-eval', seat:s, p_win: __pwin, threshold: __thresholdProb, decision: (__decision), score: (__external ? ((r as any)?.score ?? null) : sc), source: __pwSource, from: __pwFrom }; } catch {}
-
-
+const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
+const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
+// === emit probability-based rob-eval for built-in ===
+const __pwin_builtin = (scoreToProb(sc) ?? 0.5);
+const __thr_builtin = 0.5;
+const __dec_builtin: 'rob'|'pass' = (__pwin_builtin > __thr_builtin) ? 'rob' : 'pass';
+try { yield { type:'event', kind:'rob-eval', seat:s, p_win: __pwin_builtin, threshold: __thr_builtin, decision: __dec_builtin, score: sc, source: 'score2prob' }; } catch {}
+let bid: boolean = __external ? (__dec_ext === 'rob') : (__dec_builtin === 'rob');
 // 记录本轮评估（即使未达到阈值也写日志/存档）
 if (__external) { try { yield { type:'event', kind:'bid-eval', seat: s, source:'external-ai', decision: (bid ? 'bid' : 'pass'), reason: __aiBidReason, bidMult: bidMultiplier, mult: multiplier }; } catch{} } else { yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier }; }
 if (bid) {
