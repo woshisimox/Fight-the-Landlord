@@ -1,19 +1,3 @@
-
-function __sanitizeBidReason(raw: any): string {
-  const s = (typeof raw === 'string' ? raw : '').trim();
-  if (!s) return '';
-  const PLAY_PAT = /(出牌|跟牌|压住|首家出牌|顺子|连对|三带|炸弹|王炸|lead|follow|type\s*=|cards?\s*:)/i;
-  if (PLAY_PAT.test(s)) return '';
-  return s.replace(/\s+/g, ' ').slice(0, 200);
-}
-function formatBidReasonForDisplay(phase:string, reason:string, fallback?:string): string {
-  if (phase === 'bid') {
-    const clean = __sanitizeBidReason(reason);
-    if (clean) return clean;
-    return (fallback && fallback.trim()) ? fallback.trim() : '';
-  }
-  return reason || '';
-}
 // pages/api/stream_ndjson.ts
 
 /* === Bid-only reason sanitizer (display) === */
@@ -335,12 +319,10 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
       ? unifiedScore(ctx, result.cards)
       : undefined;
     const scoreTag = (typeof unified === 'number') ? ` | score=${unified.toFixed(2)}` : '';
-    const rawReason =
+    const reason =
       (result && typeof result.reason === 'string')
         ? `[${label}] ${result.reason}${scoreTag}`
         : `[${label}] ${(result?.move==='play' ? stringifyMove(result) : 'pass')}${scoreTag}`
-    const phaseForLog = (typeof (result as any)?.phase === 'string') ? (result as any).phase : (ctx?.phase || 'play');
-    const reason = formatBidReasonForDisplay(phaseForLog, rawReason, undefined);
     try { const cstr = Array.isArray(result?.cards)?result.cards.join(''):''; console.debug('[DECISION]', `seat=${seatIndex}`, `move=${result?.move}`, `cards=${cstr}`, (typeof unified==='number'?`score=${unified.toFixed(2)}`:'') , `reason=${reason}`); } catch {}
     onReason(seatIndex, reason);
     try { onScore(seatIndex, unified as any); } catch {}
