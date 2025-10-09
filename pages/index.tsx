@@ -1483,6 +1483,32 @@ for (const raw of batch) {
               }
 else if (m.type === 'event' && m.kind === 'bid-eval') {
   const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
+  const dec = m.decision || 'pass';
+  if (m.source === 'external-ai') {
+    const reason = (typeof m.reason === 'string' && m.reason.trim()) ? m.reason : '';
+    const line = reason ? `${who} 评估｜外置AI｜决策=${dec}｜理由：${reason}`
+                        : `${who} 评估｜外置AI｜决策=${dec}`;
+    nextLog.push(line);
+  } else {
+    const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
+    const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
+    const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
+    nextLog.push(line);
+  }
+  continue;
+}
+else if (m.type === 'event' && m.kind === 'rob2') {
+  // 外置AI：只展示AI理由；否则展示 margin（若有）
+  if (m.source === 'external-ai' && typeof (m as any).reason === 'string' && (m as any).reason.trim()) {
+    nextLog = [...nextLog, `AI理由｜${seatName(m.seat)}：${(m as any).reason}`];
+  } else {
+    const marginTxt = String(m.score ?? '');
+    nextLog = [...nextLog, `${seatName(m.seat)} 二轮再抢｜margin=${marginTxt}`];
+  }
+  continue;
+}
+
+
   const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
   const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
   const dec = m.decision || 'pass';
