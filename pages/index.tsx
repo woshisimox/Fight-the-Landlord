@@ -1489,6 +1489,19 @@ else if (m.type === 'event' && m.kind === 'bid-eval') {
   const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
   nextLog.push(line);
 }
+else if (m.type === 'event' && m.kind === 'rob-eval') {
+  const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
+  const p   = (typeof m.p_win==='number' && isFinite(m.p_win)) ? (m.p_win*100).toFixed(1) + '%' : String(m.p_win);
+  const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? (m.threshold*100).toFixed(1) + '%' : String(m.threshold ?? '');
+  const dec = (m.decision ? String(m.decision) : ((typeof m.p_win==='number' && typeof m.threshold==='number' && isFinite(m.p_win) && isFinite(m.threshold) && m.p_win > m.threshold) ? 'rob' : 'pass'));
+  // 可选信息：来源与原始分数
+  const src = (m.source ? String(m.source) : '');
+  const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : (m.score==null ? '' : String(m.score));
+  const ext = [src ? `source=${src}` : '', sc!=='' ? `score=${sc}` : ''].filter(Boolean).join('｜');
+  const line = `${who} 抢评｜p_win=${p}｜阈值=${thr}｜决策=${dec}` + (ext ? `｜${ext}` : '');
+  nextLog.push(line);
+}
+
 
 
               // -------- 明牌后额外加倍 --------
