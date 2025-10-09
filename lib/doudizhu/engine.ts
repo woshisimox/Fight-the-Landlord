@@ -1186,10 +1186,11 @@ for (let __k=0; __k<3; __k++) { const s = (bidStartSeat + __k) % 3;
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
       const __ai = await __askExternalBid(s, 1, bidStartSeat, hands, (opts as any).rule, (opts as any).ruleId, __bidActs, bidMultiplier, multiplier);
+const bid = (__ai !== null) ? __ai : (sc >= __th);
+
+
+
       __bidActs.push({ seat:s, action: (bid ? 'bid' : 'pass') });
-
-      const bid = (__ai !== null) ? __ai : (sc >= __th);
-
 
 // 记录本轮评估（即使未达到阈值也写日志/存档）
 yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
