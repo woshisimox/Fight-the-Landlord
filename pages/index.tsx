@@ -1493,6 +1493,15 @@ else if (m.type === 'event' && m.kind === 'bid-eval') {
 
               // -------- 明牌后额外加倍 --------
 // -------- 倍数校准（兜底） --------
+
+// ------ 明牌（显示底牌） ------
+if (m.type === 'event' && m.kind === 'reveal') {
+  const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
+  const pretty = decorateHandCycle ? decorateHandCycle(btm) : btm;
+  nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
+  // 不改变 nextMultiplier，仅展示
+  continue;
+}
 if (m.type === 'event' && m.kind === 'multiplier-sync') {
   const cur = Math.max(1, (nextMultiplier || 1));
   const mlt = Math.max(1, Number((m as any).multiplier || 1));
@@ -1504,6 +1513,36 @@ if (m.type === 'event' && m.kind === 'multiplier-sync') {
   continue;
 }
 
+
+// ------ 明牌后独立加倍：逐家决策 ------
+if (m.type === 'event' && m.kind === 'double-decision') {
+  const who = seatName(m.seat);
+  const decided = m.double ? '加倍' : '不加倍';
+  const parts: string[] = [ `[加倍阶段] ${who}${m.role==='landlord'?'(地主)':''} ${decided}` ];
+  if (typeof m.delta === 'number' && isFinite(m.delta)) parts.push(`Δ=${m.delta.toFixed(2)}`);
+  if (typeof m.dLhat === 'number' && isFinite(m.dLhat)) parts.push(`Δ̂=${m.dLhat.toFixed(2)}`);
+  if (typeof m.counter === 'number' && isFinite(m.counter)) parts.push(`counter=${m.counter.toFixed(2)}`);
+  if (typeof m.reason === 'string') parts.push(`理由=${m.reason}`);
+  if (m.bayes && (typeof m.bayes.landlord!=='undefined' || typeof m.bayes.farmerY!=='undefined')) {
+    const l = Number(m.bayes.landlord||0), y = Number(m.bayes.farmerY||0);
+    parts.push(`bayes:{L=${l},Y=${y}}`);
+  }
+  nextLog = [...nextLog, parts.join('｜')];
+  continue;
+}
+
+// ------ 明牌后独立加倍：汇总 ------
+if (m.type === 'event' && m.kind === 'double-summary') {
+  const base = Math.max(1, Number((m as any).base || 1));
+  const yi   = Math.max(1, Number((m as any).mulY || (m as any).multiplierYi || 1));
+  const bing = Math.max(1, Number((m as any).mulB || (m as any).multiplierBing || 1));
+  nextLog = [...nextLog,
+    `明牌加倍汇总｜基础x${base}`,
+    `对乙x${yi}｜对丙x${bing}`
+  ];
+  // 不直接改 nextMultiplier，保持旧逻辑一致性
+  continue;
+}
 if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double')) {
   if (m.do) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
   nextLog = [...nextLog, `${seatName(m.seat)} ${m.do ? '加倍' : '不加倍'}（明牌后）`];
@@ -1607,6 +1646,14 @@ nextTotals     = [
   nextTotals[1] + rot2[1],
   nextTotals[2] + rot2[2]
 ] as any;
+                {
+                  const mYi  = Number(((m as any).multiplierYi ?? 0));
+                  const mBing= Number(((m as any).multiplierBing ?? 0));
+                  if ((mYi && mYi > 0) || (mBing && mBing > 0)) {
+                    nextLog = [...nextLog, `结算倍数拆分｜对乙x${mYi || 1}｜对丙x${mBing || 1}`];
+                  }
+                }
+
 
                 // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
                 if (nextWinnerLocal == null) {

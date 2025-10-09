@@ -1123,7 +1123,7 @@ if (opts.bid !== false) {
 for (let s=0;s<3;s++) {
       const sc = evalRobScore(hands[s]); 
 
-      // thresholds for both built-ins and external choices (inline for scope)
+      // thresholds for both built-ins && external choices (inline for scope)
       const __thMap: Record<string, number> = {
         greedymax: 1.6,
         allysupport: 1.8,
@@ -1202,6 +1202,131 @@ yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: b
   yield { type:'event', kind:'reveal', bottom: bottom.slice() };
   hands[landlord].push(...bottom);
   hands[landlord] = sorted(hands[landlord]);
+
+// === 加倍阶段（地主→乙→丙） ===
+// 配置参数（可抽到外部 config）
+const __DOUBLE_CFG = {
+  landlordThreshold: 1.0,
+  counterLo: 2.5,
+  counterHi: 4.0,
+  mcSamples: 240,
+  bayes: { landlordRaiseHi: 0.8, teammateRaiseHi: 0.4 },
+  // 上限，最终对位最多到 8 倍（含叫抢与加倍）；炸弹/春天在结算时另外乘
+  cap: 8
+};
+
+// 计算反制能力分（简版，可再调权重）
+function __counterScore(hand: Label[], bottom: Label[]): number {
+  const map = countByRank(hand);
+  const hasR = !!rocketFrom(map);
+  const bombs = [...bombsFrom(map)].length;
+  const twos = map.get(ORDER['2'])?.length ?? 0;
+  const As = map.get(ORDER['A'])?.length ?? 0;
+  let sc = 0;
+  if (hasR) sc += 3.0;
+  sc += 2.0 * bombs;
+  sc += 0.8 * Math.max(0, twos);
+  sc += 0.6 * Math.max(0, As-1);
+  return sc;
+}
+
+// 基于公开信息的蒙特卡洛：估计底牌带来的期望增益 Δ̂
+function __estimateDeltaByMC(mySeat:number, myHand:Label[], bottom:Label[], landlordSeat:number, samples:number): number {
+  // 未知牌：整副 54 去掉我的 17 与底牌 3
+  const deckAll: Label[] = freshDeck();
+  const mySet = new Set(myHand.concat(bottom));
+  const unknown: Label[] = deckAll.filter(c => !mySet.has(c));
+  let acc = 0, n = 0;
+  for (let t=0;t<samples;t++) {
+    // 随机洗牌后，取前34张：分配给（地主17，另一农民17）
+    const pool = shuffle(unknown.slice());
+    const sampleLord = pool.slice(0,17);
+    // before
+    const S_before = evalRobScore(sampleLord);
+    // after: 并入底牌
+    const S_after  = evalRobScore(sorted(sampleLord.concat(bottom)));
+    acc += (S_after - S_before);
+    n++;
+  }
+  return n ? acc/n : 0;
+}
+
+// 结构兜底：底牌是否带来明显强结构（王炸/炸弹/连对显著延长等）
+function __structureBoosted(before: Label[], after: Label[]): boolean {
+  const mb = countByRank(before), ma = countByRank(after);
+  const rb = !!rocketFrom(mb), ra = !!rocketFrom(ma);
+  if (!rb && ra) return true;
+  const bb = [...bombsFrom(mb)].length, ba = [...bombsFrom(ma)].length;
+  if (ba > bb) return true;
+  // 高张数量显著提升（粗略兜底）
+  const twb = mb.get(ORDER['2'])?.length ?? 0, twa = ma.get(ORDER['2'])?.length ?? 0;
+  if (twa - twb >= 2) return true;
+  const Ab = mb.get(ORDER['A'])?.length ?? 0, Aa = ma.get(ORDER['A'])?.length ?? 0;
+  if (Aa - Ab >= 2) return true;
+  return false;
+}
+
+// 地主加倍判定（阈值优先，未达阈值时结构兜底；仅一次）
+function __decideLandlordDouble(handBefore:Label[], handAfter:Label[]): {L:number, delta:number, reason:'threshold'|'structure'|'none'} {
+  const S_before = evalRobScore(handBefore);
+  const S_after  = evalRobScore(handAfter);
+  const delta = S_after - S_before;
+  if (delta >= __DOUBLE_CFG.landlordThreshold) return { L:1, delta, reason:'threshold' };
+  if (__structureBoosted(handBefore, handAfter)) return { L:1, delta, reason:'structure' };
+  return { L:0, delta, reason:'none' };
+}
+
+// 农民加倍基础规则（不含贝叶斯微调）
+function __decideFarmerDoubleBase(myHand:Label[], bottom:Label[], samples:number): {F:number, dLhat:number, counter:number} {
+  const dLhat = __estimateDeltaByMC(-1, myHand, bottom, landlord, samples);
+  const counter = __counterScore(myHand, bottom);
+  let F = 0;
+  if ((dLhat <= 0 && counter >= __DOUBLE_CFG.counterLo) ||
+      (dLhat >  0 && counter >= __DOUBLE_CFG.counterHi) ||
+      (bombsFrom(countByRank(myHand)).next().value) || (!!rocketFrom(countByRank(myHand)))) {
+    F = 1;
+  }
+  return { F, dLhat, counter };
+}
+
+// —— 执行顺序：地主 → 乙(下家) → 丙(上家) ——
+const Lseat = landlord;
+const Yseat = (landlord + 1) % 3;
+const Bseat = (landlord + 2) % 3;
+
+// 地主：基于 before/after 的 Δ 与结构兜底
+const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 理论上就是并入前
+const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
+const Lflag = lordDecision.L;
+try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
+
+// 乙（下家）：蒙特卡洛 + 反制能力
+const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
+try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yBase.F, dLhat:yBase.dLhat, counter:yBase.counter }; } catch{}
+
+// 丙（上家）：在边缘情况下做贝叶斯式调节
+let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
+let F_b = bBase.F;
+if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.counterHi) <= 0.6)) {
+  // 若地主或乙已加倍，提高门槛（更保守）
+  let effectiveHi = __DOUBLE_CFG.counterHi;
+  if (Lflag === 1) effectiveHi += __DOUBLE_CFG.bayes.landlordRaiseHi;
+  if (yBase.F === 1) effectiveHi += __DOUBLE_CFG.bayes.teammateRaiseHi;
+  F_b = (bBase.counter >= effectiveHi) ? 1 : 0;
+}
+try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!F_b, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch{}
+
+// 记录对位加倍倍数（不含炸弹/春天）
+let __doubleMulY = (1 << Lflag) * (1 << yBase.F);
+let __doubleMulB = (1 << Lflag) * (1 << F_b);
+
+// 上限裁剪到 8（含叫抢）
+__doubleMulY = Math.min(__DOUBLE_CFG.cap, __doubleMulY * multiplier) / Math.max(1, multiplier);
+__doubleMulB = Math.min(__DOUBLE_CFG.cap, __doubleMulB * multiplier) / Math.max(1, multiplier);
+
+try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bing:Bseat, mulY: __doubleMulY, mulB: __doubleMulB, base: multiplier }; } catch{}
+
+
 
   // 初始化（带上地主）
   yield { type:'state', kind:'init', landlord, hands: hands.map(h => [...h]) };
@@ -1380,14 +1505,17 @@ yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: b
       if (winner === landlord && farmerPlayed === 0) springMul *= 2;          // 春天
       if (winner !== landlord && landlordPlayed <= 1) springMul *= 2;         // 反春天（地主仅首手或一次也没成）
 
-      const finalMultiplier = multiplier * (1 << bombTimes) * springMul;      // 炸弹/王炸：每次×2
+      
+      const finalBaseY = multiplier * __doubleMulY;
+      const finalBaseB = multiplier * __doubleMulB;
+      const finalYi   = finalBaseY * (1 << bombTimes) * springMul;
+      const finalBing = finalBaseB * (1 << bombTimes) * springMul;
 
       const delta: [number, number, number] =
         winner === landlord
-          ? [+2*finalMultiplier, -finalMultiplier, -finalMultiplier]
-          : [-2*finalMultiplier, +finalMultiplier, +finalMultiplier];
-
-      yield { type:'event', kind:'win', winner, multiplier: finalMultiplier, deltaScores: delta };
+          ? [+(finalYi + finalBing), -finalYi, -finalBing]
+          : [-(finalYi + finalBing), +finalYi, +finalBing];
+      yield { type:'event', kind:'win', winner, multiplier: multiplier, multiplierYi: finalYi, multiplierBing: finalBing, deltaScores: delta };
       return;
     }
 
