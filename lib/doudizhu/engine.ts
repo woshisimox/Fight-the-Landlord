@@ -1103,9 +1103,6 @@ export async function* runOneGame(opts: {
   // 发牌
   let deck = shuffle(freshDeck());
   let hands: Label[][] = [[],[],[]];
-  // 外置AI理由记录
-  const __aiBidReason: (string|null)[] = [null, null, null];
-  const __aiDoubleReason: (string|null)[] = [null, null, null];
   for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
   let bottom = deck.slice(17*3); // 3 张
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
@@ -1123,7 +1120,41 @@ if (opts.bid !== false) {
   last = -1;
   bidMultiplier = 1;
   multiplier = 1;
-for (let s=0;s<3;s++) {
+
+async function __askExternalBid(s:number, round:number, startSeat:number, hands: Label[][], rule:any, ruleId:string, bidHistory: {seat:number; action:'bid'|'pass'}[], bidMultiplier:number, multiplier:number): Promise<boolean|null> {
+  try {
+    const choice = String((bots as any)[s]?.choice || '').toLowerCase();
+    const isExternal = choice.startsWith('ai:') || choice === 'ai' || choice === 'http' || choice === 'openai' || choice === 'gpt' || choice === 'external';
+    if (!isExternal) return null;
+    const ctxForBid: any = {
+      phase: 'bid',
+      seat: s,
+      hands: hands[s],
+      role: 'farmer',
+      require: null,
+      canPass: true,
+      policy: { four2 },
+      history: [], currentTrick: [], seen: [], bottom: [],
+      handsCount: [hands[0].length, hands[1].length, hands[2].length],
+      counts: {},
+      leader: startSeat, trick: -1, landlord: -1,
+      teammates: [], opponents: [],
+      ruleId, rule,
+      bidding: { startSeat, round, lastSeat: (bidHistory.length? bidHistory[bidHistory.length-1].seat: -1), history: bidHistory, bidMultiplier, multiplier },
+    };
+    const mv = await Promise.resolve(bots[s](ctxForBid));
+    if (!mv) return null;
+    const __raw:any = (mv as any);
+            const action = (((__raw && (__raw.action ?? __raw.move)) ?? '') as string).toString().toLowerCase();
+    if (action === 'bid' || action === 'rob' || action === 'play') return true;
+    if (action === 'pass' || action === 'skip' || action === 'nobid') return false;
+    return null;
+  } catch { return null; }
+}
+let bidStartSeat = (opts as any)?.bidStartSeat;
+      if (typeof bidStartSeat !== 'number' || bidStartSeat<0 || bidStartSeat>2) { bidStartSeat = Math.floor(Math.random()*3); }
+      const __bidActs: { seat:number; action:'bid'|'pass' }[] = [];
+for (let __k=0; __k<3; __k++) { const s = (bidStartSeat + __k) % 3;
       const sc = evalRobScore(hands[s]); 
 
       // thresholds for both built-ins && external choices (inline for scope)
@@ -1151,30 +1182,24 @@ for (let s=0;s<3;s++) {
         'gpt':                   2.2,
         'claude':                2.2,
       };
-      const __choice = String((bots as any)[s]?.choice || (bots as any)[s]?.provider || (bots as any)[s]?.name || (bots as any)[s]?.label || '').toLowerCase();
-      const __external = /^(ai:|ai$|http|openai|gpt|external)/.test(__choice);
+      const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-      const bid = (sc >= __th);
+      const __ai = await __askExternalBid(s, 1, bidStartSeat, hands, (opts as any).rule, (opts as any).ruleId, __bidActs, bidMultiplier, multiplier);
+const bid = (__ai !== null) ? __ai : (sc >= __th);
 
 
-// 记录本轮评估（外置AI则只展示AI，不展示阈值）
-if (__external) {
-  yield { type:'event', kind:'bid-eval', seat: s, source:'external-ai', decision: (bid ? 'bid' : 'pass'), reason: (__aiBidReason[s] ?? null), bidMult: bidMultiplier, mult: multiplier };
-} else {
-  yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
-}
+
+      __bidActs.push({ seat:s, action: (bid ? 'bid' : 'pass') });
+
+// 记录本轮评估（即使未达到阈值也写日志/存档）
+yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
 if (bid) {
         __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
 
         last = s;
-yield { type:'event', kind:'bid', seat:s, bid,
-  score: (__external ? undefined : sc),
-  source: (__external ? 'external-ai' : undefined),
-  reason: (__external ? (__aiBidReason[s] ?? null) : undefined),
-  bidMult: bidMultiplier, mult: multiplier };
-
+yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier, mult: multiplier };
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
@@ -1182,19 +1207,16 @@ yield { type:'event', kind:'bid', seat:s, bid,
       if (__bidders.length > 0) {
         let bestSeat = -1;
         let bestMargin = -Infinity;
-        for (let t = 0; t < 3; t++) {
+        for (let __j=0; __j<3; __j++) { const t = (bidStartSeat + __j) % 3;
           const hit = __bidders.find(b => b.seat === t);
           if (!hit) continue;
-                const __choiceT = String((bots as any)[t]?.choice || (bots as any)[t]?.provider || (bots as any)[t]?.name || (bots as any)[t]?.label || '').toLowerCase();
-      const __externalT = /^(ai:|ai$|http|openai|gpt|external)/.test(__choiceT);
+          
+const __ai2 = await __askExternalBid(t, 2, bidStartSeat, hands, (opts as any).rule, (opts as any).ruleId, __bidActs, bidMultiplier, multiplier);
+if (__ai2 === false) { __bidActs.push({ seat:t, action:'pass' }); continue; }
+if (__ai2 === true) { __bidActs.push({ seat:t, action:'bid' }); }
 bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
           multiplier = bidMultiplier;
-          yield { type:'event', kind:'rob2', seat: t,
-  score: (__externalT ? undefined : (hit && typeof hit.margin==='number' ? Number(hit.margin).toFixed(4) : undefined)),
-  source: (__externalT ? 'external-ai' : undefined),
-  reason: (__externalT ? (__aiBidReason[t] ?? null) : undefined),
-  bidMult: bidMultiplier, mult: multiplier };
-
+          yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
           if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
         }
         landlord = bestSeat;

@@ -1476,32 +1476,13 @@ for (const raw of batch) {
   else if (m.bid) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
   if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
   else if (m.bid) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
-  // 外置AI优先展示理由
-if (m.source === 'external-ai' && typeof (m as any).reason === 'string' && (m as any).reason.trim()) {
-  nextLog = [...nextLog, `AI理由｜${seatName(m.seat)}：${(m as any).reason}`];
-} else {
   const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
   const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
-  nextLog = [...nextLog, `${seatName(m.seat)} ${m.bid ? '抢地主' : '让过'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
-}
+  nextLog = [...nextLog, `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
   continue;
               }
 else if (m.type === 'event' && m.kind === 'bid-eval') {
   const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
-  const dec = m.decision || 'pass';
-  if (m.source === 'external-ai') {
-    const reason = (typeof m.reason === 'string' && m.reason.trim()) ? m.reason : '';
-    const line = reason ? `${who} 评估｜外置AI｜决策=${dec}｜理由：${reason}`
-                        : `${who} 评估｜外置AI｜决策=${dec}`;
-    nextLog.push(line);
-  } else {
-    const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
-    const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
-    const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
-    nextLog.push(line);
-  }
-  continue;
-}`;
   const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
   const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
   const dec = m.decision || 'pass';
