@@ -1091,6 +1091,9 @@ function wantRob(hand: Label[]): boolean {
 
 // ========== 对局主循环 ==========
 export async function* runOneGame(opts: {
+  // Internal phase guard to avoid premature PLAY before doubling finishes
+  let __PHASE: 'deal' | 'bid' | 'double' | 'play' = 'deal';
+
   seats: [BotFunc, BotFunc, BotFunc] | BotFunc[];
   delayMs?: number;
   bid?: boolean;                // true => 叫/抢
@@ -1114,7 +1117,8 @@ export async function* runOneGame(opts: {
 if (opts.bid !== false) {
     let last = -1;
     
-      for (let __attempt=0; __attempt<5; __attempt++) {
+      __PHASE = 'bid';
+  for (let __attempt=0; __attempt<5; __attempt++) {
   const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
   // 每次重试重置叫抢状态
   last = -1;
@@ -1139,12 +1143,16 @@ if (__external) {
       teammates: [], opponents: [],
       ruleId: (opts as any).ruleId, rule: (opts as any).rule,
       bidding: { round: 1 }
-    };
-    const mv = await Promise.resolve((bots as any)[s](ctxForBid));
-    const r:any = (mv||{});
-    const rraw = r.reason ?? r.explanation ?? r.rationale ?? r.why ?? r.comment ?? r.msg;
-    if (typeof rraw === 'string' && rraw.trim()) __aiBidReason = rraw.slice(0, 800);
-    if (typeof r.bid === 'boolean') __aiBid = r.bid; else
+    };const mv = await Promise.resolve((bots as any)[s](ctxForBid));
+const r:any = (mv||{});
+const rraw = r.reason ?? r.explanation ?? r.rationale ?? r.why ?? r.comment ?? r.msg;
+if (typeof rraw === 'string' && rraw.trim()) {
+  // Heuristic filter: in bidding phase, ignore reasons that look like PLAY instructions
+  const _rr = rraw.trim();
+  const looksLikePlay = /(出牌|顺子|对子|炸弹|跟牌|压住|首家出牌|lead|follow|type=|打出)/.test(_rr);
+  if (!looksLikePlay) __aiBidReason = _rr.slice(0, 800);
+  else __aiBidReason = ''; // drop misleading play-style reason during bid
+}if (typeof r.bid === 'boolean') __aiBid = r.bid; else
     if (typeof r.rob === 'boolean') __aiBid = r.rob; else
     if (typeof r.yes === 'boolean') __aiBid = r.yes; else
     if (typeof r.double === 'boolean') __aiBid = r.double; else
@@ -1233,6 +1241,7 @@ yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: b
 
   }
   // 亮底 & 地主收底
+  __PHASE = 'double';
   yield { type:'event', kind:'reveal', bottom: bottom.slice() };
   hands[landlord].push(...bottom);
   hands[landlord] = sorted(hands[landlord]);
@@ -1400,7 +1409,9 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
       landlord,
       leader,
       trick,
-      history: clone(history),
+      
+  __PHASE = 'play';
+history: clone(history),
       currentTrick: clone(history.filter(h => h.trick === trick)),
       seen: clone(seen),
       bottom: clone(bottom),
