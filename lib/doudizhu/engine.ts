@@ -45,7 +45,6 @@ export type BotCtx = {
 
   seen: Label[];            // 所有“已公开可见”的牌：底牌 + 历史出牌
   bottom: Label[];          // 亮底的三张牌（开局已公布）
-  seenBySeat?: Label[][];
 
   handsCount: [number, number, number]; // 各家的手牌张数
   role: 'landlord' | 'farmer';          // 当前角色
@@ -475,7 +474,40 @@ function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy)
 
 // ========== 内置 Bot ==========
 export const RandomLegal: BotFunc = (ctx) => {
-  const four2 = ctx?.policy?.four2 || 'both';
+  
+async function __askExternalDouble(s:number, hands: Label[][], bottom: Label[], landlord:number, rule:any, ruleId:string, already: Record<string, boolean>, multiplier:number, seen: Label[], seenBySeat: Label[][]): Promise<boolean|null> {
+  try {
+    const choice = String((bots as any)[s]?.choice || '').toLowerCase();
+    const isExternal = choice.startsWith('ai:') || choice === 'ai' || choice === 'http' || choice === 'openai' || choice === 'gpt' || choice === 'external';
+    if (!isExternal) return null;
+    const ctxForDouble: any = {
+      phase: 'double',
+      seat: s,
+      role: (s === landlord ? 'landlord' : 'farmer'),
+      hands: hands[s],
+      bottom,
+      seen,
+      seenBySeat,
+      policy: { four2 },
+      ruleId, rule,
+      require: null, canPass: true,
+      landlord, leader: landlord, trick: -1,
+      history: [], currentTrick: [],
+      handsCount: [hands[0].length, hands[1].length, hands[2].length],
+      counts: {},
+      teammates: (s === landlord ? [] : [ ((s=== (landlord+1)%3) ? (landlord+2)%3 : (landlord+1)%3 ) ]),
+      opponents: (s === landlord ? [ (landlord+1)%3, (landlord+2)%3 ] : [ landlord ]),
+      doubling: { policy: 'independent', order: 'landlord-first', already, canDouble: !already[String(s)], multiplier, baseMultiplier: 1 }
+    };
+    const mv = await Promise.resolve(bots[s](ctxForDouble));
+    if (!mv) return null;
+    const action = (mv.action || mv.move || '').toString().toLowerCase();
+    if (action === 'double' || action === 'play') return true;
+    if (action === 'skip' || action === 'pass') return false;
+    return null;
+  } catch { return null; }
+}
+const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
 
   const isType = (t:any,...n:string[])=>n.includes(String(t));
@@ -1294,17 +1326,32 @@ function __decideFarmerDoubleBase(myHand:Label[], bottom:Label[], samples:number
 const Lseat = landlord;
 const Yseat = (landlord + 1) % 3;
 const Bseat = (landlord + 2) % 3;
+const __sbs = __computeSeenBySeat(history, bottom, landlord);
+const __already: Record<string, boolean> = { '0': false, '1': false, '2': false };
+
 
 // 地主：基于 before/after 的 Δ 与结构兜底
 const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 理论上就是并入前
 const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
-const Lflag = lordDecision.L;
+let Lflag = lordDecision.L;
 try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
 
+
+try {
+  const __aiL = await __askExternalDouble(Lseat, hands, bottom, landlord, (opts as any).rule, (opts as any).ruleId, __already, multiplier, seen, __sbs);
+  if (__aiL !== null) { Lflag = __aiL ? 1 : 0; }
+} catch {}
+__already[String(Lseat)] = (Lflag === 1);
 // 乙（下家）：蒙特卡洛 + 反制能力
 const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
 try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yBase.F, dLhat:yBase.dLhat, counter:yBase.counter }; } catch{}
 
+
+try {
+  const __aiY = await __askExternalDouble(Yseat, hands, bottom, landlord, (opts as any).rule, (opts as any).ruleId, __already, multiplier, seen, __sbs);
+  if (__aiY !== null) { try { (yBase as any).F = __aiY ? 1 : 0; } catch{} }
+} catch {}
+__already[String(Yseat)] = ((yBase as any).F === 1);
 // 丙（上家）：在边缘情况下做贝叶斯式调节
 let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
 let F_b = bBase.F;
@@ -1317,6 +1364,12 @@ if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.c
 }
 try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!F_b, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch{}
 
+
+try {
+  const __aiB = await __askExternalDouble(Bseat, hands, bottom, landlord, (opts as any).rule, (opts as any).ruleId, __already, multiplier, seen, __sbs);
+  if (__aiB !== null) { F_b = __aiB ? 1 : 0; }
+} catch {}
+__already[String(Bseat)] = (F_b === 1);
 // 记录对位加倍倍数（不含炸弹/春天）
 let __doubleMulY = (1 << Lflag) * (1 << yBase.F);
 let __doubleMulB = (1 << Lflag) * (1 << F_b);
@@ -1358,21 +1411,7 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
   // 游戏循环
   while (true) {
     const isLeader = (require == null && turn === leader);
-    
-// --- derive per-seat seen cards (history + bottom to landlord) ---
-function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: number): Label[][] {
-  const arr: Label[][] = [[],[],[]];
-  for (const ev of history) {
-    if (ev && ev.move === 'play' && Array.isArray(ev.cards)) {
-      try { arr[ev.seat]?.push(...(ev.cards as Label[])); } catch {}
-    }
-  }
-  if (typeof landlord === 'number' && landlord >= 0) {
-    try { arr[landlord]?.push(...(bottom as Label[])); } catch {}
-  }
-  return arr;
-}
-const ctx: BotCtx = {
+    const ctx: BotCtx = {
       hands: hands[turn],
       require,
       canPass: !isLeader,
@@ -1385,7 +1424,6 @@ const ctx: BotCtx = {
       currentTrick: clone(history.filter(h => h.trick === trick)),
       seen: clone(seen),
       bottom: clone(bottom),
-      seenBySeat: __computeSeenBySeat(history, bottom, landlord),
       handsCount: handsCount(),
       role: (turn === landlord ? 'landlord' : 'farmer'),
       teammates: (turn === landlord ? [] : [ (turn=== (landlord+1)%3 ? (landlord+2)%3 : (landlord+1)%3 ) ]),
