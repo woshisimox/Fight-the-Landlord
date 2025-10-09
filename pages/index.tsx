@@ -1382,7 +1382,20 @@ for (const raw of batch) {
                 continue;
               }
 
-              // -------- 初始发牌（仅限 init 帧） --------
+              
+              // -------- 抢地主评估（行动优先） --------
+              if (m.type === 'event' && m.kind === 'bid-eval') {
+                const seat = m.seat;
+                const sc = (typeof m.score === 'number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
+                const th = (typeof m.threshold === 'number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : (m.threshold==null? '—' : String(m.threshold));
+                const conf = (typeof m.confidence === 'number' && isFinite(m.confidence)) ? Math.round(m.confidence*100) + '%' : '—';
+                const pwin = (typeof m.pwin === 'number' && isFinite(m.pwin)) ? (m.pwin*100).toFixed(1) + '%' : (typeof m.p_win_estimate==='number'? (m.p_win_estimate*100).toFixed(1)+'%' : '—');
+                const decision = (m.decision==='call'||m.decision==='rob'||m.decision==='pass') ? m.decision : (m.bid ? 'rob' : 'pass');
+                const who = ['甲','乙','丙'][seat] || String(seat);
+                nextLog = [...nextLog, `【抢评估】${who} | S=${sc} | Th=${th} | Pwin=${pwin} | Conf=${conf} | 决策=${decision}`];
+                continue;
+              }
+// -------- 初始发牌（仅限 init 帧） --------
               if (m.type === 'init') {
                 const rh = m.hands;
                 if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
