@@ -1413,9 +1413,8 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
       landlord,
       leader,
       trick,
-      
-  __PHASE = 'play';
-history: clone(history),
+__PHASE = 'play';
+  history: clone(history),
       currentTrick: clone(history.filter(h => h.trick === trick)),
       seen: clone(seen),
       bottom: clone(bottom),
