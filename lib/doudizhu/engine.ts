@@ -15,6 +15,44 @@ function __isExternalBot(b: any): boolean {
 }
 
 /* === Inject: bid-eval helper (bidding debug) === */
+
+/* === helper: normalize external AI 'double' choice === */
+function __parseDoubleChoice(v:any): boolean | null {
+  try {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') {
+      if (!isFinite(v)) return null;
+      return v > 0;
+    }
+    if (typeof v === 'string') {
+      const t = v.trim().toLowerCase();
+      const yes = ['double','yes','y','true','1','加倍','翻倍','d','dou','rob','qiang','抢','再抢','2x','x2','double2'];
+      const no  = ['no','n','false','0','不加倍','不翻倍','pass','skip','none','cancel','c'];
+      if (yes.includes(t)) return true;
+      if (no.includes(t)) return false;
+      if (/double\s*[:=]\s*(yes|true|1|y|加倍|翻倍|2x|x2)/.test(t)) return true;
+      if (/double\s*[:=]\s*(no|false|0|n|不加倍|不翻倍)/.test(t)) return false;
+      if (/^(2x|x2|2)$/i.test(t)) return true;
+      if (/^(1x|x1|1)$/i.test(t)) return false;
+    }
+  } catch {}
+  return null;
+}
+    if (typeof v === 'string') {
+      const t = v.trim().toLowerCase();
+      const yes = ['double','yes','y','true','1','加倍','翻倍','d','dou','rob','qiang','抢','再抢'];
+      const no  = ['no','n','false','0','不加倍','不翻倍','pass','skip','none','cancel','c'];
+      if (yes.includes(t)) return true;
+      if (no.includes(t)) return false;
+      // tolerate "double:yes" "double=true"
+      if (/double\s*[:=]\s*(yes|true|1|y|加倍|翻倍)/.test(t)) return true;
+      if (/double\s*[:=]\s*(no|false|0|n|不加倍|不翻倍)/.test(t)) return false;
+    }
+  } catch {}
+  return null;
+}
+
+
 function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'bid'|'pass', roundNo?:number){
   try { gen && gen.next && gen.next({ type:'event', kind:'bid-eval', seat, score, threshold, decision, roundNo }); } catch(e){}
 }
@@ -1368,17 +1406,20 @@ try {
       };
       const mvL = await Promise.resolve((bots as any)[Lseat](ctxL));
       const rL:any = (mvL||{});
-      const boL = rL.double ?? rL.yes ?? rL.rob ?? rL.bid;
+      const boLraw = rL.double ?? rL.yes ?? rL.rob ?? rL.bid ?? rL.action ?? rL.act ?? rL.move;
+      const boL = __parseDoubleChoice(boLraw);
+      let multL = (rL.multiplier ?? rL.mult ?? rL.doubleMultiplier ?? rL.mul);
+      if (boL !== null) Lflag = boL ? 1 : 0; else if (typeof multL === 'number') Lflag = (multL > 1) ? 1 : 0;
       if (typeof boL === 'boolean') Lflag = boL ? 1 : 0;
       const msg = rL.reason ?? rL.explanation ?? rL.rationale ?? rL.why ?? rL.comment ?? rL.msg;
       try {
-        yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!(typeof boL==='boolean'? boL : Lflag), delta: lordDecision.delta, reason: (typeof msg==='string'? msg.slice(0,800): undefined) };
+        yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!(typeof boL==='boolean'? boL : Lflag), delta: lordDecision.delta, reason: (typeof msg==='string'? msg.slice(0,800): undefined), source:'external' };
       } catch {}
     } catch {
-      try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch {}
+      try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!Lflag, delta: lordDecision.delta, reason: lordDecision.reason, source:'internal' }; } catch {}
     }
   } else {
-    try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch {}
+    try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!Lflag, delta: lordDecision.delta, reason: lordDecision.reason, source:'internal' }; } catch {}
   }
 } catch {}
 
@@ -1397,15 +1438,18 @@ try {
       };
       const mvY = await Promise.resolve((bots as any)[Yseat](ctxY));
       const rY:any = (mvY||{});
-      const boY = rY.double ?? rY.yes ?? rY.rob ?? rY.bid;
+      const boYraw = rY.double ?? rY.yes ?? rY.rob ?? rY.bid ?? rY.action ?? rY.act ?? rY.move;
+      const boY = __parseDoubleChoice(boYraw);
+      let multY = (rY.multiplier ?? rY.mult ?? rY.doubleMultiplier ?? rY.mul);
+      if (boY !== null) { try { (yBase as any).F = boY ? 1 : 0; } catch {} } else if (typeof multY === 'number') { try { (yBase as any).F = (multY > 1) ? 1 : 0; } catch {} }
       if (typeof boY === 'boolean') { try { (yBase as any).F = boY ? 1 : 0; } catch {} }
       const msg = rY.reason ?? rY.explanation ?? rY.rationale ?? rY.why ?? rY.comment ?? rY.msg;
-      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), dLhat: yBase.dLhat, counter: yBase.counter, reason: (typeof msg==='string'? msg.slice(0,800): undefined) }; } catch {}
+      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), dLhat: yBase.dLhat, counter: yBase.counter, reason: (typeof msg==='string'? msg.slice(0,800): undefined), source:'external' }; } catch {}
     } catch {
-      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), dLhat: yBase.dLhat, counter: yBase.counter }; } catch {}
+      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), dLhat: yBase.dLhat, counter: yBase.counter, source:'internal' }; } catch {}
     }
   } else {
-    try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), dLhat: yBase.dLhat, counter: yBase.counter }; } catch {}
+    try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), dLhat: yBase.dLhat, counter: yBase.counter, source:'internal' }; } catch {}
   }
 } catch {}
 
@@ -1433,15 +1477,18 @@ try {
       };
       const mvB = await Promise.resolve((bots as any)[Bseat](ctxB));
       const rB:any = (mvB||{});
-      const boB = rB.double ?? rB.yes ?? rB.rob ?? rB.bid;
+      const boBraw = rB.double ?? rB.yes ?? rB.rob ?? rB.bid ?? rB.action ?? rB.act ?? rB.move;
+      const boB = __parseDoubleChoice(boBraw);
+      let multB = (rB.multiplier ?? rB.mult ?? rB.doubleMultiplier ?? rB.mul);
+      if (boB !== null) F_b = boB ? 1 : 0; else if (typeof multB === 'number') F_b = (multB > 1) ? 1 : 0;
       if (typeof boB === 'boolean') F_b = boB ? 1 : 0;
       const msg = rB.reason ?? rB.explanation ?? rB.rationale ?? rB.why ?? rB.comment ?? rB.msg;
-      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double: !!F_b, dLhat: bBase.dLhat, counter: bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F }, reason: (typeof msg==='string'? msg.slice(0,800): undefined) }; } catch {}
+      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double: !!F_b, dLhat: bBase.dLhat, counter: bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F }, reason: (typeof msg==='string'? msg.slice(0,800): undefined), source:'external' }; } catch {}
     } catch {
-      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double: !!F_b, dLhat: bBase.dLhat, counter: bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch {}
+      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double: !!F_b, dLhat: bBase.dLhat, counter: bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F }, source:'internal' }; } catch {}
     }
   } else {
-    try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double: !!F_b, dLhat: bBase.dLhat, counter: bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch {}
+    try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double: !!F_b, dLhat: bBase.dLhat, counter: bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F }, source:'internal' }; } catch {}
   }
 } catch {}
 // 记录对位加倍倍数（不含炸弹/春天）
