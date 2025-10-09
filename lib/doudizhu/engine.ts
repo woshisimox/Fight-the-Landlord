@@ -45,6 +45,7 @@ export type BotCtx = {
 
   seen: Label[];            // 所有“已公开可见”的牌：底牌 + 历史出牌
   bottom: Label[];          // 亮底的三张牌（开局已公布）
+  seenBySeat?: Label[][];
 
   handsCount: [number, number, number]; // 各家的手牌张数
   role: 'landlord' | 'farmer';          // 当前角色
@@ -1357,7 +1358,21 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
   // 游戏循环
   while (true) {
     const isLeader = (require == null && turn === leader);
-    const ctx: BotCtx = {
+    
+// --- derive per-seat seen cards (history + bottom to landlord) ---
+function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: number): Label[][] {
+  const arr: Label[][] = [[],[],[]];
+  for (const ev of history) {
+    if (ev && ev.move === 'play' && Array.isArray(ev.cards)) {
+      try { arr[ev.seat]?.push(...(ev.cards as Label[])); } catch {}
+    }
+  }
+  if (typeof landlord === 'number' && landlord >= 0) {
+    try { arr[landlord]?.push(...(bottom as Label[])); } catch {}
+  }
+  return arr;
+}
+const ctx: BotCtx = {
       hands: hands[turn],
       require,
       canPass: !isLeader,
@@ -1370,6 +1385,7 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
       currentTrick: clone(history.filter(h => h.trick === trick)),
       seen: clone(seen),
       bottom: clone(bottom),
+      seenBySeat: __computeSeenBySeat(history, bottom, landlord),
       handsCount: handsCount(),
       role: (turn === landlord ? 'landlord' : 'farmer'),
       teammates: (turn === landlord ? [] : [ (turn=== (landlord+1)%3 ? (landlord+2)%3 : (landlord+1)%3 ) ]),
