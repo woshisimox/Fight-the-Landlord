@@ -1097,9 +1097,7 @@ export async function* runOneGame(opts: {
   bid?: boolean;                // true => 叫/抢
   four2?: Four2Policy;
 }): AsyncGenerator<any, void, unknown> {
-  const wait = (ms: number) => new Promise(r => setTimeout(r
-  // Internal phase guard to avoid premature PLAY before doubling finishes
-  let __PHASE: 'deal' | 'bid' | 'double' | 'play' = 'deal';
+  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 , ms));
   const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
   const four2 = opts.four2 || 'both';
