@@ -1,17 +1,4 @@
 // lib/doudizhu/engine.ts
-// === helper: judge external bot (explicit flag > heuristics) ===
-function __isExternalBot(b: any): boolean {
-  try {
-    if (!b) return false;
-    if (b.external === true || b.isExternal === true) return true;
-    if (b.meta && (b.meta.source === 'external-ai' || b.meta.kind === 'external')) return true;
-    const tag = String(b.choice || b.provider || b.name || b.label || '').toLowerCase();
-    if (/^(ai:|ai$|http)/.test(tag)) return true;
-    if (/(openai|gpt|qwen|glm|deepseek|claude|anthropic|cohere|mistral|vertex|dashscope|external)/.test(tag)) return true;
-  } catch {}
-  return false;
-}
-
 
 /* === Inject: bid-eval helper (bidding debug) === */
 function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'bid'|'pass', roundNo?:number){
@@ -1134,10 +1121,45 @@ if (opts.bid !== false) {
   bidMultiplier = 1;
   multiplier = 1;
 for (let s=0;s<3;s++) {
-      const __external = __isExternalBot((bots as any)[s]);
-      const sc = evalRobScore(hands[s]); 
-
-      // thresholds for both built-ins && external choices (inline for scope)
+      // 外置AI识别 + 决策（优先，不评分）
+const __bot = (bots as any)[s];
+const __tag = String(__bot?.choice || __bot?.provider || __bot?.name || __bot?.label || '').toLowerCase();
+const __external = !!(__bot?.external === true || __bot?.isExternal === true || (__bot?.meta && (__bot.meta.source === 'external-ai' || __bot.meta.kind === 'external')) || /^(ai:|ai$|http)/.test(__tag) || /(openai|gpt|qwen|glm|deepseek|claude|anthropic|cohere|mistral|vertex|dashscope|external)/.test(__tag));
+let __aiBid: null | boolean = null;
+let __aiBidReason: string | null = null;
+if (__external) {
+  try {
+    const ctxForBid:any = {
+      phase:'bid', seat:s, role:'farmer',
+      hands: hands[s], require: null, canPass: true,
+      policy: { four2 },
+      history: [], currentTrick: [], seen: [], bottom: [],
+      handsCount: [hands[0].length, hands[1].length, hands[2].length],
+      counts: {}, landlord: -1, leader: s, trick: 0,
+      teammates: [], opponents: [],
+      ruleId: (opts as any).ruleId, rule: (opts as any).rule,
+      bidding: { round: 1 }
+    };
+    const mv = await Promise.resolve((bots as any)[s](ctxForBid));
+    const r:any = (mv||{});
+    const rraw = r.reason ?? r.explanation ?? r.rationale ?? r.why ?? r.comment ?? r.msg;
+    if (typeof rraw === 'string' && rraw.trim()) __aiBidReason = rraw.slice(0, 800);
+    if (typeof r.bid === 'boolean') __aiBid = r.bid; else
+    if (typeof r.rob === 'boolean') __aiBid = r.rob; else
+    if (typeof r.yes === 'boolean') __aiBid = r.yes; else
+    if (typeof r.double === 'boolean') __aiBid = r.double; else
+    if (typeof r.bid === 'number') __aiBid = r.bid !== 0; else
+    if (typeof r.rob === 'number') __aiBid = r.rob !== 0; else
+    if (typeof r.yes === 'number') __aiBid = r.yes !== 0; else
+    if (typeof r.double === 'number') __aiBid = r.double !== 0; else {
+      const act = String(r.action ?? r.move ?? r.decision ?? '').toLowerCase();
+      if (['bid','rob','call','qiang','play','yes','y','true','1','叫','抢'].includes(act)) __aiBid = true;
+      else if (['pass','skip','nobid','no','n','false','0','不叫','不抢'].includes(act)) __aiBid = false;
+    }
+  } catch {}
+}
+const sc = __external ? 0 : evalRobScore(hands[s]);
+// thresholds for both built-ins && external choices (inline for scope)
       const __thMap: Record<string, number> = {
         greedymax: 1.6,
         allysupport: 1.8,
@@ -1162,20 +1184,18 @@ for (let s=0;s<3;s++) {
         'gpt':                   2.2,
         'claude':                2.2,
       };
-      const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-            const __choice = String((bots as any)[s]?.choice || (bots as any)[s]?.provider || (bots as any)[s]?.name || (bots as any)[s]?.label || '').toLowerCase();
+      const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
+const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
 const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-      const bid = (sc >= __th);
-
-
+let bid: boolean = __external ? !!__aiBid : (sc >= __th);
 // 记录本轮评估（即使未达到阈值也写日志/存档）
-yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+if (__external) { try { yield { type:'event', kind:'bid-eval', seat: s, source:'external-ai', decision: (bid ? 'bid' : 'pass'), reason: __aiBidReason, bidMult: bidMultiplier, mult: multiplier }; } catch{} } else { yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier }; }
 if (bid) {
-        __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
+        __bidders.push({ seat: s, score: (__external? Number.NaN : sc), threshold: (__external? Number.NaN : __th), margin: (__external? 0 : (sc - __th)) });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
 
         last = s;
-yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier, mult: multiplier };
+yield { type:'event', kind:'bid', seat:s, bid, ...( __external ? { source:'external-ai', reason: __aiBidReason } : { score: sc } ), bidMult: bidMultiplier, mult: multiplier };
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
@@ -1184,7 +1204,6 @@ yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier
         let bestSeat = -1;
         let bestMargin = -Infinity;
         for (let t = 0; t < 3; t++) {
-          const __externalT = __isExternalBot((bots as any)[t]);
           const hit = __bidders.find(b => b.seat === t);
           if (!hit) continue;
           bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
@@ -1306,11 +1325,8 @@ function __decideFarmerDoubleBase(myHand:Label[], bottom:Label[], samples:number
 
 // —— 执行顺序：地主 → 乙(下家) → 丙(上家) ——
 const Lseat = landlord;
-    const __externalL = __isExternalBot((bots as any)[Lseat]);
 const Yseat = (landlord + 1) % 3;
-    const __externalY = __isExternalBot((bots as any)[Yseat]);
 const Bseat = (landlord + 2) % 3;
-    const __externalB = __isExternalBot((bots as any)[Bseat]);
 
 // 地主：基于 before/after 的 Δ 与结构兜底
 const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 理论上就是并入前
