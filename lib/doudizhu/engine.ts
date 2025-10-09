@@ -1100,6 +1100,8 @@ export async function* runOneGame(opts: {
   // Internal phase guard to avoid premature PLAY before doubling finishes
   let __PHASE: 'deal' | 'bid' | 'double' | 'play' = 'deal';
 
+  // Internal phase guard to avoid premature PLAY before doubling finishes
+
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
   const four2 = opts.four2 || 'both';
@@ -1242,6 +1244,7 @@ yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: b
 
   }
   // 亮底 & 地主收底
+  __PHASE = 'double';
   __PHASE = 'double';
   yield { type:'event', kind:'reveal', bottom: bottom.slice() };
   hands[landlord].push(...bottom);
