@@ -1149,7 +1149,8 @@ for (let s=0;s<3;s++) {
         'gpt':                   2.2,
         'claude':                2.2,
       };
-      const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
+      // __choice already declared above
+
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
       const bid = (sc >= __th);
