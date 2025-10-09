@@ -1103,6 +1103,9 @@ export async function* runOneGame(opts: {
   // 发牌
   let deck = shuffle(freshDeck());
   let hands: Label[][] = [[],[],[]];
+  // 外置AI理由记录（bid/double）
+  const __aiBidReason: (string|null)[] = [null,null,null];
+  const __aiDoubleReason: (string|null)[] = [null,null,null];
   for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
   let bottom = deck.slice(17*3); // 3 张
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
@@ -1155,6 +1158,7 @@ for (let s=0;s<3;s++) {
 // 外置优先：若座位是外置，则调用其决定；否则走阈值
 const __external = /^(ai:|ai$|http|openai|gpt|external)/.test(__choice);
 let bid:boolean;
+let __aiUsed:any = null;      // 记录AI是否给出明确布尔
 if (__external) {
   let __ai:any = null;
   try {
@@ -1172,6 +1176,13 @@ if (__external) {
     };
     const mv = await Promise.resolve(bots[s](ctxForBid));
     const r:any = (mv||{});
+
+    // 记录理由
+    const reasonRaw = r.reason ?? r.explanation ?? r.rationale ?? r.why ?? r.comment ?? r.msg;
+    if (typeof reasonRaw === 'string' && reasonRaw.trim()) {
+      __aiBidReason[s] = reasonRaw.slice(0, 800);
+    }
+
     if (typeof r.bid === 'boolean') __ai = r.bid; else
     if (typeof r.rob === 'boolean') __ai = r.rob; else
     if (typeof r.yes === 'boolean') __ai = r.yes; else
@@ -1185,14 +1196,16 @@ if (__external) {
       else if (['pass','skip','nobid','no','n','false','0','不叫','不抢'].includes(act)) __ai = false;
     }
   } catch {}
+  __aiUsed = __ai;
   bid = !!__ai; // 外置未明确 => 视作不抢
 } else {
   bid = (sc >= __th);
+}// 记录本轮评估（AI优先：外置命中则只展示AI理由，不展示阈值）
+if (__external && __aiUsed !== null) {
+  yield { type:'event', kind:'bid-eval', seat: s, source:'external-ai', decision: (bid ? 'bid' : 'pass'), reason: __aiBidReason[s] ?? null, bidMult: bidMultiplier, mult: multiplier };
+} else {
+  yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, margin: sc - __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
 }
-
-
-// 记录本轮评估（即使未达到阈值也写日志/存档）
-yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
 if (bid) {
         __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
@@ -1228,7 +1241,11 @@ if (__externalT) {
     };
     const mv2 = await Promise.resolve(bots[t](ctxForBid2));
     const r2:any = (mv2||{});
-    if (typeof r2.bid === 'boolean') __ai2 = r2.bid; else
+    
+{ const reasonRaw2 = r2.reason ?? r2.explanation ?? r2.rationale ?? r2.why ?? r2.comment ?? r2.msg;
+  if (typeof reasonRaw2 === 'string' && reasonRaw2.trim()) __aiBidReason[t] = reasonRaw2.slice(0, 800);
+}
+if (typeof r2.bid === 'boolean') __ai2 = r2.bid; else
     if (typeof r2.rob === 'boolean') __ai2 = r2.rob; else
     if (typeof r2.yes === 'boolean') __ai2 = r2.yes; else
     if (typeof r2.double === 'boolean') __ai2 = r2.double; else
@@ -1386,7 +1403,11 @@ try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat,
         };
         const mvL = await Promise.resolve(bots[Lseat](ctxForDouble));
         const rL:any = (mvL||{});
-        let aiL: null|boolean = null;
+        
+        { const rraw = rL?.reason ?? rL?.explanation ?? rL?.rationale ?? rL?.why ?? rL?.comment ?? rL?.msg;
+          if (typeof rraw === 'string' && rraw.trim()) __aiDoubleReason[Lseat] = rraw.slice(0, 800);
+        }
+    let aiL: null|boolean = null;
         if (typeof rL.double === 'boolean') aiL = rL.double; else
         if (typeof rL.yes === 'boolean')    aiL = rL.yes; else
         if (typeof rL.bid === 'boolean')    aiL = rL.bid; else
@@ -1402,6 +1423,7 @@ try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat,
         if (aiL !== null) Lflag = aiL ? 1 : 0;
       } catch {}
     }
+  try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, source:'external-ai', double: !!Lflag, reason: __aiDoubleReason[Lseat] ?? null }; } catch {}
   }
  } catch{}
 
@@ -1424,7 +1446,11 @@ try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, d
         };
         const mvY = await Promise.resolve(bots[Yseat](ctxY));
         const rY:any = (mvY||{});
-        let aiY: null|boolean = null;
+        
+        { const rraw = rY?.reason ?? rY?.explanation ?? rY?.rationale ?? rY?.why ?? rY?.comment ?? rY?.msg;
+          if (typeof rraw === 'string' && rraw.trim()) __aiDoubleReason[Yseat] = rraw.slice(0, 800);
+        }
+    let aiY: null|boolean = null;
         if (typeof rY.double === 'boolean') aiY = rY.double; else
         if (typeof rY.yes === 'boolean')    aiY = rY.yes; else
         if (typeof rY.bid === 'boolean')    aiY = rY.bid; else
@@ -1470,7 +1496,11 @@ try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, d
         };
         const mvB = await Promise.resolve(bots[Bseat](ctxB));
         const rB:any = (mvB||{});
-        let aiB: null|boolean = null;
+        
+        { const rraw = rB?.reason ?? rB?.explanation ?? rB?.rationale ?? rB?.why ?? rB?.comment ?? rB?.msg;
+          if (typeof rraw === 'string' && rraw.trim()) __aiDoubleReason[Bseat] = rraw.slice(0, 800);
+        }
+    let aiB: null|boolean = null;
         if (typeof rB.double === 'boolean') aiB = rB.double; else
         if (typeof rB.yes === 'boolean')    aiB = rB.yes; else
         if (typeof rB.bid === 'boolean')    aiB = rB.bid; else
