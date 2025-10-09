@@ -10,7 +10,7 @@ type DecideLandlordRequest = {
   meta: { game_id?: string; round_id?: number; deadline_ms?: number; lang?: 'zh'|'en' };
   seat: number;
   visibility: {
-    hand: Label[];
+    hand: string[];
     history: Array<{seat:number; action: LandlordAction}>;
     start_seat: number;
     bid_round: number;
@@ -88,7 +88,7 @@ const extReq: DecideLandlordRequest = {
   version:'ddz.v1', task:'decide_landlord',
   meta:{ deadline_ms: 1200, lang:'zh' },
   seat: s,
-  visibility: { hand: hands[s].slice(), history: [], start_seat: 0, bid_round: 1 },
+  visibility: { hand: (hands[s] as any as string[]).slice(), history: [], start_seat: 0, bid_round: 1 },
   rules: { scheme:'call-rob-pass', four2: (four2 as any), farmer_coop: true },
   provider_hints: { temperature: 0.1, deterministic: true }
 };
