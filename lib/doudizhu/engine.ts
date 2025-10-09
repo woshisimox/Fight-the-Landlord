@@ -1103,11 +1103,6 @@ export async function* runOneGame(opts: {
   // 发牌
   let deck = shuffle(freshDeck());
   let hands: Label[][] = [[],[],[]];
-
-  // 外置AI理由缓存（叫/抢、加倍）
-  const __aiBidReason: (string|null)[] = [null,null,null];
-  const __aiDoubleReason: (string|null)[] = [null,null,null];
-
   for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
   let bottom = deck.slice(17*3); // 3 张
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
@@ -1126,10 +1121,9 @@ if (opts.bid !== false) {
   bidMultiplier = 1;
   multiplier = 1;
 for (let s=0;s<3;s++) {
-      const __choice = String((bots as any)[s]?.choice || (bots as any)[s]?.provider || (bots as any)[s]?.name || (bots as any)[s]?.label || '').toLowerCase();
-      const __external = /^(ai:|ai$|http|openai|gpt|external)/.test(__choice);
-      const sc = __external ? 0 : evalRobScore(hands[s]);
-// thresholds for both built-ins && external choices (inline for scope)
+      const sc = evalRobScore(hands[s]); 
+
+      // thresholds for both built-ins && external choices (inline for scope)
       const __thMap: Record<string, number> = {
         greedymax: 1.6,
         allysupport: 1.8,
@@ -1156,53 +1150,18 @@ for (let s=0;s<3;s++) {
       };
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-      const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-      let bid: boolean;
-if (__external) {
-  let __ai:any = null;
-  try {
-    const ctxForBid:any = {
-      phase:'bid', seat:s, role:'farmer',
-      hands: hands[s], require: null, canPass: true,
-      policy: { four2 },
-      history: [], currentTrick: [], seen: [], bottom: [],
-      handsCount: [hands[0].length, hands[1].length, hands[2].length],
-      counts: {}, landlord: -1, leader: s, trick: 0,
-      teammates: [], opponents: [],
-      ruleId: (opts as any).ruleId, rule: (opts as any).rule,
-      bidding: { round: 1 }
-    };
-    const mv = await Promise.resolve(bots[s](ctxForBid));
-    const r:any = (mv||{});
-    const rraw = r.reason ?? r.explanation ?? r.rationale ?? r.why ?? r.comment ?? r.msg;
-    if (typeof rraw === 'string' && rraw.trim()) __aiBidReason[s] = rraw.slice(0, 800);
-    if (typeof r.bid === 'boolean') __ai = r.bid; else
-    if (typeof r.rob === 'boolean') __ai = r.rob; else
-    if (typeof r.yes === 'boolean') __ai = r.yes; else
-    if (typeof r.double === 'boolean') __ai = r.double; else
-    if (typeof r.bid === 'number') __ai = r.bid !== 0; else
-    if (typeof r.rob === 'number') __ai = r.rob !== 0; else
-    if (typeof r.yes === 'number') __ai = r.yes !== 0; else
-    if (typeof r.double === 'number') __ai = r.double !== 0; else {
-      const act = String(r.action ?? r.move ?? r.decision ?? '').toLowerCase();
-      if (['bid','rob','call','qiang','play','yes','y','true','1','叫','抢'].includes(act)) __ai = true;
-      else if (['pass','skip','nobid','no','n','false','0','不叫','不抢'].includes(act)) __ai = false;
-    }
-  } catch {}
-  bid = !!__ai; // 外置AI未明确 => 默认不抢
-} else {
-  bid = (sc >= __th);
-}
+      const __th = (__thMapChoice[__choiceBid] ?? __thMap[__name] ?? 1.8);
+      const bid = (sc >= __th);
 
 
 // 记录本轮评估（即使未达到阈值也写日志/存档）
-if (__external) { try { yield { type:'event', kind:'bid-eval', seat: s, source:'external-ai', decision: (bid ? 'bid' : 'pass'), reason:(__aiBidReason[s]??null), bidMult: bidMultiplier, mult: multiplier }; } catch{} } else { yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier }; }
+yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
 if (bid) {
-        __bidders.push({ seat: s, score: (__external? Number.NaN : sc), threshold: (__external? Number.NaN : __th), margin: (__external? 0 : (sc - __th)) });
+        __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
 
         last = s;
-yield { type:'event', kind:'bid', seat:s, bid, ...( __external ? { source:'external-ai', reason:(__aiBidReason[s]??null) } : { score: sc } ), bidMult: bidMultiplier, mult: multiplier };
+yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier, mult: multiplier };
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
@@ -1213,45 +1172,9 @@ yield { type:'event', kind:'bid', seat:s, bid, ...( __external ? { source:'exter
         for (let t = 0; t < 3; t++) {
           const hit = __bidders.find(b => b.seat === t);
           if (!hit) continue;
-          
-          const __choiceT = String((bots as any)[t]?.choice || (bots as any)[t]?.provider || (bots as any)[t]?.name || (bots as any)[t]?.label || '').toLowerCase();
-          const __externalT = /^(ai:|ai$|http|openai|gpt|external)/.test(__choiceT);
-          if (__externalT) {
-            let __ai2:any = null;
-            try {
-              const ctxForBid2:any = {
-                phase:'bid', seat:t, role:'farmer',
-                hands: hands[t], require: null, canPass: true,
-                policy: { four2 },
-                history: [], currentTrick: [], seen: [], bottom: [],
-                handsCount: [hands[0].length, hands[1].length, hands[2].length],
-                counts: {}, landlord: -1, leader: t, trick: 0,
-                teammates: [], opponents: [],
-                ruleId: (opts as any).ruleId, rule: (opts as any).rule,
-                bidding: { round: 2 }
-              };
-              const mv2 = await Promise.resolve(bots[t](ctxForBid2));
-              const r2:any = (mv2||{});
-              const rraw2 = r2.reason ?? r2.explanation ?? r2.rationale ?? r2.why ?? r2.comment ?? r2.msg;
-              if (typeof rraw2 === 'string' && rraw2.trim()) __aiBidReason[t] = rraw2.slice(0, 800);
-              if (typeof r2.bid === 'boolean') __ai2 = r2.bid; else
-              if (typeof r2.rob === 'boolean') __ai2 = r2.rob; else
-              if (typeof r2.yes === 'boolean') __ai2 = r2.yes; else
-              if (typeof r2.double === 'boolean') __ai2 = r2.double; else
-              if (typeof r2.bid === 'number') __ai2 = r2.bid !== 0; else
-              if (typeof r2.rob === 'number') __ai2 = r2.rob !== 0; else
-              if (typeof r2.yes === 'number') __ai2 = r2.yes !== 0; else
-              if (typeof r2.double === 'number') __ai2 = r2.double !== 0; else {
-                const act2 = String(r2.action ?? r2.move ?? r2.decision ?? '').toLowerCase();
-                if (['bid','rob','call','qiang','play','yes','y','true','1','叫','抢','再抢'].includes(act2)) __ai2 = true;
-                else if (['pass','skip','nobid','no','n','false','0','不叫','不抢'].includes(act2)) __ai2 = false;
-              }
-            } catch {}
-            if (!__ai2) continue;
-          }
-bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
           multiplier = bidMultiplier;
-          yield { type:'event', kind:'rob2', seat: t, ...( __externalT ? { source:'external-ai', reason:(__aiBidReason[t]??null) } : { score: (hit && typeof hit.margin==='number' ? Number(hit.margin).toFixed(4) : undefined) } ), bidMult: bidMultiplier, mult: multiplier };
+          yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
           if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
         }
         landlord = bestSeat;
@@ -1374,70 +1297,13 @@ const Bseat = (landlord + 2) % 3;
 // 地主：基于 before/after 的 Δ 与结构兜底
 const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 理论上就是并入前
 const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
-let Lflag = lordDecision.L;
-{ const __choiceL = String((bots as any)[Lseat]?.choice || (bots as any)[Lseat]?.provider || (bots as any)[Lseat]?.name || (bots as any)[Lseat]?.label || '').toLowerCase();
-  const __externalL = /^(ai:|ai$|http|openai|gpt|external)/.test(__choiceL);
-  if (__externalL) {
-    try {
-      const ctxL:any = { phase:'double', seat:Lseat, role:'landlord', hands: hands[Lseat], bottom, seen: [], policy:{ four2 }, ruleId:(opts as any).ruleId, rule:(opts as any).rule };
-      const mvL = await Promise.resolve(bots[Lseat](ctxL)); const rL:any = (mvL||{});
-      const rrawL = rL.reason ?? rL.explanation ?? rL.rationale ?? rL.why ?? rL.comment ?? rL.msg;
-      if (typeof rrawL === 'string' && rrawL.trim()) __aiDoubleReason[Lseat] = rrawL.slice(0, 800);
-      let aiL:null|boolean = null;
-      if (typeof rL.double === 'boolean') aiL = rL.double; else
-      if (typeof rL.yes === 'boolean')    aiL = rL.yes; else
-      if (typeof rL.rob === 'boolean')    aiL = rL.rob; else
-      if (typeof rL.bid === 'boolean')    aiL = rL.bid; else
-      if (typeof rL.double === 'number')  aiL = rL.double !== 0; else
-      if (typeof rL.yes === 'number')     aiL = rL.yes !== 0; else
-      if (typeof rL.rob === 'number')     aiL = rL.rob !== 0; else
-      if (typeof rL.bid === 'number')     aiL = rL.bid !== 0; else {
-        const act = String(rL.action ?? rL.move ?? rL.decision ?? '').toLowerCase();
-        if (['double','yes','y','true','1','加倍'].includes(act)) aiL = true;
-        else if (['skip','pass','no','n','false','0','不加倍'].includes(act)) aiL = false;
-      }
-      if (aiL !== null) Lflag = aiL ? 1 : 0;
-      yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, source:'external-ai', reason:(__aiDoubleReason[Lseat]??undefined) };
-    } catch {}
-  } else {
-    try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
+const Lflag = lordDecision.L;
+try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
 
-
-  }
-}
 // 乙（下家）：蒙特卡洛 + 反制能力
-{ const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
-  const __choiceY = String((bots as any)[Yseat]?.choice || (bots as any)[Yseat]?.provider || (bots as any)[Yseat]?.name || (bots as any)[Yseat]?.label || '').toLowerCase();
-  const __externalY = /^(ai:|ai$|http|openai|gpt|external)/.test(__choiceY);
-  if (__externalY) {
-    try {
-      const ctxY:any = { phase:'double', seat:Yseat, role:'farmer', hands: hands[Yseat], bottom, seen: [], policy:{ four2 }, ruleId:(opts as any).ruleId, rule:(opts as any).rule };
-      const mvY = await Promise.resolve(bots[Yseat](ctxY)); const rY:any = (mvY||{});
-      const rrawY = rY.reason ?? rY.explanation ?? rY.rationale ?? rY.why ?? rY.comment ?? rY.msg;
-      if (typeof rrawY === 'string' && rrawY.trim()) __aiDoubleReason[Yseat] = rrawY.slice(0, 800);
-      let aiY:null|boolean = null;
-      if (typeof rY.double === 'boolean') aiY = rY.double; else
-      if (typeof rY.yes === 'boolean')    aiY = rY.yes; else
-      if (typeof rY.rob === 'boolean')    aiY = rY.rob; else
-      if (typeof rY.bid === 'boolean')    aiY = rY.bid; else
-      if (typeof rY.double === 'number')  aiY = rY.double !== 0; else
-      if (typeof rY.yes === 'number')     aiY = rY.yes !== 0; else
-      if (typeof rY.rob === 'number')     aiY = rY.rob !== 0; else
-      if (typeof rY.bid === 'number')     aiY = rY.bid !== 0; else {
-        const actY = String(rY.action ?? rY.move ?? rY.decision ?? '').toLowerCase();
-        if (['double','yes','y','true','1','加倍'].includes(actY)) aiY = true;
-        else if (['skip','pass','no','n','false','0','不加倍'].includes(actY)) aiY = false;
-      }
-      if (aiY !== null) { try { (yBase as any).F = aiY ? 1 : 0; } catch {} }
-      yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), source:'external-ai', reason:(__aiDoubleReason[Yseat]??undefined) };
-    } catch {}
-  } else {
-    const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
+const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
 try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yBase.F, dLhat:yBase.dLhat, counter:yBase.counter }; } catch{}
 
-
-  }
-}
 // 丙（上家）：在边缘情况下做贝叶斯式调节
 let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
 let F_b = bBase.F;
