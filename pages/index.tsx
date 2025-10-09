@@ -343,7 +343,7 @@ type LiveProps = {
   
   seatDelayMs?: number[];
   enabled: boolean;
-  rob: boolean;
+  bid: boolean;
   four2: Four2Policy;
   seats: BotChoice[];
   seatModels: string[];
@@ -490,7 +490,12 @@ function LadderPanel() {
     return { id, label, val, n };
   });
 
-  const K = Math.max(1, ...arr.map(x=> (players[x.id]?.current?.K ?? 20)), 20);
+  const valsForRange = (arr.some(x=> x.n>0) ? arr.filter(x=> x.n>0) : arr);
+  const minVal = Math.min(0, ...valsForRange.map(x=> x.val));
+  const maxVal = Math.max(0, ...valsForRange.map(x=> x.val));
+  const maxAbs = Math.max(Math.abs(minVal), Math.abs(maxVal));
+  const K = Math.max(1, maxAbs * 1.1);
+
   const items = arr.sort((a,b)=> b.val - a.val);
 
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
@@ -573,7 +578,7 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 /* ====== 雷达图累计（0~5） ====== */
-type Score5 = { coop:number; agg:number; cons:number; eff:number; rob:number };
+type Score5 = { coop:number; agg:number; cons:number; eff:number; bid:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
   if (mode === 'mean') {
     const c = Math.max(0, count);
@@ -582,7 +587,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
       agg:  (prev.agg *c + curr.agg )/(c+1),
       cons: (prev.cons*c + curr.cons)/(c+1),
       eff:  (prev.eff *c + curr.eff )/(c+1),
-      rob:  (prev.rob *c + curr.rob )/(c+1),
+      bid: (prev.bid *c + curr.bid )/(c+1),
     };
   }
   const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
@@ -591,7 +596,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     agg:  a*curr.agg  + (1-a)*prev.agg,
     cons: a*curr.cons + (1-a)*prev.cons,
     eff:  a*curr.eff  + (1-a)*prev.eff,
-    rob:  a*curr.rob  + (1-a)*prev.rob,
+    bid: a*curr.bid  + (1-a)*prev.bid,
   };
 }
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
@@ -616,6 +621,7 @@ function LivePanel(props: LiveProps) {
   const [landlord, setLandlord] = useState<number|null>(null);
   const [plays, setPlays] = useState<{seat:number; move:'play'|'pass'; cards?:string[]; reason?:string}[]>([]);
   const [multiplier, setMultiplier] = useState(1);
+  const [bidMultiplier, setBidMultiplier] = useState(1);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [log, setLog] = useState<string[]>([]);
@@ -841,7 +847,7 @@ function LivePanel(props: LiveProps) {
     agg : Number(x?.agg  ?? 2.5),
     cons: Number(x?.cons ?? 2.5),
     eff : Number(x?.eff  ?? 2.5),
-    rob : Number(x?.rob  ?? 2.5),
+    bid : Number(x?.bid ?? 2.5),
   });
   const ensureRadarAgg = (x:any): RadarAgg => ({
     scores: ensureScore5(x?.scores),
@@ -873,7 +879,7 @@ function LivePanel(props: LiveProps) {
         agg : mean(prev.scores.agg , inc.agg ),
         cons: mean(prev.scores.cons, inc.cons),
         eff : mean(prev.scores.eff , inc.eff ),
-        rob : mean(prev.scores.rob , inc.rob ),
+        bid : mean(prev.scores.bid, inc.bid),
       },
       count: c + 1,
     };
@@ -901,7 +907,7 @@ function LivePanel(props: LiveProps) {
           agg : w(ll.scores.agg , ff.scores.agg , ll.count, ff.count),
           cons: w(ll.scores.cons, ff.scores.cons, ll.count, ff.count),
           eff : w(ll.scores.eff , ff.scores.eff , ll.count, ff.count),
-          rob : w(ll.scores.rob , ff.scores.rob , ll.count, ff.count),
+          bid : w(ll.scores.bid, ff.scores.bid, ll.count, ff.count),
         },
         count: tot,
       };
@@ -949,7 +955,7 @@ function LivePanel(props: LiveProps) {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
-      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 }, count: 0 };
+      return resolveRadarForIdentity(ids[i], role) || { scores: { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid:2.5 }, count: 0 };
     });
     setAggStats(s3.map(x=>({ ...x.scores })));
     setAggCount(Math.max(s3[0].count, s3[1].count, s3[2].count));
@@ -1048,6 +1054,7 @@ function LivePanel(props: LiveProps) {
   const winnerRef = useRef(winner); useEffect(() => { winnerRef.current = winner; }, [winner]);
   const deltaRef = useRef(delta); useEffect(() => { deltaRef.current = delta; }, [delta]);
   const multiplierRef = useRef(multiplier); useEffect(() => { multiplierRef.current = multiplier; }, [multiplier]);
+  const bidMultiplierRef = useRef(bidMultiplier); useEffect(() => { bidMultiplierRef.current = bidMultiplier; }, [bidMultiplier]);
 
   const aggStatsRef = useRef(aggStats); useEffect(()=>{ aggStatsRef.current = aggStats; }, [aggStats]);
   const aggCountRef = useRef(aggCount); useEffect(()=>{ aggCountRef.current = aggCount; }, [aggCount]);
@@ -1204,7 +1211,7 @@ const start = async () => {
     ) => {
       if (!roundFinishedRef.current) {
         if (!seenStatsRef.current) {
-          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, rob:2.5 };
+          const neutral: Score5 = { coop:2.5, agg:2.5, cons:2.5, eff:2.5, bid:2.5 };
           const mode = aggModeRef.current;
           const a    = alphaRef.current;
           if (!nextAggStats) {
@@ -1251,7 +1258,7 @@ const start = async () => {
           startScore: props.startScore,
           seatDelayMs: props.seatDelayMs,
           enabled: props.enabled,
-          rob: props.rob,
+          bid: props.bid,
           four2: props.four2,
           seats: specs,
           clientTraceId: traceId,
@@ -1299,6 +1306,7 @@ const start = async () => {
           let nextWinner = winnerRef.current as number | null;
           let nextDelta = deltaRef.current as [number, number, number] | null;
           let nextMultiplier = multiplierRef.current;
+          let nextBidMultiplier = bidMultiplierRef.current;
           let nextAggStats = aggStatsRef.current;
           let nextAggCount = aggCountRef.current;
 
@@ -1357,6 +1365,8 @@ for (const raw of batch) {
 
               // -------- 事件边界 --------
               if (m.type === 'event' && m.kind === 'round-start') {
+                nextBidMultiplier = 1;
+                nextMultiplier = 1;
                 // 清空上一局残余手牌/出牌；等待 init/hands 再填充
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
@@ -1445,13 +1455,13 @@ for (const raw of batch) {
 
 // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
-                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
+                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
                 nextLog = [
                   ...nextLog,
-                  `AI完成｜${seatName(m.seat)}｜${m.by}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
+                  `AI完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
                   ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
                 ];
                 lastReasonRef.current[m.seat] = m.reason || null;
@@ -1459,13 +1469,47 @@ for (const raw of batch) {
               }
 
               // -------- 抢/不抢 --------
-              if (m.type === 'event' && m.kind === 'rob') {
-  if (m.rob) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
-                nextLog = [...nextLog, `${seatName(m.seat)} ${m.rob ? '抢地主' : '不抢'}`];
-                continue;
+              if (m.type === 'event' && m.kind === 'bid') {
+  const mm = Number((m as any).mult || 0);
+  const bb = Number((m as any).bidMult || 0);
+  if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
+  else if (m.bid) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
+  if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
+  else if (m.bid) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
+  const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
+  const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
+  nextLog = [...nextLog, `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
+  continue;
               }
+else if (m.type === 'event' && m.kind === 'bid-eval') {
+  const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
+  const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
+  const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
+  const dec = m.decision || 'pass';
+  const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
+  nextLog.push(line);
+}
 
-              // -------- 起新墩 --------
+
+              // -------- 明牌后额外加倍 --------
+// -------- 倍数校准（兜底） --------
+if (m.type === 'event' && m.kind === 'multiplier-sync') {
+  const cur = Math.max(1, (nextMultiplier || 1));
+  const mlt = Math.max(1, Number((m as any).multiplier || 1));
+  nextMultiplier = Math.max(cur, mlt);
+  const bcur = Math.max(1, (nextBidMultiplier || 1));
+  const bmlt = Math.max(1, Number((m as any).bidMult || 1));
+  nextBidMultiplier = Math.max(bcur, bmlt);
+  nextLog = [...nextLog, `倍数校准为 叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
+  continue;
+}
+
+if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double')) {
+  if (m.do) nextMultiplier = Math.max(1, (nextMultiplier || 1) * 2);
+  nextLog = [...nextLog, `${seatName(m.seat)} ${m.do ? '加倍' : '不加倍'}（明牌后）`];
+  continue;
+}
+// -------- 起新墩 --------
               if (m.type === 'event' && m.kind === 'trick-reset') {
                 nextLog = [...nextLog, '一轮结束，重新起牌'];
                 nextPlays = [];
@@ -1649,7 +1693,7 @@ nextTotals     = [
                     agg : Number(sc.agg  ?? 2.5),
                     cons: Number(sc.cons ?? 2.5),
                     eff : Number(sc.eff  ?? 2.5),
-                    rob : Number(sc.rob  ?? 2.5),
+                    bid : Number(sc.bid ?? 2.5),
                   };
                 }) as Score5[];
 
@@ -1667,7 +1711,7 @@ nextTotals     = [
                   nextAggCount = nextAggCount + 1;
                 }
 
-                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜Rob ${v.rob}`).join(' ｜ ');
+                const msg = s3.map((v, i)=>`${seatName(i)}：Coop ${v.coop}｜Agg ${v.agg}｜Cons ${v.cons}｜Eff ${v.eff}｜抢地主倾向 ${v.bid}`).join(' ｜ ');
                 nextLog = [...nextLog, `战术画像（本局）：${msg}（已累计 ${nextAggCount} 局）`];
                 continue;
               }
@@ -1686,15 +1730,21 @@ nextTotals     = [
           setHands(nextHands); setPlays(nextPlays);
           setTotals(nextTotals); setFinishedCount(nextFinished);
           setLog(nextLog); setLandlord(nextLandlord);
-          setWinner(nextWinner); setMultiplier(nextMultiplier); setDelta(nextDelta);
+          setWinner(nextWinner); setMultiplier(nextMultiplier); setBidMultiplier(nextBidMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
         }
       }
 
           if (dogId) { try { clearInterval(dogId); } catch {} }
-    setLog(l => [...l, `—— 本局流结束 ——`]);
-    setAllLogs(prev => [...prev, ...logRef.current, `\n--- End of Round ${labelRoundNo} ---\n`]);
-    };
+    setLog((l:any)=>{
+  const __snapshot = [...(Array.isArray(l)?l:[]), `—— 本局流结束 ——`];
+  (logRef as any).current = __snapshot;
+  setAllLogs((prev:any)=>[...(Array.isArray(prev)?prev:[]), ...__snapshot, `
+--- End of Round ${labelRoundNo} ---
+`]);
+  return __snapshot;
+});
+};
 
     try {
       for (let i = 0; i < props.rounds; i++) {
@@ -1975,7 +2025,11 @@ const handleAllSaveInner = () => {
       <Section title="结果">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-            <div>倍数</div>
+            <div>叫抢倍数</div>
+            <div style={{ fontSize:24, fontWeight:800 }}>{bidMultiplier}</div>
+          </div>
+          <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+            <div>对局倍数</div>
             <div style={{ fontSize:24, fontWeight:800 }}>{multiplier}</div>
           </div>
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
@@ -2070,17 +2124,16 @@ function RadarPanel({
 /* ========= 默认值（含“清空”按钮的重置） ========= */
 const DEFAULTS = {
   enabled: true,
+  bid: true,
   rounds: 10,
   startScore: 100,
-  rob: true,
   four2: 'both' as Four2Policy,
   farmerCoop: true,
   seatDelayMs: [1000,1000,1000] as number[],
   seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
   // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
   seatModels: ['', '', ''],
-  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
-};
+  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],};
 
 function Home() {
   // Ensure language applies before paint on refresh
@@ -2119,7 +2172,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const [turnTimeoutSec, setTurnTimeoutSec] = useState<number>(30);
 
-  const [rob, setRob] = useState<boolean>(DEFAULTS.rob);
+  const [bid, setBid] = useState<boolean>(DEFAULTS.bid);
   const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
   const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
   const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
@@ -2133,7 +2186,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
-    setRob(DEFAULTS.rob); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
+    setBid(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
     setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
@@ -2195,7 +2248,7 @@ const [lang, setLang] = useState<Lang>(() => {
   <div style={{ display:'flex', alignItems:'center', gap:24 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       可抢地主
-      <input type="checkbox" checked={rob} onChange={e=>setRob(e.target.checked)} />
+      <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
     </label>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       农民配合
@@ -2454,7 +2507,7 @@ const [lang, setLang] = useState<Lang>(() => {
           startScore={startScore}
           seatDelayMs={seatDelayMs}
           enabled={enabled}
-          rob={rob}
+          bid={bid}
           four2={four2}
           seats={seats}
           seatModels={seatModels}
@@ -2646,7 +2699,7 @@ function ScoreTimeline(
 
 /* ================ 雷达图（0~5） ================= */
 function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
-  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.rob];
+  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.bid];
   const labels = ['配合','激进','保守','效率','抢地主'];
   const size = 180, R = 70, cx = size/2, cy = size/2;
 

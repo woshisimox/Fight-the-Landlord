@@ -359,7 +359,35 @@ for await (const ev of (iter as any)) {
       });
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
-      continue;
+      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
+try {
+  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
+  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
+  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
+  let extraMult = 1;
+  const decideExtraDouble = (seat:number)=>{
+    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
+    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
+    const cnt = __count(all);
+    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
+    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
+    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
+    if (role==='landlord') return hasBomb;
+    return (hasRocket || hasBomb);
+  };
+  for (let k=0;k<3;k++){
+    const s=(landlordIdx + k) % 3;
+    const will = decideExtraDouble(s);
+    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
+    if (will) extraMult *= 2;
+  }
+  if (extraMult > 1) {
+    // 同步一次倍数（可被前端用于兜底校准）
+    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
+  }
+} catch {}
+continue;
     }
 
     // 兼容两种出牌事件：turn 或 event:play
@@ -380,7 +408,35 @@ for await (const ev of (iter as any)) {
         score: (lastScore[seat] ?? undefined), 
         totals 
       });
-      continue;
+      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
+try {
+  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
+  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
+  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
+  let extraMult = 1;
+  const decideExtraDouble = (seat:number)=>{
+    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
+    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
+    const cnt = __count(all);
+    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
+    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
+    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
+    if (role==='landlord') return hasBomb;
+    return (hasRocket || hasBomb);
+  };
+  for (let k=0;k<3;k++){
+    const s=(landlordIdx + k) % 3;
+    const will = decideExtraDouble(s);
+    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
+    if (will) extraMult *= 2;
+  }
+  if (extraMult > 1) {
+    // 同步一次倍数（可被前端用于兜底校准）
+    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
+  }
+} catch {}
+continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
       const { seat, move, cards } = ev;
@@ -415,7 +471,7 @@ for await (const ev of (iter as any)) {
           agg : +agg.toFixed(2),
           cons: +cons.toFixed(2),
           eff : +eff.toFixed(2),
-          rob : +rob.toFixed(2),
+          bid: +rob.toFixed(2),
         }};
       });
 

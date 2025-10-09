@@ -1,4 +1,9 @@
 // lib/doudizhu/engine.ts
+
+/* === Inject: bid-eval helper (bidding debug) === */
+function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'bid'|'pass', roundNo?:number){
+  try { gen && gen.next && gen.next({ type:'event', kind:'bid-eval', seat, score, threshold, decision, roundNo }); } catch(e){}
+}
 // Dou Dizhu (斗地主) “真引擎”实现（适配 Bot Arena 项目）。
 // - 牌型完整（单、对、三、三带、顺子、连对、飞机/带翅膀、四带二、炸弹、王炸）
 // - 比较完整
@@ -670,6 +675,64 @@ export const GreedyMin: BotFunc = (ctx) => {
 };
 
 
+
+// ===== 内置 Bot 的“抢地主内部打分” =====
+export function GreedyMaxBidScore(hand: Label[]): number {
+  // 贴合 GreedyMax 的进攻倾向：炸力、火箭、2、A、连对/顺子的可控性
+  const map = countByRank(hand);
+  const hasRocket = !!rocketFrom(map);
+  const bombs = [...bombsFrom(map)].length;
+  const twos = map.get(ORDER['2'])?.length ?? 0;
+  const As   = map.get(ORDER['A'])?.length ?? 0;
+  // 估算连对/顺子潜力（粗略）：统计 3..A 的覆盖与对子的数量
+  const ranks = (RANKS.slice(0, 12) as unknown as string[]);
+  let coverage = 0, pairs = 0, triples = 0, singles = 0;
+  for (const r of ranks) {
+    const idx = (ORDER as any)[r as string];
+    const n = map.get(idx)?.length ?? 0;
+    if (n>0) coverage++;
+    if (n>=2) pairs++;
+    if (n>=3) triples++;
+    if (n===1) singles++;
+  }
+  let score = 0;
+  if (hasRocket) score += 4.0;
+  score += bombs * 2.0;
+  if (twos>=2) score += 1.2 + (twos-2)*0.7;
+  if (As>=3)   score += (As-2)*0.6;
+  score += Math.min(4, coverage/3) * 0.2; // 覆盖增强出牌灵活性
+  score += Math.min(3, pairs) * 0.25;
+  score += Math.min(2, triples) * 0.35;
+  score -= Math.min(4, singles) * 0.05;   // 孤张略减分
+  return score;
+}
+
+export function GreedyMinBidScore(hand: Label[]): number {
+  // 贴合 GreedyMin 的保守倾向：更强调安全牌（2/A/炸），弱化连牌收益
+  const map = countByRank(hand);
+  const hasRocket = !!rocketFrom(map);
+  const bombs = [...bombsFrom(map)].length;
+  const twos = map.get(ORDER['2'])?.length ?? 0;
+  const As   = map.get(ORDER['A'])?.length ?? 0;
+  let score = 0;
+  if (hasRocket) score += 4.5;
+  score += bombs * 2.2;
+  score += twos * 0.9;
+  score += Math.max(0, As-1) * 0.5;
+  // 轻微考虑结构但不鼓励冒进
+  const ranks = RANKS.slice(0, 12) as unknown as string[];
+  let pairs = 0;
+  for (const r of ranks) {
+    const idx = (ORDER as any)[r as string];
+    const n = map.get(idx)?.length ?? 0; if (n>=2) pairs++; }
+  score += Math.min(2, pairs) * 0.15;
+  return score;
+}
+
+export function RandomLegalBidScore(_hand: Label[]): number {
+  // 随机策略不具“内部打分”，返回 NaN 代表无内部分
+  return Number.NaN;
+}
 export const GreedyMax: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
@@ -996,6 +1059,26 @@ function shuffle<T>(a: T[]): T[] {
   return a;
 }
 
+
+export function evalRobScore(hand: Label[]): number {
+  // 基于 wantRob 的同口径启发，返回一个连续评分（越高越倾向抢）
+  // 设计：火箭=4；每个炸弹=1.8；第2张'2'=1.2，第3张及以上每张'2'=0.6；第3个A开始每张A=0.5；
+  // 另外给顺子/连对/飞机形态一些微弱加分以偏好“可控”牌型。
+  const map = countByRank(hand);
+  const hasRocket = !!rocketFrom(map);
+  const bombs = [...bombsFrom(map)].length;
+  const twos = map.get(ORDER['2'])?.length ?? 0;
+  const As = map.get(ORDER['A'])?.length ?? 0;
+  let score = 0;
+  if (hasRocket) score += 4;
+  score += bombs * 1.8;
+  if (twos >= 2) score += 1.2 + Math.max(0, twos-2) * 0.6;
+  if (As   >= 3) score += (As-2) * 0.5;
+  // 连牌结构微弱加分（避免全是孤张导致后续吃力）
+    // (可选) 这里预留给连牌结构的进一步加分逻辑；当前版本不使用以保持简洁与稳定。
+return score;
+}
+
 function wantRob(hand: Label[]): boolean {
   // 很简单的启发：有王炸/炸弹/≥2个2/≥3个A 就抢
   const map = countByRank(hand);
@@ -1010,7 +1093,7 @@ function wantRob(hand: Label[]): boolean {
 export async function* runOneGame(opts: {
   seats: [BotFunc, BotFunc, BotFunc] | BotFunc[];
   delayMs?: number;
-  rob?: boolean;                // true => 叫/抢
+  bid?: boolean;                // true => 叫/抢
   four2?: Four2Policy;
 }): AsyncGenerator<any, void, unknown> {
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -1018,30 +1101,102 @@ export async function* runOneGame(opts: {
   const four2 = opts.four2 || 'both';
 
   // 发牌
-  const deck = shuffle(freshDeck());
-  const hands: Label[][] = [[],[],[]];
+  let deck = shuffle(freshDeck());
+  let hands: Label[][] = [[],[],[]];
   for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
-  const bottom = deck.slice(17*3); // 3 张
+  let bottom = deck.slice(17*3); // 3 张
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
 
   // 抢地主流程（简单实现）
   let landlord = 0;
   let multiplier = 1;
-  if (opts.rob !== false) {
+        let bidMultiplier = 1;
+if (opts.bid !== false) {
     let last = -1;
-    for (let s=0;s<3;s++) {
-      const rob = wantRob(hands[s]);
-      yield { type:'event', kind:'rob', seat:s, rob };
-      if (rob) {
-        if (last === -1) {
-          last = s; // 叫
-        } else {
-          last = s; multiplier *= 2; // 抢 ×2
-        }
+    
+      for (let __attempt=0; __attempt<5; __attempt++) {
+  const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
+  // 每次重试重置叫抢状态
+  last = -1;
+  bidMultiplier = 1;
+  multiplier = 1;
+for (let s=0;s<3;s++) {
+      const sc = evalRobScore(hands[s]); 
+
+      // thresholds for both built-ins and external choices (inline for scope)
+      const __thMap: Record<string, number> = {
+        greedymax: 1.6,
+        allysupport: 1.8,
+        randomlegal: 2.0,
+        endgamerush: 2.1,
+        mininet: 2.2,
+        greedymin: 2.4,
+      };
+      const __thMapChoice: Record<string, number> = {
+        'built-in:greedy-max':   1.6,
+        'built-in:ally-support': 1.8,
+        'built-in:random-legal': 2.0,
+        'built-in:endgame-rush': 2.1,
+        'built-in:mininet':      2.2,
+        'built-in:greedy-min':   2.4,
+        'external':              2.2,
+        'external:ai':           2.2,
+        'external:http':         2.2,
+        'ai':                    2.2,
+        'http':                  2.2,
+        'openai':                2.2,
+        'gpt':                   2.2,
+        'claude':                2.2,
+      };
+      const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
+      const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
+      const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
+      const bid = (sc >= __th);
+
+
+// 记录本轮评估（即使未达到阈值也写日志/存档）
+yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+if (bid) {
+        __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
+        multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
+
+        last = s;
+yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier, mult: multiplier };
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
+      // 第二轮：仅对第一轮“抢”的人（__bidders）按同样座次再过一遍，比较 margin；同分后手优先（>=）；每次再 ×2，封顶 64。
+      if (__bidders.length > 0) {
+        let bestSeat = -1;
+        let bestMargin = -Infinity;
+        for (let t = 0; t < 3; t++) {
+          const hit = __bidders.find(b => b.seat === t);
+          if (!hit) continue;
+          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+          multiplier = bidMultiplier;
+          yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
+          if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
+        }
+        landlord = bestSeat;
+      }
+      
+      
+// 若无人抢，则记录并重发，随后重新叫牌
+if (__bidders.length === 0) {
+  try { yield { type:'event', kind:'bid-skip', reason:'no-bidders' }; } catch {}
+  // 重新发牌
+  deck = shuffle(freshDeck());
+  hands = [[],[],[]] as any;
+  for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
+  bottom = deck.slice(17*3);
+  for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
+  continue; // 回到下一轮尝试，重新进行叫抢（会继续产出 bid-eval）
+}
+yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: bidMultiplier };multiplier = bidMultiplier;
     if (last !== -1) landlord = last;
+      break;
+    }
+
   }
   // 亮底 & 地主收底
   yield { type:'event', kind:'reveal', bottom: bottom.slice() };
