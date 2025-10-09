@@ -1350,38 +1350,66 @@ const Lseat = landlord;
 const Yseat = (landlord + 1) % 3;
 const Bseat = (landlord + 2) % 3;
 
-// 地主：基于 before/after 的 Δ 与结构兜底
+// 地主：基于 before/after 的 Δ 与结构兜底 + 外置AI可覆盖
 const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 并底前
 const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
 let Lflag = lordDecision.L;
+
 try {
-  // 事件：地主加倍决策（不对外机器人做额外调用，避免编译错误）
-  yield { 
-    type: 'event', 
-    kind: 'double-decision', 
-    role: 'landlord', 
-    seat: Lseat, 
-    double: !!Lflag, 
-    delta: lordDecision.delta, 
-    reason: lordDecision.reason 
-  };
+  const __externalL = __isExternalBot((bots as any)[Lseat]);
+  if (__externalL) {
+    try {
+      const ctxL:any = {
+        phase:'double', seat:Lseat, role:'landlord',
+        hands: hands[Lseat], bottom,
+        ruleId: (opts as any)?.ruleId, rule: (opts as any)?.rule,
+        doubling:{ landlord:null, farmerY:null, farmerB:null },
+        estimate: lordDecision
+      };
+      const mvL = await Promise.resolve((bots as any)[Lseat](ctxL));
+      const rL:any = (mvL||{});
+      const boL = rL.double ?? rL.yes ?? rL.rob ?? rL.bid;
+      if (typeof boL === 'boolean') Lflag = boL ? 1 : 0;
+      const msg = rL.reason ?? rL.explanation ?? rL.rationale ?? rL.why ?? rL.comment ?? rL.msg;
+      try {
+        yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!(typeof boL==='boolean'? boL : Lflag), delta: lordDecision.delta, reason: (typeof msg==='string'? msg.slice(0,800): undefined) };
+      } catch {}
+    } catch {
+      try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch {}
+    }
+  } else {
+    try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch {}
+  }
 } catch {}
 
-// 乙（下家）：蒙特卡洛 + 反制能力
+// 乙（下家）：蒙特卡洛 + 反制能力 + 外置AI可覆盖
 const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
 try {
-  yield { 
-    type:'event', 
-    kind:'double-decision', 
-    role:'farmer', 
-    seat:Yseat, 
-    double: !!(yBase.F), 
-    dLhat: yBase.dLhat, 
-    counter: yBase.counter 
-  };
+  const __externalY = __isExternalBot((bots as any)[Yseat]);
+  if (__externalY) {
+    try {
+      const ctxY:any = {
+        phase:'double', seat:Yseat, role:'farmer',
+        hands: hands[Yseat], bottom,
+        ruleId: (opts as any)?.ruleId, rule: (opts as any)?.rule,
+        doubling:{ landlord:Lflag, farmerY:null, farmerB:null },
+        estimate: yBase
+      };
+      const mvY = await Promise.resolve((bots as any)[Yseat](ctxY));
+      const rY:any = (mvY||{});
+      const boY = rY.double ?? rY.yes ?? rY.rob ?? rY.bid;
+      if (typeof boY === 'boolean') { try { (yBase as any).F = boY ? 1 : 0; } catch {} }
+      const msg = rY.reason ?? rY.explanation ?? rY.rationale ?? rY.why ?? rY.comment ?? rY.msg;
+      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), dLhat: yBase.dLhat, counter: yBase.counter, reason: (typeof msg==='string'? msg.slice(0,800): undefined) }; } catch {}
+    } catch {
+      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), dLhat: yBase.dLhat, counter: yBase.counter }; } catch {}
+    }
+  } else {
+    try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), dLhat: yBase.dLhat, counter: yBase.counter }; } catch {}
+  }
 } catch {}
 
-// 丙（上家）：在边缘情况下做贝叶斯式调节
+// 丙（上家）：在边缘情况下做贝叶斯式调节 + 外置AI最终裁决（可选）
 let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
 let F_b = bBase.F;
 if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.counterHi) <= 0.6)) {
@@ -1391,17 +1419,30 @@ if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.c
   if (yBase.F === 1) effectiveHi += __DOUBLE_CFG.bayes.teammateRaiseHi;
   F_b = (bBase.counter >= effectiveHi) ? 1 : 0;
 }
-try { 
-  yield { 
-    type:'event', 
-    kind:'double-decision', 
-    role:'farmer', 
-    seat:Bseat, 
-    double: !!F_b, 
-    dLhat: bBase.dLhat, 
-    counter: bBase.counter, 
-    bayes:{ landlord:Lflag, farmerY:yBase.F } 
-  }; 
+
+try {
+  const __externalB = __isExternalBot((bots as any)[Bseat]);
+  if (__externalB) {
+    try {
+      const ctxB:any = {
+        phase:'double', seat:Bseat, role:'farmer',
+        hands: hands[Bseat], bottom,
+        ruleId: (opts as any)?.ruleId, rule: (opts as any)?.rule,
+        doubling:{ landlord:Lflag, farmerY:yBase.F, farmerB:null },
+        estimate: { ...bBase, F: F_b }
+      };
+      const mvB = await Promise.resolve((bots as any)[Bseat](ctxB));
+      const rB:any = (mvB||{});
+      const boB = rB.double ?? rB.yes ?? rB.rob ?? rB.bid;
+      if (typeof boB === 'boolean') F_b = boB ? 1 : 0;
+      const msg = rB.reason ?? rB.explanation ?? rB.rationale ?? rB.why ?? rB.comment ?? rB.msg;
+      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double: !!F_b, dLhat: bBase.dLhat, counter: bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F }, reason: (typeof msg==='string'? msg.slice(0,800): undefined) }; } catch {}
+    } catch {
+      try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double: !!F_b, dLhat: bBase.dLhat, counter: bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch {}
+    }
+  } else {
+    try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double: !!F_b, dLhat: bBase.dLhat, counter: bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch {}
+  }
 } catch {}
 // 记录对位加倍倍数（不含炸弹/春天）
 let __doubleMulY = (1 << Lflag) * (1 << yBase.F);
