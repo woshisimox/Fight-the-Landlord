@@ -1103,6 +1103,9 @@ export async function* runOneGame(opts: {
   // 发牌
   let deck = shuffle(freshDeck());
   let hands: Label[][] = [[],[],[]];
+  // 外置AI理由记录
+  const __aiBidReason: (string|null)[] = [null, null, null];
+  const __aiDoubleReason: (string|null)[] = [null, null, null];
   for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
   let bottom = deck.slice(17*3); // 3 张
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
