@@ -1,30 +1,5 @@
 // pages/api/stream_ndjson.ts
-
-/* === Bid-only reason sanitizer (display) === */
-function __sanitizeBidReason(raw: any): string {
-  const s = (typeof raw === 'string' ? raw : '').trim();
-  if (!s) return '';
-  const PLAY_PAT = /(出牌|跟牌|压住|首家出牌|顺子|连对|三带|炸弹|王炸|lead|follow|type\s*=|cards?\s*:)/i;
-  if (PLAY_PAT.test(s)) return '';
-  return s.replace(/\s+/g, ' ').slice(0, 200);
-}
 import type { NextApiRequest, NextApiResponse } from 'next';
-// === helper: mark external on bot function (ai/http or explicit) ===
-// === helper: mark external on bot function (ai/http or explicit) ===
-function __markExternalOnBot(fn: any, spec: any) {
-  try {
-    const choice = String(spec?.choice || spec?.provider || '').toLowerCase();
-    const isExt = spec?.external === true || choice.startsWith('ai:') || choice === 'http';
-    (fn as any).external = isExt;
-    (fn as any).meta = (fn as any).meta || {};
-    if (isExt) (fn as any).meta.source = 'external-ai';
-    if (spec?.provider) (fn as any).meta.provider = spec.provider;
-    if (spec?.model) (fn as any).meta.model = spec.model;
-  } catch {}
-  return fn;
-}
-const __postWrapMarkExternal = (bots:any[], specs:any[]) => { try { bots.forEach((b,i)=> __markExternalOnBot(b, specs?.[i])); } catch {} };
-
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
@@ -34,10 +9,6 @@ import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
-
-// ---- stable hash for ruleId ----
-function stableHash(s: string): string { let h=5381; for (let i=0;i<s.length;i++){ h=((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); }
-
 
 
 /* ========== 已出牌缓存（仅当前请求作用域） ========== */
@@ -334,12 +305,12 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
 async function runOneRoundWithGuard(
-  { seats, four2, rule, ruleId, lastReason, lastScore }:
-  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; rule: any; ruleId: string; lastReason: (string|null)[]; lastScore: (number|null)[] },
+  { seats, four2, lastReason, lastScore }:
+  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; lastReason: (string|null)[]; lastScore: (number|null)[] },
   res: NextApiResponse,
   round: number
 ){
-  const iter = runOneGame({ seats, four2, rule, ruleId } as any);
+  const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
 
   // 画像统计
@@ -388,35 +359,7 @@ for await (const ev of (iter as any)) {
       });
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
-      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
-try {
-  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
-  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
-  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
-  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
-  let extraMult = 1;
-  const decideExtraDouble = (seat:number)=>{
-    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
-    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
-    const cnt = __count(all);
-    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
-    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
-    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
-    if (role==='landlord') return hasBomb;
-    return (hasRocket || hasBomb);
-  };
-  for (let k=0;k<3;k++){
-    const s=(landlordIdx + k) % 3;
-    const will = decideExtraDouble(s);
-    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
-    if (will) extraMult *= 2;
-  }
-  if (extraMult > 1) {
-    // 同步一次倍数（可被前端用于兜底校准）
-    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
-  }
-} catch {}
-continue;
+      continue;
     }
 
     // 兼容两种出牌事件：turn 或 event:play
@@ -437,35 +380,7 @@ continue;
         score: (lastScore[seat] ?? undefined), 
         totals 
       });
-      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
-try {
-  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
-  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
-  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
-  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
-  let extraMult = 1;
-  const decideExtraDouble = (seat:number)=>{
-    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
-    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
-    const cnt = __count(all);
-    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
-    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
-    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
-    if (role==='landlord') return hasBomb;
-    return (hasRocket || hasBomb);
-  };
-  for (let k=0;k<3;k++){
-    const s=(landlordIdx + k) % 3;
-    const will = decideExtraDouble(s);
-    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
-    if (will) extraMult *= 2;
-  }
-  if (extraMult > 1) {
-    // 同步一次倍数（可被前端用于兜底校准）
-    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
-  }
-} catch {}
-continue;
+      continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
       const { seat, move, cards } = ev;
@@ -500,7 +415,7 @@ continue;
           agg : +agg.toFixed(2),
           cons: +cons.toFixed(2),
           eff : +eff.toFixed(2),
-          bid: +rob.toFixed(2),
+          rob : +rob.toFixed(2),
         }};
       });
 
@@ -539,10 +454,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
     const four2  = (body.four2 || 'both') as 'both'|'2singles'|'2pairs';
 
-
-    const rule = (body as any).rule ?? { four2, rob: body.rob !== false, farmerCoop: !!body.farmerCoop };
-    const ruleId = (body as any).ruleId ?? stableHash(JSON.stringify(rule));
-
     const turnTimeoutMsArr = parseTurnTimeoutMsArr(req);
     const seatSpecs = (body.seats || []).slice(0,3) as SeatSpec[];
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
@@ -564,15 +475,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
       const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScore[seat] = (typeof sc==='number'? sc: null); };
       const wrapped = baseBots.map((bot, i) =>
-        
         traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot as any, res, onReason, onScore,
                   turnTimeoutMsArr[i] ?? turnTimeoutMsArr[0],
                   Math.max(0, Math.floor(delays[i] ?? 0)),
                   i)
       );
 
-            __postWrapMarkExternal(wrapped, (seatSpecs||body?.seats||req?.body?.seats||[]));
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });

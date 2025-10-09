@@ -1,28 +1,4 @@
 // lib/doudizhu/engine.ts
-
-/* === Bid-only reason sanitizer === */
-
-/* === Probability-based bidding helpers (inserted) === */
-function __clamp01(x:number){ return Math.max(0, Math.min(1, x)); }
-function __sigmoid(z:number){ return 1/(1+Math.exp(-z)); }
-const __SCORE2PROB_ALPHA = 0.5;
-const __SCORE2PROB_BETA  = 0.0;
-function scoreToProb(score?: number|null): number|null {
-  if (typeof score !== 'number' || !isFinite(score)) return null;
-  return __clamp01(__sigmoid(__SCORE2PROB_ALPHA * score + __SCORE2PROB_BETA));
-}
-function __sanitizeBidReason(raw: any): string {
-  const s = (typeof raw === 'string' ? raw : '').trim();
-  if (!s) return '';
-  const PLAY_PAT = /(出牌|跟牌|压住|首家出牌|顺子|连对|三带|炸弹|王炸|lead|follow|type\s*=|cards?\s*:)/i;
-  if (PLAY_PAT.test(s)) return '';
-  return s.replace(/\s+/g, ' ').slice(0, 200);
-}
-
-/* === Inject: bid-eval helper (bidding debug) === */
-function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'bid'|'pass', roundNo?:number){
-  try { gen && gen.next && gen.next({ type:'event', kind:'bid-eval', seat, score, threshold, decision, roundNo }); } catch(e){}
-}
 // Dou Dizhu (斗地主) “真引擎”实现（适配 Bot Arena 项目）。
 // - 牌型完整（单、对、三、三带、顺子、连对、飞机/带翅膀、四带二、炸弹、王炸）
 // - 比较完整
@@ -694,64 +670,6 @@ export const GreedyMin: BotFunc = (ctx) => {
 };
 
 
-
-// ===== 内置 Bot 的“抢地主内部打分” =====
-export function GreedyMaxBidScore(hand: Label[]): number {
-  // 贴合 GreedyMax 的进攻倾向：炸力、火箭、2、A、连对/顺子的可控性
-  const map = countByRank(hand);
-  const hasRocket = !!rocketFrom(map);
-  const bombs = [...bombsFrom(map)].length;
-  const twos = map.get(ORDER['2'])?.length ?? 0;
-  const As   = map.get(ORDER['A'])?.length ?? 0;
-  // 估算连对/顺子潜力（粗略）：统计 3..A 的覆盖与对子的数量
-  const ranks = (RANKS.slice(0, 12) as unknown as string[]);
-  let coverage = 0, pairs = 0, triples = 0, singles = 0;
-  for (const r of ranks) {
-    const idx = (ORDER as any)[r as string];
-    const n = map.get(idx)?.length ?? 0;
-    if (n>0) coverage++;
-    if (n>=2) pairs++;
-    if (n>=3) triples++;
-    if (n===1) singles++;
-  }
-  let score = 0;
-  if (hasRocket) score += 4.0;
-  score += bombs * 2.0;
-  if (twos>=2) score += 1.2 + (twos-2)*0.7;
-  if (As>=3)   score += (As-2)*0.6;
-  score += Math.min(4, coverage/3) * 0.2; // 覆盖增强出牌灵活性
-  score += Math.min(3, pairs) * 0.25;
-  score += Math.min(2, triples) * 0.35;
-  score -= Math.min(4, singles) * 0.05;   // 孤张略减分
-  return score;
-}
-
-export function GreedyMinBidScore(hand: Label[]): number {
-  // 贴合 GreedyMin 的保守倾向：更强调安全牌（2/A/炸），弱化连牌收益
-  const map = countByRank(hand);
-  const hasRocket = !!rocketFrom(map);
-  const bombs = [...bombsFrom(map)].length;
-  const twos = map.get(ORDER['2'])?.length ?? 0;
-  const As   = map.get(ORDER['A'])?.length ?? 0;
-  let score = 0;
-  if (hasRocket) score += 4.5;
-  score += bombs * 2.2;
-  score += twos * 0.9;
-  score += Math.max(0, As-1) * 0.5;
-  // 轻微考虑结构但不鼓励冒进
-  const ranks = RANKS.slice(0, 12) as unknown as string[];
-  let pairs = 0;
-  for (const r of ranks) {
-    const idx = (ORDER as any)[r as string];
-    const n = map.get(idx)?.length ?? 0; if (n>=2) pairs++; }
-  score += Math.min(2, pairs) * 0.15;
-  return score;
-}
-
-export function RandomLegalBidScore(_hand: Label[]): number {
-  // 随机策略不具“内部打分”，返回 NaN 代表无内部分
-  return Number.NaN;
-}
 export const GreedyMax: BotFunc = (ctx) => {
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
@@ -1078,26 +996,6 @@ function shuffle<T>(a: T[]): T[] {
   return a;
 }
 
-
-export function evalRobScore(hand: Label[]): number {
-  // 基于 wantRob 的同口径启发，返回一个连续评分（越高越倾向抢）
-  // 设计：火箭=4；每个炸弹=1.8；第2张'2'=1.2，第3张及以上每张'2'=0.6；第3个A开始每张A=0.5；
-  // 另外给顺子/连对/飞机形态一些微弱加分以偏好“可控”牌型。
-  const map = countByRank(hand);
-  const hasRocket = !!rocketFrom(map);
-  const bombs = [...bombsFrom(map)].length;
-  const twos = map.get(ORDER['2'])?.length ?? 0;
-  const As = map.get(ORDER['A'])?.length ?? 0;
-  let score = 0;
-  if (hasRocket) score += 4;
-  score += bombs * 1.8;
-  if (twos >= 2) score += 1.2 + Math.max(0, twos-2) * 0.6;
-  if (As   >= 3) score += (As-2) * 0.5;
-  // 连牌结构微弱加分（避免全是孤张导致后续吃力）
-    // (可选) 这里预留给连牌结构的进一步加分逻辑；当前版本不使用以保持简洁与稳定。
-return score;
-}
-
 function wantRob(hand: Label[]): boolean {
   // 很简单的启发：有王炸/炸弹/≥2个2/≥3个A 就抢
   const map = countByRank(hand);
@@ -1110,314 +1008,45 @@ function wantRob(hand: Label[]): boolean {
 
 // ========== 对局主循环 ==========
 export async function* runOneGame(opts: {
-  // Internal phase guard to avoid premature PLAY before doubling finishes
   seats: [BotFunc, BotFunc, BotFunc] | BotFunc[];
   delayMs?: number;
-  bid?: boolean;                // true => 叫/抢
+  rob?: boolean;                // true => 叫/抢
   four2?: Four2Policy;
 }): AsyncGenerator<any, void, unknown> {
-  // Internal phase guard to avoid premature PLAY before doubling finishes
-  let __PHASE: 'deal' | 'bid' | 'double' | 'play' = 'deal';
-
-  // Internal phase guard to avoid premature PLAY before doubling finishes
-
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
+  const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
   const four2 = opts.four2 || 'both';
 
   // 发牌
-  let deck = shuffle(freshDeck());
-  let hands: Label[][] = [[],[],[]];
+  const deck = shuffle(freshDeck());
+  const hands: Label[][] = [[],[],[]];
   for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
-  let bottom = deck.slice(17*3); // 3 张
+  const bottom = deck.slice(17*3); // 3 张
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
 
   // 抢地主流程（简单实现）
   let landlord = 0;
   let multiplier = 1;
-        let bidMultiplier = 1;
-if (opts.bid !== false) {
+  if (opts.rob !== false) {
     let last = -1;
-    
-      __PHASE = 'bid';
-  for (let __attempt=0; __attempt<5; __attempt++) {
-  const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
-  // 每次重试重置叫抢状态
-  last = -1;
-  bidMultiplier = 1;
-  multiplier = 1;
-for (let s=0;s<3;s++) {
-      // 外置AI识别 + 决策（优先，不评分）
-const __bot = (bots as any)[s];
-const __tag = String(__bot?.choice || __bot?.provider || __bot?.name || __bot?.label || '').toLowerCase();
-const __external = !!(__bot?.external === true || __bot?.isExternal === true || (__bot?.meta && (__bot.meta.source === 'external-ai' || __bot.meta.kind === 'external')) || /^(ai:|ai$|http)/.test(__tag) || /(openai|gpt|qwen|glm|deepseek|claude|anthropic|cohere|mistral|vertex|dashscope|external)/.test(__tag));
-let __aiBid: null | boolean = null;
-let __aiBidReason: string | null = null;
-let __dec_ext: 'rob'|'pass'|null = null;
-if (__external) {
-  try {
-    const ctxForBid:any = {
-phase:'bid', seat:s, role:'farmer',
-      hands: hands[s], require: null, canPass: true,
-      policy: { four2 },
-      handsCount: [hands[0].length, hands[1].length, hands[2].length],
-      counts: {}, landlord: -1, leader: s, trick: 0,
-      teammates: [], opponents: [],
-      ruleId: (opts as any).ruleId, rule: (opts as any).rule,
-      bidding: { round: 1 }
-    ,
-  expect: 'bid-only',
-  instruction: '【任务=抢地主判断】只回答是否抢/叫(rob|call|pass)及简短理由；不要讨论任何出牌策略、顺子/对子/炸弹等。',  legalMoves: ['call','rob','pass'],
-};const mv = await Promise.resolve((bots as any)[s](ctxForBid));
-const r:any = (mv||{});
-    // 抢地主阶段忽略任何“出牌字段”
-    if (r && typeof r === 'object') {
-      try { delete (r as any).move; } catch {}
-      try { delete (r as any).cards; } catch {}
-      try { delete (r as any).type; } catch {}
-      try { delete (r as any).play; } catch {}
-      try { delete (r as any).action; } catch {}
-    }
-
-const rraw = r.reason ?? r.explanation ?? r.rationale ?? r.why ?? r.comment ?? r.msg;
-if (typeof rraw === 'string' && rraw.trim()) {
-  // Heuristic filter: in bidding phase, ignore reasons that look like PLAY instructions
-  const _rr = rraw.trim();
-  const looksLikePlay = /(出牌|顺子|对子|炸弹|跟牌|压住|首家出牌|lead|follow|type=|打出)/.test(_rr);
-  if (!looksLikePlay) __aiBidReason = _rr.slice(0, 800);
-  else __aiBidReason = ''; // drop misleading play-style reason during bid
-}if (typeof r.bid === 'boolean') __aiBid = r.bid; else
-    if (typeof r.rob === 'boolean') __aiBid = r.rob; else
-    if (typeof r.yes === 'boolean') __aiBid = r.yes; else
-    if (typeof r.double === 'boolean') __aiBid = r.double; else
-    if (typeof r.bid === 'number') __aiBid = r.bid !== 0; else
-    if (typeof r.rob === 'number') __aiBid = r.rob !== 0; else
-    if (typeof r.yes === 'number') __aiBid = r.yes !== 0; else
-    if (typeof r.double === 'number') __aiBid = r.double !== 0; else {
-      const act = String(r.action ?? r.move ?? r.decision ?? '').toLowerCase();
-      if (['bid','rob','call','qiang','play','yes','y','true','1','叫','抢'].includes(act)) __aiBid = true;
-      else if (['pass','skip','nobid','no','n','false','0','不叫','不抢'].includes(act)) __aiBid = false;
-  // === emit probability-based rob-eval for external AI ===
-  let __pwin_ext:number = (typeof (r as any)?.winProbAsLord === 'number' && isFinite((r as any).winProbAsLord))
-        ? __clamp01((r as any).winProbAsLord) : (scoreToProb((typeof (r as any)?.score==='number' ? (r as any).score : null)) ?? 0.5);
-  const __thr_ext = 0.5;
-  __dec_ext = (__pwin_ext > __thr_ext) ? 'rob' : 'pass';
-  try { yield { type:'event', kind:'rob-eval', seat:s, p_win: __pwin_ext, threshold: __thr_ext, decision: __dec_ext, score: (typeof (r as any)?.score==='number' ? (r as any).score : null), source: ((typeof (r as any)?.winProbAsLord==='number') ? 'bot' : 'score2prob') }; } catch {}
-
-    }
-  } catch {}
-}
-const sc = __external ? 0 : evalRobScore(hands[s]);
-// thresholds for both built-ins && external choices (inline for scope)
-      const __thMap: Record<string, number> = {
-        greedymax: 1.6,
-        allysupport: 1.8,
-        randomlegal: 2.0,
-        endgamerush: 2.1,
-        mininet: 2.2,
-        greedymin: 2.4,
-      };
-      const __thMapChoice: Record<string, number> = {
-        'built-in:greedy-max':   1.6,
-        'built-in:ally-support': 1.8,
-        'built-in:random-legal': 2.0,
-        'built-in:endgame-rush': 2.1,
-        'built-in:mininet':      2.2,
-        'built-in:greedy-min':   2.4,
-        'external':              2.2,
-        'external:ai':           2.2,
-        'external:http':         2.2,
-        'ai':                    2.2,
-        'http':                  2.2,
-        'openai':                2.2,
-        'gpt':                   2.2,
-        'claude':                2.2,
-      };
-      const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
-const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-// === emit probability-based rob-eval for built-in ===
-const __pwin_builtin = (scoreToProb(sc) ?? 0.5);
-const __thr_builtin = 0.5;
-const __dec_builtin: 'rob'|'pass' = (__pwin_builtin > __thr_builtin) ? 'rob' : 'pass';
-try { yield { type:'event', kind:'rob-eval', seat:s, p_win: __pwin_builtin, threshold: __thr_builtin, decision: __dec_builtin, score: sc, source: 'score2prob' }; } catch {}
-let bid: boolean = __external ? (__dec_ext === 'rob') : (__dec_builtin === 'rob');
-// 记录本轮评估（即使未达到阈值也写日志/存档）
-if (__external) { try { yield { type:'event', kind:'bid-eval', seat: s, source:'external-ai', decision: (bid ? 'bid' : 'pass'), reason: __aiBidReason, bidMult: bidMultiplier, mult: multiplier }; } catch{} } else { yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier }; }
-if (bid) {
-        __bidders.push({ seat: s, score: (__external? Number.NaN : sc), threshold: (__external? Number.NaN : __th), margin: (__external? 0 : (sc - __th)) });
-        multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
-
-        last = s;
-yield { type:'event', kind:'bid', seat:s, bid, ...( __external ? { source:'external-ai', reason: __aiBidReason } : { score: sc } ), bidMult: bidMultiplier, mult: multiplier };
+    for (let s=0;s<3;s++) {
+      const rob = wantRob(hands[s]);
+      yield { type:'event', kind:'rob', seat:s, rob };
+      if (rob) {
+        if (last === -1) {
+          last = s; // 叫
+        } else {
+          last = s; multiplier *= 2; // 抢 ×2
+        }
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
-      // 第二轮：仅对第一轮“抢”的人（__bidders）按同样座次再过一遍，比较 margin；同分后手优先（>=）；每次再 ×2，封顶 64。
-      if (__bidders.length > 0) {
-        let bestSeat = -1;
-        let bestMargin = -Infinity;
-        for (let t = 0; t < 3; t++) {
-          const hit = __bidders.find(b => b.seat === t);
-          if (!hit) continue;
-          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
-          multiplier = bidMultiplier;
-          yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
-          if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
-        }
-        landlord = bestSeat;
-      }
-      
-      
-// 若无人抢，则记录并重发，随后重新叫牌
-if (__bidders.length === 0) {
-  try { yield { type:'event', kind:'bid-skip', reason:'no-bidders' }; } catch {}
-  // 重新发牌
-  deck = shuffle(freshDeck());
-  hands = [[],[],[]] as any;
-  for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
-  bottom = deck.slice(17*3);
-  for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
-  continue; // 回到下一轮尝试，重新进行叫抢（会继续产出 bid-eval）
-}
-yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: bidMultiplier };multiplier = bidMultiplier;
     if (last !== -1) landlord = last;
-      break;
-    }
-
   }
   // 亮底 & 地主收底
-  __PHASE = 'double';
-  __PHASE = 'double';
   yield { type:'event', kind:'reveal', bottom: bottom.slice() };
   hands[landlord].push(...bottom);
   hands[landlord] = sorted(hands[landlord]);
-
-// === 加倍阶段（地主→乙→丙） ===
-// 配置参数（可抽到外部 config）
-__PHASE = 'play';
-const __DOUBLE_CFG = {
-  landlordThreshold: 1.0,
-  counterLo: 2.5,
-  counterHi: 4.0,
-  mcSamples: 240,
-  bayes: { landlordRaiseHi: 0.8, teammateRaiseHi: 0.4 },
-  // 上限，最终对位最多到 8 倍（含叫抢与加倍）；炸弹/春天在结算时另外乘
-  cap: 8
-};
-
-// 计算反制能力分（简版，可再调权重）
-function __counterScore(hand: Label[], bottom: Label[]): number {
-  const map = countByRank(hand);
-  const hasR = !!rocketFrom(map);
-  const bombs = [...bombsFrom(map)].length;
-  const twos = map.get(ORDER['2'])?.length ?? 0;
-  const As = map.get(ORDER['A'])?.length ?? 0;
-  let sc = 0;
-  if (hasR) sc += 3.0;
-  sc += 2.0 * bombs;
-  sc += 0.8 * Math.max(0, twos);
-  sc += 0.6 * Math.max(0, As-1);
-  return sc;
-}
-
-// 基于公开信息的蒙特卡洛：估计底牌带来的期望增益 Δ̂
-function __estimateDeltaByMC(mySeat:number, myHand:Label[], bottom:Label[], landlordSeat:number, samples:number): number {
-  // 未知牌：整副 54 去掉我的 17 与底牌 3
-  const deckAll: Label[] = freshDeck();
-  const mySet = new Set(myHand.concat(bottom));
-  const unknown: Label[] = deckAll.filter(c => !mySet.has(c));
-  let acc = 0, n = 0;
-  for (let t=0;t<samples;t++) {
-    // 随机洗牌后，取前34张：分配给（地主17，另一农民17）
-    const pool = shuffle(unknown.slice());
-    const sampleLord = pool.slice(0,17);
-    // before
-    const S_before = evalRobScore(sampleLord);
-    // after: 并入底牌
-    const S_after  = evalRobScore(sorted(sampleLord.concat(bottom)));
-    acc += (S_after - S_before);
-    n++;
-  }
-  return n ? acc/n : 0;
-}
-
-// 结构兜底：底牌是否带来明显强结构（王炸/炸弹/连对显著延长等）
-function __structureBoosted(before: Label[], after: Label[]): boolean {
-  const mb = countByRank(before), ma = countByRank(after);
-  const rb = !!rocketFrom(mb), ra = !!rocketFrom(ma);
-  if (!rb && ra) return true;
-  const bb = [...bombsFrom(mb)].length, ba = [...bombsFrom(ma)].length;
-  if (ba > bb) return true;
-  // 高张数量显著提升（粗略兜底）
-  const twb = mb.get(ORDER['2'])?.length ?? 0, twa = ma.get(ORDER['2'])?.length ?? 0;
-  if (twa - twb >= 2) return true;
-  const Ab = mb.get(ORDER['A'])?.length ?? 0, Aa = ma.get(ORDER['A'])?.length ?? 0;
-  if (Aa - Ab >= 2) return true;
-  return false;
-}
-
-// 地主加倍判定（阈值优先，未达阈值时结构兜底；仅一次）
-function __decideLandlordDouble(handBefore:Label[], handAfter:Label[]): {L:number, delta:number, reason:'threshold'|'structure'|'none'} {
-  const S_before = evalRobScore(handBefore);
-  const S_after  = evalRobScore(handAfter);
-  const delta = S_after - S_before;
-  if (delta >= __DOUBLE_CFG.landlordThreshold) return { L:1, delta, reason:'threshold' };
-  if (__structureBoosted(handBefore, handAfter)) return { L:1, delta, reason:'structure' };
-  return { L:0, delta, reason:'none' };
-}
-
-// 农民加倍基础规则（不含贝叶斯微调）
-function __decideFarmerDoubleBase(myHand:Label[], bottom:Label[], samples:number): {F:number, dLhat:number, counter:number} {
-  const dLhat = __estimateDeltaByMC(-1, myHand, bottom, landlord, samples);
-  const counter = __counterScore(myHand, bottom);
-  let F = 0;
-  if ((dLhat <= 0 && counter >= __DOUBLE_CFG.counterLo) ||
-      (dLhat >  0 && counter >= __DOUBLE_CFG.counterHi) ||
-      (bombsFrom(countByRank(myHand)).next().value) || (!!rocketFrom(countByRank(myHand)))) {
-    F = 1;
-  }
-  return { F, dLhat, counter };
-}
-
-// —— 执行顺序：地主 → 乙(下家) → 丙(上家) ——
-const Lseat = landlord;
-const Yseat = (landlord + 1) % 3;
-const Bseat = (landlord + 2) % 3;
-
-// 地主：基于 before/after 的 Δ 与结构兜底
-const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 理论上就是并入前
-const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
-const Lflag = lordDecision.L;
-try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
-
-// 乙（下家）：蒙特卡洛 + 反制能力
-const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
-try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yBase.F, dLhat:yBase.dLhat, counter:yBase.counter }; } catch{}
-
-// 丙（上家）：在边缘情况下做贝叶斯式调节
-let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
-let F_b = bBase.F;
-if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.counterHi) <= 0.6)) {
-  // 若地主或乙已加倍，提高门槛（更保守）
-  let effectiveHi = __DOUBLE_CFG.counterHi;
-  if (Lflag === 1) effectiveHi += __DOUBLE_CFG.bayes.landlordRaiseHi;
-  if (yBase.F === 1) effectiveHi += __DOUBLE_CFG.bayes.teammateRaiseHi;
-  F_b = (bBase.counter >= effectiveHi) ? 1 : 0;
-}
-try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!F_b, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch{}
-
-// 记录对位加倍倍数（不含炸弹/春天）
-let __doubleMulY = (1 << Lflag) * (1 << yBase.F);
-let __doubleMulB = (1 << Lflag) * (1 << F_b);
-
-// 上限裁剪到 8（含叫抢）
-__doubleMulY = Math.min(__DOUBLE_CFG.cap, __doubleMulY * multiplier) / Math.max(1, multiplier);
-__doubleMulB = Math.min(__DOUBLE_CFG.cap, __doubleMulB * multiplier) / Math.max(1, multiplier);
-
-try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bing:Bseat, mulY: __doubleMulY, mulB: __doubleMulB, base: multiplier }; } catch{}
-
-
 
   // 初始化（带上地主）
   yield { type:'state', kind:'init', landlord, hands: hands.map(h => [...h]) };
@@ -1457,8 +1086,7 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
       landlord,
       leader,
       trick,
-
-history: clone(history),
+      history: clone(history),
       currentTrick: clone(history.filter(h => h.trick === trick)),
       seen: clone(seen),
       bottom: clone(bottom),
@@ -1597,17 +1225,14 @@ history: clone(history),
       if (winner === landlord && farmerPlayed === 0) springMul *= 2;          // 春天
       if (winner !== landlord && landlordPlayed <= 1) springMul *= 2;         // 反春天（地主仅首手或一次也没成）
 
-      
-      const finalBaseY = multiplier * __doubleMulY;
-      const finalBaseB = multiplier * __doubleMulB;
-      const finalYi   = finalBaseY * (1 << bombTimes) * springMul;
-      const finalBing = finalBaseB * (1 << bombTimes) * springMul;
+      const finalMultiplier = multiplier * (1 << bombTimes) * springMul;      // 炸弹/王炸：每次×2
 
       const delta: [number, number, number] =
         winner === landlord
-          ? [+(finalYi + finalBing), -finalYi, -finalBing]
-          : [-(finalYi + finalBing), +finalYi, +finalBing];
-      yield { type:'event', kind:'win', winner, multiplier: multiplier, multiplierYi: finalYi, multiplierBing: finalBing, deltaScores: delta };
+          ? [+2*finalMultiplier, -finalMultiplier, -finalMultiplier]
+          : [-2*finalMultiplier, +finalMultiplier, +finalMultiplier];
+
+      yield { type:'event', kind:'win', winner, multiplier: finalMultiplier, deltaScores: delta };
       return;
     }
 
