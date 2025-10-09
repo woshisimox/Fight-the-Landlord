@@ -1155,7 +1155,7 @@ if (__external) {
       teammates: [], opponents: [],
       ruleId: (opts as any).ruleId, rule: (opts as any).rule,
       bidding: { round: 1 }
-    
+    ,
   expect: 'bid-only',
   instruction: '【任务=抢地主判断】只回答是否抢/叫(rob|call|pass)及简短理由；不要讨论任何出牌策略、顺子/对子/炸弹等。',
 };const mv = await Promise.resolve((bots as any)[s](ctxForBid));
