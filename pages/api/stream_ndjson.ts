@@ -1,5 +1,30 @@
 // pages/api/stream_ndjson.ts
+
+/* === Bid-only reason sanitizer (display) === */
+function __sanitizeBidReason(raw: any): string {
+  const s = (typeof raw === 'string' ? raw : '').trim();
+  if (!s) return '';
+  const PLAY_PAT = /(出牌|跟牌|压住|首家出牌|顺子|连对|三带|炸弹|王炸|lead|follow|type\s*=|cards?\s*:)/i;
+  if (PLAY_PAT.test(s)) return '';
+  return s.replace(/\s+/g, ' ').slice(0, 200);
+}
 import type { NextApiRequest, NextApiResponse } from 'next';
+// === helper: mark external on bot function (ai/http or explicit) ===
+// === helper: mark external on bot function (ai/http or explicit) ===
+function __markExternalOnBot(fn: any, spec: any) {
+  try {
+    const choice = String(spec?.choice || spec?.provider || '').toLowerCase();
+    const isExt = spec?.external === true || choice.startsWith('ai:') || choice === 'http';
+    (fn as any).external = isExt;
+    (fn as any).meta = (fn as any).meta || {};
+    if (isExt) (fn as any).meta.source = 'external-ai';
+    if (spec?.provider) (fn as any).meta.provider = spec.provider;
+    if (spec?.model) (fn as any).meta.model = spec.model;
+  } catch {}
+  return fn;
+}
+const __postWrapMarkExternal = (bots:any[], specs:any[]) => { try { bots.forEach((b,i)=> __markExternalOnBot(b, specs?.[i])); } catch {} };
+
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
@@ -539,12 +564,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
       const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScore[seat] = (typeof sc==='number'? sc: null); };
       const wrapped = baseBots.map((bot, i) =>
+        
         traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot as any, res, onReason, onScore,
                   turnTimeoutMsArr[i] ?? turnTimeoutMsArr[0],
                   Math.max(0, Math.floor(delays[i] ?? 0)),
                   i)
       );
 
+            __postWrapMarkExternal(wrapped, (seatSpecs||body?.seats||req?.body?.seats||[]));
       await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });

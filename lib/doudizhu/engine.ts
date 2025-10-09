@@ -1,5 +1,14 @@
 // lib/doudizhu/engine.ts
 
+/* === Bid-only reason sanitizer === */
+function __sanitizeBidReason(raw: any): string {
+  const s = (typeof raw === 'string' ? raw : '').trim();
+  if (!s) return '';
+  const PLAY_PAT = /(出牌|跟牌|压住|首家出牌|顺子|连对|三带|炸弹|王炸|lead|follow|type\s*=|cards?\s*:)/i;
+  if (PLAY_PAT.test(s)) return '';
+  return s.replace(/\s+/g, ' ').slice(0, 200);
+}
+
 /* === Inject: bid-eval helper (bidding debug) === */
 function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'bid'|'pass', roundNo?:number){
   try { gen && gen.next && gen.next({ type:'event', kind:'bid-eval', seat, score, threshold, decision, roundNo }); } catch(e){}
@@ -45,7 +54,6 @@ export type BotCtx = {
 
   seen: Label[];            // 所有“已公开可见”的牌：底牌 + 历史出牌
   bottom: Label[];          // 亮底的三张牌（开局已公布）
-  seenBySeat?: Label[][];
 
   handsCount: [number, number, number]; // 各家的手牌张数
   role: 'landlord' | 'farmer';          // 当前角色
@@ -1092,13 +1100,19 @@ function wantRob(hand: Label[]): boolean {
 
 // ========== 对局主循环 ==========
 export async function* runOneGame(opts: {
+  // Internal phase guard to avoid premature PLAY before doubling finishes
   seats: [BotFunc, BotFunc, BotFunc] | BotFunc[];
   delayMs?: number;
   bid?: boolean;                // true => 叫/抢
   four2?: Four2Policy;
 }): AsyncGenerator<any, void, unknown> {
+  // Internal phase guard to avoid premature PLAY before doubling finishes
+  let __PHASE: 'deal' | 'bid' | 'double' | 'play' = 'deal';
+
+  // Internal phase guard to avoid premature PLAY before doubling finishes
+
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-  const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
+const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
   const four2 = opts.four2 || 'both';
 
   // 发牌
@@ -1115,16 +1129,60 @@ export async function* runOneGame(opts: {
 if (opts.bid !== false) {
     let last = -1;
     
-      for (let __attempt=0; __attempt<5; __attempt++) {
+      __PHASE = 'bid';
+  for (let __attempt=0; __attempt<5; __attempt++) {
   const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
   // 每次重试重置叫抢状态
   last = -1;
   bidMultiplier = 1;
   multiplier = 1;
 for (let s=0;s<3;s++) {
-      const sc = evalRobScore(hands[s]); 
-
-      // thresholds for both built-ins && external choices (inline for scope)
+      // 外置AI识别 + 决策（优先，不评分）
+const __bot = (bots as any)[s];
+const __tag = String(__bot?.choice || __bot?.provider || __bot?.name || __bot?.label || '').toLowerCase();
+const __external = !!(__bot?.external === true || __bot?.isExternal === true || (__bot?.meta && (__bot.meta.source === 'external-ai' || __bot.meta.kind === 'external')) || /^(ai:|ai$|http)/.test(__tag) || /(openai|gpt|qwen|glm|deepseek|claude|anthropic|cohere|mistral|vertex|dashscope|external)/.test(__tag));
+let __aiBid: null | boolean = null;
+let __aiBidReason: string | null = null;
+if (__external) {
+  try {
+    const ctxForBid:any = {
+      phase:'bid', seat:s, role:'farmer',
+      hands: hands[s], require: null, canPass: true,
+      policy: { four2 },
+      history: [], currentTrick: [], seen: [], bottom: [],
+      handsCount: [hands[0].length, hands[1].length, hands[2].length],
+      counts: {}, landlord: -1, leader: s, trick: 0,
+      teammates: [], opponents: [],
+      ruleId: (opts as any).ruleId, rule: (opts as any).rule,
+      bidding: { round: 1 }
+    ,
+  expect: 'bid-only',
+  instruction: '【任务=抢地主判断】只回答是否抢/叫(rob|call|pass)及简短理由；不要讨论任何出牌策略、顺子/对子/炸弹等。',
+};const mv = await Promise.resolve((bots as any)[s](ctxForBid));
+const r:any = (mv||{});
+const rraw = r.reason ?? r.explanation ?? r.rationale ?? r.why ?? r.comment ?? r.msg;
+if (typeof rraw === 'string' && rraw.trim()) {
+  // Heuristic filter: in bidding phase, ignore reasons that look like PLAY instructions
+  const _rr = rraw.trim();
+  const looksLikePlay = /(出牌|顺子|对子|炸弹|跟牌|压住|首家出牌|lead|follow|type=|打出)/.test(_rr);
+  if (!looksLikePlay) __aiBidReason = _rr.slice(0, 800);
+  else __aiBidReason = ''; // drop misleading play-style reason during bid
+}if (typeof r.bid === 'boolean') __aiBid = r.bid; else
+    if (typeof r.rob === 'boolean') __aiBid = r.rob; else
+    if (typeof r.yes === 'boolean') __aiBid = r.yes; else
+    if (typeof r.double === 'boolean') __aiBid = r.double; else
+    if (typeof r.bid === 'number') __aiBid = r.bid !== 0; else
+    if (typeof r.rob === 'number') __aiBid = r.rob !== 0; else
+    if (typeof r.yes === 'number') __aiBid = r.yes !== 0; else
+    if (typeof r.double === 'number') __aiBid = r.double !== 0; else {
+      const act = String(r.action ?? r.move ?? r.decision ?? '').toLowerCase();
+      if (['bid','rob','call','qiang','play','yes','y','true','1','叫','抢'].includes(act)) __aiBid = true;
+      else if (['pass','skip','nobid','no','n','false','0','不叫','不抢'].includes(act)) __aiBid = false;
+    }
+  } catch {}
+}
+const sc = __external ? 0 : evalRobScore(hands[s]);
+// thresholds for both built-ins && external choices (inline for scope)
       const __thMap: Record<string, number> = {
         greedymax: 1.6,
         allysupport: 1.8,
@@ -1150,19 +1208,17 @@ for (let s=0;s<3;s++) {
         'claude':                2.2,
       };
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
-      const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-      const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-      const bid = (sc >= __th);
-
-
+const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
+const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
+let bid: boolean = __external ? !!__aiBid : (sc >= __th);
 // 记录本轮评估（即使未达到阈值也写日志/存档）
-yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+if (__external) { try { yield { type:'event', kind:'bid-eval', seat: s, source:'external-ai', decision: (bid ? 'bid' : 'pass'), reason: __aiBidReason, bidMult: bidMultiplier, mult: multiplier }; } catch{} } else { yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier }; }
 if (bid) {
-        __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
+        __bidders.push({ seat: s, score: (__external? Number.NaN : sc), threshold: (__external? Number.NaN : __th), margin: (__external? 0 : (sc - __th)) });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
 
         last = s;
-yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier, mult: multiplier };
+yield { type:'event', kind:'bid', seat:s, bid, ...( __external ? { source:'external-ai', reason: __aiBidReason } : { score: sc } ), bidMult: bidMultiplier, mult: multiplier };
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
@@ -1200,12 +1256,15 @@ yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: b
 
   }
   // 亮底 & 地主收底
+  __PHASE = 'double';
+  __PHASE = 'double';
   yield { type:'event', kind:'reveal', bottom: bottom.slice() };
   hands[landlord].push(...bottom);
   hands[landlord] = sorted(hands[landlord]);
 
 // === 加倍阶段（地主→乙→丙） ===
 // 配置参数（可抽到外部 config）
+__PHASE = 'play';
 const __DOUBLE_CFG = {
   landlordThreshold: 1.0,
   counterLo: 2.5,
@@ -1358,21 +1417,7 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
   // 游戏循环
   while (true) {
     const isLeader = (require == null && turn === leader);
-    
-// --- derive per-seat seen cards (history + bottom to landlord) ---
-function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: number): Label[][] {
-  const arr: Label[][] = [[],[],[]];
-  for (const ev of history) {
-    if (ev && ev.move === 'play' && Array.isArray(ev.cards)) {
-      try { arr[ev.seat]?.push(...(ev.cards as Label[])); } catch {}
-    }
-  }
-  if (typeof landlord === 'number' && landlord >= 0) {
-    try { arr[landlord]?.push(...(bottom as Label[])); } catch {}
-  }
-  return arr;
-}
-const ctx: BotCtx = {
+    const ctx: BotCtx = {
       hands: hands[turn],
       require,
       canPass: !isLeader,
@@ -1381,11 +1426,11 @@ const ctx: BotCtx = {
       landlord,
       leader,
       trick,
-      history: clone(history),
+
+history: clone(history),
       currentTrick: clone(history.filter(h => h.trick === trick)),
       seen: clone(seen),
       bottom: clone(bottom),
-      seenBySeat: __computeSeenBySeat(history, bottom, landlord),
       handsCount: handsCount(),
       role: (turn === landlord ? 'landlord' : 'farmer'),
       teammates: (turn === landlord ? [] : [ (turn=== (landlord+1)%3 ? (landlord+2)%3 : (landlord+1)%3 ) ]),
