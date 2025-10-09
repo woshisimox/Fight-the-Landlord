@@ -1120,41 +1120,7 @@ if (opts.bid !== false) {
   last = -1;
   bidMultiplier = 1;
   multiplier = 1;
-
-async function __askExternalBid(s:number, round:number, startSeat:number, hands: Label[][], rule:any, ruleId:string, bidHistory: {seat:number; action:'bid'|'pass'}[], bidMultiplier:number, multiplier:number): Promise<boolean|null> {
-  try {
-    const choice = String((bots as any)[s]?.choice || '').toLowerCase();
-    const isExternal = choice.startsWith('ai:') || choice === 'ai' || choice === 'http' || choice === 'openai' || choice === 'gpt' || choice === 'external';
-    if (!isExternal) return null;
-    const ctxForBid: any = {
-      phase: 'bid',
-      seat: s,
-      hands: hands[s],
-      role: 'farmer',
-      require: null,
-      canPass: true,
-      policy: { four2 },
-      history: [], currentTrick: [], seen: [], bottom: [],
-      handsCount: [hands[0].length, hands[1].length, hands[2].length],
-      counts: {},
-      leader: startSeat, trick: -1, landlord: -1,
-      teammates: [], opponents: [],
-      ruleId, rule,
-      bidding: { startSeat, round, lastSeat: (bidHistory.length? bidHistory[bidHistory.length-1].seat: -1), history: bidHistory, bidMultiplier, multiplier },
-    };
-    const mv = await Promise.resolve(bots[s](ctxForBid));
-    if (!mv) return null;
-    const __raw:any = (mv as any);
-            const action = (((__raw && (__raw.action ?? __raw.move)) ?? '') as string).toString().toLowerCase();
-    if (action === 'bid' || action === 'rob' || action === 'play') return true;
-    if (action === 'pass' || action === 'skip' || action === 'nobid') return false;
-    return null;
-  } catch { return null; }
-}
-let bidStartSeat = (opts as any)?.bidStartSeat;
-      if (typeof bidStartSeat !== 'number' || bidStartSeat<0 || bidStartSeat>2) { bidStartSeat = Math.floor(Math.random()*3); }
-      const __bidActs: { seat:number; action:'bid'|'pass' }[] = [];
-for (let __k=0; __k<3; __k++) { const s = (bidStartSeat + __k) % 3;
+for (let s=0;s<3;s++) {
       const sc = evalRobScore(hands[s]); 
 
       // thresholds for both built-ins && external choices (inline for scope)
@@ -1185,12 +1151,45 @@ for (let __k=0; __k<3; __k++) { const s = (bidStartSeat + __k) % 3;
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-      const __ai = await __askExternalBid(s, 1, bidStartSeat, hands, (opts as any).rule, (opts as any).ruleId, __bidActs, bidMultiplier, multiplier);
-const bid = (__ai !== null) ? __ai : (sc >= __th);
 
+// 外置优先：若座位是外置，则调用其决定；否则走阈值
+const __external = /^(ai:|ai$|http|openai|gpt|external)/.test(__choice);
+let bid:boolean;
+if (__external) {
+  let __ai:any = null;
+  try {
+    const ctxForBid:any = {
+      phase: 'bid', seat: s, role:'farmer',
+      hands: hands[s], require: null, canPass: true,
+      policy: { four2 },
+      history: [], currentTrick: [], seen: [], bottom: [],
+      handsCount: [hands[0].length, hands[1].length, hands[2].length],
+      counts: {},
+      landlord: -1, leader: s, trick: -1,
+      teammates: [], opponents: [],
+      ruleId: (opts as any).ruleId, rule: (opts as any).rule,
+      bidding: { startSeat: 0, round: 1, lastSeat: -1, history: [], bidMultiplier, multiplier },
+    };
+    const mv = await Promise.resolve(bots[s](ctxForBid));
+    const r:any = (mv||{});
+    if (typeof r.bid === 'boolean') __ai = r.bid; else
+    if (typeof r.rob === 'boolean') __ai = r.rob; else
+    if (typeof r.yes === 'boolean') __ai = r.yes; else
+    if (typeof r.double === 'boolean') __ai = r.double; else
+    if (typeof r.bid === 'number') __ai = r.bid !== 0; else
+    if (typeof r.rob === 'number') __ai = r.rob !== 0; else
+    if (typeof r.yes === 'number') __ai = r.yes !== 0; else
+    if (typeof r.double === 'number') __ai = r.double !== 0; else {
+      const act = String(r.action ?? r.move ?? r.decision ?? '').toLowerCase();
+      if (['bid','rob','play','call','qiang','yes','y','true','1','叫','抢','再抢'].includes(act)) __ai = true;
+      else if (['pass','skip','nobid','no','n','false','0','不叫','不抢'].includes(act)) __ai = false;
+    }
+  } catch {}
+  bid = !!__ai; // 外置未明确 => 视作不抢
+} else {
+  bid = (sc >= __th);
+}
 
-
-      __bidActs.push({ seat:s, action: (bid ? 'bid' : 'pass') });
 
 // 记录本轮评估（即使未达到阈值也写日志/存档）
 yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
@@ -1207,14 +1206,44 @@ yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier
       if (__bidders.length > 0) {
         let bestSeat = -1;
         let bestMargin = -Infinity;
-        for (let __j=0; __j<3; __j++) { const t = (bidStartSeat + __j) % 3;
+        for (let t = 0; t < 3; t++) {
           const hit = __bidders.find(b => b.seat === t);
           if (!hit) continue;
-          
-const __ai2 = await __askExternalBid(t, 2, bidStartSeat, hands, (opts as any).rule, (opts as any).ruleId, __bidActs, bidMultiplier, multiplier);
-if (__ai2 === false) { __bidActs.push({ seat:t, action:'pass' }); continue; }
-if (__ai2 === true) { __bidActs.push({ seat:t, action:'bid' }); }
-bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+const __choiceT = String((bots as any)[t]?.choice || (bots as any)[t]?.provider || (bots as any)[t]?.name || (bots as any)[t]?.label || '').toLowerCase();
+const __externalT = /^(ai:|ai$|http|openai|gpt|external)/.test(__choiceT);
+if (__externalT) {
+  let __ai2:any = null;
+  try {
+    const ctxForBid2:any = {
+      phase: 'bid', seat: t, role:'farmer',
+      hands: hands[t], require: null, canPass: true,
+      policy: { four2 },
+      history: [], currentTrick: [], seen: [], bottom: [],
+      handsCount: [hands[0].length, hands[1].length, hands[2].length],
+      counts: {},
+      landlord: -1, leader: t, trick: -1,
+      teammates: [], opponents: [],
+      ruleId: (opts as any).ruleId, rule: (opts as any).rule,
+      bidding: { startSeat: 0, round: 2, lastSeat: -1, history: [], bidMultiplier, multiplier },
+    };
+    const mv2 = await Promise.resolve(bots[t](ctxForBid2));
+    const r2:any = (mv2||{});
+    if (typeof r2.bid === 'boolean') __ai2 = r2.bid; else
+    if (typeof r2.rob === 'boolean') __ai2 = r2.rob; else
+    if (typeof r2.yes === 'boolean') __ai2 = r2.yes; else
+    if (typeof r2.double === 'boolean') __ai2 = r2.double; else
+    if (typeof r2.bid === 'number') __ai2 = r2.bid !== 0; else
+    if (typeof r2.rob === 'number') __ai2 = r2.rob !== 0; else
+    if (typeof r2.yes === 'number') __ai2 = r2.yes !== 0; else
+    if (typeof r2.double === 'number') __ai2 = r2.double !== 0; else {
+      const act2 = String(r2.action ?? r2.move ?? r2.decision ?? '').toLowerCase();
+      if (['bid','rob','play','call','qiang','yes','y','true','1','叫','抢','再抢'].includes(act2)) __ai2 = true;
+      else if (['pass','skip','nobid','no','n','false','0','不叫','不抢'].includes(act2)) __ai2 = false;
+    }
+  } catch {}
+  if (!__ai2) continue; // 外置明确拒绝或无效 => 不参与再抢
+}
+          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
           multiplier = bidMultiplier;
           yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
           if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
@@ -1339,12 +1368,80 @@ const Bseat = (landlord + 2) % 3;
 // 地主：基于 before/after 的 Δ 与结构兜底
 const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 理论上就是并入前
 const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
-const Lflag = lordDecision.L;
-try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
+let Lflag = lordDecision.L;
+try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason };
+  // 外置加倍优先（地主）
+  { const __choiceL = String((bots as any)[Lseat]?.choice || (bots as any)[Lseat]?.provider || (bots as any)[Lseat]?.name || (bots as any)[Lseat]?.label || '').toLowerCase();
+    if (/^(ai:|ai$|http|openai|gpt|external)/.test(__choiceL)) {
+      try {
+        const ctxForDouble:any = {
+          phase:'double', seat:Lseat, role:'landlord',
+          hands: hands[Lseat], bottom, seen: [],
+          policy: { four2 }, ruleId:(opts as any).ruleId, rule:(opts as any).rule,
+          require:null, canPass:true, landlord, leader:landlord, trick:-1,
+          history: [], currentTrick: [],
+          handsCount: [hands[0].length, hands[1].length, hands[2].length],
+          counts: {}, teammates: [], opponents: [Yseat, Bseat],
+          doubling: { policy:'independent', order:'landlord-first', already:{}, canDouble:true, multiplier, baseMultiplier:1 },
+        };
+        const mvL = await Promise.resolve(bots[Lseat](ctxForDouble));
+        const rL:any = (mvL||{});
+        let aiL: null|boolean = null;
+        if (typeof rL.double === 'boolean') aiL = rL.double; else
+        if (typeof rL.yes === 'boolean')    aiL = rL.yes; else
+        if (typeof rL.bid === 'boolean')    aiL = rL.bid; else
+        if (typeof rL.rob === 'boolean')    aiL = rL.rob; else
+        if (typeof rL.double === 'number')  aiL = rL.double !== 0; else
+        if (typeof rL.yes === 'number')     aiL = rL.yes !== 0; else
+        if (typeof rL.bid === 'number')     aiL = rL.bid !== 0; else
+        if (typeof rL.rob === 'number')     aiL = rL.rob !== 0; else {
+          const act = String(rL.action ?? rL.move ?? rL.decision ?? '').toLowerCase();
+          if (['double','play','yes','y','true','1','加倍'].includes(act)) aiL = true;
+          else if (['skip','pass','no','n','false','0','不加倍'].includes(act)) aiL = false;
+        }
+        if (aiL !== null) Lflag = aiL ? 1 : 0;
+      } catch {}
+    }
+  }
+ } catch{}
 
 // 乙（下家）：蒙特卡洛 + 反制能力
 const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
-try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yBase.F, dLhat:yBase.dLhat, counter:yBase.counter }; } catch{}
+try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yBase.F, dLhat:yBase.dLhat, counter:yBase.counter };
+  // 外置加倍优先（乙/下家）
+  { const __choiceY = String((bots as any)[Yseat]?.choice || (bots as any)[Yseat]?.provider || (bots as any)[Yseat]?.name || (bots as any)[Yseat]?.label || '').toLowerCase();
+    if (/^(ai:|ai$|http|openai|gpt|external)/.test(__choiceY)) {
+      try {
+        const ctxY:any = {
+          phase:'double', seat:Yseat, role:'farmer',
+          hands: hands[Yseat], bottom, seen: [],
+          policy: { four2 }, ruleId:(opts as any).ruleId, rule:(opts as any).rule,
+          require:null, canPass:true, landlord, leader:landlord, trick:-1,
+          history: [], currentTrick: [],
+          handsCount: [hands[0].length, hands[1].length, hands[2].length],
+          counts: {}, teammates: [Bseat], opponents: [landlord],
+          doubling: { policy:'independent', order:'landlord-first', already:{}, canDouble:true, multiplier, baseMultiplier:1 },
+        };
+        const mvY = await Promise.resolve(bots[Yseat](ctxY));
+        const rY:any = (mvY||{});
+        let aiY: null|boolean = null;
+        if (typeof rY.double === 'boolean') aiY = rY.double; else
+        if (typeof rY.yes === 'boolean')    aiY = rY.yes; else
+        if (typeof rY.bid === 'boolean')    aiY = rY.bid; else
+        if (typeof rY.rob === 'boolean')    aiY = rY.rob; else
+        if (typeof rY.double === 'number')  aiY = rY.double !== 0; else
+        if (typeof rY.yes === 'number')     aiY = rY.yes !== 0; else
+        if (typeof rY.bid === 'number')     aiY = rY.bid !== 0; else
+        if (typeof rY.rob === 'number')     aiY = rY.rob !== 0; else {
+          const act = String(rY.action ?? rY.move ?? rY.decision ?? '').toLowerCase();
+          if (['double','play','yes','y','true','1','加倍'].includes(act)) aiY = true;
+          else if (['skip','pass','no','n','false','0','不加倍'].includes(act)) aiY = false;
+        }
+        if (aiY !== null) { try { (yBase as any).F = aiY ? 1 : 0; } catch{} }
+      } catch {}
+    }
+  }
+ } catch{}
 
 // 丙（上家）：在边缘情况下做贝叶斯式调节
 let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
@@ -1356,7 +1453,41 @@ if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.c
   if (yBase.F === 1) effectiveHi += __DOUBLE_CFG.bayes.teammateRaiseHi;
   F_b = (bBase.counter >= effectiveHi) ? 1 : 0;
 }
-try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!F_b, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch{}
+try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!F_b, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } };
+  // 外置加倍优先（丙/上家）
+  { const __choiceB = String((bots as any)[Bseat]?.choice || (bots as any)[Bseat]?.provider || (bots as any)[Bseat]?.name || (bots as any)[Bseat]?.label || '').toLowerCase();
+    if (/^(ai:|ai$|http|openai|gpt|external)/.test(__choiceB)) {
+      try {
+        const ctxB:any = {
+          phase:'double', seat:Bseat, role:'farmer',
+          hands: hands[Bseat], bottom, seen: [],
+          policy: { four2 }, ruleId:(opts as any).ruleId, rule:(opts as any).rule,
+          require:null, canPass:true, landlord, leader:landlord, trick:-1,
+          history: [], currentTrick: [],
+          handsCount: [hands[0].length, hands[1].length, hands[2].length],
+          counts: {}, teammates: [Yseat], opponents: [landlord],
+          doubling: { policy:'independent', order:'landlord-first', already:{}, canDouble:true, multiplier, baseMultiplier:1 },
+        };
+        const mvB = await Promise.resolve(bots[Bseat](ctxB));
+        const rB:any = (mvB||{});
+        let aiB: null|boolean = null;
+        if (typeof rB.double === 'boolean') aiB = rB.double; else
+        if (typeof rB.yes === 'boolean')    aiB = rB.yes; else
+        if (typeof rB.bid === 'boolean')    aiB = rB.bid; else
+        if (typeof rB.rob === 'boolean')    aiB = rB.rob; else
+        if (typeof rB.double === 'number')  aiB = rB.double !== 0; else
+        if (typeof rB.yes === 'number')     aiB = rB.yes !== 0; else
+        if (typeof rB.bid === 'number')     aiB = rB.bid !== 0; else
+        if (typeof rB.rob === 'number')     aiB = rB.rob !== 0; else {
+          const act = String(rB.action ?? rB.move ?? rB.decision ?? '').toLowerCase();
+          if (['double','play','yes','y','true','1','加倍'].includes(act)) aiB = true;
+          else if (['skip','pass','no','n','false','0','不加倍'].includes(act)) aiB = false;
+        }
+        if (aiB !== null) { F_b = aiB ? 1 : 0; }
+      } catch {}
+    }
+  }
+ } catch{}
 
 // 记录对位加倍倍数（不含炸弹/春天）
 let __doubleMulY = (1 << Lflag) * (1 << yBase.F);
