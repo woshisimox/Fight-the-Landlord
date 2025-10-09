@@ -32,8 +32,7 @@ export type BotCtx = {
   hands: Label[];
   require: Combo | null;    // 当前需跟牌型（首家为 null）
   canPass: boolean;
-  policy?: { four2?: Four2Policy   seenBySeat?: Label[][];
-};
+  policy?: { four2?: Four2Policy };
 
   // --- 新增：对局上下文（记牌 / 历史 / 角色信息） ---
   seat: number;             // 当前出牌座位（0/1/2）
@@ -46,6 +45,7 @@ export type BotCtx = {
 
   seen: Label[];            // 所有“已公开可见”的牌：底牌 + 历史出牌
   bottom: Label[];          // 亮底的三张牌（开局已公布）
+  seenBySeat?: Label[][];
 
   handsCount: [number, number, number]; // 各家的手牌张数
   role: 'landlord' | 'farmer';          // 当前角色
