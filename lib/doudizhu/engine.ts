@@ -14,18 +14,16 @@ function __isExternalBot(b: any): boolean {
   return false;
 }
 
-/* === Inject: bid-eval helper (bidding debug) === */
-
 /* === helper: normalize external AI 'double' choice === */
-function __parseDoubleChoice(v:any): boolean | null {
+function __parseDoubleChoice(val:any): boolean | null {
   try {
-    if (typeof v === 'boolean') return v;
-    if (typeof v === 'number') {
-      if (!isFinite(v)) return null;
-      return v > 0;
+    if (typeof val === 'boolean') return val;
+    if (typeof val === 'number') {
+      if (!isFinite(val)) return null;
+      return val > 0;
     }
-    if (typeof v === 'string') {
-      const t = v.trim().toLowerCase();
+    if (typeof val === 'string') {
+      const t = val.trim().toLowerCase();
       const yes = ['double','yes','y','true','1','加倍','翻倍','d','dou','rob','qiang','抢','再抢','2x','x2','double2'];
       const no  = ['no','n','false','0','不加倍','不翻倍','pass','skip','none','cancel','c'];
       if (yes.includes(t)) return true;
@@ -38,21 +36,8 @@ function __parseDoubleChoice(v:any): boolean | null {
   } catch {}
   return null;
 }
-    if (typeof v === 'string') {
-      const t = v.trim().toLowerCase();
-      const yes = ['double','yes','y','true','1','加倍','翻倍','d','dou','rob','qiang','抢','再抢'];
-      const no  = ['no','n','false','0','不加倍','不翻倍','pass','skip','none','cancel','c'];
-      if (yes.includes(t)) return true;
-      if (no.includes(t)) return false;
-      // tolerate "double:yes" "double=true"
-      if (/double\s*[:=]\s*(yes|true|1|y|加倍|翻倍)/.test(t)) return true;
-      if (/double\s*[:=]\s*(no|false|0|n|不加倍|不翻倍)/.test(t)) return false;
-    }
-  } catch {}
-  return null;
-}
 
-
+/* === Inject: bid-eval helper (bidding debug) === */
 function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'bid'|'pass', roundNo?:number){
   try { gen && gen.next && gen.next({ type:'event', kind:'bid-eval', seat, score, threshold, decision, roundNo }); } catch(e){}
 }
@@ -1383,13 +1368,12 @@ function __decideFarmerDoubleBase(myHand:Label[], bottom:Label[], samples:number
 }
 
 // —— 执行顺序：地主 → 乙(下家) → 丙(上家) ——
-// 位置
 const Lseat = landlord;
 const Yseat = (landlord + 1) % 3;
 const Bseat = (landlord + 2) % 3;
 
 // 地主：基于 before/after 的 Δ 与结构兜底 + 外置AI可覆盖
-const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 并底前
+const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c));
 const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
 let Lflag = lordDecision.L;
 
@@ -1398,7 +1382,7 @@ try {
   if (__externalL) {
     try {
       const ctxL:any = {
-        phase:'double', seat:Lseat, role:'landlord',
+        phase:'double', role:'landlord', seat:Lseat,
         hands: hands[Lseat], bottom,
         ruleId: (opts as any)?.ruleId, rule: (opts as any)?.rule,
         doubling:{ landlord:null, farmerY:null, farmerB:null },
@@ -1408,13 +1392,10 @@ try {
       const rL:any = (mvL||{});
       const boLraw = rL.double ?? rL.yes ?? rL.rob ?? rL.bid ?? rL.action ?? rL.act ?? rL.move;
       const boL = __parseDoubleChoice(boLraw);
-      let multL = (rL.multiplier ?? rL.mult ?? rL.doubleMultiplier ?? rL.mul);
+      const multL = (rL.multiplier ?? rL.mult ?? rL.doubleMultiplier ?? rL.mul);
       if (boL !== null) Lflag = boL ? 1 : 0; else if (typeof multL === 'number') Lflag = (multL > 1) ? 1 : 0;
-      if (typeof boL === 'boolean') Lflag = boL ? 1 : 0;
       const msg = rL.reason ?? rL.explanation ?? rL.rationale ?? rL.why ?? rL.comment ?? rL.msg;
-      try {
-        yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!(typeof boL==='boolean'? boL : Lflag), delta: lordDecision.delta, reason: (typeof msg==='string'? msg.slice(0,800): undefined), source:'external' };
-      } catch {}
+      try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!Lflag, delta: lordDecision.delta, reason: (typeof msg==='string'? msg.slice(0,800): undefined), source:'external' }; } catch {}
     } catch {
       try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double: !!Lflag, delta: lordDecision.delta, reason: lordDecision.reason, source:'internal' }; } catch {}
     }
@@ -1430,7 +1411,7 @@ try {
   if (__externalY) {
     try {
       const ctxY:any = {
-        phase:'double', seat:Yseat, role:'farmer',
+        phase:'double', role:'farmer', seat:Yseat,
         hands: hands[Yseat], bottom,
         ruleId: (opts as any)?.ruleId, rule: (opts as any)?.rule,
         doubling:{ landlord:Lflag, farmerY:null, farmerB:null },
@@ -1440,9 +1421,8 @@ try {
       const rY:any = (mvY||{});
       const boYraw = rY.double ?? rY.yes ?? rY.rob ?? rY.bid ?? rY.action ?? rY.act ?? rY.move;
       const boY = __parseDoubleChoice(boYraw);
-      let multY = (rY.multiplier ?? rY.mult ?? rY.doubleMultiplier ?? rY.mul);
+      const multY = (rY.multiplier ?? rY.mult ?? rY.doubleMultiplier ?? rY.mul);
       if (boY !== null) { try { (yBase as any).F = boY ? 1 : 0; } catch {} } else if (typeof multY === 'number') { try { (yBase as any).F = (multY > 1) ? 1 : 0; } catch {} }
-      if (typeof boY === 'boolean') { try { (yBase as any).F = boY ? 1 : 0; } catch {} }
       const msg = rY.reason ?? rY.explanation ?? rY.rationale ?? rY.why ?? rY.comment ?? rY.msg;
       try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double: !!(yBase.F), dLhat: yBase.dLhat, counter: yBase.counter, reason: (typeof msg==='string'? msg.slice(0,800): undefined), source:'external' }; } catch {}
     } catch {
@@ -1453,23 +1433,21 @@ try {
   }
 } catch {}
 
-// 丙（上家）：在边缘情况下做贝叶斯式调节 + 外置AI最终裁决（可选）
+// 丙（上家）：边缘贝叶斯调节 + 外置AI最终裁决
 let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
 let F_b = bBase.F;
 if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.counterHi) <= 0.6)) {
-  // 若地主或乙已加倍，提高门槛（更保守）
   let effectiveHi = __DOUBLE_CFG.counterHi;
   if (Lflag === 1) effectiveHi += __DOUBLE_CFG.bayes.landlordRaiseHi;
   if (yBase.F === 1) effectiveHi += __DOUBLE_CFG.bayes.teammateRaiseHi;
   F_b = (bBase.counter >= effectiveHi) ? 1 : 0;
 }
-
 try {
   const __externalB = __isExternalBot((bots as any)[Bseat]);
   if (__externalB) {
     try {
       const ctxB:any = {
-        phase:'double', seat:Bseat, role:'farmer',
+        phase:'double', role:'farmer', seat:Bseat,
         hands: hands[Bseat], bottom,
         ruleId: (opts as any)?.ruleId, rule: (opts as any)?.rule,
         doubling:{ landlord:Lflag, farmerY:yBase.F, farmerB:null },
@@ -1479,9 +1457,8 @@ try {
       const rB:any = (mvB||{});
       const boBraw = rB.double ?? rB.yes ?? rB.rob ?? rB.bid ?? rB.action ?? rB.act ?? rB.move;
       const boB = __parseDoubleChoice(boBraw);
-      let multB = (rB.multiplier ?? rB.mult ?? rB.doubleMultiplier ?? rB.mul);
+      const multB = (rB.multiplier ?? rB.mult ?? rB.doubleMultiplier ?? rB.mul);
       if (boB !== null) F_b = boB ? 1 : 0; else if (typeof multB === 'number') F_b = (multB > 1) ? 1 : 0;
-      if (typeof boB === 'boolean') F_b = boB ? 1 : 0;
       const msg = rB.reason ?? rB.explanation ?? rB.rationale ?? rB.why ?? rB.comment ?? rB.msg;
       try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double: !!F_b, dLhat: bBase.dLhat, counter: bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F }, reason: (typeof msg==='string'? msg.slice(0,800): undefined), source:'external' }; } catch {}
     } catch {
