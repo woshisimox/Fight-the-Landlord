@@ -1144,7 +1144,8 @@ async function __askExternalBid(s:number, round:number, startSeat:number, hands:
     };
     const mv = await Promise.resolve(bots[s](ctxForBid));
     if (!mv) return null;
-    const action = (mv.action || mv.move || '').toString().toLowerCase();
+    const __raw:any = (mv as any);
+            const action = (((__raw && (__raw.action ?? __raw.move)) ?? '') as string).toString().toLowerCase();
     if (action === 'bid' || action === 'rob' || action === 'play') return true;
     if (action === 'pass' || action === 'skip' || action === 'nobid') return false;
     return null;
