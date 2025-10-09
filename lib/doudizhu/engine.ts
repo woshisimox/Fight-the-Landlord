@@ -1149,7 +1149,8 @@ for (let s=0;s<3;s++) {
         'claude':                2.2,
       };
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-      const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
+            const __choice = String((bots as any)[s]?.choice || (bots as any)[s]?.provider || (bots as any)[s]?.name || (bots as any)[s]?.label || '').toLowerCase();
+const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
       const bid = (sc >= __th);
 
 
