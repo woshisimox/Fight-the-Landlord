@@ -1483,37 +1483,16 @@ for (const raw of batch) {
               }
 else if (m.type === 'event' && m.kind === 'bid-eval') {
   const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
-  const dec = m.decision || 'pass';
-  if (m.source === 'external-ai') {
-    const reason = (typeof m.reason === 'string' && m.reason.trim()) ? m.reason : '';
-    const line = reason ? `${who} 评估｜外置AI｜决策=${dec}｜理由：${reason}`
-                        : `${who} 评估｜外置AI｜决策=${dec}`;
-    nextLog.push(line);
-  } else {
-    const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
-    const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
-    const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
-    nextLog.push(line);
-  }
-  continue;
-}
-else if (m.type === 'event' && m.kind === 'rob2') {
-  // 外置AI：只展示AI理由；否则展示 margin（若有）
-  if (m.source === 'external-ai' && typeof (m as any).reason === 'string' && (m as any).reason.trim()) {
-    nextLog = [...nextLog, `AI理由｜${seatName(m.seat)}：${(m as any).reason}`];
-  } else {
-    const marginTxt = String(m.score ?? '');
-    nextLog = [...nextLog, `${seatName(m.seat)} 二轮再抢｜margin=${marginTxt}`];
-  }
-  continue;
-}
-
-
   const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
   const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
   const dec = m.decision || 'pass';
+  if (m.source === 'external-ai') {
+  const line = `${who} 评估｜外置AI｜决策=${dec}${m.reason?('｜理由='+m.reason):''}`;
+  nextLog.push(line);
+} else {
   const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
   nextLog.push(line);
+}
 }
 
 
@@ -1544,11 +1523,17 @@ if (m.type === 'event' && m.kind === 'multiplier-sync') {
 if (m.type === 'event' && m.kind === 'double-decision') {
   const who = seatName(m.seat);
   const decided = m.double ? '加倍' : '不加倍';
-  const parts: string[] = [ `[加倍阶段] ${who}${m.role==='landlord'?'(地主)':''} ${decided}` ];
+  let parts: string[];
+if (m.source === 'external-ai') {
+  parts = [ `[加倍阶段] ${who}${m.role==='landlord'?'(地主)':''} ${decided}` ];
+  if (typeof m.reason === 'string' && m.reason) parts.push(`理由=${m.reason}`);
+} else {
+  parts = [ `[加倍阶段] ${who}${m.role==='landlord'?'(地主)':''} ${decided}` ];
   if (typeof m.delta === 'number' && isFinite(m.delta)) parts.push(`Δ=${m.delta.toFixed(2)}`);
   if (typeof m.dLhat === 'number' && isFinite(m.dLhat)) parts.push(`Δ̂=${m.dLhat.toFixed(2)}`);
   if (typeof m.counter === 'number' && isFinite(m.counter)) parts.push(`counter=${m.counter.toFixed(2)}`);
   if (typeof m.reason === 'string') parts.push(`理由=${m.reason}`);
+}
   if (m.bayes && (typeof m.bayes.landlord!=='undefined' || typeof m.bayes.farmerY!=='undefined')) {
     const l = Number(m.bayes.landlord||0), y = Number(m.bayes.farmerY||0);
     parts.push(`bayes:{L=${l},Y=${y}}`);
