@@ -474,40 +474,7 @@ function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy)
 
 // ========== 内置 Bot ==========
 export const RandomLegal: BotFunc = (ctx) => {
-  
-async function __askExternalDouble(s:number, hands: Label[][], bottom: Label[], landlord:number, rule:any, ruleId:string, already: Record<string, boolean>, multiplier:number, seen: Label[], seenBySeat: Label[][]): Promise<boolean|null> {
-  try {
-    const choice = String((bots as any)[s]?.choice || '').toLowerCase();
-    const isExternal = choice.startsWith('ai:') || choice === 'ai' || choice === 'http' || choice === 'openai' || choice === 'gpt' || choice === 'external';
-    if (!isExternal) return null;
-    const ctxForDouble: any = {
-      phase: 'double',
-      seat: s,
-      role: (s === landlord ? 'landlord' : 'farmer'),
-      hands: hands[s],
-      bottom,
-      seen,
-      seenBySeat,
-      policy: { four2 },
-      ruleId, rule,
-      require: null, canPass: true,
-      landlord, leader: landlord, trick: -1,
-      history: [], currentTrick: [],
-      handsCount: [hands[0].length, hands[1].length, hands[2].length],
-      counts: {},
-      teammates: (s === landlord ? [] : [ ((s=== (landlord+1)%3) ? (landlord+2)%3 : (landlord+1)%3 ) ]),
-      opponents: (s === landlord ? [ (landlord+1)%3, (landlord+2)%3 ] : [ landlord ]),
-      doubling: { policy: 'independent', order: 'landlord-first', already, canDouble: !already[String(s)], multiplier, baseMultiplier: 1 }
-    };
-    const mv = await Promise.resolve(bots[s](ctxForDouble));
-    if (!mv) return null;
-    const action = (mv.action || mv.move || '').toString().toLowerCase();
-    if (action === 'double' || action === 'play') return true;
-    if (action === 'skip' || action === 'pass') return false;
-    return null;
-  } catch { return null; }
-}
-const four2 = ctx?.policy?.four2 || 'both';
+  const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
 
   const isType = (t:any,...n:string[])=>n.includes(String(t));
@@ -1153,7 +1120,40 @@ if (opts.bid !== false) {
   last = -1;
   bidMultiplier = 1;
   multiplier = 1;
-for (let s=0;s<3;s++) {
+
+async function __askExternalBid(s:number, round:number, startSeat:number, hands: Label[][], rule:any, ruleId:string, bidHistory: {seat:number; action:'bid'|'pass'}[], bidMultiplier:number, multiplier:number): Promise<boolean|null> {
+  try {
+    const choice = String((bots as any)[s]?.choice || '').toLowerCase();
+    const isExternal = choice.startsWith('ai:') || choice === 'ai' || choice === 'http' || choice === 'openai' || choice === 'gpt' || choice === 'external';
+    if (!isExternal) return null;
+    const ctxForBid: any = {
+      phase: 'bid',
+      seat: s,
+      hands: hands[s],
+      role: 'farmer',
+      require: null,
+      canPass: true,
+      policy: { four2 },
+      history: [], currentTrick: [], seen: [], bottom: [],
+      handsCount: [hands[0].length, hands[1].length, hands[2].length],
+      counts: {},
+      leader: startSeat, trick: -1, landlord: -1,
+      teammates: [], opponents: [],
+      ruleId, rule,
+      bidding: { startSeat, round, lastSeat: (bidHistory.length? bidHistory[bidHistory.length-1].seat: -1), history: bidHistory, bidMultiplier, multiplier },
+    };
+    const mv = await Promise.resolve(bots[s](ctxForBid));
+    if (!mv) return null;
+    const action = (mv.action || mv.move || '').toString().toLowerCase();
+    if (action === 'bid' || action === 'rob' || action === 'play') return true;
+    if (action === 'pass' || action === 'skip' || action === 'nobid') return false;
+    return null;
+  } catch { return null; }
+}
+let bidStartSeat = (opts as any)?.bidStartSeat;
+      if (typeof bidStartSeat !== 'number' || bidStartSeat<0 || bidStartSeat>2) { bidStartSeat = Math.floor(Math.random()*3); }
+      const __bidActs: { seat:number; action:'bid'|'pass' }[] = [];
+for (let __k=0; __k<3; __k++) { const s = (bidStartSeat + __k) % 3;
       const sc = evalRobScore(hands[s]); 
 
       // thresholds for both built-ins && external choices (inline for scope)
@@ -1184,7 +1184,10 @@ for (let s=0;s<3;s++) {
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-      const bid = (sc >= __th);
+      const __ai = await __askExternalBid(s, 1, bidStartSeat, hands, (opts as any).rule, (opts as any).ruleId, __bidActs, bidMultiplier, multiplier);
+      __bidActs.push({ seat:s, action: (bid ? 'bid' : 'pass') });
+
+      const bid = (__ai !== null) ? __ai : (sc >= __th);
 
 
 // 记录本轮评估（即使未达到阈值也写日志/存档）
@@ -1202,10 +1205,14 @@ yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier
       if (__bidders.length > 0) {
         let bestSeat = -1;
         let bestMargin = -Infinity;
-        for (let t = 0; t < 3; t++) {
+        for (let __j=0; __j<3; __j++) { const t = (bidStartSeat + __j) % 3;
           const hit = __bidders.find(b => b.seat === t);
           if (!hit) continue;
-          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+          
+const __ai2 = await __askExternalBid(t, 2, bidStartSeat, hands, (opts as any).rule, (opts as any).ruleId, __bidActs, bidMultiplier, multiplier);
+if (__ai2 === false) { __bidActs.push({ seat:t, action:'pass' }); continue; }
+if (__ai2 === true) { __bidActs.push({ seat:t, action:'bid' }); }
+bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
           multiplier = bidMultiplier;
           yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
           if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
@@ -1326,32 +1333,17 @@ function __decideFarmerDoubleBase(myHand:Label[], bottom:Label[], samples:number
 const Lseat = landlord;
 const Yseat = (landlord + 1) % 3;
 const Bseat = (landlord + 2) % 3;
-const __sbs = __computeSeenBySeat(history, bottom, landlord);
-const __already: Record<string, boolean> = { '0': false, '1': false, '2': false };
-
 
 // 地主：基于 before/after 的 Δ 与结构兜底
 const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 理论上就是并入前
 const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
-let Lflag = lordDecision.L;
+const Lflag = lordDecision.L;
 try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
 
-
-try {
-  const __aiL = await __askExternalDouble(Lseat, hands, bottom, landlord, (opts as any).rule, (opts as any).ruleId, __already, multiplier, seen, __sbs);
-  if (__aiL !== null) { Lflag = __aiL ? 1 : 0; }
-} catch {}
-__already[String(Lseat)] = (Lflag === 1);
 // 乙（下家）：蒙特卡洛 + 反制能力
 const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
 try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yBase.F, dLhat:yBase.dLhat, counter:yBase.counter }; } catch{}
 
-
-try {
-  const __aiY = await __askExternalDouble(Yseat, hands, bottom, landlord, (opts as any).rule, (opts as any).ruleId, __already, multiplier, seen, __sbs);
-  if (__aiY !== null) { try { (yBase as any).F = __aiY ? 1 : 0; } catch{} }
-} catch {}
-__already[String(Yseat)] = ((yBase as any).F === 1);
 // 丙（上家）：在边缘情况下做贝叶斯式调节
 let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
 let F_b = bBase.F;
@@ -1364,12 +1356,6 @@ if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.c
 }
 try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!F_b, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch{}
 
-
-try {
-  const __aiB = await __askExternalDouble(Bseat, hands, bottom, landlord, (opts as any).rule, (opts as any).ruleId, __already, multiplier, seen, __sbs);
-  if (__aiB !== null) { F_b = __aiB ? 1 : 0; }
-} catch {}
-__already[String(Bseat)] = (F_b === 1);
 // 记录对位加倍倍数（不含炸弹/春天）
 let __doubleMulY = (1 << Lflag) * (1 << yBase.F);
 let __doubleMulB = (1 << Lflag) * (1 << F_b);
