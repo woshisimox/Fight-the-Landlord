@@ -1,5 +1,14 @@
 // lib/doudizhu/engine.ts
 
+/* === Bid-only reason sanitizer === */
+function __sanitizeBidReason(raw: any): string {
+  const s = (typeof raw === 'string' ? raw : '').trim();
+  if (!s) return '';
+  const PLAY_PAT = /(出牌|跟牌|压住|首家出牌|顺子|连对|三带|炸弹|王炸|lead|follow|type\s*=|cards?\s*:)/i;
+  if (PLAY_PAT.test(s)) return '';
+  return s.replace(/\s+/g, ' ').slice(0, 200);
+}
+
 /* === Inject: bid-eval helper (bidding debug) === */
 function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'bid'|'pass', roundNo?:number){
   try { gen && gen.next && gen.next({ type:'event', kind:'bid-eval', seat, score, threshold, decision, roundNo }); } catch(e){}
@@ -1146,7 +1155,10 @@ if (__external) {
       teammates: [], opponents: [],
       ruleId: (opts as any).ruleId, rule: (opts as any).rule,
       bidding: { round: 1 }
-    };const mv = await Promise.resolve((bots as any)[s](ctxForBid));
+    
+  expect: 'bid-only',
+  instruction: '【任务=抢地主判断】只回答是否抢/叫(rob|call|pass)及简短理由；不要讨论任何出牌策略、顺子/对子/炸弹等。',
+};const mv = await Promise.resolve((bots as any)[s](ctxForBid));
 const r:any = (mv||{});
 const rraw = r.reason ?? r.explanation ?? r.rationale ?? r.why ?? r.comment ?? r.msg;
 if (typeof rraw === 'string' && rraw.trim()) {

@@ -1,4 +1,13 @@
 // pages/api/stream_ndjson.ts
+
+/* === Bid-only reason sanitizer (display) === */
+function __sanitizeBidReason(raw: any): string {
+  const s = (typeof raw === 'string' ? raw : '').trim();
+  if (!s) return '';
+  const PLAY_PAT = /(出牌|跟牌|压住|首家出牌|顺子|连对|三带|炸弹|王炸|lead|follow|type\s*=|cards?\s*:)/i;
+  if (PLAY_PAT.test(s)) return '';
+  return s.replace(/\s+/g, ' ').slice(0, 200);
+}
 import type { NextApiRequest, NextApiResponse } from 'next';
 // === helper: mark external on bot function (ai/http or explicit) ===
 // === helper: mark external on bot function (ai/http or explicit) ===
