@@ -1,21 +1,5 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-// === helper: mark external on bot function (ai/http or explicit) ===
-// === helper: mark external on bot function (ai/http or explicit) ===
-function __markExternalOnBot(fn: any, spec: any) {
-  try {
-    const choice = String(spec?.choice || spec?.provider || '').toLowerCase();
-    const isExt = spec?.external === true || choice.startsWith('ai:') || choice === 'http';
-    (fn as any).external = isExt;
-    (fn as any).meta = (fn as any).meta || {};
-    if (isExt) (fn as any).meta.source = 'external-ai';
-    if (spec?.provider) (fn as any).meta.provider = spec.provider;
-    if (spec?.model) (fn as any).meta.model = spec.model;
-  } catch {}
-  return fn;
-}
-const __postWrapMarkExternal = (bots:any[], specs:any[]) => { try { bots.forEach((b,i)=> __markExternalOnBot(b, specs?.[i])); } catch {} };
-
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
@@ -25,10 +9,6 @@ import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
-
-// ---- stable hash for ruleId ----
-function stableHash(s: string): string { let h=5381; for (let i=0;i<s.length;i++){ h=((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); }
-
 
 
 /* ========== 已出牌缓存（仅当前请求作用域） ========== */
@@ -325,12 +305,12 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
 async function runOneRoundWithGuard(
-  { seats, four2, rule, ruleId, lastReason, lastScore }:
-  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; rule: any; ruleId: string; lastReason: (string|null)[]; lastScore: (number|null)[] },
+  { seats, four2, lastReason, lastScore }:
+  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; lastReason: (string|null)[]; lastScore: (number|null)[] },
   res: NextApiResponse,
   round: number
 ){
-  const iter = runOneGame({ seats, four2, rule, ruleId } as any);
+  const iter = runOneGame({ seats, four2 } as any);
   let sentInit = false;
 
   // 画像统计
@@ -530,10 +510,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
     const four2  = (body.four2 || 'both') as 'both'|'2singles'|'2pairs';
 
-
-    const rule = (body as any).rule ?? { four2, rob: body.rob !== false, farmerCoop: !!body.farmerCoop };
-    const ruleId = (body as any).ruleId ?? stableHash(JSON.stringify(rule));
-
     const turnTimeoutMsArr = parseTurnTimeoutMsArr(req);
     const seatSpecs = (body.seats || []).slice(0,3) as SeatSpec[];
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
@@ -555,15 +531,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
       const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScore[seat] = (typeof sc==='number'? sc: null); };
       const wrapped = baseBots.map((bot, i) =>
-        
         traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot as any, res, onReason, onScore,
                   turnTimeoutMsArr[i] ?? turnTimeoutMsArr[0],
                   Math.max(0, Math.floor(delays[i] ?? 0)),
                   i)
       );
 
-            __postWrapMarkExternal(wrapped, (seatSpecs||body?.seats||req?.body?.seats||[]));
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });

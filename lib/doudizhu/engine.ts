@@ -1129,6 +1129,8 @@ if (opts.bid !== false) {
     let last = -1;
     
       for (let __attempt=0; __attempt<5; __attempt++) {
+  const bidStartSeat = 0;
+  let __bidActs: { seat:number; action:string }[] = [];
   const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
   // 每次重试重置叫抢状态
   last = -1;
