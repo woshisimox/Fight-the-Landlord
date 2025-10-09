@@ -1148,14 +1148,19 @@ for (let s=0;s<3;s++) {
         'gpt':                   2.2,
         'claude':                2.2,
       };
-      const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
+      const __choice = String((bots as any)[s]?.choice || (bots as any)[s]?.provider || (bots as any)[s]?.name || (bots as any)[s]?.label || '').toLowerCase();
+      const __external = /^(ai:|ai$|http|openai|gpt|external)/.test(__choice);
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
       const bid = (sc >= __th);
 
 
-// 记录本轮评估（即使未达到阈值也写日志/存档）
-yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+// 记录本轮评估（外置AI则只展示AI，不展示阈值）
+if (__external) {
+  yield { type:'event', kind:'bid-eval', seat: s, source:'external-ai', decision: (bid ? 'bid' : 'pass'), reason: (__aiBidReason[s] ?? null), bidMult: bidMultiplier, mult: multiplier };
+} else {
+  yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+}
 if (bid) {
         __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
@@ -1177,7 +1182,9 @@ yield { type:'event', kind:'bid', seat:s, bid,
         for (let t = 0; t < 3; t++) {
           const hit = __bidders.find(b => b.seat === t);
           if (!hit) continue;
-          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+                const __choiceT = String((bots as any)[t]?.choice || (bots as any)[t]?.provider || (bots as any)[t]?.name || (bots as any)[t]?.label || '').toLowerCase();
+      const __externalT = /^(ai:|ai$|http|openai|gpt|external)/.test(__choiceT);
+bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
           multiplier = bidMultiplier;
           yield { type:'event', kind:'rob2', seat: t,
   score: (__externalT ? undefined : (hit && typeof hit.margin==='number' ? Number(hit.margin).toFixed(4) : undefined)),
