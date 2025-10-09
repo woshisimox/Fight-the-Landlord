@@ -1252,6 +1252,7 @@ yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: b
 
 // === 加倍阶段（地主→乙→丙） ===
 // 配置参数（可抽到外部 config）
+__PHASE = 'play';
 const __DOUBLE_CFG = {
   landlordThreshold: 1.0,
   counterLo: 2.5,
@@ -1413,7 +1414,7 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
       landlord,
       leader,
       trick,
-    __PHASE = 'play';
+
 history: clone(history),
       currentTrick: clone(history.filter(h => h.trick === trick)),
       seen: clone(seen),
