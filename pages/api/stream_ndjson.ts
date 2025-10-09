@@ -1,3 +1,12 @@
+
+function formatBidReasonForDisplay(phase:string, reason:string, fallback?:string): string {
+  if (phase === 'bid') {
+    const clean = __sanitizeBidReason(reason);
+    if (clean) return clean;
+    return (fallback && fallback.trim()) ? fallback.trim() : '';
+  }
+  return reason || '';
+}
 // pages/api/stream_ndjson.ts
 
 /* === Bid-only reason sanitizer (display) === */
@@ -323,7 +332,7 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
       (result && typeof result.reason === 'string')
         ? `[${label}] ${result.reason}${scoreTag}`
         : `[${label}] ${(result?.move==='play' ? stringifyMove(result) : 'pass')}${scoreTag}`
-    try { const cstr = Array.isArray(result?.cards)?result.cards.join(''):''; console.debug('[DECISION]', `seat=${seatIndex}`, `move=${result?.move}`, `cards=${cstr}`, (typeof unified==='number'?`score=${unified.toFixed(2)}`:'') , `reason=${reason}`); } catch {}
+    try { const cstr = Array.isArray(result?.cards)?result.cards.join(''):''; console.debug('[DECISION]', `seat=${seatIndex}`, `move=${result?.move}`, `cards=${cstr}`, (typeof unified==='number'?`score=${unified.toFixed(2)}`:'') , `reason=${ formatBidReasonForDisplay(phase, reason, fallbackReason) }`); } catch {}
     onReason(seatIndex, reason);
     try { onScore(seatIndex, unified as any); } catch {}
     try { writeLine(res, { type:'event', kind:'bot-done', seat: seatIndex, by: label, model: spec?.model||'', tookMs: Date.now()-t0, reason, score: unified }); } catch {}

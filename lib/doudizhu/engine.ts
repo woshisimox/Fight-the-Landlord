@@ -1149,13 +1149,11 @@ if (__external) {
       phase:'bid', seat:s, role:'farmer',
       hands: hands[s], require: null, canPass: true,
       policy: { four2 },
-      history: [], currentTrick: [], seen: [], bottom: [],
       handsCount: [hands[0].length, hands[1].length, hands[2].length],
       counts: {}, landlord: -1, leader: s, trick: 0,
       teammates: [], opponents: [],
       ruleId: (opts as any).ruleId, rule: (opts as any).rule,
-      bidding: { round: 1 }
-    ,
+      \1,\2    ,
   expect: 'bid-only',
   instruction: '【任务=抢地主判断】只回答是否抢/叫(rob|call|pass)及简短理由；不要讨论任何出牌策略、顺子/对子/炸弹等。',
 };const mv = await Promise.resolve((bots as any)[s](ctxForBid));
@@ -1175,6 +1173,17 @@ if (typeof rraw === 'string' && rraw.trim()) {
     if (typeof r.rob === 'number') __aiBid = r.rob !== 0; else
     if (typeof r.yes === 'number') __aiBid = r.yes !== 0; else
     if (typeof r.double === 'number') __aiBid = r.double !== 0; else {
+
+// —— 兜底：若理由为空，则回退到启发式“score vs threshold”的解释 ——
+try {
+  const sc = (typeof (score) === 'number' && isFinite(score)) ? score.toFixed(2) : '?';
+  const th = (typeof (threshold) === 'number' && isFinite(threshold)) ? threshold.toFixed(2) : '?';
+  if (!__aiBidReason) {
+    const dec = (__aiBid === true) ? '抢/叫' : (__aiBid === false) ? '不抢/不叫' : '未知';
+    __aiBidReason = `启发式：score=${sc} vs thr=${th} → ${dec}`;
+  }
+} catch {}
+
       const act = String(r.action ?? r.move ?? r.decision ?? '').toLowerCase();
       if (['bid','rob','call','qiang','play','yes','y','true','1','叫','抢'].includes(act)) __aiBid = true;
       else if (['pass','skip','nobid','no','n','false','0','不叫','不抢'].includes(act)) __aiBid = false;
