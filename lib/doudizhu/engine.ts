@@ -1098,8 +1098,7 @@ export async function* runOneGame(opts: {
   four2?: Four2Policy;
 }): AsyncGenerator<any, void, unknown> {
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-, ms));
-  const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
+const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
   const four2 = opts.four2 || 'both';
 
   // 发牌
