@@ -1,4 +1,17 @@
 // lib/doudizhu/engine.ts
+// === helper: judge external bot (explicit flag > heuristics) ===
+function __isExternalBot(b: any): boolean {
+  try {
+    if (!b) return false;
+    if (b.external === true || b.isExternal === true) return true;
+    if (b.meta && (b.meta.source === 'external-ai' || b.meta.kind === 'external')) return true;
+    const tag = String(b.choice || b.provider || b.name || b.label || '').toLowerCase();
+    if (/^(ai:|ai$|http)/.test(tag)) return true;
+    if (/(openai|gpt|qwen|glm|deepseek|claude|anthropic|cohere|mistral|vertex|dashscope|external)/.test(tag)) return true;
+  } catch {}
+  return false;
+}
+
 
 /* === Inject: bid-eval helper (bidding debug) === */
 function __emitRobEval(gen:any, seat:number, score:number, threshold:number, decision:'call'|'bid'|'pass', roundNo?:number){
@@ -1121,6 +1134,7 @@ if (opts.bid !== false) {
   bidMultiplier = 1;
   multiplier = 1;
 for (let s=0;s<3;s++) {
+      const __external = __isExternalBot((bots as any)[s]);
       const sc = evalRobScore(hands[s]); 
 
       // thresholds for both built-ins && external choices (inline for scope)
@@ -1170,6 +1184,7 @@ yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier
         let bestSeat = -1;
         let bestMargin = -Infinity;
         for (let t = 0; t < 3; t++) {
+          const __externalT = __isExternalBot((bots as any)[t]);
           const hit = __bidders.find(b => b.seat === t);
           if (!hit) continue;
           bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
@@ -1291,8 +1306,11 @@ function __decideFarmerDoubleBase(myHand:Label[], bottom:Label[], samples:number
 
 // —— 执行顺序：地主 → 乙(下家) → 丙(上家) ——
 const Lseat = landlord;
+    const __externalL = __isExternalBot((bots as any)[Lseat]);
 const Yseat = (landlord + 1) % 3;
+    const __externalY = __isExternalBot((bots as any)[Yseat]);
 const Bseat = (landlord + 2) % 3;
+    const __externalB = __isExternalBot((bots as any)[Bseat]);
 
 // 地主：基于 before/after 的 Δ 与结构兜底
 const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 理论上就是并入前

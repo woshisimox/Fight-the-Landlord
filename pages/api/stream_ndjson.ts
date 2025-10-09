@@ -1,5 +1,19 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
+// === helper: mark external on bot function (ai/http or explicit) ===
+function __markExternalOnBot(fn: any, spec: any) {
+  try {
+    const choice = String(spec?.choice || spec?.provider || '').toLowerCase();
+    const isExt = spec?.external === true || choice.startsWith('ai:') || choice === 'http';
+    (fn as any).external = isExt;
+    (fn as any).meta = (fn as any).meta || {};
+    if (isExt) (fn as any).meta.source = 'external-ai';
+    if (spec?.provider) (fn as any).meta.provider = spec.provider;
+    if (spec?.model) (fn as any).meta.model = spec.model;
+  } catch {}
+  return fn;
+}
+
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
@@ -539,13 +553,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const onReason = (seat:number, text?:string)=>{ if (seat>=0 && seat<3) lastReason[seat] = text || null; };
       const onScore  = (seat:number, sc?:number)=>{ if (seat>=0 && seat<3) lastScore[seat] = (typeof sc==='number'? sc: null); };
       const wrapped = baseBots.map((bot, i) =>
+const __postWrapMarkExternal = (bots:any[], specs:any[]) => { try { bots.forEach((b,i)=> __markExternalOnBot(b, specs?.[i])); } catch {} };
         traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot as any, res, onReason, onScore,
                   turnTimeoutMsArr[i] ?? turnTimeoutMsArr[0],
                   Math.max(0, Math.floor(delays[i] ?? 0)),
                   i)
       );
 
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
+      await runOneRoundWithGuard((__postWrapMarkExternal(wrapped, (seatSpecs||body?.seats||req?.body?.seats||[])), {  seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore  }), res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
