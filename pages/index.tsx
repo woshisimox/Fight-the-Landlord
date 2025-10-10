@@ -1589,11 +1589,16 @@ nextTotals     = [
   return (
     <div>
       <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:18 }}>
+<div style={{ display:'flex', gap:8 }}>
   <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
   <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
-  <span style={{ marginLeft:12, display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
+</div>
+<div style={{ display:'flex', justifyContent:'flex-start', marginBottom:8 }}>
+  <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
     剩余局数：{remainingGames}
   </span>
+</div>
+
 </div>
 {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
