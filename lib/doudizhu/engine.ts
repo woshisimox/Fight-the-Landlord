@@ -85,7 +85,6 @@ function __scoreToAction(sc:number, choiceName:string): { action: LandlordAction
   return { action, threshold: th };
 }
 
-};
 const ext = await __callExternalBid(bots as any, s, extReq, 1200);
 if (ext && (ext.action==='call'||ext.action==='rob'||ext.action==='pass')) {
   decision = ext.action;
