@@ -85,17 +85,13 @@ function __scoreToAction(sc:number, choiceName:string): { action: LandlordAction
   return { action, threshold: th };
 }
 
-const ext = await __callExternalBid(bots as any, s, extReq, 1200);
-if (ext && (ext.action==='call'||ext.action==='rob'||ext.action==='pass')) {
-  decision = ext.action;
-  confidence = (typeof ext.confidence==='number') ? ext.confidence : undefined;
-  pwin = (typeof ext?.telemetry?.p_win_estimate==='number') ? ext.telemetry.p_win_estimate : undefined;
-} else {
+let decision: LandlordAction = 'pass'; let threshold: number|undefined; let confidence: number|undefined; let pwin: number|undefined;
+{
   const fb = __scoreToAction(sc, __choice || __name || 'external');
   decision = fb.action;
   threshold = fb.threshold;
+  // confidence/pwin left undefined in fallback
 }
-
 const bid = (decision === 'call' || decision === 'rob');
 
 // —— 记录评估（含行动/可选置信/可选胜率） —— //
