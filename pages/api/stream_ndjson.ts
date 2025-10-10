@@ -11,6 +11,14 @@ import { QwenBot } from '../../lib/bots/qwen_bot';
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
 
+function writeLine(res: NextApiResponse, obj: any) {
+  res.write(JSON.stringify(obj) + "\n");
+}
+// ---- stable hash for ruleId ----
+function stableHash(s: string): string { let h=5381; for (let i=0;i<s.length;i++){ h=((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); }
+
+
+
 /* ========== 已出牌缓存（仅当前请求作用域） ========== */
 declare global {
   var __DDZ_SEEN: string[] | undefined;
@@ -305,12 +313,12 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
 async function runOneRoundWithGuard(
-  { seats, four2, lastReason, lastScore }:
-  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; lastReason: (string|null)[]; lastScore: (number|null)[] },
+  { seats, four2, rule, ruleId, lastReason, lastScore }:
+  { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; rule: any; ruleId: string; lastReason: (string|null)[]; lastScore: (number|null)[] },
   res: NextApiResponse,
   round: number
 ){
-  const iter = runOneGame({ seats, four2 } as any);
+  const iter = runOneGame({ seats, four2, rule, ruleId } as any);
   let sentInit = false;
 
   // 画像统计
@@ -349,10 +357,45 @@ for await (const ev of (iter as any)) {
     if (!sentInit && ev?.type==='init') {
       sentInit = true;
       landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
-      writeLine(res, { type:'init', landlordIdx, bottom: ev.bottom, hands: ev.hands });
+      // 修复：添加 landlord 字段确保前端能正确识别地主
+      writeLine(res, { 
+        type:'init', 
+        landlordIdx, 
+        landlord: landlordIdx,  // 添加 landlord 字段
+        bottom: ev.bottom, 
+        hands: ev.hands 
+      });
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
-      continue;
+      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
+try {
+  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
+  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
+  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
+  let extraMult = 1;
+  const decideExtraDouble = (seat:number)=>{
+    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
+    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
+    const cnt = __count(all);
+    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
+    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
+    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
+    if (role==='landlord') return hasBomb;
+    return (hasRocket || hasBomb);
+  };
+  for (let k=0;k<3;k++){
+    const s=(landlordIdx + k) % 3;
+    const will = decideExtraDouble(s);
+    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
+    if (will) extraMult *= 2;
+  }
+  if (extraMult > 1) {
+    // 同步一次倍数（可被前端用于兜底校准）
+    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
+  }
+} catch {}
+continue;
     }
 
     // 兼容两种出牌事件：turn 或 event:play
@@ -361,8 +404,47 @@ for await (const ev of (iter as any)) {
       countPlay(seat, move, cards);
       const moveStr = stringifyMove({ move, cards });
       const reason = lastReason[seat] || null;
-      writeLine(res, { type:'turn', seat, move, cards, hand, moveStr, reason, score: (lastScore[seat] ?? undefined), totals });
-      continue;
+      // 确保发送完整的手牌信息
+      writeLine(res, { 
+        type:'turn', 
+        seat, 
+        move, 
+        cards, 
+        hand: hand || [],  // 确保手牌不为空
+        moveStr, 
+        reason, 
+        score: (lastScore[seat] ?? undefined), 
+        totals 
+      });
+      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
+try {
+  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
+  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
+  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
+  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
+  let extraMult = 1;
+  const decideExtraDouble = (seat:number)=>{
+    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
+    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
+    const cnt = __count(all);
+    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
+    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
+    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
+    if (role==='landlord') return hasBomb;
+    return (hasRocket || hasBomb);
+  };
+  for (let k=0;k<3;k++){
+    const s=(landlordIdx + k) % 3;
+    const will = decideExtraDouble(s);
+    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
+    if (will) extraMult *= 2;
+  }
+  if (extraMult > 1) {
+    // 同步一次倍数（可被前端用于兜底校准）
+    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
+  }
+} catch {}
+continue;
     }
     if (ev?.type==='event' && ev?.kind==='play') {
       const { seat, move, cards } = ev;
@@ -371,7 +453,7 @@ for await (const ev of (iter as any)) {
       continue;
     }
 
-    // 兼容多种“结果”别名
+    // 兼容多种"结果"别名
     const isResultLike =
       (ev?.type==='result') ||
       (ev?.type==='event' && (ev.kind==='win' || ev.kind==='result' || ev.kind==='game-over' || ev.kind==='game_end')) ||
@@ -397,7 +479,7 @@ for await (const ev of (iter as any)) {
           agg : +agg.toFixed(2),
           cons: +cons.toFixed(2),
           eff : +eff.toFixed(2),
-          rob : +rob.toFixed(2),
+          bid: +rob.toFixed(2),
         }};
       });
 
@@ -436,6 +518,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
     const four2  = (body.four2 || 'both') as 'both'|'2singles'|'2pairs';
 
+
+    const rule = (body as any).rule ?? { four2, rob: body.rob !== false, farmerCoop: !!body.farmerCoop };
+    const ruleId = (body as any).ruleId ?? stableHash(JSON.stringify(rule));
+
     const turnTimeoutMsArr = parseTurnTimeoutMsArr(req);
     const seatSpecs = (body.seats || []).slice(0,3) as SeatSpec[];
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
@@ -463,7 +549,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   i)
       );
 
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, lastReason, lastScore }, res, round);
+      await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
