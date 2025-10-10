@@ -2279,10 +2279,22 @@ const [lang, setLang] = useState<Lang>(() => {
                 清空
               </button>
             </div>
-            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
-          </div>
+            </div>
 
-          <label style={{ display:'flex', alignItems:'center', gap:8 }}>局数<input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'160px' }}/></label>
+          <div style={ gridColumn:'2 / 3', display:'grid', gridTemplateColumns:'90px 220px', columnGap:12, rowGap:12, alignItems:'center' }>
+  <div style={ textAlign:'right' }>局数</div>
+  <div><input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }}/></div>
+  <div style={ textAlign:'right' }>初始分</div>
+  <div><input type="number" step={10} value={startScore}
+           onChange={e=>setStartScore(Number(e.target.value)||0)}
+           style={{ width:'220px' }} /></div>
+  <div style={ textAlign:'right' }>4带2 规则</div>
+  <div><select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'220px' }}>
+              <option value="both">都可</option>
+              <option value="2singles">两张单牌</option>
+              <option value="2pairs">两对</option>
+            </select></div>
+</div>
           
           
 <div style={{ gridColumn:'1 / 2' }}>
@@ -2318,18 +2330,8 @@ const [lang, setLang] = useState<Lang>(() => {
     >存档</button>
   </div>
 </div>
-<div style={{ gridColumn:'2 / 3' }}>
-  <label style={{ display:'flex', alignItems:'center', gap:8 }}>初始分<input type="number" step={10} value={startScore}
-           onChange={e=>setStartScore(Number(e.target.value)||0)}
-           style={{ width:'160px' }} /></label>
-</div>
-          <div style={{ gridColumn:'2 / 3' }}>
-  <label style={{ display:'flex', alignItems:'center', gap:8 }}>4带2 规则<select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'160px' }}>
-              <option value="both">都可</option>
-              <option value="2singles">两张单牌</option>
-              <option value="2pairs">两对</option>
-            </select></label>
-</div>
+
+          
         </div>
 
         <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
