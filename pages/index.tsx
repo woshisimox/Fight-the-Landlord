@@ -1594,6 +1594,12 @@ nextTotals     = [
         </span>
       </div>
 
+
+      <div style={{ display:'flex', gap:8 }}>
+        <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
+        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
+      </div>
+
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
         {/* 上传 / 存档 / 刷新 */}
@@ -1780,10 +1786,6 @@ nextTotals     = [
         </div>
       </Section>
 
-      <div style={{ display:'flex', gap:8 }}>
-        <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
-        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
-      </div>
 
       <div style={{ marginTop:18 }}>
         <Section title="运行日志">
