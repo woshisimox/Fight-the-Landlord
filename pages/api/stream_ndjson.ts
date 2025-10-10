@@ -10,10 +10,6 @@ import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 
-
-function writeLine(res: NextApiResponse, obj: any) {
-  res.write(JSON.stringify(obj) + "\n");
-}
 // ---- stable hash for ruleId ----
 function stableHash(s: string): string { let h=5381; for (let i=0;i<s.length;i++){ h=((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); }
 
