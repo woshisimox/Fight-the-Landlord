@@ -161,9 +161,9 @@ const TRANSLATIONS: TransRule[] = [
 
 
   // === Added for extended UI coverage (batch 4) ===
-  { zh: /按[“"“]?内置\/AI\+模型\/版本\(\+HTTP Base\)[”"”]?识别，并区分地主\/农民。?/, en: 'Recognize by "built-in/AI+model/version (+HTTP Base)" and distinguish Landlord/Farmer.' },
+  { zh: /按[“\"“]?内置\/AI\+模型\/版本\(\+HTTP Base\)[”\"”]?识别，并区分地主\/农民。?/, en: 'Recognize by "built-in/AI+model/version (+HTTP Base)" and distinguish Landlord/Farmer.' },
   { zh: /说明[:：]\s*CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。?/, en: 'Note: CR is the lower confidence bound (higher is more stable); updates after each hand (also supports backend-pushed TS).' },
-  { zh: /每局开始时底色按[“"“]?本局地主[”"”]?的线色变化提示；上传文件可替换\/叠加历史，必要时点[“"“]?刷新[”"”]?。?/, en: 'At the start of each hand, background follows the current Landlord color; uploads can replace/append history; click "Refresh" if needed.' },
+  { zh: /每局开始时底色按[“\"“]?本局地主[”\"”]?的线色变化提示；上传文件可替换\/叠加历史，必要时点[“\"“]?刷新[”\"”]?。?/, en: 'At the start of each hand, background follows the current Landlord color; uploads can replace/append history; click "Refresh" if needed.' },
   { zh: /α/, en: 'alpha' },  // symbol label near alpha
   { zh: /指数加权（推荐）/, en: 'Exponentially weighted (recommended)' },
   { zh: /当前使用[:：]\s*/, en: 'Current: ' },
@@ -1895,10 +1895,17 @@ const handleAllSaveInner = () => {
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
+        <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
+        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
         <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
           剩余局数：{remainingGames}
         </span>
       </div>
+
+      </div>
+
+
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
@@ -2089,13 +2096,7 @@ const handleAllSaveInner = () => {
           </div>
         </div>
       </Section>
-
-      <div style={{ display:'flex', gap:8 }}>
-        <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
-        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
-      </div>
-
-      <div style={{ marginTop:18 }}>
+<div style={{ marginTop:18 }}>
         <Section title="">
   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
     <div style={{ fontWeight:700 }}>运行日志</div>
@@ -2139,8 +2140,7 @@ function RadarPanel({
         {mode === 'ewma' && (
           <label>
             α（0.05–0.95）
-            <input
-              type="number"
+            <input type="number" min={0.05} max={0.95} step={0.05}
               value={a}
               onChange={e=>{
                 const v = Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35));
@@ -2148,11 +2148,6 @@ function RadarPanel({
               }}
               style={{ width:80, marginLeft:6 }}
             />
-
-
-
-
-
           </label>
         )}
         <div style={{ fontSize:12, color:'#6b7280' }}>
@@ -2289,38 +2284,63 @@ const [lang, setLang] = useState<Lang>(() => {
                 清空
               </button>
             </div>
-            </div>
-<div style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:12 }}>
-  <div style={{ width:96, textAlign:'right' }}>局数</div>
-  <div style={{ width:220 }}>
-    <input
-      type="number"
-      min={1}
-      step={1}
-      value={rounds}
-      onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))}
-      style={{ width:'220px' }}
-    />
-  </div>
-</div>
+            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
+          </div>
 
-<div style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:12 }}>
-  <div style={{ width:96, textAlign:'right' }}>4带2 规则</div>
-  <div style={{ width:220 }}>
-    <select
-      value={four2}
-      onChange={e=>setFour2(e.target.value as Four2Policy)}
-      style={{ width:'220px' }}
-    >
-      <option value="both">都可</option>
-      <option value="2singles">两张单牌</option>
-      <option value="2pairs">两对</option>
-    </select>
-  </div>
-</div>
-
-
+          <label>局数
+            <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
+          </label>
           
+          
+<div style={{ gridColumn:'1 / 2' }}>
+  <div style={{ display:'flex', alignItems:'center', gap:24 }}>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      可抢地主
+      <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
+    </label>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      农民配合
+      <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
+    </label>
+  </div>
+  <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      天梯  /  TrueSkill
+    <input
+      ref={allFileRef}
+      type="file"
+      accept="application/json"
+      style={{ display:'none' }}
+      onChange={handleAllFileUploadHome}
+    />
+    <button
+      onClick={()=>allFileRef.current?.click()}
+      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >上传</button>
+    
+    </label>
+<button
+      onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
+      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >存档</button>
+  </div>
+</div>
+<div style={{ gridColumn:'2 / 3' }}>
+  <label>初始分
+          <input type="number" step={10} value={startScore}
+           onChange={e=>setStartScore(Number(e.target.value)||0)}
+           style={{ width:'100%' }} />
+          </label>
+</div>
+          <div style={{ gridColumn:'2 / 3' }}>
+  <label>4带2 规则
+            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
+              <option value="both">都可</option>
+              <option value="2singles">两张单牌</option>
+              <option value="2pairs">两对</option>
+            </select>
+          </label>
+</div>
         </div>
 
         <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
