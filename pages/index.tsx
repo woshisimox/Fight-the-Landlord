@@ -2139,12 +2139,20 @@ function RadarPanel({
         {mode === 'ewma' && (
           <label>
             α（0.05–0.95）
-            <input type="number" />{
+            <input
+              type="number"
+              value={a}
+              onChange={e=>{
                 const v = Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35));
                 setA(v); onChangeAlpha(v);
               }}
               style={{ width:80, marginLeft:6 }}
             />
+
+
+
+
+
           </label>
         )}
         <div style={{ fontSize:12, color:'#6b7280' }}>
