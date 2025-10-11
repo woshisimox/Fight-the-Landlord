@@ -2279,7 +2279,37 @@ const [lang, setLang] = useState<Lang>(() => {
                 清空
               </button>
             </div>
-          </div><div style={{ gridColumn:'2 / 3' }}>
+          </div><div style={{ gridColumn:'1 / 2' }}>
+  <div style={{ display:'flex', alignItems:'center', gap:24 }}>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      可抢地主
+      <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
+    </label>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      农民配合
+      <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
+    </label>
+  </div>
+  <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:12, flexWrap:'wrap' }}>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>天梯 / TrueSkill</label>
+    <input
+      ref={allFileRef}
+      type="file"
+      accept="application/json"
+      style={{ display:'none' }}
+      onChange={handleAllFileUploadHome}
+    />
+    <button
+      onClick={()=>allFileRef.current?.click()}
+      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >上传</button>
+    <button
+      onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
+      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >存档</button>
+  </div>
+</div>
+<div style={{ gridColumn:'2 / 3' }}>
   <div style={{ display:'grid', rowGap:12 }}>
     <label style={{ display:'flex', alignItems:'center', gap:12 }}>
       <span style={{ width:72, display:'inline-block' }}>局数</span>
