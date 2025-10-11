@@ -2139,9 +2139,7 @@ function RadarPanel({
         {mode === 'ewma' && (
           <label>
             α（0.05–0.95）
-            <input type="number" min={0.05} max={0.95} step={0.05}
-              value={a}
-              onChange={e=>{
+            <input type="number" />{
                 const v = Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35));
                 setA(v); onChangeAlpha(v);
               }}
@@ -2286,7 +2284,7 @@ const [lang, setLang] = useState<Lang>(() => {
             </div>
 <div style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:12 }}>
   <div style={{ width:96, textAlign:'right' }>局数</div>
-  <div style={{ width:220 }}><input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }}/></div>
+  <div style={{ width:220 }}><input type=\"number\" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }} /></div>
 </div>
 
 
@@ -2310,7 +2308,7 @@ const [lang, setLang] = useState<Lang>(() => {
 </div>
 <div style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:12 }}>
   <div style={{ width:96, textAlign:'right' }>初始分</div>
-  <div style={{ width:220 }}><input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }}/></div>
+  <div style={{ width:220 }}><input type=\"number\" min={0} step={10} value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ width:'220px' }} /></div>
 </div>
 <div style={{ gridColumn:'1 / 2' }}>
 <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
@@ -2337,7 +2335,7 @@ const [lang, setLang] = useState<Lang>(() => {
 </div>
 <div style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:12 }}>
   <div style={{ width:96, textAlign:'right' }>4带2 规则</div>
-  <div style={{ width:220 }}><input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }}/></div>
+  <div style={{ width:220 }}><input type="number" />setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }}/></div>
 </div>
 
 
