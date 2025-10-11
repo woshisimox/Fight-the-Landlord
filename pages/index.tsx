@@ -2279,64 +2279,31 @@ const [lang, setLang] = useState<Lang>(() => {
                 清空
               </button>
             </div>
-            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
           </div><div style={{ gridColumn:'2 / 3' }}>
-  <label style={{ display:'flex', alignItems:'center', gap:12 }}>局数
-    <select value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ flex:1 }}>
-      {[1,5,10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
-    </select>
-  </label>
-</div>
-          
-          
-<div style={{ gridColumn:'1 / 2' }}>
-  <div style={{ display:'flex', alignItems:'center', gap:24 }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-      可抢地主
-      <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
+  <div style={{ display:'grid', rowGap:12 }}>
+    <label style={{ display:'flex', alignItems:'center', gap:12 }}>
+      <span style={{ width:72, display:'inline-block' }}>局数</span>
+      <select value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ flex:1 }}>
+        {[1,5,10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+      </select>
     </label>
-    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-      农民配合
-      <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
+
+    <label style={{ display:'flex', alignItems:'center', gap:12 }}>
+      <span style={{ width:72, display:'inline-block' }}>初始分</span>
+      <select value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ flex:1 }}>
+        {[0,50,100,200,500,1000].map(n => <option key={n} value={n}>{n}</option>)}
+      </select>
+    </label>
+
+    <label style={{ display:'flex', alignItems:'center', gap:12 }}>
+      <span style={{ width:72, display:'inline-block' }}>4带2 规则</span>
+      <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ flex:1 }}>
+        <option value="both">都可</option>
+        <option value="2singles">两张单牌</option>
+        <option value="2pairs">两对</option>
+      </select>
     </label>
   </div>
-  <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-      天梯  /  TrueSkill
-    <input
-      ref={allFileRef}
-      type="file"
-      accept="application/json"
-      style={{ display:'none' }}
-      onChange={handleAllFileUploadHome}
-    />
-    <button
-      onClick={()=>allFileRef.current?.click()}
-      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-    >上传</button>
-    
-    </label>
-<button
-      onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
-      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-    >存档</button>
-  </div>
-</div>
-<div style={{ gridColumn:'2 / 3' }}>
-  <label style={{ display:'flex', alignItems:'center', gap:12 }}>初始分
-          <select value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ flex:1 }}>
-              {[0,50,100,200,500,1000].map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </label>
-</div>
-          <div style={{ gridColumn:'2 / 3' }}>
-  <label style={{ display:'flex', alignItems:'center', gap:12 }}>4带2 规则
-            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ flex:1 }}>
-              <option value="both">都可</option>
-              <option value="2singles">两张单牌</option>
-              <option value="2pairs">两对</option>
-            </select>
-          </label>
 </div>
         </div>
 
