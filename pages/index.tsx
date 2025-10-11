@@ -2283,31 +2283,21 @@ const [lang, setLang] = useState<Lang>(() => {
                 清空
               </button>
             </div>
-            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
-          </div>
+            </div>
+<div style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:12 }}>
+  <div style={{ width:96, textAlign:'right' }>局数</div>
+  <div style={{ width:220 }}><input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }}/></div>
+</div>
+
 
           
-<div style={{ gridColumn:'2 / 3' }}>
-  <div style={{ display:'grid', gridTemplateColumns:'96px 220px', columnGap:12, rowGap:12, alignItems:'center' }}>
-    <div style={{ textAlign:'right' }}>局数</div>
-    <div><input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }}/></div>
-    <div style={{ textAlign:'right' }}>初始分</div>
-    <div><input type="number" step={10} value={startScore}
-           onChange={e=>setStartScore(Number(e.target.value)||0)}
-           style={{ width:'220px' }} /></div>
-    <div style={{ textAlign:'right' }}>4带2 规则</div>
-    <div><select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'220px' }}>
-              <option value="both">都可</option>
-              <option value="2singles">两张单牌</option>
-              <option value="2pairs">两对</option>
-            </select></div>
-  </div>
+
 </div>
 
           
           
 <div style={{ gridColumn:'1 / 2' }}>
-  <div style={{ display:'flex', alignItems:'center', gap:24 }}>
+<div style={{ display:'flex', alignItems:'center', gap:24 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       可抢地主
       <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
@@ -2317,7 +2307,13 @@ const [lang, setLang] = useState<Lang>(() => {
       <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
     </label>
   </div>
-  <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
+</div>
+<div style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:12 }}>
+  <div style={{ width:96, textAlign:'right' }>初始分</div>
+  <div style={{ width:220 }}><input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }}/></div>
+</div>
+<div style={{ gridColumn:'1 / 2' }}>
+<div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       天梯  /  TrueSkill
     <input
@@ -2339,6 +2335,11 @@ const [lang, setLang] = useState<Lang>(() => {
     >存档</button>
   </div>
 </div>
+<div style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:12 }}>
+  <div style={{ width:96, textAlign:'right' }>4带2 规则</div>
+  <div style={{ width:220 }}><input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }}/></div>
+</div>
+
 
           
         </div>
