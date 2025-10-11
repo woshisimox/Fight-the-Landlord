@@ -2280,12 +2280,12 @@ const [lang, setLang] = useState<Lang>(() => {
               </button>
             </div>
           </div><div style={{ gridColumn:'2 / 3' }}>
-  <label style={{ display:'flex', alignItems:'center', gap:12 }}>
-    <span style={{ width:72, display:'inline-block' }}>局数</span>
+  <label style={{ display:'flex', alignItems:'center', gap:12, minHeight:36 }}>
+    <span style={{ width:72, display:'inline-flex', alignItems:'center', height:36 }}>局数</span>
     <select
       value={rounds}
       onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))}
-      style={{ flex:1 }}
+      style={{ flex:1 , flex:1, height:36}}
     >
       {[1,5,10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
     </select>
@@ -2328,12 +2328,12 @@ const [lang, setLang] = useState<Lang>(() => {
   <label>初始分
           <input type="number" step={10} value={startScore}
            onChange={e=>setStartScore(Number(e.target.value)||0)}
-           style={{ width:'100%' }} />
+           style={{ width:'100%' , flex:1, height:36}} />
           </label>
 </div>
           <div style={{ gridColumn:'2 / 3' }}>
   <label>4带2 规则
-            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
+            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' , flex:1, height:36}}>
               <option value="both">都可</option>
               <option value="2singles">两张单牌</option>
               <option value="2pairs">两对</option>
