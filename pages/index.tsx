@@ -2279,7 +2279,6 @@ const [lang, setLang] = useState<Lang>(() => {
                 清空
               </button>
             </div>
-            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
           </div><div style={{ gridColumn:'2 / 3' }}>
   <label style={{ display:'flex', alignItems:'center', gap:12 }}>
     <span style={{ width:72, display:'inline-block' }}>局数</span>
@@ -2303,7 +2302,7 @@ const [lang, setLang] = useState<Lang>(() => {
       <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
     </label>
   </div>
-  <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
+  <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       天梯  /  TrueSkill
     <input
@@ -2732,7 +2731,7 @@ function ScoreTimeline(
       </svg>
 
       {/* 图例 */}
-      <div style={{ display:'flex', gap:12, marginTop:6, fontSize:12, color:'#374151' }}>
+      <div style={{ display:'flex', gap:12, fontSize:12, color:'#374151' }}>
         {[0,1,2].map(i=>(
           <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
             <span style={{ width:10, height:10, borderRadius:5, background:colors[i], display:'inline-block' }} />
