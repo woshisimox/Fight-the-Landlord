@@ -2349,8 +2349,8 @@ const [lang, setLang] = useState<Lang>(() => {
     <div style={{fontWeight:600}}>天梯 / TrueSkill</div>
     <div style={{opacity:.7,fontSize:12}}></div>
     <label style={{display:'inline-flex',alignItems:'center',gap:8}}>
-      <input ref={fileRef} type="file" accept="application/json" onChange={handleUploadFile} style={{display:'none'}}/>
-      <button onClick={()=>fileRef?.current?.click()} style={{padding:'6px 12px',borderRadius:8,border:'1px solid #e5e7eb',background:'#fff'}}>上传</button>
+      <input id="trueskill-upload"  type="file" accept="application/json" onChange={handleUploadFile} style={{display:'none'}}/>
+      <button onClick={() => (document.getElementById("trueskill-upload") as HTMLInputElement | null)?.click()} style={{padding:'6px 12px',borderRadius:8,border:'1px solid #e5e7eb',background:'#fff'}}>上传</button>
     </label>
     <button onClick={handleSaveArchive} style={{padding:'6px 12px',borderRadius:8,border:'1px solid #e5e7eb',background:'#fff'}}>存档</button>
   </div>
