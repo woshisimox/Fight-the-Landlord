@@ -2285,7 +2285,7 @@ const [lang, setLang] = useState<Lang>(() => {
     <select
       value={rounds}
       onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))}
-      style={{ flex:1, height:36}}
+      style={{flex:1, height:36}}
     >
       {[1,5,10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
     </select>
@@ -2328,12 +2328,12 @@ const [lang, setLang] = useState<Lang>(() => {
   <label>初始分
           <input type="number" step={10} value={startScore}
            onChange={e=>setStartScore(Number(e.target.value)||0)}
-           style={{ width:'100%' , flex:1, height:36}} />
+           style={{flex:1, height:36}} />
           </label>
 </div>
           <div style={{ gridColumn:'2 / 3' }}>
   <label>4带2 规则
-            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' , flex:1, height:36}}>
+            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{flex:1, height:36}}>
               <option value="both">都可</option>
               <option value="2singles">两张单牌</option>
               <option value="2pairs">两对</option>
@@ -2786,3 +2786,5 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
     </div>
   );
 }
+
+{/* build-tag: align-fix 2025-10-11 16:15:02 */}
