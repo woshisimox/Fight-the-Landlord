@@ -2280,11 +2280,13 @@ const [lang, setLang] = useState<Lang>(() => {
               </button>
             </div>
             <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
-          </div>
-
-          <label>局数
-            <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
-          </label>
+          </div><div style={{ gridColumn:'2 / 3' }}>
+  <label>局数
+    <select value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}>
+      {[1,5,10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+    </select>
+  </label>
+</div>
           
           
 <div style={{ gridColumn:'1 / 2' }}>
@@ -2322,9 +2324,9 @@ const [lang, setLang] = useState<Lang>(() => {
 </div>
 <div style={{ gridColumn:'2 / 3' }}>
   <label>初始分
-          <input type="number" step={10} value={startScore}
-           onChange={e=>setStartScore(Number(e.target.value)||0)}
-           style={{ width:'100%' }} />
+          <select value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{ width:'100%' }}>
+              {[0,50,100,200,500,1000].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
           </label>
 </div>
           <div style={{ gridColumn:'2 / 3' }}>
