@@ -1,12 +1,12 @@
 
-// Updated UI optimizations for the provided index.tsx
+// UI optimizations for layout (button positions and spacing only)
 
 import { createContext, useContext, useEffect, useState } from 'react';
 
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
 
-// Updated translation and UI settings
+// Translation and UI settings (unchanged)
 const I18N: Record<Lang, Record<string, string>> = {
   zh: {
     Title: '斗地主 · Fight the Landlord',
@@ -22,9 +22,6 @@ const I18N: Record<Lang, Record<string, string>> = {
     Upload: '上传',
     Save: '存档',
     FarmerCoop: '农民配合',
-    Rounds: '局数',
-    InitialScore: '初始分',
-    Four2Rule: '4带2规则',
   },
   en: {
     Title: 'Fight the Landlord',
@@ -40,9 +37,6 @@ const I18N: Record<Lang, Record<string, string>> = {
     Upload: 'Upload',
     Save: 'Save',
     FarmerCoop: 'Farmer cooperation',
-    Rounds: 'Rounds',
-    InitialScore: 'Initial Score',
-    Four2Rule: '4-with-2 Rule',
   }
 };
 
@@ -56,7 +50,7 @@ function useI18n() {
   return { lang, t };
 }
 
-// Updated component for optimized UI
+// Updated button and layout optimization
 function SettingsPanel() {
   const { t } = useI18n();
 
@@ -79,7 +73,7 @@ function SettingsPanel() {
         </select>
       </div>
       <div style={{ marginBottom: '16px' }}>
-        <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+        <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '4px' }} >
           <input type="checkbox" style={{ marginRight: '8px' }} />
           {t('Enable')}
         </label>
