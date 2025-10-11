@@ -418,16 +418,7 @@ function Hand({ cards }: { cards: string[] }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
       {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
-    <
-<div style={{ gridColumn:'2 / 3' }}>
-  <label style={{ display:'flex', alignItems:'center', gap:12, minHeight:36 }}>
-    <span style={{ width:72, display:'inline-flex', alignItems:'center', height:36 }}>初始分</span>
-    <select value={startScore} onChange={e=>setStartScore(Number(e.target.value)||0)} style={{flex:1, height:36}}>
-      {[0,50,100,200,500,1000].map(n => <option key={n} value={n}>{n}</option>)}
-    </select>
-  </label>
-</div>
-/div>
+    </div>
   );
 }
 function PlayRow({ seat, move, cards, reason }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string }) {
