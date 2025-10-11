@@ -2285,7 +2285,7 @@ const [lang, setLang] = useState<Lang>(() => {
     <select
       value={rounds}
       onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))}
-      style={{ flex:1 , flex:1, height:36}}
+      style={{ flex:1, height:36}}
     >
       {[1,5,10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
     </select>
