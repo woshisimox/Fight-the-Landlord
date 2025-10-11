@@ -2280,7 +2280,19 @@ const [lang, setLang] = useState<Lang>(() => {
               </button>
             </div>
             <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
-          </div><div style={{ gridColumn:'1 / 2' }}>
+          </div><div style={{ gridColumn:'2 / 3' }}>
+  <label style={{ display:'flex', alignItems:'center', gap:12 }}>
+    <span style={{ width:72, display:'inline-block' }}>局数</span>
+    <select
+      value={rounds}
+      onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))}
+      style={{ flex:1 }}
+    >
+      {[1,5,10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+    </select>
+  </label>
+</div>
+<div style={{ gridColumn:'1 / 2' }}>
   <div style={{ display:'flex', alignItems:'center', gap:24 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       可抢地主
