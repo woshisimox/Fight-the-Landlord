@@ -416,7 +416,8 @@ function Hand({ cards }: { cards: string[] }) {
   const { t } = useI18n();
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>{t('Empty')}</span>;
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+    <!-- Begin Button Section --><!-- Move below TrueSkill -->
+<div style={{ display: 'flex', flexWrap: 'wrap' }}>
       {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
     </div>
   );
@@ -1895,17 +1896,10 @@ const handleAllSaveInner = () => {
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-        <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
-        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
         <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
           剩余局数：{remainingGames}
         </span>
       </div>
-
-      </div>
-
-
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
@@ -2096,7 +2090,13 @@ const handleAllSaveInner = () => {
           </div>
         </div>
       </Section>
-<div style={{ marginTop:18 }}>
+
+      <div style={{ display:'flex', gap:8 }}>
+        <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
+        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
+      </div>
+
+      <div style={{ marginTop:18 }}>
         <Section title="">
   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
     <div style={{ fontWeight:700 }}>运行日志</div>
