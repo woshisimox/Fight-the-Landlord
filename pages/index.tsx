@@ -1894,13 +1894,11 @@ const handleAllSaveInner = () => {
 
   return (
     <div>
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-  <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
-  <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
-  <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
-    剩余局数：{remainingGames}
-  </span>
-</div>
+      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
+        <span style={{ display:'inline-flex', alignItems:'center', padding:'6px 10px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
+          剩余局数：{remainingGames}
+        </span>
+      </div>
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
@@ -2091,7 +2089,13 @@ const handleAllSaveInner = () => {
           </div>
         </div>
       </Section>
-<div style={{ marginTop:18 }}>
+
+      <div style={{ display:'flex', gap:8 }}>
+        <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
+        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
+      </div>
+
+      <div style={{ marginTop:18 }}>
         <Section title="">
   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
     <div style={{ fontWeight:700 }}>运行日志</div>
@@ -2253,7 +2257,7 @@ const [lang, setLang] = useState<Lang>(() => {
     };
     rd.readAsText(f);
   };
-  return (<>
+  return (
     <LangContext.Provider value={lang}>
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
@@ -2282,9 +2286,24 @@ const [lang, setLang] = useState<Lang>(() => {
             <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
           </div>
 
-          <label>局数
-            <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
-          </label>
+          
+<div style={ gridColumn:'2 / 3' }>
+  <div style={ display:'grid', gridTemplateColumns:'96px 220px', columnGap:12, rowGap:12, alignItems:'center' }>
+    <div style={ textAlign:'right' }>局数</div>
+    <div><input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'220px' }}/></div>
+    <div style={ textAlign:'right' }>初始分</div>
+    <div><input type="number" step={10} value={startScore}
+           onChange={e=>setStartScore(Number(e.target.value)||0)}
+           style={{ width:'220px' }} /></div>
+    <div style={ textAlign:'right' }>4带2 规则</div>
+    <div><select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'220px' }}>
+              <option value="both">都可</option>
+              <option value="2singles">两张单牌</option>
+              <option value="2pairs">两对</option>
+            </select></div>
+  </div>
+</div>
+
           
           
 <div style={{ gridColumn:'1 / 2' }}>
@@ -2320,22 +2339,8 @@ const [lang, setLang] = useState<Lang>(() => {
     >存档</button>
   </div>
 </div>
-<div style={{ gridColumn:'2 / 3' }}>
-  <label>初始分
-          <input type="number" step={10} value={startScore}
-           onChange={e=>setStartScore(Number(e.target.value)||0)}
-           style={{ width:'100%' }} />
-          </label>
-</div>
-          <div style={{ gridColumn:'2 / 3' }}>
-  <label>4带2 规则
-            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
-              <option value="both">都可</option>
-              <option value="2singles">两张单牌</option>
-              <option value="2pairs">两对</option>
-            </select>
-          </label>
-</div>
+
+          
         </div>
 
         <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
@@ -2563,7 +2568,7 @@ const [lang, setLang] = useState<Lang>(() => {
       </div>
     </div>
     </LangContext.Provider>
-  </>);
+  );
 }
 
 export default Home;
