@@ -239,10 +239,11 @@ export async function* playOneGame(bots: BotFunc[], options: EngineOptions = {})
 // ---- Example: external AI bot with optional .bid() ----
 // Keep callable (play) signature compatible with BotFunc, and attach .bid for bidding.
 export const exampleExternalAIBot: BotFunc & ExternalBidder = Object.assign(
-  async (ctx: BotCtx) => {
+  (async (ctx: BotCtx): Promise<BotMove> => {
     // play-phase: pass for demo
-    return { move: 'pass', reason: 'demo external bot' };
-  },
+    const mv: BotMove = { move: 'pass', reason: 'demo external bot' } as const;
+    return mv;
+  }) as BotFunc,
   {
     bid: async (ctx: BidCtx): Promise<BidDecision> => {
       const score = evalRobScore(ctx.hand);
@@ -260,7 +261,10 @@ export const exampleExternalAIBot: BotFunc & ExternalBidder = Object.assign(
 
 // ---- Simple rule bot that also supports .bid() ----
 export const simpleRuleBot: BotFunc & ExternalBidder = Object.assign(
-  async (ctx: BotCtx) => ({ move: 'pass' }),
+  (async (ctx: BotCtx): Promise<BotMove> => {
+    const mv: BotMove = { move: 'pass' } as const;
+    return mv;
+  }) as BotFunc,
   {
     bid: async (ctx: BidCtx) => {
       const score = evalRobScore(ctx.hand);
