@@ -2352,7 +2352,7 @@ const [lang, setLang] = useState<Lang>(() => {
     {/* 右列：表单行网格（右侧统一成“标签-控件”两列） */}
     <div
       style={{
-        gridColumn:'5 / 6',
+        gridColumn:'3 / 4',
         display:'grid',
         gridTemplateColumns:'96px 1fr',
         alignItems:'center',
