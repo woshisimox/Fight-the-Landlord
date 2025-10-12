@@ -170,7 +170,7 @@ const TRANSLATIONS: TransRule[] = [
   { zh: /总体档/, en: 'Overall' },
   { zh: /总体(?!均值)/, en: 'Overall' },
 
-  { zh: '关闭后不可开始/继续对局；再次勾选即可恢复。', en: 'Disabled matches cannot start/continue; tick again to restore.' },
+  { zh: ' ', en: ' ' },
 ];
 function hasChinese(s: string) { return /[\u4e00-\u9fff]/.test(s); }
 
