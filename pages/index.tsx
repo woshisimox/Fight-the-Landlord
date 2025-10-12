@@ -2299,10 +2299,9 @@ const [lang, setLang] = useState<Lang>(() => {
       <div style={{ fontSize:12, color:'#6b7280' }}>
         
       </div>
-    </div>
+
 
     {/* 左列：可抢地主 / 农民配合 */}
-    <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
       <div style={{ display:'flex', alignItems:'center', gap:24 }}>
         <label style={{ display:'flex', alignItems:'center', gap:8 }}>
           可抢地主
@@ -2348,7 +2347,7 @@ const [lang, setLang] = useState<Lang>(() => {
           存档
         </button>
       </div>
-    </div>
+
 
     {/* 右列：表单行网格（右侧统一成“标签-控件”两列） */}
     <div
