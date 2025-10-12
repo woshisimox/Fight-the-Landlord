@@ -2302,7 +2302,7 @@ const [lang, setLang] = useState<Lang>(() => {
     </div>
 
     {/* 左列：可抢地主 / 农民配合 */}
-
+    <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
       <div style={{ display:'flex', alignItems:'center', gap:24 }}>
         <label style={{ display:'flex', alignItems:'center', gap:8 }}>
           可抢地主
@@ -2348,7 +2348,7 @@ const [lang, setLang] = useState<Lang>(() => {
           存档
         </button>
       </div>
-
+    </div>
 
     {/* 右列：表单行网格（右侧统一成“标签-控件”两列） */}
     <div
@@ -2369,7 +2369,7 @@ const [lang, setLang] = useState<Lang>(() => {
           step={1}
           value={rounds}
           onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))}
-          style={{ width:'100%' }}
+          style={{ width:'50%' }}
         />
       </div>
 
