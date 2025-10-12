@@ -2388,7 +2388,7 @@ const [lang, setLang] = useState<Lang>(() => {
         <select
           value={four2}
           onChange={e=>setFour2(e.target.value as Four2Policy)}
-          style={{ width:'100%' }}
+          style={{ width:'105%' }}
         >
           <option value="both">都可</option>
           <option value="2singles">两张单牌</option>
