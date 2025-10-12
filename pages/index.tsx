@@ -794,7 +794,7 @@ function LadderPanel() {
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         {/* —— 天梯图 —— */}
-      <LadderPanel />
+      <LadderPanelFixed />
 <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
         <LivePanel
           key={resetKey}
@@ -817,6 +817,109 @@ function LadderPanel() {
     </LangContext.Provider>
   </>);
 }
+
+
+/* ===== FIX: LadderPanel JSX single-root + balanced tags (2025-10-12) ===== */
+function LadderPanelFixed() {
+  const { t } = useI18n();
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const onAny = () => setTick(k => k + 1);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('ddz-all-refresh', onAny as any);
+    }
+    const timer = setInterval(onAny, 2000);
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('ddz-all-refresh', onAny as any);
+      }
+      clearInterval(timer);
+    };
+  }, []);
+
+  // 读取本地天梯存档
+  let store: any = { players: {} };
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem('ddz_ladder_store_v1');
+      if (raw) store = JSON.parse(raw) || { players: {} };
+    }
+  } catch {}
+
+  const CATALOG: BotChoice[] = [
+    'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
+    'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http'
+  ] as any;
+
+  const catalogIds = CATALOG.map((choice: BotChoice) => {
+    const model = defaultModelFor(choice) || '';
+    const base  = (choice === 'http') ? '' : '';
+    return `${choice}|${model}|${base}`;
+  });
+
+  const catalogLabels = (id: string) => {
+    const [choice, model] = id.split('|');
+    const label = choiceLabel(choice as any);
+    if (choice.startsWith('ai:')) return `${label}:${model || defaultModelFor(choice as any)}`;
+    return label;
+  };
+
+  const players: Record<string, any> = (store?.players) || {};
+  const keys = Array.from(new Set([...Object.keys(players), ...catalogIds]));
+
+  const arr = keys.map((id) => {
+    const ent = players[id];
+    const val = ent?.current?.deltaR ?? 0;
+    const n   = ent?.current?.n ?? 0;
+    const label = ent?.label || catalogLabels(id) || id;
+    return { id, label, val, n };
+  });
+
+  const valsForRange = (arr.some(x => x.n > 0) ? arr.filter(x => x.n > 0) : arr);
+  const minVal = Math.min(0, ...(valsForRange.length ? valsForRange.map(x => x.val) : [0]));
+  const maxVal = Math.max(0, ...(valsForRange.length ? valsForRange.map(x => x.val) : [0]));
+  const maxAbs = Math.max(Math.abs(minVal), Math.abs(maxVal));
+  const K = Math.max(1, maxAbs * 1.1);
+
+  const items = arr.sort((a, b) => b.val - a.val);
+
+  return (
+    <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+        <div style={{ fontWeight:700 }}>{t('LadderTitle')}</div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>{t('LadderRange', { K })}</div>
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
+        {items.map((it: any) => {
+          const pct = Math.min(1, Math.abs(it.val) / K);
+          const pos = it.val >= 0;
+          return (
+            <div key={it.id} style={{ display:'contents' }}>
+              <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.label}</div>
+              <div style={{ position:'relative', height:16, background:'#f9fafb', border:'1px solid #f3f4f6', borderRadius:8 }}>
+                <div
+                  style={{
+                    position:'absolute',
+                    left: pos ? '50%' : `${50 - pct * 50}%`,
+                    width: `${pct * 50}%`,
+                    top:2, bottom:2,
+                    borderRadius:6,
+                    background: pos ? '#10b981' : '#ef4444'
+                  }}
+                />
+                <div style={{ position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' }} />
+              </div>
+              <div style={{ textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{it.val.toFixed(2)}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 
 export default Home;
 
