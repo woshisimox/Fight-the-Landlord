@@ -2353,7 +2353,7 @@ const [lang, setLang] = useState<Lang>(() => {
     {/* 右列：表单行网格（右侧统一成“标签-控件”两列） */}
     <div
       style={{
-        gridColumn:'2 / 3',
+        gridColumn:'3 / 4',
         display:'grid',
         gridTemplateColumns:'96px 1fr',
         alignItems:'center',
@@ -2369,7 +2369,7 @@ const [lang, setLang] = useState<Lang>(() => {
           step={1}
           value={rounds}
           onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))}
-          style={{ width:'50%' }}
+          style={{ width:'100%' }}
         />
       </div>
 
