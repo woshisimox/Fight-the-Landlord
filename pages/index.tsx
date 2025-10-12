@@ -2285,7 +2285,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
           
 <div style={{ gridColumn:'1 / 2' }}>
-  <div style={{ display:'flex', alignItems:'center', gap:24 }}>
+  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       可抢地主
       <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
