@@ -1,5 +1,5 @@
 // lib/bots/kimi_bot.ts
-import { extractFirstJsonObject, nonEmptyReason } from './util';
+import { extractFirstJsonObject, nonEmptyReason, sanitizeCredential } from './util';
 
 type BotMove =
   | { move: 'pass'; reason?: string }
@@ -28,12 +28,13 @@ async function throttle(){
 
 export const KimiBot=(o:{apiKey:string,model?:string,baseUrl?:string}):BotFunc=>async (ctx:BotCtx)=>{
   try{
-    if(!o.apiKey) throw new Error('Missing Kimi API Key');
+    const apiKey = sanitizeCredential(o.apiKey);
+    if(!apiKey) throw new Error('Missing Kimi API Key');
     await throttle();
     const url = (o.baseUrl||'https://api.moonshot.cn').replace(/\/$/, '') + '/v1/chat/completions';
     const r = await fetch(url, {
       method:'POST',
-      headers:{'content-type':'application/json', authorization:`Bearer ${o.apiKey}`},
+      headers:{'content-type':'application/json', authorization:`Bearer ${apiKey}`},
       body: JSON.stringify({
         model:o.model||'moonshot-v1-8k',
         temperature:0.2,

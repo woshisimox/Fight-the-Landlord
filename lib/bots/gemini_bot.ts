@@ -1,5 +1,5 @@
 // lib/bots/gemini_bot.ts
-import { extractFirstJsonObject, nonEmptyReason } from './util';
+import { extractFirstJsonObject, nonEmptyReason, sanitizeCredential } from './util';
 
 type BotMove =
   | { move: 'pass'; reason?: string }
@@ -19,8 +19,9 @@ function fallbackMove(ctx: BotCtx, reason: string): BotMove {
 export const GeminiBot = (o: { apiKey: string; model?: string }): BotFunc =>
   async (ctx: BotCtx) => {
     try {
-      if (!o.apiKey) throw new Error('Missing Gemini API Key');
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${o.model||'gemini-1.5-flash'}:generateContent?key=${encodeURIComponent(o.apiKey)}`;
+      const apiKey = sanitizeCredential(o.apiKey);
+      if (!apiKey) throw new Error('Missing Gemini API Key');
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${o.model||'gemini-1.5-flash'}:generateContent?key=${encodeURIComponent(apiKey)}`;
       const r = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

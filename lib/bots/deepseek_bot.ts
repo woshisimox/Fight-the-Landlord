@@ -1,5 +1,5 @@
 // lib/bots/deepseek_bot.ts
-import { extractFirstJsonObject, nonEmptyReason } from './util';
+import { extractFirstJsonObject, nonEmptyReason, sanitizeCredential } from './util';
 
 type BotMove =
   | { move: 'pass'; reason?: string }
@@ -22,7 +22,8 @@ export function DeepseekBot({ apiKey, model }: { apiKey?: string; model?: string
 
   return async function bot(ctx: BotCtx): Promise<BotMove> {
     try {
-      if (!apiKey) throw new Error('DeepSeek API key 未配置');
+      const cleaned = sanitizeCredential(apiKey);
+      if (!cleaned) throw new Error('DeepSeek API key 未配置');
 
       const prompt = [
         { role: 'system', content: 'Only reply with a strict JSON object for the move.' },
@@ -41,7 +42,7 @@ export function DeepseekBot({ apiKey, model }: { apiKey?: string; model?: string
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'authorization': `Bearer ${apiKey}`,
+          'authorization': `Bearer ${cleaned}`,
         },
         body: JSON.stringify({ model: mdl, temperature: 0.2, messages: prompt, stream: false })
       });

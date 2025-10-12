@@ -1,5 +1,5 @@
 // lib/bots/openai_bot.ts
-import { extractFirstJsonObject, nonEmptyReason } from './util';
+import { extractFirstJsonObject, nonEmptyReason, sanitizeCredential } from './util';
 
 type BotMove =
   | { move: 'pass'; reason?: string }
@@ -20,11 +20,12 @@ function fallbackMove(ctx: BotCtx, reason: string): BotMove {
 export const OpenAIBot = (o: { apiKey: string; model?: string }): BotFunc =>
   async (ctx: BotCtx) => {
     try {
-      if (!o.apiKey) throw new Error('Missing OpenAI API Key');
+      const apiKey = sanitizeCredential(o.apiKey);
+      if (!apiKey) throw new Error('Missing OpenAI API Key');
       const url = 'https://api.openai.com/v1/chat/completions';
       const r = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${o.apiKey}` },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
           model: o.model || 'gpt-4o-mini',
           temperature: 0.2,

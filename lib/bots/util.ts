@@ -32,6 +32,25 @@ export function nonEmptyReason(r?: string, provider?: string): string {
   return s || `${provider ? provider : 'AI'} 已调用`;
 }
 
+/**
+ * 清洗外部凭据字符串：去除首尾空白，并仅保留可打印 ASCII 字符。
+ * 这样可以避免将含有中文或全角字符的文本直接塞进 HTTP Header，
+ * 触发 Node/undici 的 ByteString 校验错误。
+ */
+export function sanitizeCredential(raw?: string | null): string {
+  if (!raw) return '';
+  const trimmed = String(raw).trim();
+  if (!trimmed) return '';
+  let out = '';
+  for (const ch of trimmed) {
+    const code = ch.charCodeAt(0);
+    if (code >= 0x21 && code <= 0x7e) {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 /** 统一格式：座位行 */
 export function formatSeatLine(ctx: any): string {
   return `座位：我=${ctx?.seat} 地主=${ctx?.landlord} 首家=${ctx?.leader} 轮次=${ctx?.trick}`;
