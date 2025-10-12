@@ -2279,7 +2279,7 @@ const [lang, setLang] = useState<Lang>(() => {
                 清空
               </button>
             </div>
-//            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
+
           </div>
 
           <label>局数
