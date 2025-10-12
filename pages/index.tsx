@@ -1,11 +1,26 @@
 
-<div style={{ display: 'flex', alignItems: 'center' }}>
-  <label style={{ marginRight: 10 }}>启用对局</label>
-  <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
-  <button onClick={doResetAll} style={{ marginLeft: 10, padding: '4px 10px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>清空</button>
+import { useState } from 'react';
 
-  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
-    <label style={{ marginRight: 10 }}>局数</label>
-    <input type="number" value={rounds} onChange={e => setRounds(Math.max(1, Math.floor(Number(e.target.value))))} />
-  </div>
-</div>
+function MyComponent() {
+  const [enabled, setEnabled] = useState(false);  // Added state initialization for "enabled"
+  const [rounds, setRounds] = useState(10);  // Added state initialization for "rounds"
+
+  const doResetAll = () => {
+    // Reset function logic (you can define this)
+    setRounds(10);
+    setEnabled(false);
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center' }}>
+      <label style={{ marginRight: 10 }}>启用对局</label>
+      <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
+      <button onClick={doResetAll} style={{ marginLeft: 10, padding: '4px 10px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>清空</button>
+
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
+        <label style={{ marginRight: 10 }}>局数</label>
+        <input type="number" value={rounds} onChange={e => setRounds(Math.max(1, Math.floor(Number(e.target.value))))} />
+      </div>
+    </div>
+  );
+}
