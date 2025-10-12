@@ -180,14 +180,14 @@ export async function* playOneGame(bots: BotFunc[], options: EngineOptions = {})
   // round 1
   for (const s of order) {
     const r = await decideBid(s, 'first-round');
-    yield { type:'event', kind:'bid-eval', seat: s, score: r.score, threshold: r.threshold, decision: r.decision, reason: r.reason } as EventBidEval;
+    yield { type:'event', kind:'bid-eval', seat: s, score: r.score, threshold: r.threshold, decision: r.decision, reason: r.reason, reason: (typeof reason!=='undefined'?reason: (m as any)?.reason) } as EventBidEval;
     if (delayMs) await wait(delayMs);
 
     if (r.decision === 'bid') {
       bidders.push({ seat: s, score: r.score, threshold: r.threshold, margin: r.score - r.threshold });
       multiplier = Math.min(64, Math.max(1, multiplier * 2));
     }
-    yield { type:'event', kind:'bid', seat: s, bid: r.decision==='bid', score: r.score, bidMult: bidMultiplier, mult: multiplier, reason: r.reason } as EventBid;
+    yield { type:'event', kind:'bid', seat: s, bid: r.decision==='bid', score: r.score, bidMult: bidMultiplier, mult: multiplier, reason: r.reason, reason: (typeof reason!=='undefined'?reason: (m as any)?.reason) } as EventBid;
     if (delayMs) await wait(delayMs);
   }
 
@@ -198,14 +198,14 @@ export async function* playOneGame(bots: BotFunc[], options: EngineOptions = {})
     const bidders2: { seat:number; score:number; threshold:number; margin:number }[] = [];
     for (const s of secondOrder) {
       const r2 = await decideBid(s, 'second-round');
-      yield { type:'event', kind:'bid-eval', seat: s, score: r2.score, threshold: r2.threshold, decision: r2.decision, reason: r2.reason } as EventBidEval;
+      yield { type:'event', kind:'bid-eval', seat: s, score: r2.score, threshold: r2.threshold, decision: r2.decision, reason: r2.reason, reason: (typeof reason!=='undefined'?reason: (m as any)?.reason) } as EventBidEval;
       if (delayMs) await wait(delayMs);
 
       if (r2.decision === 'bid') {
         bidders2.push({ seat: s, score: r2.score, threshold: r2.threshold, margin: r2.score - r2.threshold });
         multiplier = Math.min(64, Math.max(1, multiplier * 2));
       }
-      yield { type:'event', kind:'bid', seat: s, bid: r2.decision==='bid', score: r2.score, bidMult: bidMultiplier, mult: multiplier, reason: r2.reason } as EventBid;
+      yield { type:'event', kind:'bid', seat: s, bid: r2.decision==='bid', score: r2.score, bidMult: bidMultiplier, mult: multiplier, reason: r2.reason, reason: (typeof reason!=='undefined'?reason: (m as any)?.reason) } as EventBid;
       if (delayMs) await wait(delayMs);
     }
     const pool = (bidders2.length>0? bidders2 : bidders);
