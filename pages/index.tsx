@@ -2279,7 +2279,7 @@ const [lang, setLang] = useState<Lang>(() => {
     }}
   >
     {/* 左列：启用 + 清空 */}
-    <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
+    <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:1 }}>
       <div style={{ display:'grid', gridTemplateColumns:'auto auto', alignItems:'center', columnGap:10 }}>
         <label style={{ display:'flex', alignItems:'center', gap:8 }}>
           启用对局
