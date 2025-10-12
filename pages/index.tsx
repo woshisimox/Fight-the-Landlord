@@ -1478,7 +1478,8 @@ for (const raw of batch) {
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'bid') {
                 const mm = Number((m as any).mult || 0);
-                const reasonStr = sanitizeReason((m as any).reason);
+                const storedReason = lastReasonRef.current[m.seat] ?? '';
+                const reasonStr = sanitizeReason((m as any).reason ?? storedReason ?? '');
                 const reasonTxt = reasonStr ? `｜理由=${reasonStr}` : '';
                 const bb = Number((m as any).bidMult || 0);
                 if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
@@ -1487,13 +1488,15 @@ for (const raw of batch) {
                 else if (m.bid) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
                 const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
                 const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
+                if (reasonStr) lastReasonRef.current[m.seat] = null;
                 nextLog = [
                   ...nextLog,
                   `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}${reasonTxt}`,
                 ];
                 continue;
               } else if (m.type === 'event' && m.kind === 'bid-eval') {
-                const reasonStr = sanitizeReason((m as any).reason);
+                const storedReason = lastReasonRef.current[m.seat] ?? '';
+                const reasonStr = sanitizeReason((m as any).reason ?? storedReason ?? '');
                 const reasonTxt = reasonStr ? `｜理由=${reasonStr}` : '';
                 const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
                 const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
@@ -1535,8 +1538,10 @@ if (m.type === 'event' && m.kind === 'double-decision') {
   if (typeof m.delta === 'number' && isFinite(m.delta)) parts.push(`Δ=${m.delta.toFixed(2)}`);
   if (typeof m.dLhat === 'number' && isFinite(m.dLhat)) parts.push(`Δ̂=${m.dLhat.toFixed(2)}`);
   if (typeof m.counter === 'number' && isFinite(m.counter)) parts.push(`counter=${m.counter.toFixed(2)}`);
-  const reason = sanitizeReason(m.reason);
+  const storedReason = lastReasonRef.current[m.seat] ?? '';
+  const reason = sanitizeReason(m.reason ?? storedReason ?? '');
   if (reason) parts.push(`理由=${reason}`);
+  if (reason) lastReasonRef.current[m.seat] = null;
   if (m.bayes && (typeof m.bayes.landlord!=='undefined' || typeof m.bayes.farmerY!=='undefined')) {
     const l = Number(m.bayes.landlord||0), y = Number(m.bayes.farmerY||0);
     parts.push(`bayes:{L=${l},Y=${y}}`);
