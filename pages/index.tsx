@@ -2601,7 +2601,6 @@ const [lang, setLang] = useState<Lang>(() => {
             </div>
           </div>
         </div>
-      </div>
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         {/* —— 天梯图 —— */}
