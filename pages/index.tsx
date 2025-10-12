@@ -2621,7 +2621,6 @@ const [lang, setLang] = useState<Lang>(() => {
           turnTimeoutSecs={turnTimeoutSecs}
         />
       </div>
-    </div>
     </LangContext.Provider>
   </>);
 }
