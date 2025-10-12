@@ -288,6 +288,25 @@ export const GreedyMax  = exampleExternalAIBot;
 export const GreedyMin  = simpleRuleBot;
 export const RandomLegal = simpleRuleBot;
 
+const aliasBot = (
+  base: BotFunc & ExternalBidder,
+  meta: Partial<ExternalBidder>
+): BotFunc & ExternalBidder =>
+  Object.assign(
+    (async (ctx: BotCtx): Promise<BotMove> => base(ctx)) as BotFunc,
+    { ...base, ...meta }
+  );
+
+export const AllySupport = aliasBot(simpleRuleBot, {
+  name: 'allySupport',
+  choice: 'ally-support'
+});
+
+export const EndgameRush = aliasBot(simpleRuleBot, {
+  name: 'endgameRush',
+  choice: 'endgame-rush'
+});
+
 
 // ---- Legacy type compatibility ----
 export type Four2Policy =
