@@ -1470,27 +1470,29 @@ for (const raw of batch) {
 
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'bid') {
-  const mm = Number((m as any).mult || 0);
-      const reasonTxt = (m as any).reason ? `｜理由=${(m as any).reason}` : '';
-  const bb = Number((m as any).bidMult || 0);
-  if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
-  else if (m.bid) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
-  if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
-  else if (m.bid) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
-  const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
-  const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
-  nextLog = [...nextLog, `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
-  continue;
+                const mm = Number((m as any).mult || 0);
+                const reasonTxt = (m as any).reason ? `｜理由=${(m as any).reason}` : '';
+                const bb = Number((m as any).bidMult || 0);
+                if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
+                else if (m.bid) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
+                if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
+                else if (m.bid) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
+                const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
+                const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
+                nextLog = [
+                  ...nextLog,
+                  `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}${reasonTxt}`,
+                ];
+                continue;
+              } else if (m.type === 'event' && m.kind === 'bid-eval') {
+                const reasonTxt = (m as any).reason ? `｜理由=${(m as any).reason}` : '';
+                const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
+                const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
+                const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
+                const dec = m.decision || 'pass';
+                const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}${reasonTxt}`;
+                nextLog.push(line);
               }
-else if (m.type === 'event' && m.kind === 'bid-eval') {
-      const reasonTxt = (m as any).reason ? `｜理由=${(m as any).reason}` : '';
-  const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
-  const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
-  const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
-  const dec = m.decision || 'pass';
-  const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
-  nextLog.push(line);
-}
 
 
               // -------- 明牌后额外加倍 --------
