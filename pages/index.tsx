@@ -1,7 +1,7 @@
 
 import { useState } from 'react';
 
-function MyComponent() {
+const MyComponent = () => {
   const [enabled, setEnabled] = useState(false);  // Added state initialization for "enabled"
   const [rounds, setRounds] = useState(10);  // Added state initialization for "rounds"
 
@@ -23,4 +23,6 @@ function MyComponent() {
       </div>
     </div>
   );
-}
+};
+
+export default MyComponent;
