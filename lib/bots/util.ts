@@ -33,18 +33,18 @@ export function nonEmptyReason(r?: string, provider?: string): string {
 }
 
 /**
- * 清洗外部凭据字符串：去除首尾空白，并仅保留可打印 ASCII 字符。
+ * 清洗外部凭据字符串：去除首尾空白，并移除控制字符及超出单字节范围的字符。
  * 这样可以避免将含有中文或全角字符的文本直接塞进 HTTP Header，
- * 触发 Node/undici 的 ByteString 校验错误。
+ * 触发 Node/undici 的 ByteString 校验错误，同时保留常见的空格等字符。
  */
 export function sanitizeCredential(raw?: string | null): string {
-  if (!raw) return '';
+  if (raw == null) return '';
   const trimmed = String(raw).trim();
   if (!trimmed) return '';
   let out = '';
   for (const ch of trimmed) {
     const code = ch.charCodeAt(0);
-    if (code >= 0x21 && code <= 0x7e) {
+    if (code >= 0x20 && code <= 0xff) {
       out += ch;
     }
   }
