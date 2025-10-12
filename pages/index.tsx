@@ -2280,7 +2280,7 @@ const [lang, setLang] = useState<Lang>(() => {
   >
     {/* 左列：启用 + 清空 */}
     <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
-      <div style={{ display:'grid', gridTemplateColumns:'auto auto', alignItems:'center', columnGap:10 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
         <label style={{ display:'flex', alignItems:'center', gap:8 }}>
           启用对局
           <input
@@ -2296,11 +2296,14 @@ const [lang, setLang] = useState<Lang>(() => {
           清空
         </button>
       </div>
-</div>
+      <div style={{ fontSize:12, color:'#6b7280' }}>
+        
+      </div>
+    </div>
 
     {/* 左列：可抢地主 / 农民配合 */}
     <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
-      <div style={{ display:'grid', gridTemplateColumns:'auto auto', alignItems:'center', columnGap:8 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:24 }}>
         <label style={{ display:'flex', alignItems:'center', gap:8 }}>
           可抢地主
           <input
@@ -2320,7 +2323,7 @@ const [lang, setLang] = useState<Lang>(() => {
       </div>
 
       {/* 左列：上传/存档 */}
-      <div style={{ display:'grid', gridTemplateColumns:'auto auto', alignItems:'center', columnGap:10 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
         <label style={{ display:'flex', alignItems:'center', gap:8 }}>
           天梯 / TrueSkill
           <input
@@ -2621,6 +2624,7 @@ const [lang, setLang] = useState<Lang>(() => {
           turnTimeoutSecs={turnTimeoutSecs}
         />
       </div>
+    </div>
     </LangContext.Provider>
   </>);
 }
