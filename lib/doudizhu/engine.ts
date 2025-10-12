@@ -287,3 +287,14 @@ export async function runOneGame(bots: BotFunc[], options: EngineOptions = {}): 
 export const GreedyMax  = exampleExternalAIBot;
 export const GreedyMin  = simpleRuleBot;
 export const RandomLegal = simpleRuleBot;
+
+
+// ---- Legacy type compatibility ----
+export type Four2Policy =
+  | 'both'           // 双方都可使用“四带二”
+  | 'lord-only'      // 仅地主
+  | 'farmer-only'    // 仅农民
+  | 'none'           // 禁用
+  | 'first'          // 旧项目里的别名，等价于允许
+  | 'second'         // 旧项目里的别名
+  | 'all';           // 旧项目里的别名
