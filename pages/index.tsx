@@ -2347,7 +2347,7 @@ const [lang, setLang] = useState<Lang>(() => {
           存档
         </button>
       </div>
-
+    </div>
 
     {/* 右列：表单行网格（右侧统一成“标签-控件”两列） */}
     <div
