@@ -2302,7 +2302,7 @@ const [lang, setLang] = useState<Lang>(() => {
     </div>
 
     {/* 左列：可抢地主 / 农民配合 */}
-    <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
+    <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:2 }}>
       <div style={{ display:'flex', alignItems:'center', gap:24 }}>
         <label style={{ display:'flex', alignItems:'center', gap:8 }}>
           可抢地主
