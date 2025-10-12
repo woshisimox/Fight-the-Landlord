@@ -10,7 +10,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     Settings: '对局设置',
     Enable: '启用对局',
     Reset: '清空',
-    EnableHint: '关闭后不可开始/继续对局；再次勾选即可恢复。',
+    EnableHint: '',
     LadderTitle: '天梯图（活动积分 ΔR）',
     LadderRange: '范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）',
     Pass: '过',
@@ -170,7 +170,7 @@ const TRANSLATIONS: TransRule[] = [
   { zh: /总体档/, en: 'Overall' },
   { zh: /总体(?!均值)/, en: 'Overall' },
 
-  { zh: '关闭后不可开始/继续对局；再次勾选即可恢复。', en: 'Disabled matches cannot start/continue; tick again to restore.' },
+  { zh: '', en: 'Disabled matches cannot start/continue; tick again to restore.' },
 ];
 function hasChinese(s: string) { return /[\u4e00-\u9fff]/.test(s); }
 
@@ -2296,10 +2296,7 @@ const [lang, setLang] = useState<Lang>(() => {
           清空
         </button>
       </div>
-      <div style={{ fontSize:12, color:'#6b7280' }}>
-        关闭后不可开始/继续对局；再次勾选即可恢复。
-      </div>
-    </div>
+</div>
 
     {/* 左列：可抢地主 / 农民配合 */}
     <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
