@@ -2279,10 +2279,27 @@ const [lang, setLang] = useState<Lang>(() => {
     }}
   >
     {/* 左列：启用 + 清空 */}
-
+    <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'auto auto', alignItems:'center', columnGap:10 }}>
+        <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+          启用对局
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={e=>setEnabled(e.target.checked)}
+          />
+        </label>
+        <button
+          onClick={doResetAll}
+          style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+        >
+          清空
+        </button>
+      </div>
+</div>
 
     {/* 左列：可抢地主 / 农民配合 */}
-    <div style={{ gridColumn:'1 / 4', display:'grid', rowGap:6 }}>
+    <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
       <div style={{ display:'grid', gridTemplateColumns:'auto auto', alignItems:'center', columnGap:24 }}>
         <label style={{ display:'flex', alignItems:'center', gap:8 }}>
           可抢地主
@@ -2333,7 +2350,7 @@ const [lang, setLang] = useState<Lang>(() => {
     {/* 右列：表单行网格（右侧统一成“标签-控件”两列） */}
     <div
       style={{
-        gridColumn:'3 / 4',
+        gridColumn:'2 / 3',
         display:'grid',
         gridTemplateColumns:'96px 1fr',
         alignItems:'center',
