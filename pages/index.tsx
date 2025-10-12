@@ -2296,6 +2296,7 @@ const [lang, setLang] = useState<Lang>(() => {
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       农民配合
       <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
+	  
     </label>
   </div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
