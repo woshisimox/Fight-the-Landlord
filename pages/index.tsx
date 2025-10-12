@@ -2282,10 +2282,7 @@ const [lang, setLang] = useState<Lang>(() => {
             <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
           </div>
 
-          <label>局数
-            <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
-          </label>
-          
+
           
 <div style={{ gridColumn:'1 / 2' }}>
   <div style={{ display:'flex', alignItems:'center', gap:24 }}>
@@ -2321,6 +2318,10 @@ const [lang, setLang] = useState<Lang>(() => {
   </div>
 </div>
 <div style={{ gridColumn:'2 / 3' }}>
+  <label>局数
+    <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
+  </label>
+          
   <label>初始分
           <input type="number" step={10} value={startScore}
            onChange={e=>setStartScore(Number(e.target.value)||0)}
