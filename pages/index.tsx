@@ -2279,7 +2279,7 @@ const [lang, setLang] = useState<Lang>(() => {
     }}
   >
     {/* 左列：启用 + 清空 */}
-    <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:1 }}>
+    <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
       <div style={{ display:'grid', gridTemplateColumns:'auto auto', alignItems:'center', columnGap:10 }}>
         <label style={{ display:'flex', alignItems:'center', gap:8 }}>
           启用对局
@@ -2300,7 +2300,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
     {/* 左列：可抢地主 / 农民配合 */}
     <div style={{ gridColumn:'1 / 2', display:'grid', rowGap:6 }}>
-      <div style={{ display:'grid', gridTemplateColumns:'auto auto', alignItems:'center', columnGap:24 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'auto auto', alignItems:'center', columnGap:8 }}>
         <label style={{ display:'flex', alignItems:'center', gap:8 }}>
           可抢地主
           <input
