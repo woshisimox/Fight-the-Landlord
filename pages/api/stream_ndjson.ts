@@ -551,27 +551,70 @@ continue;
 
 /* ========== HTTP 处理 ========== */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const allowMethods = 'POST, GET, OPTIONS, HEAD';
   const applyCors = () => {
     try {
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      const reqHeaders = req.headers['access-control-request-headers'];
+      if (typeof reqHeaders === 'string' && reqHeaders.trim()) {
+        res.setHeader('Access-Control-Allow-Headers', reqHeaders);
+      } else {
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+      }
+      res.setHeader('Access-Control-Allow-Methods', allowMethods);
     } catch {}
   };
 
   applyCors();
 
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Allow', 'POST, OPTIONS');
+  const method = (req.method || '').toUpperCase();
+  if (method === 'OPTIONS') {
+    res.setHeader('Allow', allowMethods);
     res.status(204).end();
     return;
   }
 
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST, OPTIONS');
+  if (method === 'HEAD') {
+    res.setHeader('Allow', allowMethods);
+    res.status(204).end();
+    return;
+  }
+
+  if (method !== 'POST' && method !== 'GET') {
+    res.setHeader('Allow', allowMethods);
     res.status(405).json({ error: 'Method Not Allowed' });
     return;
   }
+
+  const resolveBody = (): RunBody => {
+    if (method === 'POST') {
+      return ((req as any).body ?? {}) as RunBody;
+    }
+
+    const query = req.query || {};
+    const payload = typeof (query as any).payload === 'string'
+      ? (query as any).payload
+      : typeof (query as any).body === 'string'
+        ? (query as any).body
+        : '';
+
+    if (payload) {
+      try {
+        return JSON.parse(payload);
+      } catch {}
+    }
+
+    const base: Record<string, any> = {};
+    for (const [key, value] of Object.entries(query)) {
+      if (key === 'payload' || key === 'body') continue;
+      if (Array.isArray(value)) {
+        base[key] = value.length === 1 ? value[0] : value;
+      } else {
+        base[key] = value;
+      }
+    }
+    return base as RunBody;
+  };
 
   try {
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
@@ -582,7 +625,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const keepAlive = setInterval(() => { try { (res as any).write('\n'); } catch {} }, 15000);
 
   try {
-    const body: RunBody = (req as any).body as any;
+    const body: RunBody = resolveBody();
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
     const four2  = (body.four2 || 'both') as 'both'|'2singles'|'2pairs';
 
