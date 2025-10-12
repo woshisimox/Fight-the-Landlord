@@ -1,8 +1,9 @@
 
-// engine.ts — external-AI bidding enabled version (fixed: no yield inside inner async fn)
+// engine.ts — external-AI bidding via optional bot.bid(ctx) to avoid breaking existing BotFunc
 
 export type Label = string;
 
+// ---- Decisions & Contexts ----
 export type BidDecision =
   | { kind: 'bid'; score?: number; threshold?: number; reason?: string }
   | { kind: 'pass'; score?: number; threshold?: number; reason?: string };
@@ -26,7 +27,15 @@ export type BotCtx = {
   position: number;
 };
 
-export type BotFunc = (ctx: BotCtx | BidCtx) => Promise<BotMove | BidDecision> | BotMove | BidDecision;
+// ---- Keep BotFunc signature compatible with existing codebases (play-phase only) ----
+export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
+
+// ---- Allow (optional) external bidding entrypoint on the same bot object ----
+export type ExternalBidder = {
+  bid?: (ctx: BidCtx) => Promise<BidDecision> | BidDecision;
+  name?: string;
+  choice?: string;
+};
 
 export type EventInit = { type:'event', kind:'init', hands: Label[][] };
 export type EventBidEval = { type:'event', kind:'bid-eval', seat:number, score:number, threshold?:number, decision:'bid'|'pass', reason?:string };
@@ -141,9 +150,9 @@ export async function* playOneGame(bots: BotFunc[], options: EngineOptions = {})
     let reason: string | undefined = undefined;
 
     try {
-      const bot = bots[seat];
-      if (bot) {
-        const maybe = await Promise.resolve(bot(bidCtx as any));
+      const botAny = bots[seat] as BotFunc & ExternalBidder;
+      if (botAny && typeof botAny.bid === 'function') {
+        const maybe = await Promise.resolve(botAny.bid(bidCtx));
         if (maybe && typeof maybe === 'object' && ('kind' in (maybe as any)) && ((maybe as any).kind==='bid' || (maybe as any).kind==='pass')) {
           decisionFromExternal = maybe as BidDecision;
           if (typeof decisionFromExternal.score === 'number') sc = decisionFromExternal.score as number;
@@ -158,22 +167,19 @@ export async function* playOneGame(bots: BotFunc[], options: EngineOptions = {})
     if (usedThreshold === undefined) {
       const thChoice = options.thresholdChoice || { '': 1.8 };
       const thName   = options.thresholdName   || { '': 1.8 };
-      const anyBot:any = (bots as any)[seat];
+      const anyBot = bots[seat] as Partial<ExternalBidder>;
       const choice = String(anyBot?.choice || '').toLowerCase();
-      const name   = String(anyBot?.name   || anyBot?.constructor?.name || '').toLowerCase();
-      usedThreshold = thChoice[choice] ?? thName[name] ?? 1.8;
+      const name   = String(anyBot?.name   || '').toLowerCase();
+      usedThreshold = (thChoice as any)[choice] ?? (thName as any)[name] ?? 1.8;
     }
 
     const decision: 'bid'|'pass' = decisionFromExternal ? decisionFromExternal.kind : (sc >= (usedThreshold || 0) ? 'bid' : 'pass');
-
     return { decision, score: sc, threshold: usedThreshold || 0, reason };
   }
 
   // round 1
   for (const s of order) {
     const r = await decideBid(s, 'first-round');
-
-    // emit eval event here (moved out of inner function)
     yield { type:'event', kind:'bid-eval', seat: s, score: r.score, threshold: r.threshold, decision: r.decision, reason: r.reason } as EventBidEval;
     if (delayMs) await wait(delayMs);
 
@@ -192,7 +198,6 @@ export async function* playOneGame(bots: BotFunc[], options: EngineOptions = {})
     const bidders2: { seat:number; score:number; threshold:number; margin:number }[] = [];
     for (const s of secondOrder) {
       const r2 = await decideBid(s, 'second-round');
-
       yield { type:'event', kind:'bid-eval', seat: s, score: r2.score, threshold: r2.threshold, decision: r2.decision, reason: r2.reason } as EventBidEval;
       if (delayMs) await wait(delayMs);
 
@@ -215,33 +220,54 @@ export async function* playOneGame(bots: BotFunc[], options: EngineOptions = {})
   yield { type:'event', kind:'assign-lord', seat: lordSeat, bottom, mult: multiplier } as EventAssign;
   if (delayMs) await wait(delayMs);
 
+  // --- play stub ---
   for (let turn = 0; turn < 3; turn++) {
     const s = (lordSeat + turn) % 3;
-    yield { type:'event', kind:'play', seat: s, move:'pass', reason:'stub' } as EventPlay;
+    const bot = bots[s];
+    const mv = await Promise.resolve(bot({ hand: hands[s], position: s }));
+    if (mv && mv.move === 'play') {
+      yield { type:'event', kind:'play', seat: s, move:'play', cards: mv.cards, reason: mv.reason } as EventPlay;
+    } else {
+      yield { type:'event', kind:'play', seat: s, move:'pass', reason: mv?.reason || 'stub' } as EventPlay;
+    }
     if (delayMs) await wait(delayMs);
   }
 
   yield { type:'event', kind:'result', winner:'lord', mult: multiplier } as EventResult;
 }
 
-export const exampleExternalAIBot: BotFunc = async (ctx:any) => {
-  if (ctx && ctx.phase) {
-    const score = evalRobScore(ctx.hand);
-    const threshold = 2.0;
-    if (score >= threshold || hasBomb(ctx.hand)) {
-      return { kind: 'bid', score, threshold, reason: `外部AI：score=${score.toFixed(2)} >= ${threshold} 或存在炸弹` };
-    } else {
-      return { kind: 'pass', score, threshold, reason: `外部AI：score=${score.toFixed(2)} < ${threshold}` };
-    }
+// ---- Example: external AI bot with optional .bid() ----
+// Keep callable (play) signature compatible with BotFunc, and attach .bid for bidding.
+export const exampleExternalAIBot: BotFunc & ExternalBidder = Object.assign(
+  async (ctx: BotCtx) => {
+    // play-phase: pass for demo
+    return { move: 'pass', reason: 'demo external bot' };
+  },
+  {
+    bid: async (ctx: BidCtx): Promise<BidDecision> => {
+      const score = evalRobScore(ctx.hand);
+      const threshold = 2.0;
+      if (score >= threshold || hasBomb(ctx.hand)) {
+        return { kind: 'bid', score, threshold, reason: `外部AI：score=${score.toFixed(2)} >= ${threshold} 或存在炸弹` };
+      } else {
+        return { kind: 'pass', score, threshold, reason: `外部AI：score=${score.toFixed(2)} < ${threshold}` };
+      }
+    },
+    name: 'exampleExternalAIBot',
+    choice: 'external-llm'
   }
-  return { move: 'pass', reason: 'demo external bot' };
-};
+);
 
-export const simpleRuleBot: BotFunc = async (ctx:any) => {
-  if (ctx && ctx.phase) {
-    const score = evalRobScore(ctx.hand);
-    const th = 1.8;
-    return { kind: (score>=th?'bid':'pass'), score, threshold: th, reason: 'simple rule' };
+// ---- Simple rule bot that also supports .bid() ----
+export const simpleRuleBot: BotFunc & ExternalBidder = Object.assign(
+  async (ctx: BotCtx) => ({ move: 'pass' }),
+  {
+    bid: async (ctx: BidCtx) => {
+      const score = evalRobScore(ctx.hand);
+      const th = 1.8;
+      return { kind: (score>=th?'bid':'pass'), score, threshold: th, reason: 'simple rule' };
+    },
+    name: 'simpleRule',
+    choice: 'rule'
   }
-  return { move: 'pass' };
-};
+);
