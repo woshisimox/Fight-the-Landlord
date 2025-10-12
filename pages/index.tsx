@@ -2297,8 +2297,9 @@ const [lang, setLang] = useState<Lang>(() => {
       农民配合
       <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
 	      </label>
-       {/* Empty row for spacing */}
-      <div style={{ marginBottom: 12 }}> </div>
+  </div>
+        {/* Empty row for spacing */}
+      <div style={{ marginBottom: 12 }}></div>
   <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       天梯  /  TrueSkill
