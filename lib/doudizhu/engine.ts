@@ -159,6 +159,24 @@ export async function* playOneGame(bots: BotFunc[], options: EngineOptions = {})
       }
     } catch (e) {
       console.warn('[engine] external bid error seat', seat, e);
+      const botAny = bots[seat] as Partial<ExternalBidder>;
+      const label =
+        (botAny?.name && String(botAny.name).trim()) ||
+        (botAny?.choice && String(botAny.choice).trim()) ||
+        '';
+      const prefix = label ? `[${label}] ` : '';
+      const message = (() => {
+        if (!e) return 'external bidder exception';
+        if (typeof e === 'string') return e;
+        const maybe = (e as any).message;
+        if (typeof maybe === 'string' && maybe.trim()) return maybe;
+        try {
+          return JSON.stringify(e);
+        } catch (_err) {
+          return String(e);
+        }
+      })();
+      reason = `${prefix}${message}，已回退`;
     }
 
     if (usedThreshold === undefined) {
