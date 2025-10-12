@@ -2603,6 +2603,7 @@ const [lang, setLang] = useState<Lang>(() => {
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
         {/* —— 天梯图 —— */}
       <LadderPanel />
+<div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
         <LivePanel
           key={resetKey}
           rounds={rounds}
@@ -2620,6 +2621,7 @@ const [lang, setLang] = useState<Lang>(() => {
           turnTimeoutSecs={turnTimeoutSecs}
         />
       </div>
+    </div>
     </LangContext.Provider>
   </>);
 }
