@@ -273,6 +273,37 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
+function choiceLabel(choice: BotChoice): string {
+  switch (choice) {
+    case 'built-in:greedy-max': return 'Greedy Max';
+    case 'built-in:greedy-min': return 'Greedy Min';
+    case 'built-in:random-legal': return 'Random Legal';
+    case 'built-in:mininet': return 'MiniNet';
+    case 'built-in:ally-support': return 'Ally Support';
+    case 'built-in:endgame-rush': return 'Endgame Rush';
+    case 'ai:openai': return 'OpenAI';
+    case 'ai:gemini': return 'Gemini';
+    case 'ai:grok': return 'Grok';
+    case 'ai:kimi': return 'Kimi';
+    case 'ai:qwen': return 'Qwen';
+    case 'ai:deepseek': return 'DeepSeek';
+    case 'http': return 'HTTP';
+    default: return choice;
+  }
+}
+
+function defaultModelFor(choice: BotChoice): string {
+  switch (choice) {
+    case 'ai:openai': return 'gpt-4o-mini';
+    case 'ai:gemini': return 'gemini-1.5-flash';
+    case 'ai:grok': return 'grok-beta';
+    case 'ai:kimi': return 'moonshot-v1-8k';
+    case 'ai:qwen': return 'qwen-max';
+    case 'ai:deepseek': return 'deepseek-chat';
+    default: return '';
+  }
+}
+
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
 type Rating = { mu:number; sigma:number };
 const TS_DEFAULT: Rating = { mu:25, sigma:25/3 };
