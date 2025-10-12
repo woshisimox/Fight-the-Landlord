@@ -1,5 +1,5 @@
 
-// engine.ts — external-AI bidding via optional bot.bid(ctx); single `reason` prop in events
+// engine.ts — external-AI bidding via optional bot.bid(ctx); v5 fixes literal union for `kind`
 
 export type Label = string;
 
@@ -243,11 +243,11 @@ export const exampleExternalAIBot: BotFunc & ExternalBidder = Object.assign(
     bid: async (ctx: BidCtx): Promise<BidDecision> => {
       const score = evalRobScore(ctx.hand);
       const threshold = 2.0;
-      if (score >= threshold || hasBomb(ctx.hand)) {
-        return { kind: 'bid', score, threshold, reason: `外部AI：score=${score.toFixed(2)} >= ${threshold} 或存在炸弹` };
-      } else {
-        return { kind: 'pass', score, threshold, reason: `外部AI：score=${score.toFixed(2)} < ${threshold}` };
-      }
+      const kd: 'bid'|'pass' = (score >= threshold || hasBomb(ctx.hand)) ? 'bid' : 'pass';
+      return { kind: kd, score, threshold, reason: kd==='bid'
+        ? `外部AI：score=${score.toFixed(2)} >= ${threshold} 或存在炸弹`
+        : `外部AI：score=${score.toFixed(2)} < ${threshold}`
+      };
     },
     name: 'exampleExternalAIBot',
     choice: 'external-llm'
@@ -260,10 +260,11 @@ export const simpleRuleBot: BotFunc & ExternalBidder = Object.assign(
     return mv;
   }) as BotFunc,
   {
-    bid: async (ctx: BidCtx) => {
+    bid: async (ctx: BidCtx): Promise<BidDecision> => {
       const score = evalRobScore(ctx.hand);
       const th = 1.8;
-      return { kind: (score>=th?'bid':'pass'), score, threshold: th, reason: 'simple rule' };
+      const decision: 'bid'|'pass' = (score >= th) ? 'bid' : 'pass';
+      return { kind: decision, score, threshold: th, reason: 'simple rule' };
     },
     name: 'simpleRule',
     choice: 'rule'
