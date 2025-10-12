@@ -2267,94 +2267,78 @@ const [lang, setLang] = useState<Lang>(() => {
 
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
-  <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12, gridAutoFlow:'row dense' }}>
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                启用对局
+                <input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} />
+              </label>
+              <button onClick={doResetAll} style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+                清空
+              </button>
+            </div>
+            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
+          </div>
 
-  <div style={{ display:'grid', gridTemplateColumns:'minmax(360px,1fr) minmax(420px,1fr)', gap:16, alignItems:'start' }}>
-    {/* 左侧：启用/可抢地主/农民配合 + 清空 */}
-    <div style={{
-      display:'grid',
-      gridTemplateColumns:'auto 1fr auto',
-      rowGap:12, columnGap:12, alignItems:'center',
-      padding:'10px 12px', border:'1px solid #eee', borderRadius:10, background:'rgba(255,255,255,0.5)'
-    }}>
-      {/* 启用对局 */}
-      <div style={{opacity:.9}}>启用对局</div>
-      <div>
-        <label style={{display:'inline-flex',alignItems:'center',gap:8}}>
-          <input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} />
-          <span style={{opacity:.65,fontSize:12}}>关闭后不可开始/继续对局；再次勾选即可恢复。</span>
-        </label>
-      </div>
-      <div><button onClick={doResetAll} style={{padding:'6px 12px',borderRadius:8,border:'1px solid #e5e7eb',background:'#fff'}}>清空</button></div>
-
-      {/* 可抢地主 */}
-      <div style={{opacity:.9}}>可抢地主</div>
-      <div>
-        <label style={{display:'inline-flex',alignItems:'center',gap:8}}>
-          <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
-          <span style={{opacity:.65,fontSize:12}}>{bid ? '已启用' : '已关闭'}</span>
-        </label>
-      </div>
-      <div />
-
-      {/* 农民配合 */}
-      <div style={{opacity:.9}}>农民配合</div>
-      <div>
-        <label style={{display:'inline-flex',alignItems:'center',gap:8}}>
-          <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
-          <span style={{opacity:.65,fontSize:12}}>{farmerCoop ? '协作' : '独立'}</span>
-        </label>
-      </div>
-      <div />
-    </div>
-
-    {/* 右侧：局数 / 初始分 / 4带2规则 */}
-    <div style={{
-      display:'grid',
-      gridTemplateColumns:'120px 1fr',
-      rowGap:12, columnGap:12, alignItems:'center',
-      padding:'10px 12px', border:'1px solid #eee', borderRadius:10, background:'rgba(255,255,255,0.5)'
-    }}>
-      <div style={{textAlign:'right',opacity:.9}}>局数</div>
-      <div>
-        <select value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{width:'100%',height:36}}>
-          {[1,5,10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
-        </select>
-      </div>
-
-      <div style={{textAlign:'right',opacity:.9}}>初始分</div>
-      <div>
-        <input type="number" step={1} value={startScore}
-          onChange={e=>setStartScore(Math.floor(Number(e.target.value)||0))}
-          style={{width:'100%',height:36,padding:'0 10px',borderRadius:8,border:'1px solid #e5e7eb',background:'#fff'}}/>
-      </div>
-
-      <div style={{textAlign:'right',opacity:.9}}>4带2 规则</div>
-      <div>
-        <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{width:'100%',height:36}}>
-          <option value="both">都可</option>
-          <option value="2singles">两张单牌</option>
-          <option value="2pairs">两对</option>
-        </select>
-      </div>
-    </div>
-  </div>
-
-  {/* TrueSkill / 天梯：上传 / 存档 */}
-  <div style={{
-    marginTop:12, display:'grid',
-    gridTemplateColumns:'140px 1fr auto auto', gap:12, alignItems:'center',
-    padding:'10px 12px', border:'1px dashed #eee', borderRadius:10, background:'rgba(255,255,255,0.5)'
-  }}>
-    <div style={{fontWeight:600}}>天梯 / TrueSkill</div>
-    <div style={{opacity:.7,fontSize:12}}></div>
-    <label style={{display:'inline-flex',alignItems:'center',gap:8}}>
-      <input id="trueskill-upload"  type="file" accept="application/json" onChange={handleUploadFile} style={{display:'none'}}/>
-      <button onClick={() => (document.getElementById("trueskill-upload") as HTMLInputElement | null)?.click()} style={{padding:'6px 12px',borderRadius:8,border:'1px solid #e5e7eb',background:'#fff'}}>上传</button>
+          <label>局数
+            <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
+          </label>
+          
+          
+<div style={{ gridColumn:'1 / 2' }}>
+  <div style={{ display:'flex', alignItems:'center', gap:24 }}>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      可抢地主
+      <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
     </label>
-    <button onClick={handleSaveArchive} style={{padding:'6px 12px',borderRadius:8,border:'1px solid #e5e7eb',background:'#fff'}}>存档</button>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      农民配合
+      <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
+    </label>
   </div>
-</div><div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
+  <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
+    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+      天梯  /  TrueSkill
+    <input
+      ref={allFileRef}
+      type="file"
+      accept="application/json"
+      style={{ display:'none' }}
+      onChange={handleAllFileUploadHome}
+    />
+    <button
+      onClick={()=>allFileRef.current?.click()}
+      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >上传</button>
+    
+    </label>
+<button
+      onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
+      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+    >存档</button>
+  </div>
+</div>
+<div style={{ gridColumn:'2 / 3' }}>
+  <label>初始分
+          <input type="number" step={10} value={startScore}
+           onChange={e=>setStartScore(Number(e.target.value)||0)}
+           style={{ width:'100%' }} />
+          </label>
+</div>
+          <div style={{ gridColumn:'2 / 3' }}>
+  <label>4带2 规则
+            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
+              <option value="both">都可</option>
+              <option value="2singles">两张单牌</option>
+              <option value="2pairs">两对</option>
+            </select>
+          </label>
+</div>
+        </div>
+
+        <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
           <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
 
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
@@ -2798,6 +2782,3 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
     </div>
   );
 }
-{/* ui-align-v3 20251011-164626 */}
-
-{/* ui-align-v4 20251011-164656 */}
