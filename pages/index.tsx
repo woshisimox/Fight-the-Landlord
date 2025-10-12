@@ -2287,7 +2287,7 @@ const [lang, setLang] = useState<Lang>(() => {
           </label>
           
           
-<div style={{ gridColumn:'1 / 2' }}>
+<div style={{ gridColumn:'1 / 3' }}>
   <div style={{ display:'flex', alignItems:'center', gap:24 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       可抢地主
