@@ -2299,7 +2299,7 @@ const [lang, setLang] = useState<Lang>(() => {
       <div style={{ fontSize:12, color:'#6b7280' }}>
         
       </div>
-    </div>
+
 
     {/* 左列：可抢地主 / 农民配合 */}
 
