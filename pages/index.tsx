@@ -10,7 +10,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     Settings: '对局设置',
     Enable: '启用对局',
     Reset: '清空',
-    EnableHint: '',
+    EnableHint: '关闭后不可开始/继续对局；再次勾选即可恢复。',
     LadderTitle: '天梯图（活动积分 ΔR）',
     LadderRange: '范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）',
     Pass: '过',
@@ -25,7 +25,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     Settings: 'Match settings',
     Enable: 'Enable match',
     Reset: 'Reset',
-    EnableHint: '',
+    EnableHint: 'Disabled matches cannot start/continue; tick again to restore.',
     LadderTitle: 'Ladder (ΔR)',
     LadderRange: 'Range ±K (weighted by situation, current K≈{K}; no-participation = history or 0)',
     Pass: 'Pass',
@@ -170,7 +170,7 @@ const TRANSLATIONS: TransRule[] = [
   { zh: /总体档/, en: 'Overall' },
   { zh: /总体(?!均值)/, en: 'Overall' },
 
-  { zh: ' ', en: ' ' },
+  { zh: '关闭后不可开始/继续对局；再次勾选即可恢复。', en: 'Disabled matches cannot start/continue; tick again to restore.' },
 ];
 function hasChinese(s: string) { return /[\u4e00-\u9fff]/.test(s); }
 
@@ -2279,7 +2279,7 @@ const [lang, setLang] = useState<Lang>(() => {
                 清空
               </button>
             </div>
-            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
+//            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
           </div>
 
           <label>局数
