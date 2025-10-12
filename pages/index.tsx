@@ -2297,6 +2297,11 @@ const [lang, setLang] = useState<Lang>(() => {
       农民配合
       <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
 	      </label>
+		    <label>初始分
+          <input type="number" step={10} value={startScore}
+           onChange={e=>setStartScore(Number(e.target.value)||0)}
+           style={{ width:'100%' }} />
+          </label>
   </div>
         {/* Empty row for spacing */}
       <div style={{ marginBottom: 20 }}></div>
@@ -2323,11 +2328,7 @@ const [lang, setLang] = useState<Lang>(() => {
   </div>
 </div>
 <div style={{ gridColumn:'2 / 3' }}>
-  <label>初始分
-          <input type="number" step={10} value={startScore}
-           onChange={e=>setStartScore(Number(e.target.value)||0)}
-           style={{ width:'100%' }} />
-          </label>
+
 </div>
           <div style={{ gridColumn:'2 / 3' }}>
   <label>4带2 规则
