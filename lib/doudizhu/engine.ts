@@ -270,3 +270,20 @@ export const simpleRuleBot: BotFunc & ExternalBidder = Object.assign(
     choice: 'rule'
   }
 );
+
+
+// ---- Compatibility shims ----
+
+// Run the game to completion and collect all events (compat with legacy `runOneGame` API)
+export async function runOneGame(bots: BotFunc[], options: EngineOptions = {}): Promise<EngineEvent[]> {
+  const events: EngineEvent[] = [];
+  for await (const ev of playOneGame(bots, options)) {
+    events.push(ev);
+  }
+  return events;
+}
+
+// Common bot aliases for compatibility with previous imports
+export const GreedyMax  = exampleExternalAIBot;
+export const GreedyMin  = simpleRuleBot;
+export const RandomLegal = simpleRuleBot;
