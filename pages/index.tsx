@@ -2287,7 +2287,7 @@ const [lang, setLang] = useState<Lang>(() => {
           </label>
           
           
-<div style={{ gridColumn:'1 / 3' }}>
+<div style={{ gridColumn:'1 / 2' }}>
   <div style={{ display:'flex', alignItems:'center', gap:24 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
       可抢地主
@@ -2297,6 +2297,7 @@ const [lang, setLang] = useState<Lang>(() => {
       农民配合
       <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
 	      </label>
+		  <div style={{ gridColumn:'2 / 3' }}>
 		    <label>初始分
           <input type="number" step={10} value={startScore}
            onChange={e=>setStartScore(Number(e.target.value)||0)}
