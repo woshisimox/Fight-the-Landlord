@@ -1471,6 +1471,7 @@ for (const raw of batch) {
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'bid') {
   const mm = Number((m as any).mult || 0);
+      const reasonTxt = (m as any).reason ? `｜理由=${(m as any).reason}` : '';
   const bb = Number((m as any).bidMult || 0);
   if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
   else if (m.bid) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
@@ -1482,6 +1483,7 @@ for (const raw of batch) {
   continue;
               }
 else if (m.type === 'event' && m.kind === 'bid-eval') {
+      const reasonTxt = (m as any).reason ? `｜理由=${(m as any).reason}` : '';
   const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
   const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
   const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
