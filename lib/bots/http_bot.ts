@@ -1,5 +1,6 @@
 // lib/bots/http_bot.ts
 // 通用 HTTP 代理 bot：把 ctx 以 JSON POST 给你的服务，由服务返回 {move, cards?, reason}
+import { sanitizeCredential } from './util';
 type BotMove =
   | { move: 'pass'; reason?: string }
   | { move: 'play'; cards: string[]; reason?: string };
@@ -14,15 +15,18 @@ export const HttpBot = (o: {
   headers?: Record<string, string>;
 }): BotFunc =>
   async (ctx: BotCtx) => {
-    const endpoint = (o.url || o.base || '').replace(/\/$/, '');
+    const endpoint = (o.url || o.base || '').trim().replace(/\/$/, '');
     if (!endpoint) throw new Error('Missing HTTP endpoint (base/url)');
+
+    const apiKey = sanitizeCredential(o.apiKey);
+    const token = sanitizeCredential(o.token);
 
     const r = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        ...(o.apiKey ? { 'x-api-key': o.apiKey } : {}),
-        ...(o.token ? { authorization: `Bearer ${o.token}` } : {}),
+        ...(apiKey ? { 'x-api-key': apiKey } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
         ...(o.headers || {}),
       },
       body: JSON.stringify({ ctx, seen: (Array.isArray((ctx as any)?.seen)?(ctx as any).seen:[]), seenBySeat: (Array.isArray((ctx as any)?.seenBySeat)?(ctx as any).seenBySeat:[[],[],[]]), seatInfo: { seat:(ctx as any).seat, landlord:(ctx as any).landlord, leader:(ctx as any).leader, trick:(ctx as any).trick } }),
