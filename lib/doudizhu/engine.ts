@@ -34,6 +34,23 @@ export type ExternalBidder = {
   choice?: string;
 };
 
+function withExternalMeta<T extends BotFunc>(
+  fn: T,
+  meta: { bid?: ExternalBidder['bid']; name?: string; choice?: string }
+): T & ExternalBidder {
+  const target = fn as T & ExternalBidder;
+  if (meta.bid) target.bid = meta.bid;
+  if (meta.choice) target.choice = meta.choice;
+  if (meta.name) {
+    try {
+      Object.defineProperty(target, 'name', { value: meta.name, configurable: true });
+    } catch {
+      try { (target as any).name = meta.name; } catch {}
+    }
+  }
+  return target;
+}
+
 export type EventInit = { type:'event', kind:'init', hands: Label[][] };
 export type EventBidEval = { type:'event', kind:'bid-eval', seat:number, score:number, threshold?:number, decision:'bid'|'pass', reason?:string };
 export type EventBid = { type:'event', kind:'bid', seat:number, bid:boolean, score:number, bidMult:number, mult:number, reason?:string };
@@ -234,7 +251,7 @@ export async function* playOneGame(bots: BotFunc[], options: EngineOptions = {})
 }
 
 // Example bots
-export const exampleExternalAIBot: BotFunc & ExternalBidder = Object.assign(
+export const exampleExternalAIBot: BotFunc & ExternalBidder = withExternalMeta(
   (async (ctx: BotCtx): Promise<BotMove> => {
     const mv: BotMove = { move: 'pass', reason: 'demo external bot' } as const;
     return mv;
@@ -254,7 +271,7 @@ export const exampleExternalAIBot: BotFunc & ExternalBidder = Object.assign(
   }
 );
 
-export const simpleRuleBot: BotFunc & ExternalBidder = Object.assign(
+export const simpleRuleBot: BotFunc & ExternalBidder = withExternalMeta(
   (async (ctx: BotCtx): Promise<BotMove> => {
     const mv: BotMove = { move: 'pass' } as const;
     return mv;

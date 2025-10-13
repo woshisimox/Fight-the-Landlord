@@ -2,6 +2,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import {
   runOneGame,
+  playOneGame,
   GreedyMax,
   GreedyMin,
   RandomLegal,
@@ -319,7 +320,18 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
     return result;
   };
 
-  Object.assign(wrapped, baseBot);
+  for (const key of Reflect.ownKeys(baseBot)) {
+    if (key === 'name' || key === 'length' || key === 'prototype') continue;
+    const desc = Object.getOwnPropertyDescriptor(baseBot, key as any);
+    if (!desc) continue;
+    try {
+      Object.defineProperty(wrapped, key, desc);
+    } catch {
+      if ('value' in desc) {
+        try { (wrapped as any)[key as any] = desc.value; } catch {}
+      }
+    }
+  }
   (wrapped as any).__providerLabel = label;
   (wrapped as any).__choice = choice;
   (wrapped as any).__isExternalAi = isExternal;
@@ -377,7 +389,38 @@ async function runOneRoundWithGuard(
   res: NextApiResponse,
   round: number
 ){
-  const iter = runOneGame({ seats, four2, rule, ruleId } as any);
+  let iter: AsyncIterable<any> | null = null;
+  if (typeof playOneGame === 'function') {
+    try {
+      const candidate = (playOneGame as any)(seats, { roundNo: round, ruleId });
+      if (candidate && typeof candidate[Symbol.asyncIterator] === 'function') {
+        iter = candidate as AsyncIterable<any>;
+      }
+    } catch (err) {
+      const msg = (err && typeof err === 'object' && 'message' in err)
+        ? String((err as any).message)
+        : String(err);
+      writeLine(res, { type:'log', message:`playOneGame 调用失败：${msg}` });
+    }
+  }
+
+  if (!iter) {
+    const legacyResult = (runOneGame as any)({ seats, four2, rule, ruleId });
+    if (legacyResult && typeof legacyResult[Symbol.asyncIterator] === 'function') {
+      iter = legacyResult as AsyncIterable<any>;
+    } else {
+      iter = (async function* () {
+        try {
+          const events = await legacyResult;
+          if (Array.isArray(events)) {
+            for (const ev of events) yield ev;
+          }
+        } catch (err) {
+          throw err;
+        }
+      })();
+    }
+  }
   let sentInit = false;
 
   // 画像统计
