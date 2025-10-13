@@ -559,7 +559,20 @@ continue;
 
 /* ========== HTTP 处理 ========== */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  try {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'content-type, authorization, x-api-key');
+  } catch {}
+
+  if (req.method === 'OPTIONS') {
+    try { res.setHeader('Allow', 'POST, OPTIONS'); } catch {}
+    res.status(204).end();
+    return;
+  }
+
   if (req.method !== 'POST') {
+    try { res.setHeader('Allow', 'POST, OPTIONS'); } catch {}
     res.status(405).json({ error: 'Method Not Allowed' });
     return;
   }
