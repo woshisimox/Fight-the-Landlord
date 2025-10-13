@@ -1,6 +1,13 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
+import {
+  runOneGame,
+  GreedyMax,
+  GreedyMin,
+  RandomLegal,
+  type ExternalBidder,
+  type BidDecision,
+} from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -200,6 +207,9 @@ type BotChoice =
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
+const AllySupport = GreedyMin;
+const EndgameRush = GreedyMax;
+
 type SeatSpec = {
   choice: BotChoice;
   model?: string;
@@ -270,7 +280,10 @@ function traceWrap(
   seatIndex: number
 ){
   const label = providerLabel(choice);
-  return async (ctx:any) => {
+  const baseBot = bot as ((ctx:any)=>any) & Partial<ExternalBidder> & Record<string, any>;
+  const isExternal = choice.startsWith('ai:') || choice === 'http';
+
+  const wrapped: ((ctx:any)=>Promise<any>) & Partial<ExternalBidder> & Record<string, any> = async (ctx:any) => {
     if (startDelayMs && startDelayMs>0) {
       await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
     }
@@ -305,6 +318,56 @@ const unified = (result?.move==='play' && Array.isArray(result?.cards))
 
     return result;
   };
+
+  Object.assign(wrapped, baseBot);
+  (wrapped as any).__providerLabel = label;
+  (wrapped as any).__choice = choice;
+  (wrapped as any).__isExternalAi = isExternal;
+
+  const wrapPhaseMethod = (
+    key: 'bid' | 'double' | 'postDouble',
+    phase: string
+  ) => {
+    const original = baseBot[key];
+    if (typeof original !== 'function') return;
+
+    (wrapped as any)[key] = async (ctx: any) => {
+      const need = ctx?.need ?? ctx?.phase;
+      try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase, ...(need?{ need }:{}) }); } catch {}
+      const t0 = Date.now();
+      let result: BidDecision | boolean | null = null;
+      let error: any = null;
+      try {
+        const value = await Promise.resolve(original.call(baseBot, ctx));
+        result = value as any;
+        return value;
+      } catch (e:any) {
+        error = e;
+        throw e;
+      } finally {
+        try {
+          const payload: Record<string, any> = {
+            type:'event',
+            kind:'bot-done',
+            seat: seatIndex,
+            by: label,
+            model: spec?.model || '',
+            phase,
+            tookMs: Date.now() - t0,
+          };
+          if (result != null) payload.decision = result;
+          if (error) payload.error = error?.message || String(error);
+          writeLine(res, payload);
+        } catch {}
+      }
+    };
+  };
+
+  wrapPhaseMethod('bid', 'bid');
+  wrapPhaseMethod('double', 'double');
+  wrapPhaseMethod('postDouble', 'post-double');
+
+  return wrapped;
 }
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
@@ -496,7 +559,20 @@ continue;
 
 /* ========== HTTP 处理 ========== */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  try {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'content-type, authorization, x-api-key');
+  } catch {}
+
+  if (req.method === 'OPTIONS') {
+    try { res.setHeader('Allow', 'POST, OPTIONS'); } catch {}
+    res.status(204).end();
+    return;
+  }
+
   if (req.method !== 'POST') {
+    try { res.setHeader('Allow', 'POST, OPTIONS'); } catch {}
     res.status(405).json({ error: 'Method Not Allowed' });
     return;
   }
