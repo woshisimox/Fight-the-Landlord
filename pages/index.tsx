@@ -1076,6 +1076,16 @@ function LivePanel(props: LiveProps) {
     return text.replace(/\r?\n\s*/g, '；').trim();
   };
 
+  const pickReason = (...values: unknown[]): string => {
+    for (const value of values) {
+      const text = sanitizeReason(value);
+      if (!text) continue;
+      if (/^(none|null|undefined|无|无理由)$/i.test(text)) continue;
+      return text;
+    }
+    return '';
+  };
+
   const agentIdForIndex = (i:number) => {
     const choice = props.seats[i] as BotChoice;
     const label = choiceLabel(choice);
@@ -1465,7 +1475,7 @@ for (const raw of batch) {
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
-                const reason = sanitizeReason(m.reason);
+                const reason = pickReason(m.reason);
                 nextLog = [
                   ...nextLog,
                   `AI完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
@@ -1479,7 +1489,7 @@ for (const raw of batch) {
               if (m.type === 'event' && m.kind === 'bid') {
                 const mm = Number((m as any).mult || 0);
                 const storedReason = lastReasonRef.current[m.seat] ?? '';
-                const reasonStr = sanitizeReason((m as any).reason ?? storedReason ?? '');
+                const reasonStr = pickReason((m as any).reason, storedReason);
                 const reasonTxt = reasonStr ? `｜理由=${reasonStr}` : '';
                 const bb = Number((m as any).bidMult || 0);
                 if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
@@ -1489,20 +1499,22 @@ for (const raw of batch) {
                 const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
                 const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
                 if (reasonStr) lastReasonRef.current[m.seat] = null;
+                const metrics = reasonStr ? '' : `｜score=${scTxt}`;
                 nextLog = [
                   ...nextLog,
-                  `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}${reasonTxt}`,
+                  `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}${metrics}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}${reasonTxt}`,
                 ];
                 continue;
               } else if (m.type === 'event' && m.kind === 'bid-eval') {
                 const storedReason = lastReasonRef.current[m.seat] ?? '';
-                const reasonStr = sanitizeReason((m as any).reason ?? storedReason ?? '');
-                const reasonTxt = reasonStr ? `｜理由=${reasonStr}` : '';
+                const reasonStr = pickReason((m as any).reason, storedReason);
                 const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
                 const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
                 const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
                 const dec = m.decision || 'pass';
-                const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}${reasonTxt}`;
+                const line = reasonStr
+                  ? `${who} 评估｜决策=${dec}｜理由=${reasonStr}`
+                  : `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
                 nextLog.push(line);
               }
 
@@ -1539,7 +1551,7 @@ if (m.type === 'event' && m.kind === 'double-decision') {
   if (typeof m.dLhat === 'number' && isFinite(m.dLhat)) parts.push(`Δ̂=${m.dLhat.toFixed(2)}`);
   if (typeof m.counter === 'number' && isFinite(m.counter)) parts.push(`counter=${m.counter.toFixed(2)}`);
   const storedReason = lastReasonRef.current[m.seat] ?? '';
-  const reason = sanitizeReason(m.reason ?? storedReason ?? '');
+  const reason = pickReason(m.reason, storedReason);
   if (reason) parts.push(`理由=${reason}`);
   if (reason) lastReasonRef.current[m.seat] = null;
   if (m.bayes && (typeof m.bayes.landlord!=='undefined' || typeof m.bayes.farmerY!=='undefined')) {
