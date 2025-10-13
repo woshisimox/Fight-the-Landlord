@@ -1070,6 +1070,22 @@ function LivePanel(props: LiveProps) {
   
   const scoreFileRef = useRef<HTMLInputElement|null>(null);
 
+  const sanitizeReason = (value: unknown): string => {
+    if (value == null) return '';
+    const text = String(value);
+    return text.replace(/\r?\n\s*/g, '；').trim();
+  };
+
+  const pickReason = (...values: unknown[]): string => {
+    for (const value of values) {
+      const text = sanitizeReason(value);
+      if (!text) continue;
+      if (/^(none|null|undefined|无|无理由)$/i.test(text)) continue;
+      return text;
+    }
+    return '';
+  };
+
   const agentIdForIndex = (i:number) => {
     const choice = props.seats[i] as BotChoice;
     const label = choiceLabel(choice);
@@ -1459,38 +1475,48 @@ for (const raw of batch) {
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
+                const reason = pickReason(m.reason);
                 nextLog = [
                   ...nextLog,
                   `AI完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
-                  ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
+                  ...(reason ? [`AI理由｜${seatName(m.seat)}：${reason}`] : []),
                 ];
-                lastReasonRef.current[m.seat] = m.reason || null;
+                lastReasonRef.current[m.seat] = reason || null;
                 continue;
               }
 
               // -------- 抢/不抢 --------
               if (m.type === 'event' && m.kind === 'bid') {
-  const mm = Number((m as any).mult || 0);
-      const reasonTxt = (m as any).reason ? `｜理由=${(m as any).reason}` : '';
-  const bb = Number((m as any).bidMult || 0);
-  if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
-  else if (m.bid) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
-  if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
-  else if (m.bid) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
-  const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
-  const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
-  nextLog = [...nextLog, `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
-  continue;
+                const mm = Number((m as any).mult || 0);
+                const storedReason = lastReasonRef.current[m.seat] ?? '';
+                const reasonStr = pickReason((m as any).reason, storedReason);
+                const reasonTxt = reasonStr ? `｜理由=${reasonStr}` : '';
+                const bb = Number((m as any).bidMult || 0);
+                if (Number.isFinite(bb) && bb > 0) nextBidMultiplier = Math.max(nextBidMultiplier || 1, bb);
+                else if (m.bid) nextBidMultiplier = Math.min(64, Math.max(1, (nextBidMultiplier || 1) * 2));
+                if (Number.isFinite(mm) && mm > 0) nextMultiplier = Math.max(nextMultiplier || 1, mm);
+                else if (m.bid) nextMultiplier = Math.min(64, Math.max(1, (nextMultiplier || 1) * 2));
+                const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
+                const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
+                if (reasonStr) lastReasonRef.current[m.seat] = null;
+                const metrics = reasonStr ? '' : `｜score=${scTxt}`;
+                nextLog = [
+                  ...nextLog,
+                  `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}${metrics}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}${reasonTxt}`,
+                ];
+                continue;
+              } else if (m.type === 'event' && m.kind === 'bid-eval') {
+                const storedReason = lastReasonRef.current[m.seat] ?? '';
+                const reasonStr = pickReason((m as any).reason, storedReason);
+                const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
+                const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
+                const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
+                const dec = m.decision || 'pass';
+                const line = reasonStr
+                  ? `${who} 评估｜决策=${dec}｜理由=${reasonStr}`
+                  : `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
+                nextLog.push(line);
               }
-else if (m.type === 'event' && m.kind === 'bid-eval') {
-      const reasonTxt = (m as any).reason ? `｜理由=${(m as any).reason}` : '';
-  const who = (typeof seatName==='function') ? seatName(m.seat) : `seat${m.seat}`;
-  const sc  = (typeof m.score==='number' && isFinite(m.score)) ? m.score.toFixed(2) : String(m.score);
-  const thr = (typeof m.threshold==='number' && isFinite(m.threshold)) ? m.threshold.toFixed(2) : String(m.threshold ?? '');
-  const dec = m.decision || 'pass';
-  const line = `${who} 评估｜score=${sc}｜阈值=${thr}｜决策=${dec}`;
-  nextLog.push(line);
-}
 
 
               // -------- 明牌后额外加倍 --------
@@ -1524,7 +1550,10 @@ if (m.type === 'event' && m.kind === 'double-decision') {
   if (typeof m.delta === 'number' && isFinite(m.delta)) parts.push(`Δ=${m.delta.toFixed(2)}`);
   if (typeof m.dLhat === 'number' && isFinite(m.dLhat)) parts.push(`Δ̂=${m.dLhat.toFixed(2)}`);
   if (typeof m.counter === 'number' && isFinite(m.counter)) parts.push(`counter=${m.counter.toFixed(2)}`);
-  if (typeof m.reason === 'string') parts.push(`理由=${m.reason}`);
+  const storedReason = lastReasonRef.current[m.seat] ?? '';
+  const reason = pickReason(m.reason, storedReason);
+  if (reason) parts.push(`理由=${reason}`);
+  if (reason) lastReasonRef.current[m.seat] = null;
   if (m.bayes && (typeof m.bayes.landlord!=='undefined' || typeof m.bayes.farmerY!=='undefined')) {
     const l = Number(m.bayes.landlord||0), y = Number(m.bayes.farmerY||0);
     parts.push(`bayes:{L=${l},Y=${y}}`);
@@ -1565,7 +1594,7 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                   if (s>=0 && s<3) {
                     let val: number|null = (typeof (m as any).score === 'number') ? (m as any).score as number : null;
                     if (typeof val !== 'number') {
-                      const rr = (m.reason ?? lastReasonRef.current?.[s] ?? '') as string;
+                      const rr = sanitizeReason(m.reason ?? lastReasonRef.current?.[s] ?? '');
                       const mm = /score=([+-]?\d+(?:\.\d+)?)/.exec(rr || '');
                       if (mm) { val = parseFloat(mm[1]); }
                     }
@@ -1589,11 +1618,11 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                 }
                 continue;
               }
-if (m.type === 'event' && m.kind === 'play') {
+              if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
-                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  const reason = sanitizeReason(m.reason ?? lastReasonRef.current[m.seat] ?? '');
                   lastReasonRef.current[m.seat] = null;
-                  nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason }];
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason: reason || undefined }];
                   nextLog = [...nextLog, `${seatName(m.seat)} 过${reason ? `（${reason}）` : ''}`];
                 } else {
                   const pretty: string[] = [];
@@ -1607,11 +1636,11 @@ if (m.type === 'event' && m.kind === 'play') {
                     if (k >= 0) nh[seat].splice(k, 1);
                     pretty.push(chosen);
                   }
-                  const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  const reason = sanitizeReason(m.reason ?? lastReasonRef.current[m.seat] ?? '');
                   lastReasonRef.current[m.seat] = null;
 
                   nextHands = nh;
-                  nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason }];
+                  nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason: reason || undefined }];
                   nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reason ? `（理由：${reason}）` : ''}`];
                 }
                 continue;

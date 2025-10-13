@@ -1,6 +1,7 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
+import type { BidDecision } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -270,11 +271,17 @@ function traceWrap(
   seatIndex: number
 ){
   const label = providerLabel(choice);
-  return async (ctx:any) => {
-    if (startDelayMs && startDelayMs>0) {
-      await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
+  const safeDelay = Math.min(60_000, Math.max(0, startDelayMs || 0));
+  const maybeDelay = async () => {
+    if (safeDelay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, safeDelay));
     }
-    try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase: ctx?.phase || 'play' }); } catch {}
+  };
+
+  const wrapped: any = async (ctx:any) => {
+    await maybeDelay();
+    const phase = ctx?.phase || 'play';
+    try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch {}
 
     const timeout = new Promise((resolve)=> {
       setTimeout(()=> resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` }), Math.max(1000, turnTimeoutMs));
@@ -290,21 +297,69 @@ function traceWrap(
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
     }
 
-const unified = (result?.move==='play' && Array.isArray(result?.cards))
+    const unified = (result?.move==='play' && Array.isArray(result?.cards))
       ? unifiedScore(ctx, result.cards)
       : undefined;
     const scoreTag = (typeof unified === 'number') ? ` | score=${unified.toFixed(2)}` : '';
     const reason =
       (result && typeof result.reason === 'string')
         ? `[${label}] ${result.reason}${scoreTag}`
-        : `[${label}] ${(result?.move==='play' ? stringifyMove(result) : 'pass')}${scoreTag}`
+        : `[${label}] ${(result?.move==='play' ? stringifyMove(result) : 'pass')}${scoreTag}`;
     try { const cstr = Array.isArray(result?.cards)?result.cards.join(''):''; console.debug('[DECISION]', `seat=${seatIndex}`, `move=${result?.move}`, `cards=${cstr}`, (typeof unified==='number'?`score=${unified.toFixed(2)}`:'') , `reason=${reason}`); } catch {}
     onReason(seatIndex, reason);
     try { onScore(seatIndex, unified as any); } catch {}
-    try { writeLine(res, { type:'event', kind:'bot-done', seat: seatIndex, by: label, model: spec?.model||'', tookMs: Date.now()-t0, reason, score: unified }); } catch {}
+    try { writeLine(res, { type:'event', kind:'bot-done', seat: seatIndex, by: label, model: spec?.model||'', tookMs: Date.now()-t0, reason, score: unified, phase }); } catch {}
 
     return result;
   };
+
+  const baseBid = typeof (bot as any)?.bid === 'function' ? (bot as any).bid.bind(bot) : null;
+  if (baseBid) {
+    wrapped.bid = async (bidCtx: any): Promise<BidDecision> => {
+      await maybeDelay();
+      const phase = (bidCtx?.phase as string) || 'bid';
+      try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch {}
+
+      const timeoutMs = Math.max(1000, turnTimeoutMs);
+      const timeout = new Promise<BidDecision>((resolve) => {
+        setTimeout(() => resolve({ kind: 'pass', reason: `timeout@${Math.round(timeoutMs/1000)}s` }), timeoutMs);
+      });
+
+      let result: BidDecision | any;
+      const t0 = Date.now();
+      try {
+        result = await Promise.race([
+          Promise.resolve(baseBid({ ...bidCtx, phase })),
+          timeout,
+        ]);
+      } catch (e:any) {
+        result = { kind: 'pass', reason: `error:${e?.message || String(e)}` };
+      }
+
+      if (!result || typeof result !== 'object' || (result.kind !== 'bid' && result.kind !== 'pass')) {
+        result = { kind: 'pass', reason: 'invalid bid result' };
+      }
+
+      const detail: string[] = [];
+      if (typeof result.score === 'number' && Number.isFinite(result.score)) {
+        detail.push(`score=${(+result.score).toFixed(2)}`);
+      }
+      if (typeof result.threshold === 'number' && Number.isFinite(result.threshold)) {
+        detail.push(`threshold=${(+result.threshold).toFixed(2)}`);
+      }
+      const rawReason = (typeof result.reason === 'string' && result.reason.trim())
+        ? result.reason.trim()
+        : (result.kind === 'bid' ? '选择抢地主' : '选择不抢');
+      const reason = `[${label}] ${rawReason}${detail.length ? `｜${detail.join('｜')}` : ''}`;
+
+      onReason(seatIndex, reason);
+      try { writeLine(res, { type:'event', kind:'bot-done', seat: seatIndex, by: label, model: spec?.model||'', tookMs: Date.now()-t0, reason, phase, score: result.score }); } catch {}
+
+      return result as BidDecision;
+    };
+  }
+
+  return wrapped;
 }
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
@@ -496,10 +551,77 @@ continue;
 
 /* ========== HTTP 处理 ========== */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
+  const allowList = ['POST', 'GET', 'OPTIONS', 'HEAD'] as const;
+  const allowMethods = allowList.join(', ');
+  const applyCors = () => {
+    try {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      const reqHeaders = req.headers['access-control-request-headers'];
+      if (typeof reqHeaders === 'string' && reqHeaders.trim()) {
+        res.setHeader('Access-Control-Allow-Headers', reqHeaders);
+      } else {
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+      }
+      res.setHeader('Access-Control-Allow-Methods', allowMethods);
+    } catch {}
+  };
+
+  applyCors();
+
+  const rawMethod = typeof req.method === 'string' ? req.method : '';
+  const normalized = rawMethod.replace(/[\s]+/g, ' ').trim().toUpperCase();
+  const methodTokens = normalized.split(/[\s,]+/).filter(Boolean);
+  const candidate = methodTokens.find((m) => allowList.includes(m as any))
+    || methodTokens[0]
+    || 'POST';
+  const method = (allowList.includes(candidate as any) ? candidate : 'POST') as (typeof allowList)[number];
+  if (method === 'OPTIONS') {
+    res.setHeader('Allow', allowMethods);
+    res.status(204).end();
+    return;
+  }
+
+  if (method === 'HEAD') {
+    res.setHeader('Allow', allowMethods);
+    res.status(204).end();
+    return;
+  }
+
+  if (method !== 'POST' && method !== 'GET') {
+    res.setHeader('Allow', allowMethods);
     res.status(405).json({ error: 'Method Not Allowed' });
     return;
   }
+
+  const resolveBody = (): RunBody => {
+    if (method === 'POST') {
+      return ((req as any).body ?? {}) as RunBody;
+    }
+
+    const query = req.query || {};
+    const payload = typeof (query as any).payload === 'string'
+      ? (query as any).payload
+      : typeof (query as any).body === 'string'
+        ? (query as any).body
+        : '';
+
+    if (payload) {
+      try {
+        return JSON.parse(payload);
+      } catch {}
+    }
+
+    const base: Record<string, any> = {};
+    for (const [key, value] of Object.entries(query)) {
+      if (key === 'payload' || key === 'body') continue;
+      if (Array.isArray(value)) {
+        base[key] = value.length === 1 ? value[0] : value;
+      } else {
+        base[key] = value;
+      }
+    }
+    return base as RunBody;
+  };
 
   try {
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
@@ -510,7 +632,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const keepAlive = setInterval(() => { try { (res as any).write('\n'); } catch {} }, 15000);
 
   try {
-    const body: RunBody = (req as any).body as any;
+    const body: RunBody = resolveBody();
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
     const four2  = (body.four2 || 'both') as 'both'|'2singles'|'2pairs';
 
