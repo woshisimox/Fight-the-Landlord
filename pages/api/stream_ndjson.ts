@@ -567,7 +567,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   applyCors();
 
-  const method = (req.method || '').toUpperCase();
+  const method = (((req.method ?? '') as string).trim().toUpperCase()) || 'POST';
   if (method === 'OPTIONS') {
     res.setHeader('Allow', allowMethods);
     res.status(204).end();
