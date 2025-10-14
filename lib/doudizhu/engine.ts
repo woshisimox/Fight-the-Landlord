@@ -88,6 +88,21 @@ function rankOf(label: Label): string {
   // 'x' / 'X'
   return s;
 }
+
+function remainingCountByRank(seen: Label[], hand: Label[]): Record<string, number> {
+  const total: Record<string, number> = {};
+  for (const r of RANKS) total[r] = (r === 'x' || r === 'X') ? 1 : 4;
+  const subtract = (labels: Label[]) => {
+    for (const card of labels) {
+      const rk = rankOf(card);
+      total[rk] = (total[rk] || 0) - 1;
+    }
+  };
+  subtract(seen);
+  subtract(hand);
+  for (const r of RANKS) if (!(r in total)) total[r] = 0;
+  return total;
+}
 function v(label: Label): number {
   return ORDER[rankOf(label)] ?? -1;
 }
@@ -1111,93 +1126,147 @@ export async function* runOneGame(opts: {
   // 抢地主流程（简单实现）
   let landlord = 0;
   let multiplier = 1;
-        let bidMultiplier = 1;
-if (opts.bid !== false) {
+  let bidMultiplier = 1;
+  const seatMeta = bots.map((bot:any)=>({
+    phaseAware: !!((bot as any)?.phaseAware),
+    choice: String((bot as any)?.choice || '').toLowerCase(),
+    name: String((bot as any)?.name || (bot as any)?.constructor?.name || '').toLowerCase(),
+  }));
+
+  const MAX_BID_ATTEMPTS = 5;
+  if (opts.bid !== false) {
     let last = -1;
-    
-      for (let __attempt=0; __attempt<5; __attempt++) {
-  const __bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
-  // 每次重试重置叫抢状态
-  last = -1;
-  bidMultiplier = 1;
-  multiplier = 1;
-for (let s=0;s<3;s++) {
-      const sc = evalRobScore(hands[s]); 
 
-      // thresholds for both built-ins && external choices (inline for scope)
-      const __thMap: Record<string, number> = {
-        greedymax: 1.6,
-        allysupport: 1.8,
-        randomlegal: 2.0,
-        endgamerush: 2.1,
-        mininet: 2.2,
-        greedymin: 2.4,
-      };
-      const __thMapChoice: Record<string, number> = {
-        'built-in:greedy-max':   1.6,
-        'built-in:ally-support': 1.8,
-        'built-in:random-legal': 2.0,
-        'built-in:endgame-rush': 2.1,
-        'built-in:mininet':      2.2,
-        'built-in:greedy-min':   2.4,
-        'external':              2.2,
-        'external:ai':           2.2,
-        'external:http':         2.2,
-        'ai':                    2.2,
-        'http':                  2.2,
-        'openai':                2.2,
-        'gpt':                   2.2,
-        'claude':                2.2,
-      };
-      const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
-      const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
-      const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-      const bid = (sc >= __th);
+    for (let attempt = 0; attempt < MAX_BID_ATTEMPTS; attempt++) {
+      const bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
+      last = -1;
+      bidMultiplier = 1;
+      multiplier = 1;
 
+      for (let s = 0; s < 3; s++) {
+        const sc = evalRobScore(hands[s]);
 
-// 记录本轮评估（即使未达到阈值也写日志/存档）
-yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
-if (bid) {
-        __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
-        multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
+        const __thMap: Record<string, number> = {
+          greedymax: 1.6,
+          allysupport: 1.8,
+          randomlegal: 2.0,
+          endgamerush: 2.1,
+          mininet: 2.2,
+          greedymin: 2.4,
+        };
+        const __thMapChoice: Record<string, number> = {
+          'built-in:greedy-max':   1.6,
+          'built-in:ally-support': 1.8,
+          'built-in:random-legal': 2.0,
+          'built-in:endgame-rush': 2.1,
+          'built-in:mininet':      2.2,
+          'built-in:greedy-min':   2.4,
+          'external':              2.2,
+          'external:ai':           2.2,
+          'external:http':         2.2,
+          'ai':                    2.2,
+          'http':                  2.2,
+          'openai':                2.2,
+          'gpt':                   2.2,
+          'claude':                2.2,
+        };
+        const meta = seatMeta[s];
+        const threshold = (__thMapChoice[meta.choice] ?? __thMap[meta.name] ?? 1.8);
+        const recommended = (sc >= threshold);
 
-        last = s;
-yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier, mult: multiplier };
+        const prevBidders = bidders.map(b => ({ seat:b.seat, score:b.score, threshold:b.threshold, margin:b.margin }));
+        const bidCtx: any = {
+          hands: clone(hands[s]),
+          require: null,
+          canPass: true,
+          policy: { four2 },
+          phase: 'bid',
+          bid: {
+            score: sc,
+            threshold,
+            multiplier,
+            bidMultiplier,
+            recommended,
+            attempt,
+            maxAttempts: MAX_BID_ATTEMPTS,
+            bidders: prevBidders,
+          },
+          seat: s,
+          landlord: -1,
+          leader: -1,
+          trick: -1,
+          history: [],
+          currentTrick: [],
+          seen: [],
+          bottom: [],
+          seenBySeat: [[],[],[]],
+          handsCount: [hands[0].length, hands[1].length, hands[2].length],
+          role: 'farmer',
+          teammates: [],
+          opponents: [ (s+1)%3, (s+2)%3 ],
+          counts: {
+            handByRank: tallyByRank(hands[s]),
+            seenByRank: tallyByRank([]),
+            remainingByRank: remainingCountByRank([], hands[s]),
+          },
+        };
+
+        let decision = recommended;
+        if (meta.phaseAware) {
+          try {
+            const result = await Promise.resolve(bots[s](clone(bidCtx)));
+            const parsed = (()=>{
+              if (!result) return null;
+              if (result.phase === 'bid' && typeof result.bid === 'boolean') return !!result.bid;
+              if (typeof result.bid === 'boolean') return !!result.bid;
+              if (result.move === 'pass') return false;
+              if (result.move === 'play') return true;
+              return null;
+            })();
+            if (parsed !== null) decision = parsed;
+          } catch {}
+        }
+
+        yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold, decision: (recommended ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+
+        if (decision) {
+          const margin = sc - threshold;
+          bidders.push({ seat: s, score: sc, threshold, margin });
+          multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
+          last = s;
+          yield { type:'event', kind:'bid', seat:s, bid:true, score: sc, bidMult: bidMultiplier, mult: multiplier };
+        }
+
+        if (opts.delayMs) await wait(opts.delayMs);
       }
-      if (opts.delayMs) await wait(opts.delayMs);
-    }
-      // 第二轮：仅对第一轮“抢”的人（__bidders）按同样座次再过一遍，比较 margin；同分后手优先（>=）；每次再 ×2，封顶 64。
-      if (__bidders.length > 0) {
+
+      if (bidders.length > 0) {
         let bestSeat = -1;
         let bestMargin = -Infinity;
         for (let t = 0; t < 3; t++) {
-          const hit = __bidders.find(b => b.seat === t);
+          const hit = bidders.find(b => b.seat === t);
           if (!hit) continue;
           bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
           multiplier = bidMultiplier;
           yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
-          if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; } // 同分后手优先
+          if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; }
         }
         landlord = bestSeat;
+      } else {
+        try { yield { type:'event', kind:'bid-skip', reason:'no-bidders' }; } catch {}
+        deck = shuffle(freshDeck());
+        hands = [[],[],[]] as any;
+        for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
+        bottom = deck.slice(17*3);
+        for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
+        continue;
       }
-      
-      
-// 若无人抢，则记录并重发，随后重新叫牌
-if (__bidders.length === 0) {
-  try { yield { type:'event', kind:'bid-skip', reason:'no-bidders' }; } catch {}
-  // 重新发牌
-  deck = shuffle(freshDeck());
-  hands = [[],[],[]] as any;
-  for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
-  bottom = deck.slice(17*3);
-  for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
-  continue; // 回到下一轮尝试，重新进行叫抢（会继续产出 bid-eval）
-}
-yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: bidMultiplier };multiplier = bidMultiplier;
-    if (last !== -1) landlord = last;
+
+      yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: bidMultiplier };
+      multiplier = bidMultiplier;
+      if (last !== -1) landlord = last;
       break;
     }
-
   }
   // 亮底 & 地主收底
   yield { type:'event', kind:'reveal', bottom: bottom.slice() };
@@ -1216,7 +1285,6 @@ const __DOUBLE_CFG = {
   cap: 8
 };
 
-// 计算反制能力分（简版，可再调权重）
 function __counterScore(hand: Label[], bottom: Label[]): number {
   const map = countByRank(hand);
   const hasR = !!rocketFrom(map);
@@ -1231,20 +1299,15 @@ function __counterScore(hand: Label[], bottom: Label[]): number {
   return sc;
 }
 
-// 基于公开信息的蒙特卡洛：估计底牌带来的期望增益 Δ̂
 function __estimateDeltaByMC(mySeat:number, myHand:Label[], bottom:Label[], landlordSeat:number, samples:number): number {
-  // 未知牌：整副 54 去掉我的 17 与底牌 3
   const deckAll: Label[] = freshDeck();
   const mySet = new Set(myHand.concat(bottom));
   const unknown: Label[] = deckAll.filter(c => !mySet.has(c));
   let acc = 0, n = 0;
   for (let t=0;t<samples;t++) {
-    // 随机洗牌后，取前34张：分配给（地主17，另一农民17）
     const pool = shuffle(unknown.slice());
     const sampleLord = pool.slice(0,17);
-    // before
     const S_before = evalRobScore(sampleLord);
-    // after: 并入底牌
     const S_after  = evalRobScore(sorted(sampleLord.concat(bottom)));
     acc += (S_after - S_before);
     n++;
@@ -1252,14 +1315,12 @@ function __estimateDeltaByMC(mySeat:number, myHand:Label[], bottom:Label[], land
   return n ? acc/n : 0;
 }
 
-// 结构兜底：底牌是否带来明显强结构（王炸/炸弹/连对显著延长等）
 function __structureBoosted(before: Label[], after: Label[]): boolean {
   const mb = countByRank(before), ma = countByRank(after);
   const rb = !!rocketFrom(mb), ra = !!rocketFrom(ma);
   if (!rb && ra) return true;
   const bb = [...bombsFrom(mb)].length, ba = [...bombsFrom(ma)].length;
-  if (ba > bb) return true;
-  // 高张数量显著提升（粗略兜底）
+  if (ba - bb >= 1) return true;
   const twb = mb.get(ORDER['2'])?.length ?? 0, twa = ma.get(ORDER['2'])?.length ?? 0;
   if (twa - twb >= 2) return true;
   const Ab = mb.get(ORDER['A'])?.length ?? 0, Aa = ma.get(ORDER['A'])?.length ?? 0;
@@ -1267,7 +1328,6 @@ function __structureBoosted(before: Label[], after: Label[]): boolean {
   return false;
 }
 
-// 地主加倍判定（阈值优先，未达阈值时结构兜底；仅一次）
 function __decideLandlordDouble(handBefore:Label[], handAfter:Label[]): {L:number, delta:number, reason:'threshold'|'structure'|'none'} {
   const S_before = evalRobScore(handBefore);
   const S_after  = evalRobScore(handAfter);
@@ -1277,7 +1337,6 @@ function __decideLandlordDouble(handBefore:Label[], handAfter:Label[]): {L:numbe
   return { L:0, delta, reason:'none' };
 }
 
-// 农民加倍基础规则（不含贝叶斯微调）
 function __decideFarmerDoubleBase(myHand:Label[], bottom:Label[], samples:number): {F:number, dLhat:number, counter:number} {
   const dLhat = __estimateDeltaByMC(-1, myHand, bottom, landlord, samples);
   const counter = __counterScore(myHand, bottom);
@@ -1290,43 +1349,116 @@ function __decideFarmerDoubleBase(myHand:Label[], bottom:Label[], samples:number
   return { F, dLhat, counter };
 }
 
-// —— 执行顺序：地主 → 乙(下家) → 丙(上家) ——
 const Lseat = landlord;
 const Yseat = (landlord + 1) % 3;
 const Bseat = (landlord + 2) % 3;
 
-// 地主：基于 before/after 的 Δ 与结构兜底
-const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 理论上就是并入前
+const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c));
 const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
-const Lflag = lordDecision.L;
-try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
-
-// 乙（下家）：蒙特卡洛 + 反制能力
 const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
-try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yBase.F, dLhat:yBase.dLhat, counter:yBase.counter }; } catch{}
-
-// 丙（上家）：在边缘情况下做贝叶斯式调节
 let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
 let F_b = bBase.F;
 if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.counterHi) <= 0.6)) {
-  // 若地主或乙已加倍，提高门槛（更保守）
   let effectiveHi = __DOUBLE_CFG.counterHi;
-  if (Lflag === 1) effectiveHi += __DOUBLE_CFG.bayes.landlordRaiseHi;
+  if (lordDecision.L === 1) effectiveHi += __DOUBLE_CFG.bayes.landlordRaiseHi;
   if (yBase.F === 1) effectiveHi += __DOUBLE_CFG.bayes.teammateRaiseHi;
   F_b = (bBase.counter >= effectiveHi) ? 1 : 0;
 }
-try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!F_b, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch{}
 
-// 记录对位加倍倍数（不含炸弹/春天）
-let __doubleMulY = (1 << Lflag) * (1 << yBase.F);
-let __doubleMulB = (1 << Lflag) * (1 << F_b);
+const doubleSeen = bottom.slice();
+const baseCounts = () => [hands[0].length, hands[1].length, hands[2].length] as [number,number,number];
 
-// 上限裁剪到 8（含叫抢）
+const buildDoubleCtx = (seat:number, role:'landlord'|'farmer', recommended:boolean, info:any) => {
+  const teammates = role === 'landlord' ? [] : [ seat === Yseat ? Bseat : Yseat ];
+  const opponents = role === 'landlord' ? [Yseat, Bseat] : [landlord];
+  const seenBySeat: Label[][] = [[],[],[]];
+  if (role === 'landlord') { seenBySeat[landlord] = bottom.slice(); }
+  return {
+    hands: clone(hands[seat]),
+    require: null,
+    canPass: true,
+    policy: { four2 },
+    phase: 'double' as const,
+    double: {
+      baseMultiplier: multiplier,
+      landlordSeat: landlord,
+      role,
+      recommended,
+      info,
+    },
+    seat,
+    landlord,
+    leader: landlord,
+    trick: 0,
+    history: [],
+    currentTrick: [],
+    seen: doubleSeen.slice(),
+    bottom: bottom.slice(),
+    seenBySeat,
+    handsCount: baseCounts(),
+    role,
+    teammates,
+    opponents,
+    counts: {
+      handByRank: tallyByRank(hands[seat]),
+      seenByRank: tallyByRank(doubleSeen),
+      remainingByRank: remainingCountByRank(doubleSeen, hands[seat]),
+    },
+  };
+};
+
+const parseDoubleResult = (res:any): boolean | null => {
+  if (!res) return null;
+  if (res.phase === 'double' && typeof res.double === 'boolean') return !!res.double;
+  if (typeof res.double === 'boolean') return !!res.double;
+  if (typeof res.bid === 'boolean') return !!res.bid;
+  if (res.move === 'pass') return false;
+  if (res.move === 'play') return true;
+  return null;
+};
+
+let Lflag = lordDecision.L ? 1 : 0;
+let farmerYFlag = yBase.F ? 1 : 0;
+let farmerBFlag = F_b ? 1 : 0;
+
+if (seatMeta[Lseat]?.phaseAware) {
+  try {
+    const ctx = buildDoubleCtx(Lseat, 'landlord', !!lordDecision.L, { landlord: { delta: lordDecision.delta, reason: lordDecision.reason } });
+    const res = await Promise.resolve(bots[Lseat](clone(ctx)));
+    const parsed = parseDoubleResult(res);
+    if (parsed !== null) Lflag = parsed ? 1 : 0;
+  } catch {}
+}
+
+if (seatMeta[Yseat]?.phaseAware) {
+  try {
+    const ctx = buildDoubleCtx(Yseat, 'farmer', !!yBase.F, { farmer: { dLhat: yBase.dLhat, counter: yBase.counter } });
+    const res = await Promise.resolve(bots[Yseat](clone(ctx)));
+    const parsed = parseDoubleResult(res);
+    if (parsed !== null) farmerYFlag = parsed ? 1 : 0;
+  } catch {}
+}
+
+if (seatMeta[Bseat]?.phaseAware) {
+  try {
+    const ctx = buildDoubleCtx(Bseat, 'farmer', !!F_b, { farmer: { dLhat: bBase.dLhat, counter: bBase.counter }, bayes:{ landlord: lordDecision.L, farmerY: yBase.F } });
+    const res = await Promise.resolve(bots[Bseat](clone(ctx)));
+    const parsed = parseDoubleResult(res);
+    if (parsed !== null) farmerBFlag = parsed ? 1 : 0;
+  } catch {}
+}
+
+try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
+try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!farmerYFlag, dLhat:yBase.dLhat, counter:yBase.counter }; } catch{}
+try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!farmerBFlag, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord: Lflag, farmerY: farmerYFlag } }; } catch{}
+
+let __doubleMulY = (1 << Lflag) * (1 << farmerYFlag);
+let __doubleMulB = (1 << Lflag) * (1 << farmerBFlag);
+
 __doubleMulY = Math.min(__DOUBLE_CFG.cap, __doubleMulY * multiplier) / Math.max(1, multiplier);
 __doubleMulB = Math.min(__DOUBLE_CFG.cap, __doubleMulB * multiplier) / Math.max(1, multiplier);
 
 try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bing:Bseat, mulY: __doubleMulY, mulB: __doubleMulB, base: multiplier }; } catch{}
-
 
 
   // 初始化（带上地主）

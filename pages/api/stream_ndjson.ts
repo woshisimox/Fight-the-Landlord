@@ -270,7 +270,11 @@ function traceWrap(
   seatIndex: number
 ){
   const label = providerLabel(choice);
-  return async (ctx:any) => {
+  const supportsPhase = typeof choice === 'string'
+    ? (choice.startsWith('ai:') || choice === 'http')
+    : false;
+
+  const wrapped = async (ctx:any) => {
     if (startDelayMs && startDelayMs>0) {
       await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
     }
@@ -328,6 +332,13 @@ function traceWrap(
 
     return result;
   };
+
+  try {
+    (wrapped as any).choice = choice;
+    (wrapped as any).phaseAware = supportsPhase;
+  } catch {}
+
+  return wrapped;
 }
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
