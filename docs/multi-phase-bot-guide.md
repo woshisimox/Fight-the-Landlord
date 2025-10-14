@@ -18,9 +18,25 @@ its built-in heuristics.
 
 * `lib/doudizhu/engine.ts` constructs a bid context (`ctx.phase = 'bid'`) before
   invoking the bot for each seat and honours the boolean result that the bot
-  returns.【F:lib/doudizhu/engine.ts†L1202-L1260】
+  returns.【F:lib/doudizhu/engine.ts†L1246-L1329】
 * The same file later emits a double context (`ctx.phase = 'double'`) and again
-  uses the bot's decision to update the multiplier.【F:lib/doudizhu/engine.ts†L1330-L1400】
+  uses the bot's decision to update the multiplier.【F:lib/doudizhu/engine.ts†L1461-L1559】
+
+### What the bot sees in each phase
+
+During **bid**, the bot receives:
+
+* Its 17-card starting hand (`ctx.hands`).
+* Seat index, current landlord (always `-1` during bidding), and teammate/opponent indices for convenience (`ctx.seat`, `ctx.landlord`, `ctx.teammates`, `ctx.opponents`).
+* Per-rank counts for its own hand and the remaining deck (`ctx.counts.handByRank`, `ctx.counts.remainingByRank`).
+* The current bidding heuristic, including the heuristic score, default threshold, running multiplier, whether the engine recommends bidding, how many attempts have occurred, and previously successful bidders (`ctx.bid`).【F:lib/doudizhu/engine.ts†L1251-L1283】
+
+During **double**, once the bottom cards are revealed, each bot receives:
+
+* Its updated hand (landlord already merged with the bottom), public bottom cards, and a per-seat breakdown of revealed cards (`ctx.hands`, `ctx.bottom`, `ctx.seen`, `ctx.seenBySeat`).
+* Role, teammates, opponents, and per-rank tallies for hand/seen/remaining cards (`ctx.role`, `ctx.teammates`, `ctx.opponents`, `ctx.counts`).
+* The current base multiplier, who the landlord is, and whether the engine recommends doubling based on its heuristics (`ctx.double.baseMultiplier`, `ctx.double.landlordSeat`, `ctx.double.recommended`).
+* Additional diagnostic information: landlords receive the score delta of adding the bottom, while farmers get Monte Carlo estimates and counter-strength metrics (`ctx.double.info`).【F:lib/doudizhu/engine.ts†L1461-L1549】
 
 ## Reference bot updates
 
