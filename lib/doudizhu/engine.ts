@@ -1389,10 +1389,11 @@ export async function* runOneGame(opts: {
             const result = await Promise.resolve(bots[s](clone(bidCtx)));
             const parsed = (()=>{
               if (!result) return null;
-              if (result.phase === 'bid' && typeof result.bid === 'boolean') return !!result.bid;
-              if (typeof result.bid === 'boolean') return !!result.bid;
-              if (result.move === 'pass') return false;
-              if (result.move === 'play') return true;
+              const r: any = result;
+              if (r.phase === 'bid' && typeof r.bid === 'boolean') return !!r.bid;
+              if (typeof r.bid === 'boolean') return !!r.bid;
+              if (r.move === 'pass') return false;
+              if (r.move === 'play') return true;
               return null;
             })();
             if (parsed !== null) decision = parsed;
@@ -1581,11 +1582,12 @@ const buildDoubleCtx = (seat:number, role:'landlord'|'farmer', recommended:boole
 
 const parseDoubleResult = (res:any): boolean | null => {
   if (!res) return null;
-  if (res.phase === 'double' && typeof res.double === 'boolean') return !!res.double;
-  if (typeof res.double === 'boolean') return !!res.double;
-  if (typeof res.bid === 'boolean') return !!res.bid;
-  if (res.move === 'pass') return false;
-  if (res.move === 'play') return true;
+  const r: any = res;
+  if (r.phase === 'double' && typeof r.double === 'boolean') return !!r.double;
+  if (typeof r.double === 'boolean') return !!r.double;
+  if (typeof r.bid === 'boolean') return !!r.bid;
+  if (r.move === 'pass') return false;
+  if (r.move === 'play') return true;
   return null;
 };
 
