@@ -1,0 +1,78 @@
+# Multi-phase Dou Dizhu Bot Support
+
+This project now drives all Dou Dizhu bots through three explicit phases:
+
+1. **Bid (`ctx.phase === 'bid'`)** – decide whether to take the landlord role by
+   returning `{ phase: 'bid', bid: boolean }`.
+2. **Double (`ctx.phase === 'double'`)** – decide whether to double after the
+   bottom cards are revealed by returning
+   `{ phase: 'double', double: boolean }`.
+3. **Play (`ctx.phase === 'play'` or undefined)** – play cards by returning
+   `{ move: 'play' | 'pass', cards?: string[] }`.
+
+The engine builds rich contexts for each phase and forwards them to the
+configured bot.  If a bot does not recognise the phase, the engine falls back to
+its built-in heuristics.
+
+## Engine entrypoints
+
+* `lib/doudizhu/engine.ts` constructs a bid context (`ctx.phase = 'bid'`) before
+  invoking the bot for each seat and honours the boolean result that the bot
+  returns.【F:lib/doudizhu/engine.ts†L1246-L1329】
+* The same file later emits a double context (`ctx.phase = 'double'`) and again
+  uses the bot's decision to update the multiplier.【F:lib/doudizhu/engine.ts†L1461-L1559】
+
+### What the bot sees in each phase
+
+During **bid**, the bot receives:
+
+* Its 17-card starting hand (`ctx.hands`).
+* Seat index, current landlord (always `-1` during bidding), and teammate/opponent indices for convenience (`ctx.seat`, `ctx.landlord`, `ctx.teammates`, `ctx.opponents`).
+* Per-rank counts for its own hand and the remaining deck (`ctx.counts.handByRank`, `ctx.counts.remainingByRank`).
+* The current bidding heuristic, including the heuristic score, default threshold, running multiplier, whether the engine recommends bidding, how many attempts have occurred, and previously successful bidders (`ctx.bid`).【F:lib/doudizhu/engine.ts†L1251-L1283】
+
+During **double**, once the bottom cards are revealed, each bot receives:
+
+* Its updated hand (landlord already merged with the bottom), public bottom cards, and a per-seat breakdown of revealed cards (`ctx.hands`, `ctx.bottom`, `ctx.seen`, `ctx.seenBySeat`).
+* Role, teammates, opponents, and per-rank tallies for hand/seen/remaining cards (`ctx.role`, `ctx.teammates`, `ctx.opponents`, `ctx.counts`).
+* The current base multiplier, who the landlord is, and whether the engine recommends doubling based on its heuristics (`ctx.double.baseMultiplier`, `ctx.double.landlordSeat`, `ctx.double.recommended`).
+* Additional diagnostic information: landlords receive the score delta of adding the bottom, while farmers get Monte Carlo estimates and counter-strength metrics (`ctx.double.info`).【F:lib/doudizhu/engine.ts†L1461-L1549】
+
+During **play**, the engine attaches the follow-up requirement as a rich `ctx.require` object:
+
+* `type`, `rank`, and `len` continue to mirror the tabled combo, so scripted bots can keep comparing ranks numerically.
+* For LLM or HTTP services, the engine now supplements the combo with `label`, `rankLabel`, `minRankLabel`, `maxRankLabel`, and a short `description`, making rules such as “需跟大于对3的对子” explicit in the payload.【F:lib/doudizhu/engine.ts†L1765-L1789】【F:lib/doudizhu/engine.ts†L200-L282】
+
+### How the thresholds and recommendations are produced
+
+The `score`, `threshold`, and `recommended` fields are computed by the engine before the
+bot is called, so every implementation receives the same baseline heuristics:
+
+* **Bid** – the engine evaluates each hand and chooses a threshold according to the
+  configured bot name/choice.  `ctx.bid.recommended` is simply `ctx.bid.score >= ctx.bid.threshold`,
+  and the built-in fallback also relies on this comparison.【F:lib/doudizhu/engine.ts†L1221-L1325】
+* **Double** – the landlord recommendation is based on the score delta of the bottom cards,
+  while farmers combine Monte Carlo estimates with counterplay strength; these values feed into
+  `ctx.double.recommended` for each seat.【F:lib/doudizhu/engine.ts†L1434-L1559】
+
+Bundled LLM prompts now remind the model that the default decision is to follow the provided
+recommendation (e.g. “启发分 ≥ 阈值时会抢地主”) and to justify any deviation, so logs will show
+the same threshold that the engine supplied even when the AI elects to override it.【F:lib/bots/openai_bot.ts†L53-L70】【F:lib/bots/deepseek_bot.ts†L51-L70】
+
+## Reference bot updates
+
+Every bundled bot has been updated so that it can understand and respond to the
+new phases:
+
+* `lib/bots/http_bot.ts` forwards the entire context, including `ctx.phase`, to
+  an external HTTP service and accepts `{ phase: 'bid' | 'double', ... }`
+  responses, so remote AIs can decide whether to bid or double.【F:lib/bots/http_bot.ts†L12-L43】
+* `lib/bots/openai_bot.ts`, `gemini_bot.ts`, `grok_bot.ts`, `kimi_bot.ts`,
+  `qwen_bot.ts`, and `deepseek_bot.ts` adjust their prompts and parsers so that
+  LLMs can return bid/double decisions in strict JSON form.【F:lib/bots/openai_bot.ts†L1-L123】【F:lib/bots/deepseek_bot.ts†L1-L110】
+* `lib/bots/mininet_bot.ts` exposes internal heuristics for the additional
+  phases to remain compatible with scripted tournaments.【F:lib/bots/mininet_bot.ts†L540-L607】
+
+With these changes, any external AI (HTTP or LLM-based) can make landlord and
+double decisions by respecting `ctx.phase` and returning the corresponding JSON
+shape.

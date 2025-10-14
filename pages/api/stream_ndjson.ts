@@ -274,7 +274,8 @@ function traceWrap(
     if (startDelayMs && startDelayMs>0) {
       await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
     }
-    try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase: ctx?.phase || 'play' }); } catch {}
+    const phase = ctx?.phase || 'play';
+    try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch {}
 
     const timeout = new Promise((resolve)=> {
       setTimeout(()=> resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` }), Math.max(1000, turnTimeoutMs));
@@ -290,18 +291,40 @@ function traceWrap(
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
     }
 
-const unified = (result?.move==='play' && Array.isArray(result?.cards))
+    const resPhase = (result && typeof result.phase === 'string') ? result.phase : phase;
+    const unified = (resPhase === 'play' && result?.move==='play' && Array.isArray(result?.cards))
       ? unifiedScore(ctx, result.cards)
       : undefined;
     const scoreTag = (typeof unified === 'number') ? ` | score=${unified.toFixed(2)}` : '';
-    const reason =
-      (result && typeof result.reason === 'string')
-        ? `[${label}] ${result.reason}${scoreTag}`
-        : `[${label}] ${(result?.move==='play' ? stringifyMove(result) : 'pass')}${scoreTag}`
-    try { const cstr = Array.isArray(result?.cards)?result.cards.join(''):''; console.debug('[DECISION]', `seat=${seatIndex}`, `move=${result?.move}`, `cards=${cstr}`, (typeof unified==='number'?`score=${unified.toFixed(2)}`:'') , `reason=${reason}`); } catch {}
-    onReason(seatIndex, reason);
-    try { onScore(seatIndex, unified as any); } catch {}
-    try { writeLine(res, { type:'event', kind:'bot-done', seat: seatIndex, by: label, model: spec?.model||'', tookMs: Date.now()-t0, reason, score: unified }); } catch {}
+
+    let reasonText = '';
+    if (typeof result?.reason === 'string' && result.reason) {
+      reasonText = `[${label}] ${result.reason}${scoreTag}`;
+    } else if (resPhase === 'bid') {
+      const decision = typeof result?.bid === 'boolean' ? !!result.bid : (result?.move === 'pass' ? false : true);
+      reasonText = `[${label}] bid=${decision ? '抢' : '不抢'}${scoreTag}`;
+    } else if (resPhase === 'double') {
+      const decision = typeof result?.double === 'boolean' ? !!result.double : (result?.move === 'pass' ? false : true);
+      reasonText = `[${label}] double=${decision ? '加倍' : '不加倍'}${scoreTag}`;
+    } else {
+      reasonText = `[${label}] ${(result?.move==='play' ? stringifyMove(result) : 'pass')}${scoreTag}`;
+    }
+
+    try {
+      const cstr = Array.isArray(result?.cards)?result.cards.join(''):'';
+      const extra = resPhase === 'bid' ? ` bid=${result?.bid}` : resPhase === 'double' ? ` double=${result?.double}` : '';
+      console.debug('[DECISION]', `seat=${seatIndex}`, `move=${result?.move}`, `cards=${cstr}`, (typeof unified==='number'?`score=${unified.toFixed(2)}`:'') , `phase=${resPhase}${extra}`, `reason=${reasonText}`);
+    } catch {}
+    onReason(seatIndex, reasonText);
+    if (resPhase === 'play') {
+      try { onScore(seatIndex, unified as any); } catch {}
+    }
+    try {
+      const payload: any = { type:'event', kind:'bot-done', seat: seatIndex, by: label, model: spec?.model||'', tookMs: Date.now()-t0, reason: reasonText, score: unified, phase: resPhase };
+      if (resPhase === 'bid') payload.bid = typeof result?.bid === 'boolean' ? !!result.bid : (result?.move === 'pass' ? false : true);
+      if (resPhase === 'double') payload.double = typeof result?.double === 'boolean' ? !!result.double : (result?.move === 'pass' ? false : true);
+      writeLine(res, payload);
+    } catch {}
 
     return result;
   };
