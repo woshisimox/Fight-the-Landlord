@@ -67,6 +67,13 @@ export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 const SUITS = ['♠', '♥', '♦', '♣'] as const;
 const RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const; // x=小王 X=大王
 const ORDER: Record<string, number> = Object.fromEntries(RANKS.map((r, i) => [r, i]));
+const RANK_LABELS: Record<string, string> = {
+  '3':'3','4':'4','5':'5','6':'6','7':'7','8':'8','9':'9',
+  'T':'10','J':'J','Q':'Q','K':'K','A':'A','2':'2',
+  'x':'小王','X':'大王'
+};
+const ORDER_HINT_RAW = RANKS.join('<');
+const ORDER_HINT_LABEL = RANKS.map(r => RANK_LABELS[r] ?? r).join('<');
 function tallyByRank(labels: Label[]): Record<string, number> {
   const map = countByRank(labels);
   const out: Record<string, number> = {};
@@ -152,6 +159,19 @@ export type Combo = {
   len?: number;
   // 便于二次生成/比较的附属结构
   cards?: Label[];
+  // —— 供外置 Bot 理解牌型需求的附加描述 ——
+  label?: string;
+  description?: string;
+  rankSymbol?: string;
+  rankLabel?: string;
+  minRankSymbol?: string;
+  minRankLabel?: string;
+  maxRankSymbol?: string;
+  maxRankLabel?: string;
+  rankOrder?: string[];
+  rankOrderLabel?: string[];
+  orderHint?: string;
+  orderHintLabel?: string;
 };
 
 // 对手牌点数统计
@@ -304,6 +324,158 @@ function beats(a: Combo, b: Combo): boolean {
       return b.rank > a.rank;
     default: return false;
   }
+}
+
+function rankSymbolOf(idx?: number): string | undefined {
+  if (typeof idx !== 'number') return undefined;
+  if (idx < 0 || idx >= RANKS.length) return undefined;
+  return RANKS[idx];
+}
+
+function readableRank(symbol?: string): string | undefined {
+  if (!symbol) return undefined;
+  return RANK_LABELS[symbol] ?? symbol;
+}
+
+function allowedRankSymbolsFor(type: ComboType): string[] {
+  switch (type) {
+    case 'single':
+      return [...RANKS];
+    case 'pair':
+      return RANKS.filter(r => r !== 'x' && r !== 'X');
+    case 'triple':
+    case 'triple_one':
+    case 'triple_pair':
+    case 'four_two_singles':
+    case 'four_two_pairs':
+    case 'bomb':
+      return RANKS.filter(r => r !== 'x' && r !== 'X');
+    case 'straight':
+    case 'pair_seq':
+    case 'plane':
+    case 'plane_single':
+    case 'plane_pair':
+      return RANKS.filter(r => ORDER[r] <= MAX_SEQ_VALUE);
+    case 'rocket':
+      return ['x', 'X'];
+    default:
+      return [...RANKS];
+  }
+}
+
+function nextRankSymbolFor(combo: Combo): string | undefined {
+  const symbol = rankSymbolOf(combo.rank);
+  if (!symbol) return undefined;
+  const allowed = allowedRankSymbolsFor(combo.type);
+  const idx = allowed.indexOf(symbol);
+  if (idx < 0 || idx + 1 >= allowed.length) return undefined;
+  return allowed[idx + 1];
+}
+
+function maxRankSymbolFor(combo: Combo): string | undefined {
+  const allowed = allowedRankSymbolsFor(combo.type);
+  if (!allowed.length) return undefined;
+  return allowed[allowed.length - 1];
+}
+
+function comboTypeName(combo: Combo): string {
+  const len = combo.len ?? 0;
+  switch (combo.type) {
+    case 'single': return '单张';
+    case 'pair': return '对子';
+    case 'triple': return '三张';
+    case 'triple_one': return '三带一';
+    case 'triple_pair': return '三带一对';
+    case 'straight': return len ? `${len}张顺子` : '顺子';
+    case 'pair_seq': return len ? `${len}连对` : '连对';
+    case 'plane': return len ? `${len}组三张飞机` : '飞机';
+    case 'plane_single': return len ? `${len}组三带一` : '飞机带单';
+    case 'plane_pair': return len ? `${len}组三带对` : '飞机带对';
+    case 'four_two_singles': return '四带两单';
+    case 'four_two_pairs': return '四带两对';
+    case 'bomb': return '炸弹';
+    case 'rocket': return '王炸';
+    default: return combo.type;
+  }
+}
+
+function labelForFollow(combo: Combo, rankLabel?: string): string {
+  const len = combo.len ?? 0;
+  switch (combo.type) {
+    case 'single':
+      return rankLabel ? `大于${rankLabel}的单张` : '需跟更大的单张';
+    case 'pair':
+      return rankLabel ? `大于对${rankLabel}的对子` : '需跟更大的对子';
+    case 'triple':
+      return rankLabel ? `大于${rankLabel}的三张` : '需跟更大的三张';
+    case 'triple_one':
+      return rankLabel ? `大于${rankLabel}的三带一` : '需跟更大的三带一';
+    case 'triple_pair':
+      return rankLabel ? `大于${rankLabel}的三带一对` : '需跟更大的三带一对';
+    case 'straight':
+      return rankLabel ? `大于以${rankLabel}为顶的${len}张顺子` : `需跟更大的${len}张顺子`;
+    case 'pair_seq':
+      return rankLabel ? `大于以${rankLabel}为顶的${len}连对` : `需跟更大的${len}连对`;
+    case 'plane':
+      return rankLabel ? `大于以${rankLabel}为顶的${len}组三张飞机` : `需跟更大的${len}组三张飞机`;
+    case 'plane_single':
+      return rankLabel ? `大于以${rankLabel}为顶的${len}组三带一` : `需跟更大的${len}组三带一`;
+    case 'plane_pair':
+      return rankLabel ? `大于以${rankLabel}为顶的${len}组三带对` : `需跟更大的${len}组三带对`;
+    case 'four_two_singles':
+      return rankLabel ? `大于${rankLabel}的四带两单` : '需跟更大的四带两单';
+    case 'four_two_pairs':
+      return rankLabel ? `大于${rankLabel}的四带两对` : '需跟更大的四带两对';
+    case 'bomb':
+      return rankLabel ? `大于${rankLabel}的炸弹` : '需跟更大的炸弹';
+    case 'rocket':
+      return '王炸（最大牌型）';
+    default:
+      return combo.type;
+  }
+}
+
+function describeFollowRequirement(combo: Combo): Combo {
+  const copy: Combo = { ...combo };
+  const rankSymbol = rankSymbolOf(combo.rank);
+  const rankLabel = readableRank(rankSymbol);
+  const nextSymbol = combo.type === 'rocket' ? undefined : nextRankSymbolFor(combo);
+  const nextLabel = readableRank(nextSymbol);
+  const maxSymbol = maxRankSymbolFor(combo);
+  const maxLabel = readableRank(maxSymbol);
+  const typeName = comboTypeName(combo);
+  const label = labelForFollow(combo, rankLabel);
+
+  let description: string;
+  if (combo.type === 'rocket') {
+    description = '王炸为最大牌型，无法被压制。';
+  } else if (combo.type === 'bomb') {
+    if (nextLabel) {
+      description = `需要出比 ${rankLabel} 更大的炸弹（至少 ${nextLabel}），否则只有王炸可以压制。`;
+    } else {
+      description = `${rankLabel ? `${rankLabel} 炸弹` : '该炸弹'} 已是最大，只能用王炸压制。`;
+    }
+  } else {
+    if (nextLabel) {
+      description = `需要出比 ${rankLabel} 更大的${typeName}（至少 ${nextLabel}），也可以用炸弹或王炸压制。`;
+    } else {
+      description = `${typeName}${rankLabel ? ` ${rankLabel}` : ''} 已是该类型最大，只能使用炸弹或王炸压制。`;
+    }
+  }
+
+  copy.label = label;
+  copy.description = description;
+  copy.rankSymbol = rankSymbol;
+  copy.rankLabel = rankLabel;
+  copy.minRankSymbol = nextSymbol;
+  copy.minRankLabel = nextLabel;
+  copy.maxRankSymbol = maxSymbol;
+  copy.maxRankLabel = maxLabel;
+  copy.rankOrder = [...RANKS];
+  copy.rankOrderLabel = RANKS.map(r => readableRank(r) ?? r);
+  copy.orderHint = ORDER_HINT_RAW;
+  copy.orderHintLabel = ORDER_HINT_LABEL;
+  return copy;
 }
 
 // ========== 可跟/可出 生成 ==========
@@ -1504,9 +1676,11 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
   }
   return arr;
 }
-const ctx: BotCtx = {
+    const requireForBot = require ? describeFollowRequirement(require) : null;
+
+    const ctx: BotCtx = {
       hands: hands[turn],
-      require,
+      require: requireForBot,
       canPass: !isLeader,
       policy: { four2 },
       seat: turn,
