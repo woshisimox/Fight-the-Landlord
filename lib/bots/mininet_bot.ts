@@ -270,9 +270,15 @@ function parseRequire(c:any): Req {
     };
     const type = map[name] ?? 'any';
     const len  = (r as any).len ?? (r as any).length ?? (r as any).size ?? (r as any).width ?? undefined;
-    const baseIdx = (r as any).baseIdx!=null ? Number((r as any).baseIdx) :
-                    (r as any).baseRank!=null ? rankIndex((r as any).baseRank) :
-                    (r as any).rank!=null ? rankIndex((r as any).rank) : undefined;
+    let baseIdx: number | undefined;
+    if ((r as any).baseIdx != null) {
+      baseIdx = Number((r as any).baseIdx);
+    } else if ((r as any).baseRank != null) {
+      baseIdx = rankIndex((r as any).baseRank);
+    } else if ((r as any).rank != null) {
+      const rawRank = (r as any).rank;
+      baseIdx = typeof rawRank === 'number' ? Number(rawRank) : rankIndex(rawRank);
+    }
     const wings = ((r as any).wings==='pair' || (r as any).wings==='single') ? (r as any).wings : undefined;
     return { type, len, baseIdx, wings: wings??null };
   }
