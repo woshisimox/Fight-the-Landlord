@@ -75,8 +75,9 @@ export const GrokBot = (o: { apiKey: string; model?: string }): BotFunc =>
           `你是斗地主出牌助手。必须只输出一个 JSON 对象：\n`+
           `{ "move": "play|pass", "cards": ["A","A"], "reason": "简要理由" }\n\n`+
           `手牌：${handsStr}\n`+
-          `需跟：${ctx.require?JSON.stringify(ctx.require):'null'}\n`+
-          `可过：${ctx.canPass?'true':'false'}\n`+
+        `需跟：${ctx.require?JSON.stringify(ctx.require):'null'}\n`+
+        `点数大小：3<4<5<6<7<8<9<T<J<Q<K<A<2<x<X（2 大于 K）\n`+
+        `可过：${ctx.canPass?'true':'false'}\n`+
           `策略：${ctx.policy}\n`+
           `${seatLine}\n`+
           `按座位已出牌：S0=${(seenBySeat[0]?.join('')) || ''} | S1=${(seenBySeat[1]?.join('')) || ''} | S2=${(seenBySeat[2]?.join('')) || ''}\n`+

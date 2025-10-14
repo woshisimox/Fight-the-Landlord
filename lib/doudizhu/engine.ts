@@ -227,6 +227,8 @@ export type Combo = {
   minRankLabel?: string;     // 顺子 / 连对 / 飞机等的最低点字符串
   maxRankLabel?: string;     // 顺子 / 连对 / 飞机等的最高点字符串
   description?: string;      // 简要规则说明（需压过什么牌型）
+  rankOrder?: string[];      // Dou Dizhu 点数大小顺序（供外置 bot 参考）
+  orderHint?: string;        // 紧凑文字版顺序提示（例：3<4<...<2<x<X）
 };
 
 const COMBO_LABEL: Record<ComboType, string> = {
@@ -307,6 +309,8 @@ function describeComboForBot(c: Combo): Combo {
     minRankLabel,
     maxRankLabel,
     description: desc || undefined,
+    rankOrder: [...RANKS],
+    orderHint: RANKS.join('<'),
   };
 }
 

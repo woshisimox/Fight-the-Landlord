@@ -42,6 +42,7 @@ During **play**, the engine attaches the follow-up requirement as a rich `ctx.re
 
 * `type`, `rank`, and `len` continue to mirror the tabled combo, so scripted bots can keep comparing ranks numerically.
 * For LLM or HTTP services, the engine now supplements the combo with `label`, `rankLabel`, `minRankLabel`, `maxRankLabel`, and a short `description`, making rules such as “需跟大于对3的对子” explicit in the payload.【F:lib/doudizhu/engine.ts†L1765-L1789】【F:lib/doudizhu/engine.ts†L200-L282】
+* The helper object also exposes the full Dou Dizhu ordering via `rankOrder` and its condensed `orderHint` string (`"3<4<5<6<7<8<9<T<J<Q<K<A<2<x<X"`), so external bots can confirm that `2` outranks `K` without hard-coding suit logic.【F:lib/doudizhu/engine.ts†L200-L282】
 
 ### How the thresholds and recommendations are produced
 
