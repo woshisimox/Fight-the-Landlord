@@ -1829,7 +1829,16 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
     const coopInfo = buildCoopInfo(ctx, history, landlord, coopEnabled);
     if (coopInfo) ctx.coop = coopInfo;
 
-    let mv = await Promise.resolve(bots[turn](clone(ctx)));
+    const meta = seatMeta[turn];
+    const ctxForBot = clone(ctx);
+    if (ctxForBot?.coop && meta?.phaseAware && !String(meta.choice || '').startsWith('built-in')) {
+      try {
+        ctxForBot.coop = { ...ctxForBot.coop };
+        delete (ctxForBot.coop as any).recommended;
+      } catch {}
+    }
+
+    let mv = await Promise.resolve(bots[turn](ctxForBot));
 
     // 兜底：首家不许过，且 move 非法时强制打一张
     const forcePlayOne = () => [hands[turn][0]] as Label[];

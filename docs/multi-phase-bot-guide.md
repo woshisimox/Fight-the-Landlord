@@ -47,29 +47,22 @@ During **play**, the engine attaches the follow-up requirement as a rich `ctx.re
 When the front-end toggles **Farmer cooperation**, every play-phase context also carries `ctx.coop`:
 
 * `ctx.coop.enabled` flags the mode, while `teammate`, `landlord`, and their respective histories aggregate all public plays for quick teammate/opponent lookups.【F:lib/doudizhu/engine.ts†L1184-L1211】
-* Farmers additionally receive `ctx.coop.recommended`, which mirrors the move that the built-in `AllySupport` bot would make; the bundled `RandomLegal`, `GreedyMin/Max`, and `EndgameRush` bots follow this suggestion to cooperate automatically.【F:lib/doudizhu/engine.ts†L58-L111】【F:lib/doudizhu/engine.ts†L642-L726】【F:lib/doudizhu/engine.ts†L750-L1188】【F:lib/doudizhu/engine.ts†L1383-L1448】
-* External services can choose to adopt the same recommendation or roll their own heuristics using the exposed teammate/landlord histories (`teammateHistory`, `landlordHistory`), their latest moves, and per-rank counts, all without relying on hidden signalling channels.【F:lib/doudizhu/engine.ts†L1184-L1211】
+* Built-in farmers additionally receive `ctx.coop.recommended`, which mirrors the move that the bundled `AllySupport` bot would make; the built-in `RandomLegal`, `GreedyMin/Max`, and `EndgameRush` bots follow this suggestion automatically when cooperation is enabled.【F:lib/doudizhu/engine.ts†L58-L111】【F:lib/doudizhu/engine.ts†L642-L726】【F:lib/doudizhu/engine.ts†L750-L1188】【F:lib/doudizhu/engine.ts†L1383-L1448】
+* When the engine invokes an external AI (LLM or HTTP), it keeps the rest of `ctx.coop` intact but strips `ctx.coop.recommended`, ensuring the service reads the public histories and hand counts to devise its own cooperative move.【F:lib/doudizhu/engine.ts†L1774-L1858】
+* External services can therefore inspect `ctx.coop.teammateHistory`, `ctx.coop.teammateLastPlay`, `ctx.coop.landlordLastPlay`, and the remaining hand counts to implement custom teamwork heuristics without relying on hidden signalling channels.【F:lib/doudizhu/engine.ts†L1184-L1211】
 
-For an external AI that plays as a farmer, the simplest cooperative strategy is to check `ctx.coop.enabled` and follow the bundled advice when it exists:
-
-```ts
-if (ctx.role === 'farmer' && ctx.coop?.enabled) {
-  const advise = ctx.coop.recommended;
-  if (advise?.move === 'pass' && ctx.canPass) {
-    return { move: 'pass', reason: advise.reason ?? 'Follow teammate plan' };
-  }
-  if (advise?.move === 'play') {
-    return { move: 'play', cards: advise.cards, reason: advise.reason ?? 'Follow teammate plan' };
-  }
-}
-```
-
-Because the engine injects the same data that powers `AllySupport`, `advise.cards` is guaranteed to be a legal move for the current hand. Bots that want deeper teamwork can inspect the rest of `ctx.coop`, for example to prefer soft leads when the teammate just invested a big combo:
+For an external AI that plays as a farmer, a lightweight cooperative heuristic might be:
 
 ```ts
 const teammateJustSpentBomb = ctx.coop?.teammateLastPlay?.combo?.type === 'bomb';
 const landlordDownToFewCards = (ctx.coop?.landlordHandCount ?? 20) <= 2;
-// ... tailor your move selection based on these public signals ...
+if (ctx.role === 'farmer' && ctx.coop?.enabled) {
+  // 轮到我跟牌且队友压住了地主，可考虑让牌；否则结合历史自己选最优出牌。
+  if (ctx.canPass && ctx.coop.teammateLastPlay?.trick === ctx.trick) {
+    return { move: 'pass', reason: '让队友继续控场' };
+  }
+  // ...根据 landlordDownToFewCards、teammateJustSpentBomb 等信号挑选更合适的出牌...
+}
 ```
 
 This keeps both built-in and external implementations on the same public-information footing while still allowing sophisticated cooperation logic.
