@@ -365,6 +365,7 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
+type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[] };
 
 const rankOf = (l: string) => {
   if (!l) return '';
@@ -396,19 +397,47 @@ function decorateHandCycle(raw: string[]): string[] {
   });
 }
 
-function Card({ label }: { label:string }) {
+function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seat = (typeof landlord === 'number' && landlord >= 0 && landlord < 3) ? landlord : null;
+  if (seat == null) return decorateHandCycle(raw);
+  const pool = [...(hands?.[seat] || [])];
+  return raw.map(card => {
+    const options = candDecorations(card);
+    for (const opt of options) {
+      const idx = pool.indexOf(opt);
+      if (idx >= 0) {
+        pool.splice(idx, 1);
+        return opt;
+      }
+    }
+    return options[0] || card;
+  });
+}
+
+function Card({ label, dimmed = false, compact = false }: { label:string; dimmed?:boolean; compact?:boolean }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
   const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
+  const pad = compact ? '4px 6px' : '6px 10px';
+  const fontSize = compact ? 14 : 16;
+  const suitColor = dimmed ? '#9ca3af' : baseColor;
+  const rankStyle = dimmed
+    ? { color: '#9ca3af' }
+    : (rankColor ? { color: rankColor } : {});
   return (
     <span style={{
       display:'inline-flex', alignItems:'center', gap:6,
-      border:'1px solid #ddd', borderRadius:8, padding:'6px 10px',
-      marginRight:6, marginBottom:6, fontWeight:800, color: baseColor
+      border:'1px solid #ddd', borderRadius:8, padding: pad,
+      marginRight:6, marginBottom:6, fontWeight:800,
+      color: suitColor,
+      background: dimmed ? '#f3f4f6' : '#fff',
+      opacity: dimmed ? 0.65 : 1,
+      borderColor: dimmed ? '#d1d5db' : '#ddd'
     }}>
-      <span style={{ fontSize:16 }}>{suit}</span>
-      <span style={{ fontSize:16, ...(rankColor ? { color: rankColor } : {}) }}>{rank === 'T' ? '10' : rank}</span>
+      <span style={{ fontSize }}>{suit}</span>
+      <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
     </span>
   );
 }
@@ -624,6 +653,7 @@ function LivePanel(props: LiveProps) {
   const [bidMultiplier, setBidMultiplier] = useState(1);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
+  const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [] });
   const [log, setLog] = useState<string[]>([]);
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
@@ -647,6 +677,7 @@ function LivePanel(props: LiveProps) {
   const [scoreDists, setScoreDists] = useState<number[][]>([[],[],[]]);
   const statsFileRef = useRef<HTMLInputElement|null>(null);
   const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
+  const bottomRef = useRef(bottomInfo); useEffect(()=>{ bottomRef.current = bottomInfo; }, [bottomInfo]);
 
   // 依据 scoreSeries（每手评分）与 roundCuts（每局切点）计算每局均值，并汇总到席位统计
   const recomputeScoreStats = () => {
@@ -1310,11 +1341,18 @@ const start = async () => {
           let nextAggStats = aggStatsRef.current;
           let nextAggCount = aggCountRef.current;
 
-          
+
           let nextScores = scoreSeriesRef.current.map(x => [...x]);
           let sawAnyTurn = false;
           let nextCuts = roundCutsRef.current.slice();
           let nextLords = roundLordsRef.current.slice();
+          let nextBottom = (() => {
+            const cur = bottomRef.current;
+            return {
+              landlord: cur?.landlord ?? null,
+              cards: (cur?.cards || []).map(c => ({ ...c })),
+            } as BottomInfo;
+          })();
 for (const raw of batch) {
             let m: any = raw;
             // Remap engine->UI indices when startShift != 0
@@ -1371,6 +1409,7 @@ for (const raw of batch) {
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
+                nextBottom = { landlord: null, cards: [] };
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -1394,6 +1433,7 @@ for (const raw of batch) {
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
+                  nextBottom = { landlord: lord ?? null, cards: [] };
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
@@ -1424,7 +1464,10 @@ for (const raw of batch) {
                 if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
                   nextHands = (rh0 as string[][]).map(decorateHandCycle);
                   const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
-                  if (lord2 != null) nextLandlord = lord2;
+                  if (lord2 != null) {
+                    nextLandlord = lord2;
+                    if (nextBottom.landlord !== lord2) nextBottom = { landlord: lord2, cards: [] };
+                  }
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
                   {
@@ -1497,7 +1540,15 @@ else if (m.type === 'event' && m.kind === 'bid-eval') {
 // ------ 明牌（显示底牌） ------
 if (m.type === 'event' && m.kind === 'reveal') {
   const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
-  const pretty = decorateHandCycle ? decorateHandCycle(btm) : btm;
+  const seatIdx = (typeof (m.landlordIdx ?? m.landlord) === 'number')
+    ? (m.landlordIdx ?? m.landlord) as number
+    : nextLandlord;
+  const mapped = resolveBottomDecorations(btm, seatIdx ?? nextLandlord, nextHands as string[][]);
+  nextBottom = {
+    landlord: (typeof seatIdx === 'number' ? seatIdx : nextLandlord) ?? nextBottom.landlord ?? null,
+    cards: mapped.map(label => ({ label, used: false })),
+  };
+  const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
   nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
   // 不改变 nextMultiplier，仅展示
   continue;
@@ -1604,6 +1655,16 @@ if (m.type === 'event' && m.kind === 'play') {
                     const k = nh[seat].indexOf(chosen);
                     if (k >= 0) nh[seat].splice(k, 1);
                     pretty.push(chosen);
+                  }
+                  if (seat === (nextBottom.landlord ?? -1) && pretty.length && nextBottom.cards.length) {
+                    const updated = nextBottom.cards.map(c => ({ ...c }));
+                    for (const label of pretty) {
+                      const idxCard = updated.findIndex(c => !c.used && c.label === label);
+                      if (idxCard >= 0) {
+                        updated[idxCard] = { ...updated[idxCard], used: true };
+                      }
+                    }
+                    nextBottom = { ...nextBottom, cards: updated };
                   }
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
                   lastReasonRef.current[m.seat] = null;
@@ -1775,6 +1836,7 @@ nextTotals     = [
           setRoundCuts(nextCuts);
           setScoreSeries(nextScores);
           setHands(nextHands); setPlays(nextPlays);
+          setBottomInfo(nextBottom);
           setTotals(nextTotals); setFinishedCount(nextFinished);
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setBidMultiplier(nextBidMultiplier); setDelta(nextDelta);
@@ -2058,7 +2120,7 @@ const handleAllSaveInner = () => {
         </div>
       </Section>
 
-<Section title="手牌">
+      <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
           {[0,1,2].map(i=>(
             <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
@@ -2069,6 +2131,43 @@ const handleAllSaveInner = () => {
               <Hand cards={hands[i]} />
             </div>
           ))}
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
+          {[0,1,2].map(i=>{
+            const isLandlord = bottomInfo.landlord === i;
+            const cards = isLandlord ? bottomInfo.cards : [];
+            return (
+              <div
+                key={`bottom-${i}`}
+                style={{
+                  border:'1px dashed #d1d5db',
+                  borderRadius:8,
+                  padding:'6px 8px',
+                  minHeight:64,
+                  display:'flex',
+                  flexDirection:'column',
+                  justifyContent:'center',
+                  alignItems:'center',
+                  background:isLandlord ? '#f0fdf4' : '#f9fafb'
+                }}
+              >
+                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌</div>
+                {isLandlord ? (
+                  cards.length ? (
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:4, justifyContent:'center' }}>
+                      {cards.map((c, idx) => (
+                        <Card key={`${c.label}-${idx}`} label={c.label} dimmed={c.used} compact />
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:12, color:'#9ca3af' }}>（待明牌）</div>
+                  )
+                ) : (
+                  <div style={{ fontSize:12, color:'#d1d5db' }}>—</div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </Section>
 
