@@ -83,6 +83,18 @@ Bundled LLM prompts now remind the model that the default decision is to follow 
 recommendation (e.g. “启发分 ≥ 阈值时会抢地主”) and to justify any deviation, so logs will show
 the same threshold that the engine supplied even when the AI elects to override it.【F:lib/bots/openai_bot.ts†L53-L70】【F:lib/bots/deepseek_bot.ts†L51-L70】
 
+## 计分与对局倍数（中文）
+
+斗地主的最终得分由多个阶段累积出来，前端日志里看到的“叫抢倍数”“对局倍数”也对应着引擎中的几个变量：
+
+1. **叫抢倍数 (`bidMultiplier`)**：在抢地主阶段，每当一名玩家选择“抢”时，对局倍数就会乘 2，并同步到日志中的“叫抢xN”。【F:lib/doudizhu/engine.ts†L1287-L1337】【F:lib/doudizhu/engine.ts†L1345-L1357】
+2. **对局倍数 (`multiplier`)**：这是在抢地主阶段实时累计的基础倍数，完成抢地主后会通过 `multiplier-sync` 事件通知前端，所以你会看到“对局xN”的提示。这个数值还会作为后续加倍与结算的基础倍数。【F:lib/doudizhu/engine.ts†L1345-L1371】【F:lib/doudizhu/engine.ts†L1399-L1406】
+3. **明牌加倍（地主/农民）**：亮底后，地主和两位农民会分别根据手牌与底牌评估是否再加倍，结果记录在 `__doubleMulY` 和 `__doubleMulB` 中；它们与基础倍数相乘，得到地主对乙、对丙两条线的结算倍数基准。【F:lib/doudizhu/engine.ts†L1411-L1559】【F:lib/doudizhu/engine.ts†L1565-L1579】
+4. **炸弹 / 王炸加倍**：对局过程中只要有人出炸弹或王炸，就会把 `bombTimes` 加 1；最后结算时再用 `1 << bombTimes`（即 2 的 `bombTimes` 次方）额外放大倍数，这就是常见的“出炸弹翻倍”。【F:lib/doudizhu/engine.ts†L1821-L1897】【F:lib/doudizhu/engine.ts†L1912-L1940】
+5. **春天 / 反春天**：若地主一方或农民一方满足春天条件，`springMul` 会乘 2；最终倍数再乘上 `springMul`。所以除了抢地主和明牌加倍之外，炸弹与春天也会让“对局倍数”进一步放大。【F:lib/doudizhu/engine.ts†L1898-L1940】
+
+总结来说，前端显示的“对局倍数”是在抢地主阶段累计的基础值；真正结算时还要再乘上各方明牌加倍的结果、炸弹/王炸的 2 倍数，以及春天/反春天的额外 2 倍。因此看到倍数突然翻倍，很可能是对局中有人炸弹或者出现春天，并不仅仅来自抢地主或加倍阶段。
+
 ## Reference bot updates
 
 Every bundled bot has been updated so that it can understand and respond to the
