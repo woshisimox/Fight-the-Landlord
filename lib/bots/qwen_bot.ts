@@ -17,6 +17,27 @@ function fallbackMove(ctx: BotCtx, reason: string): BotMove {
 }
 
 
+const toMessageString = (content: any): string => {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (!part) return '';
+        if (typeof part === 'string') return part;
+        if (typeof part.text === 'string') return part.text;
+        if (typeof part === 'object' && typeof part.content === 'string') return part.content;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (content && typeof content === 'object') {
+    if (typeof (content as any).text === 'string') return (content as any).text;
+    if (typeof (content as any).content === 'string') return (content as any).content;
+  }
+  return '';
+};
+
 export const QwenBot=(o:{apiKey:string,model?:string}):BotFunc=>async (ctx:BotCtx)=>{
   try{
     if(!o.apiKey) throw new Error('Missing Qwen API Key');
@@ -27,6 +48,8 @@ export const QwenBot=(o:{apiKey:string,model?:string}):BotFunc=>async (ctx:BotCt
       body: JSON.stringify({
         model:o.model||'qwen-plus',
         temperature:0.2,
+        stream:false,
+        response_format:{ type:'json_object' },
         messages:[
           {role:'system',content:'Only reply with a strict JSON object for the move.'},
           {role:'user',content:
@@ -48,12 +71,16 @@ export const QwenBot=(o:{apiKey:string,model?:string}):BotFunc=>async (ctx:BotCt
     });
     if(!r.ok) throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,200));
     const j:any = await r.json();
-    const t = j?.choices?.[0]?.message?.content || '';
+    const t = toMessageString(j?.choices?.[0]?.message?.content);
     const p:any = extractFirstJsonObject(String(t)) || {};
     const m = p.move==='pass' ? 'pass' : 'play';
     const cds:string[] = Array.isArray(p.cards)?p.cards:[];
     const reason = nonEmptyReason(p.reason,'Qwen');
-    return m==='pass'?{move:'pass',reason}:{move:'play',cards:cds,reason};
+    if(m==='pass') return {move:'pass',reason};
+    if(cds.length===0){
+      return fallbackMove(ctx, 'Qwen 返回不含有效 cards，已回退');
+    }
+    return {move:'play',cards:cds,reason};
   }catch(e:any){
     const reason=`Qwen 调用失败：${e?.message||e}，已回退`;
     return fallbackMove(ctx, reason);
