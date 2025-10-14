@@ -30,3 +30,5 @@ npm run build && npm run start
 因此，**除了引擎外，所有外接 Bot（LLM/HTTP）也必须支持新的 `ctx.phase`**，在非出牌阶段返回对应 JSON，否则 API 层会回退到内置启发式逻辑（无法真正调用 AI）。
 
 参考实现：`lib/bots/openai_bot.ts`、`gemini_bot.ts`、`grok_bot.ts`、`kimi_bot.ts`、`qwen_bot.ts`、`deepseek_bot.ts`、`http_bot.ts`、`mininet_bot.ts` 均已实现新的多阶段提示词与结果解析。
+
+关于新增阶段上下文、回调顺序和参考代码的更详细说明，可见 [`docs/multi-phase-bot-guide.md`](docs/multi-phase-bot-guide.md)。
