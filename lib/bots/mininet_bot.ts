@@ -1,6 +1,9 @@
 // lib/bots/mininet_bot.ts (v8.1 - use extractCandidatesFromCtx in main; follow-logic + qwen hands + counts fix)
 type AnyCard = any;
-type BotMove = { move: 'play' | 'pass'; cards?: AnyCard[]; reason?: string };
+type BotMove =
+  | { phase?: 'play'; move: 'play' | 'pass'; cards?: AnyCard[]; reason?: string }
+  | { phase: 'bid'; bid: boolean; reason?: string }
+  | { phase: 'double'; double: boolean; reason?: string };
 
 const RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const;
 type RankChar = typeof RANKS[number];
@@ -546,6 +549,37 @@ function buildRuleCandidates(hand: AnyCard[], ctx:any): AnyCard[][] {
 
 // ======== Bot main ========
 export async function MiniNetBot(ctx:any): Promise<BotMove> {
+  if (ctx?.phase === 'bid') {
+    const info = ctx?.bid || {};
+    const score = typeof info.score === 'number' ? info.score : NaN;
+    const threshold = typeof info.threshold === 'number' ? info.threshold : NaN;
+    const recommend = typeof info.recommended === 'boolean' ? info.recommended : !!info.bid;
+    const parts = [
+      'MiniNet:bid',
+      Number.isFinite(score) ? `score=${score.toFixed(2)}` : '',
+      Number.isFinite(threshold) ? `threshold=${threshold.toFixed(2)}` : '',
+      `decision=${recommend ? 'bid' : 'pass'}`,
+    ].filter(Boolean);
+    return { phase: 'bid', bid: !!recommend, reason: parts.join(' | ') };
+  }
+  if (ctx?.phase === 'double') {
+    const info = ctx?.double || {};
+    const recommend = typeof info.recommended === 'boolean' ? info.recommended : false;
+    const parts = [
+      'MiniNet:double',
+      info?.role ? `role=${info.role}` : '',
+      `decision=${recommend ? 'double' : 'keep'}`,
+    ].filter(Boolean);
+    if (info?.info?.farmer) {
+      const f = info.info.farmer;
+      if (typeof f.dLhat === 'number') parts.push(`Δ̂=${f.dLhat.toFixed(2)}`);
+      if (typeof f.counter === 'number') parts.push(`counter=${f.counter.toFixed(2)}`);
+    }
+    if (info?.info?.landlord && typeof info.info.landlord.delta === 'number') {
+      parts.push(`Δ=${info.info.landlord.delta.toFixed(2)}`);
+    }
+    return { phase: 'double', double: !!recommend, reason: parts.join(' | ') };
+  }
   const state: MiniState = {
     role: Number(ctx?.role ?? 0) as 0|1|2,
     landlord: Number(ctx?.landlord ?? 0) as 0|1|2,
