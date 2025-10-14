@@ -645,6 +645,35 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 /* ==================== LivePanel（对局） ==================== */
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const pauseRef = useRef(false);
+  const pauseResolversRef = useRef<Array<() => void>>([]);
+
+  const flushPauseResolvers = () => {
+    const list = pauseResolversRef.current.slice();
+    pauseResolversRef.current.length = 0;
+    for (const fn of list) {
+      try { fn(); } catch {}
+    }
+  };
+  const enterPause = () => {
+    if (pauseRef.current) return;
+    pauseRef.current = true;
+    setPaused(true);
+  };
+  const exitPause = () => {
+    pauseRef.current = false;
+    setPaused(false);
+    flushPauseResolvers();
+  };
+  const waitWhilePaused = async () => {
+    if (!pauseRef.current) return;
+    while (pauseRef.current) {
+      await new Promise<void>(resolve => {
+        pauseResolversRef.current.push(resolve);
+      });
+    }
+  };
 
   const [hands, setHands] = useState<string[][]>([[],[],[]]);
   const [landlord, setLandlord] = useState<number|null>(null);
@@ -1190,10 +1219,11 @@ const handleScoreRefresh = () => {
 const [allLogs, setAllLogs] = useState<string[]>([]);
 const allLogsRef = useRef(allLogs);
 useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
-const start = async () => {
+  const start = async () => {
     if (running) return;
     if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
 
+    exitPause();
     setRunning(true);
     setAllLogs([]);
     setLandlord(null); setHands([[], [], []]); setPlays([]);
@@ -1314,6 +1344,8 @@ const start = async () => {
       const rewrite = makeRewriteRoundLabel(labelRoundNo);
 
       while (true) {
+        if (controllerRef.current?.signal.aborted) break;
+        if (pauseRef.current) await waitWhilePaused();
         const { value, done } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
@@ -1869,6 +1901,7 @@ nextTotals     = [
           setWinner(nextWinner); setMultiplier(nextMultiplier); setBidMultiplier(nextBidMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
         }
+        if (pauseRef.current) await waitWhilePaused();
       }
 
           if (dogId) { try { clearInterval(dogId); } catch {} }
@@ -1882,22 +1915,46 @@ nextTotals     = [
 });
 };
 
+    const restBetweenRounds = async () => {
+      const base = 800 + Math.floor(Math.random() * 600);
+      const step = 120;
+      let elapsed = 0;
+      while (elapsed < base) {
+        if (controllerRef.current?.signal.aborted || pauseRef.current) break;
+        const slice = Math.min(step, base - elapsed);
+        await new Promise(resolve => setTimeout(resolve, slice));
+        elapsed += slice;
+      }
+      if (!controllerRef.current?.signal.aborted) {
+        await waitWhilePaused();
+      }
+    };
+
     try {
       for (let i = 0; i < props.rounds; i++) {
         if (controllerRef.current?.signal.aborted) break;
+        if (pauseRef.current) await waitWhilePaused();
         const thisRound = i + 1;
         await playOneGame(i, thisRound);
+        if (controllerRef.current?.signal.aborted) break;
+        if (pauseRef.current) await waitWhilePaused();
         const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
         if (hasNegative) { setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']); break; }
-        await new Promise(r => setTimeout(r, 800 + Math.floor(Math.random() * 600)));
+        await restBetweenRounds();
       }
     } catch (e: any) {
       if (e?.name === 'AbortError') setLog(l => [...l, '已手动停止。']);
       else setLog(l => [...l, `错误：${e?.message || e}`]);
-    } finally { setRunning(false); }
+    } finally { exitPause(); setRunning(false); }
   };
 
-  const stop = () => { controllerRef.current?.abort(); setRunning(false); };
+  const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); };
+
+  const togglePause = () => {
+    if (!running) return;
+    if (pauseRef.current) exitPause();
+    else enterPause();
+  };
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
@@ -1995,6 +2052,17 @@ const handleAllSaveInner = () => {
             cursor: running ? 'not-allowed' : 'pointer'
           }}
         >开始</button>
+        <button
+          onClick={togglePause}
+          disabled={!running}
+          style={{
+            padding:'8px 12px',
+            borderRadius:8,
+            background: !running ? '#d1d5db' : (paused ? '#bfdbfe' : '#fde68a'),
+            color: !running ? '#6b7280' : (paused ? '#1e3a8a' : '#92400e'),
+            cursor: !running ? 'not-allowed' : 'pointer'
+          }}
+        >{paused ? '继续' : '暂停'}</button>
         <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
         <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
           剩余局数：{remainingGames}
