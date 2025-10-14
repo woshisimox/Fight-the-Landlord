@@ -1,8 +1,10 @@
 // lib/bots/http_bot.ts
 // 通用 HTTP 代理 bot：把 ctx 以 JSON POST 给你的服务，由服务返回 {move, cards?, reason}
 type BotMove =
-  | { move: 'pass'; reason?: string }
-  | { move: 'play'; cards: string[]; reason?: string };
+  | { phase?: 'play'; move: 'pass'; reason?: string }
+  | { phase?: 'play'; move: 'play'; cards: string[]; reason?: string }
+  | { phase: 'bid'; bid: boolean; reason?: string }
+  | { phase: 'double'; double: boolean; reason?: string };
 type BotCtx = any;
 type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 
@@ -32,8 +34,18 @@ export const HttpBot = (o: {
     if (!r.ok) throw new Error(`HTTP ${r.status} ${txt.slice(0, 200)}`);
     let obj: any = {};
     try { obj = JSON.parse(txt); } catch {}
+    if (obj?.phase === 'bid' || typeof obj?.bid === 'boolean') {
+      const decision = typeof obj?.bid === 'boolean' ? !!obj.bid : (obj?.move === 'pass' ? false : true);
+      const reason: string | undefined = typeof obj?.reason === 'string' ? obj.reason : undefined;
+      return { phase: 'bid', bid: decision, reason };
+    }
+    if (obj?.phase === 'double' || typeof obj?.double === 'boolean') {
+      const decision = typeof obj?.double === 'boolean' ? !!obj.double : (typeof obj?.bid === 'boolean' ? !!obj.bid : (obj?.move === 'pass' ? false : true));
+      const reason: string | undefined = typeof obj?.reason === 'string' ? obj.reason : undefined;
+      return { phase: 'double', double: decision, reason };
+    }
     const move = obj?.move === 'pass' ? 'pass' : 'play';
     const cards: string[] = Array.isArray(obj?.cards) ? obj.cards : [];
     const reason: string | undefined = typeof obj?.reason === 'string' ? obj.reason : undefined;
-    return move === 'pass' ? { move: 'pass', reason } : { move: 'play', cards, reason };
+    return move === 'pass' ? { phase:'play', move: 'pass', reason } : { phase:'play', move: 'play', cards, reason };
   };
