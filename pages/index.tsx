@@ -2768,13 +2768,14 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
   }).join(' ');
 
   return (
-    <div style={{ display:'flex', gap:10, alignItems:'center' }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {/* 环形网格 */}
-        {[1,2,3,4].map(k=>{
-          const r = (k/4) * R;
-          return <polygon key={k} points={ringPoints(r)} fill="none" stroke="#e5e7eb"/>;
-        })}
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', gap:8 }}>
+      <div style={{ width:'100%', display:'flex', justifyContent:'center' }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow:'visible' }}>
+          {/* 环形网格 */}
+          {[1,2,3,4].map(k=>{
+            const r = (k/4) * R;
+            return <polygon key={k} points={ringPoints(r)} fill="none" stroke="#e5e7eb"/>;
+          })}
         {/* 轴线 */}
         {Array.from({length:5}, (_,i)=>{
           return <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang(i))} y2={cy + R * Math.sin(ang(i))} stroke="#e5e7eb"/>;
@@ -2787,8 +2788,9 @@ function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
           const ly = cy + (R + 14) * Math.sin(ang(i));
           return <text key={i} x={lx} y={ly} fontSize={11} textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
         })}
-      </svg>
-      <div style={{ minWidth:60, fontSize:12, color:'#374151' }}>{title}</div>
+        </svg>
+      </div>
+      <div style={{ fontSize:12, color:'#374151' }}>{title}</div>
     </div>
   );
 }
