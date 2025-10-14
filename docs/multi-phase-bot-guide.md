@@ -114,3 +114,12 @@ External services receive the same inputs through `ctx`/`require` and may
 implement their own cooperative logic (e.g. prioritising safe follow-ups when a
 teammate leads).  There is no extra API for orchestrating joint plays beyond
 the shared state that each bot already receives.【F:lib/doudizhu/engine.ts†L1687-L1789】
+
+### 中文速览：内置算法与外置 AI 的配合差异
+
+* **公共信息来源一致**：无论是内置算法还是外置 AI，只能看到 `ctx.coop` 提供的公开信息（例如队友/地主的历史出牌、剩余手牌估计等），不存在额外的暗号或隐藏信道。【F:lib/doudizhu/engine.ts†L1184-L1211】
+* **内置农民默认跟随推荐**：当勾选“农民配合”开关时，引擎会把 `AllySupport` 的建议写入 `ctx.coop.recommended`，并仅提供给内置农民 Bot；随机、贪心等农民算法会调用 `maybeFollowCoop` 优先执行这份建议，实现统一的合作行为。【F:lib/doudizhu/engine.ts†L58-L111】【F:lib/doudizhu/engine.ts†L642-L726】【F:lib/doudizhu/engine.ts†L750-L1188】
+* **外置 AI 自主决策**：调用外部服务时，引擎会保留 `ctx.coop.enabled` 等上下文字段，但移除 `recommended`，促使 AI 基于公共数据（如 `teammateLastPlay`、`landlordHandCount`）自行设计配合策略，避免被动照抄内置建议。【F:lib/doudizhu/engine.ts†L1774-L1858】
+* **可扩展的协作逻辑**：如果外置 AI 需要更复杂的配合，可以结合 `ctx.coop.teammateHistory` 与当前 `require` 规则评估局势，例如让出主导权、帮队友拆分牌型，完全由外置服务决定实现方式。【F:lib/doudizhu/engine.ts†L1765-L1789】【F:lib/doudizhu/engine.ts†L1184-L1211】
+
+综上所述，内置算法默认遵循统一的协作建议，而外置 AI 则在同样的公共数据基础上自主选择配合策略，从而保证公平性与可拓展性。
