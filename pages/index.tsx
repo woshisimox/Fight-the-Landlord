@@ -1466,7 +1466,12 @@ for (const raw of batch) {
                   const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
                   if (lord2 != null) {
                     nextLandlord = lord2;
-                    if (nextBottom.landlord !== lord2) nextBottom = { landlord: lord2, cards: [] };
+                    if (nextBottom.landlord !== lord2) {
+                      const keep = Array.isArray(nextBottom.cards)
+                        ? nextBottom.cards.map(c => ({ ...c }))
+                        : [];
+                      nextBottom = { landlord: lord2, cards: keep };
+                    }
                   }
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
@@ -1845,6 +1850,13 @@ nextTotals     = [
                 continue;
               }
             } catch (e) { console.error('[ingest:batch]', e, raw); }
+          }
+
+          if (nextLandlord != null && nextBottom.landlord !== nextLandlord) {
+            const keep = Array.isArray(nextBottom.cards)
+              ? nextBottom.cards.map(c => ({ ...c }))
+              : [];
+            nextBottom = { landlord: nextLandlord, cards: keep };
           }
 
           setRoundLords(nextLords);
