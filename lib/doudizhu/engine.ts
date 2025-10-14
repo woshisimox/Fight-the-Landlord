@@ -20,6 +20,8 @@ export type BotMove =
   | { move: 'pass'; reason?: string }
   | { move: 'play'; cards: Label[]; reason?: string };
 
+type CoopRecommendation = (BotMove & { via?: string });
+
 export type PlayEvent = {
   seat: number;
   move: 'play' | 'pass';
@@ -58,6 +60,21 @@ export type BotCtx = {
     seenByRank: Record<string, number>;
     remainingByRank: Record<string, number>; // 54 张减去 seen 与自己手牌后的估计余量
   };
+
+  coop?: {
+    enabled: boolean;
+    teammate: number | null;
+    landlord: number;
+    teammateHistory: PlayEvent[];
+    landlordHistory: PlayEvent[];
+    teammateLastPlay: PlayEvent | null;
+    landlordLastPlay: PlayEvent | null;
+    teammateSeen: Label[];
+    landlordSeen: Label[];
+    teammateHandCount: number;
+    landlordHandCount: number;
+    recommended?: CoopRecommendation;
+  };
 };
 
 
@@ -83,6 +100,37 @@ function tallyByRank(labels: Label[]): Record<string, number> {
 }
 
 function clone<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
+
+function normalizeMove(move: any): BotMove | null {
+  if (!move || typeof move !== 'object') return null;
+  if (move.move === 'pass') {
+    return { move: 'pass', reason: typeof move.reason === 'string' ? move.reason : undefined };
+  }
+  if (move.move === 'play' && Array.isArray(move.cards)) {
+    return {
+      move: 'play',
+      cards: move.cards.slice(),
+      reason: typeof move.reason === 'string' ? move.reason : undefined,
+    };
+  }
+  return null;
+}
+
+function maybeFollowCoop(ctx: BotCtx): BotMove | null {
+  const coop = ctx?.coop;
+  if (!coop?.enabled || ctx.role !== 'farmer') return null;
+  if (!coop.recommended) return null;
+  if (coop.recommended.move === 'pass') {
+    const baseReason = coop.recommended.reason || `FarmerCoop${coop.recommended.via ? `(${coop.recommended.via})` : ''}`;
+    return { move: 'pass', reason: baseReason };
+  }
+  if (coop.recommended.move === 'play') {
+    const cards = Array.isArray(coop.recommended.cards) ? coop.recommended.cards.slice() : [];
+    const baseReason = coop.recommended.reason || `FarmerCoop${coop.recommended.via ? `(${coop.recommended.via})` : ''}`;
+    return { move: 'play', cards, reason: baseReason };
+  }
+  return null;
+}
 
 
 function rankOf(label: Label): string {
@@ -662,6 +710,8 @@ function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy)
 
 // ========== 内置 Bot ==========
 export const RandomLegal: BotFunc = (ctx) => {
+  const coopMove = maybeFollowCoop(ctx);
+  if (coopMove) return coopMove;
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
 
@@ -774,6 +824,8 @@ export const RandomLegal: BotFunc = (ctx) => {
 
 
 export const GreedyMin: BotFunc = (ctx) => {
+  const coopMove = maybeFollowCoop(ctx);
+  if (coopMove) return coopMove;
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
   if (ctx.require && ctx.canPass && !legal.length) return { move:'pass' };
@@ -922,6 +974,8 @@ export function RandomLegalBidScore(_hand: Label[]): number {
   return Number.NaN;
 }
 export const GreedyMax: BotFunc = (ctx) => {
+  const coopMove = maybeFollowCoop(ctx);
+  if (coopMove) return coopMove;
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
   if (ctx.require && ctx.canPass && !legal.length) return { move:'pass' };
@@ -1119,7 +1173,55 @@ export const AllySupport: BotFunc = (ctx) => {
 };
 
 
+function buildCoopInfo(
+  ctx: BotCtx,
+  history: PlayEvent[],
+  landlord: number,
+  coopEnabled: boolean
+): BotCtx['coop'] | undefined {
+  if (!coopEnabled) return undefined;
+  const teammate = ctx.teammates.length ? ctx.teammates[0] : null;
+  const teammateHistoryRaw = teammate != null ? history.filter(ev => ev.seat === teammate) : [];
+  const landlordHistoryRaw = history.filter(ev => ev.seat === landlord);
+  const teammateHistory = clone(teammateHistoryRaw);
+  const landlordHistory = clone(landlordHistoryRaw);
+  const teammateLastPlay = teammateHistory.length ? clone(teammateHistory[teammateHistory.length - 1]) : null;
+  const landlordLastPlay = landlordHistory.length ? clone(landlordHistory[landlordHistory.length - 1]) : null;
+  const teammateSeen = teammateHistoryRaw.flatMap(ev => Array.isArray(ev.cards) ? ev.cards.slice() : []);
+  const landlordSeen = landlordHistoryRaw.flatMap(ev => Array.isArray(ev.cards) ? ev.cards.slice() : []);
+
+  const info: BotCtx['coop'] = {
+    enabled: true,
+    teammate,
+    landlord,
+    teammateHistory,
+    landlordHistory,
+    teammateLastPlay,
+    landlordLastPlay,
+    teammateSeen,
+    landlordSeen,
+    teammateHandCount: teammate != null ? (ctx.handsCount[teammate] ?? 0) : 0,
+    landlordHandCount: ctx.handsCount[landlord] ?? 0,
+  };
+
+  if (ctx.role === 'farmer') {
+    try {
+      const advCtx: BotCtx = clone(ctx);
+      delete (advCtx as any).coop;
+      const advise = normalizeMove(AllySupport(advCtx));
+      if (advise) {
+        info.recommended = { ...advise, via: 'AllySupport' };
+      }
+    } catch {}
+  }
+
+  return info;
+}
+
+
 export const EndgameRush: BotFunc = (ctx) => {
+  const coopMove = maybeFollowCoop(ctx);
+  if (coopMove) return coopMove;
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
   if (ctx.require && ctx.canPass && !legal.length) return { move:'pass', reason:'EndgameRush: 需跟无可接' };
@@ -1283,10 +1385,13 @@ export async function* runOneGame(opts: {
   delayMs?: number;
   bid?: boolean;                // true => 叫/抢
   four2?: Four2Policy;
+  rule?: { farmerCoop?: boolean };
+  ruleId?: string;
 }): AsyncGenerator<any, void, unknown> {
   const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
   const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
   const four2 = opts.four2 || 'both';
+  const coopEnabled = !!(opts.rule?.farmerCoop);
 
   // 发牌
   let deck = shuffle(freshDeck());
@@ -1720,6 +1825,9 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
         })(),
       },
     };
+
+    const coopInfo = buildCoopInfo(ctx, history, landlord, coopEnabled);
+    if (coopInfo) ctx.coop = coopInfo;
 
     let mv = await Promise.resolve(bots[turn](clone(ctx)));
 

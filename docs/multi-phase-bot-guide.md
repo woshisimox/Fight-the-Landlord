@@ -44,6 +44,12 @@ During **play**, the engine attaches the follow-up requirement as a rich `ctx.re
 * For LLM or HTTP services, the engine now supplements the combo with `label`, `rankLabel`, `minRankLabel`, `maxRankLabel`, and a short `description`, making rules such as “需跟大于对3的对子” explicit in the payload.【F:lib/doudizhu/engine.ts†L1765-L1789】【F:lib/doudizhu/engine.ts†L200-L282】
 * The helper object also exposes the full Dou Dizhu ordering via `rankOrder` and its condensed `orderHint` string (`"3<4<5<6<7<8<9<T<J<Q<K<A<2<x<X"`), so external bots can confirm that `2` outranks `K` without hard-coding suit logic.【F:lib/doudizhu/engine.ts†L200-L282】
 
+When the front-end toggles **Farmer cooperation**, every play-phase context also carries `ctx.coop`:
+
+* `ctx.coop.enabled` flags the mode, while `teammate`, `landlord`, and their respective histories aggregate all public plays for quick teammate/opponent lookups.【F:lib/doudizhu/engine.ts†L1184-L1211】
+* Farmers additionally receive `ctx.coop.recommended`, which mirrors the move that the built-in `AllySupport` bot would make; the bundled `RandomLegal`, `GreedyMin/Max`, and `EndgameRush` bots follow this suggestion to cooperate automatically.【F:lib/doudizhu/engine.ts†L58-L111】【F:lib/doudizhu/engine.ts†L642-L726】【F:lib/doudizhu/engine.ts†L750-L1188】【F:lib/doudizhu/engine.ts†L1383-L1448】
+* External services can choose to adopt the same recommendation or roll their own heuristics using the exposed teammate/landlord histories (`teammateHistory`, `landlordHistory`), their latest moves, and per-rank counts, all without relying on hidden signalling channels.【F:lib/doudizhu/engine.ts†L1184-L1211】
+
 ### How the thresholds and recommendations are produced
 
 The `score`, `threshold`, and `recommended` fields are computed by the engine before the
