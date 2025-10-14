@@ -38,6 +38,22 @@ During **double**, once the bottom cards are revealed, each bot receives:
 * The current base multiplier, who the landlord is, and whether the engine recommends doubling based on its heuristics (`ctx.double.baseMultiplier`, `ctx.double.landlordSeat`, `ctx.double.recommended`).
 * Additional diagnostic information: landlords receive the score delta of adding the bottom, while farmers get Monte Carlo estimates and counter-strength metrics (`ctx.double.info`).【F:lib/doudizhu/engine.ts†L1461-L1549】
 
+### How the thresholds and recommendations are produced
+
+The `score`, `threshold`, and `recommended` fields are computed by the engine before the
+bot is called, so every implementation receives the same baseline heuristics:
+
+* **Bid** – the engine evaluates each hand and chooses a threshold according to the
+  configured bot name/choice.  `ctx.bid.recommended` is simply `ctx.bid.score >= ctx.bid.threshold`,
+  and the built-in fallback also relies on this comparison.【F:lib/doudizhu/engine.ts†L1221-L1325】
+* **Double** – the landlord recommendation is based on the score delta of the bottom cards,
+  while farmers combine Monte Carlo estimates with counterplay strength; these values feed into
+  `ctx.double.recommended` for each seat.【F:lib/doudizhu/engine.ts†L1434-L1559】
+
+Bundled LLM prompts now remind the model that the default decision is to follow the provided
+recommendation (e.g. “启发分 ≥ 阈值时会抢地主”) and to justify any deviation, so logs will show
+the same threshold that the engine supplied even when the AI elects to override it.【F:lib/bots/openai_bot.ts†L53-L70】【F:lib/bots/deepseek_bot.ts†L51-L70】
+
 ## Reference bot updates
 
 Every bundled bot has been updated so that it can understand and respond to the

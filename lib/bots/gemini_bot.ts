@@ -46,7 +46,8 @@ export const GeminiBot = (o: { apiKey: string; model?: string }): BotFunc =>
         prompt =
           `你是斗地主决策助手，目前阶段是抢地主。必须只输出一个 JSON 对象：{"phase":"bid","bid":true|false,"reason":"简要说明"}。\n`+
           `手牌：${handsStr}\n`+
-          `启发分：${score}｜阈值：${th}｜当前倍数：${mult}｜默认建议：${info.recommended ? '抢' : '不抢'}\n`+
+            `启发分：${score}｜阈值：${th}｜当前倍数：${mult}｜默认建议：${info.recommended ? '抢' : '不抢'}\n`+
+            `通常当启发分 ≥ 阈值时会抢地主，否则不抢；如需偏离请给出理由。\n`+
           `已抢座位：${bidders}\n`+
           `${seatLine}\n`+
           `回答必须是严格的 JSON，bid=true 表示抢地主，false 表示不抢。`;
@@ -62,7 +63,8 @@ export const GeminiBot = (o: { apiKey: string; model?: string }): BotFunc =>
         const delta = typeof landlordInfo.delta === 'number' ? landlordInfo.delta.toFixed(2) : undefined;
         prompt =
           `你是斗地主决策助手，目前阶段是明牌后的加倍决策。必须只输出一个 JSON 对象：{"phase":"double","double":true|false,"reason":"简要说明"}。\n`+
-          `角色：${role}｜基础倍数：${base}｜默认建议：${rec}\n`+
+            `角色：${role}｜基础倍数：${base}｜默认建议：${rec}\n`+
+            `默认建议基于引擎的启发式：地主看底牌增益，农民结合 Δ̂ 与反制能力；如有不同判断请说明原因。\n`+
           (role==='landlord' && delta ? `地主底牌增益Δ≈${delta}\n` : '')+
           (role!=='landlord' ? `估计Δ̂=${dLhat}｜counter=${counter}\n` : '')+
           `${seatLine}\n`+
