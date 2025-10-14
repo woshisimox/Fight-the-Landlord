@@ -50,6 +50,30 @@ When the front-end toggles **Farmer cooperation**, every play-phase context also
 * Farmers additionally receive `ctx.coop.recommended`, which mirrors the move that the built-in `AllySupport` bot would make; the bundled `RandomLegal`, `GreedyMin/Max`, and `EndgameRush` bots follow this suggestion to cooperate automatically.【F:lib/doudizhu/engine.ts†L58-L111】【F:lib/doudizhu/engine.ts†L642-L726】【F:lib/doudizhu/engine.ts†L750-L1188】【F:lib/doudizhu/engine.ts†L1383-L1448】
 * External services can choose to adopt the same recommendation or roll their own heuristics using the exposed teammate/landlord histories (`teammateHistory`, `landlordHistory`), their latest moves, and per-rank counts, all without relying on hidden signalling channels.【F:lib/doudizhu/engine.ts†L1184-L1211】
 
+For an external AI that plays as a farmer, the simplest cooperative strategy is to check `ctx.coop.enabled` and follow the bundled advice when it exists:
+
+```ts
+if (ctx.role === 'farmer' && ctx.coop?.enabled) {
+  const advise = ctx.coop.recommended;
+  if (advise?.move === 'pass' && ctx.canPass) {
+    return { move: 'pass', reason: advise.reason ?? 'Follow teammate plan' };
+  }
+  if (advise?.move === 'play') {
+    return { move: 'play', cards: advise.cards, reason: advise.reason ?? 'Follow teammate plan' };
+  }
+}
+```
+
+Because the engine injects the same data that powers `AllySupport`, `advise.cards` is guaranteed to be a legal move for the current hand. Bots that want deeper teamwork can inspect the rest of `ctx.coop`, for example to prefer soft leads when the teammate just invested a big combo:
+
+```ts
+const teammateJustSpentBomb = ctx.coop?.teammateLastPlay?.combo?.type === 'bomb';
+const landlordDownToFewCards = (ctx.coop?.landlordHandCount ?? 20) <= 2;
+// ... tailor your move selection based on these public signals ...
+```
+
+This keeps both built-in and external implementations on the same public-information footing while still allowing sophisticated cooperation logic.
+
 ### How the thresholds and recommendations are produced
 
 The `score`, `threshold`, and `recommended` fields are computed by the engine before the
