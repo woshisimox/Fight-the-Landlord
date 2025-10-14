@@ -1895,12 +1895,22 @@ const handleAllSaveInner = () => {
   return (
     <div>
       <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-  <button onClick={start} style={{ padding:'8px 12px', borderRadius:8, background:'#222', color:'#fff' }}>开始</button>
-  <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
-  <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
-    剩余局数：{remainingGames}
-  </span>
-</div>
+        <button
+          onClick={start}
+          disabled={running}
+          style={{
+            padding:'8px 12px',
+            borderRadius:8,
+            background: running ? '#9ca3af' : '#bbf7d0',
+            color: running ? '#fff' : '#065f46',
+            cursor: running ? 'not-allowed' : 'pointer'
+          }}
+        >开始</button>
+        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
+        <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
+          剩余局数：{remainingGames}
+        </span>
+      </div>
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
