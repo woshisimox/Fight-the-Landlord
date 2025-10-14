@@ -16,15 +16,9 @@ function __emitRobEval(gen:any, seat:number, score:number, threshold:number, dec
 export type Four2Policy = 'both' | '2singles' | '2pairs';
 export type Label = string;
 
-type BotPlayMove =
-  | { phase?: 'play'; move: 'pass'; reason?: string }
-  | { phase?: 'play'; move: 'play'; cards: Label[]; reason?: string };
-
-type BotBidMove = { phase: 'bid'; bid: boolean; reason?: string };
-
-type BotDoubleMove = { phase: 'double'; double: boolean; reason?: string };
-
-export type BotMove = BotPlayMove | BotBidMove | BotDoubleMove;
+export type BotMove =
+  | { move: 'pass'; reason?: string }
+  | { move: 'play'; cards: Label[]; reason?: string };
 
 export type PlayEvent = {
   seat: number;
@@ -35,7 +29,6 @@ export type PlayEvent = {
 };
 
 export type BotCtx = {
-  phase?: 'play' | 'bid' | 'double';
   hands: Label[];
   require: Combo | null;    // 当前需跟牌型（首家为 null）
   canPass: boolean;
@@ -64,29 +57,6 @@ export type BotCtx = {
     handByRank: Record<string, number>;
     seenByRank: Record<string, number>;
     remainingByRank: Record<string, number>; // 54 张减去 seen 与自己手牌后的估计余量
-  };
-
-  bid?: {
-    score: number;
-    threshold: number;
-    multiplier: number;
-    bidMultiplier: number;
-    recommended: boolean;
-    attempt: number;
-    bidders: { seat: number; score: number; threshold: number; margin: number }[];
-  };
-
-  double?: {
-    role: 'landlord' | 'farmer';
-    recommended: boolean;
-    baseMultiplier: number;
-    bidMultiplier: number;
-    landlordSeat: number;
-    info?: {
-      landlord?: { delta: number; reason: 'threshold' | 'structure' | 'none' };
-      farmer?: { dLhat: number; counter: number };
-      bayes?: { landlord: number; farmerY: number };
-    };
   };
 };
 
@@ -142,60 +112,6 @@ function removeLabels(hand: Label[], pick: Label[]) {
 }
 
 
-function fallbackBidMove(name: string, info: BotCtx['bid'] | undefined, hand: Label[]): BotBidMove {
-  const score = info?.score ?? evalRobScore(hand);
-  const threshold = info?.threshold ?? 1.8;
-  const recommend = info?.recommended ?? wantRob(hand);
-  const parts = [
-    `${name}:bid`,
-    `score=${Number(score).toFixed(2)}`,
-    `threshold=${Number(threshold).toFixed(2)}`,
-    `decision=${recommend ? 'bid' : 'pass'}`,
-    `mult=${info?.bidMultiplier ?? info?.multiplier ?? 1}`,
-  ];
-  return { phase: 'bid', bid: !!recommend, reason: parts.join(' | ') };
-}
-
-function fallbackDoubleMove(name: string, info: BotCtx['double'] | undefined): BotDoubleMove {
-  const recommend = info?.recommended ?? false;
-  const role = info?.role ?? 'farmer';
-  const parts = [
-    `${name}:double`,
-    `role=${role}`,
-    `base=${info?.baseMultiplier ?? 1}`,
-    `bidMult=${info?.bidMultiplier ?? info?.baseMultiplier ?? 1}`,
-    `decision=${recommend ? 'double' : 'keep'}`,
-  ];
-  if (info?.info?.landlord) {
-    parts.push(`delta=${Number(info.info.landlord.delta).toFixed(2)}`);
-    parts.push(`landlordReason=${info.info.landlord.reason}`);
-  }
-  if (info?.info?.farmer) {
-    parts.push(`dLhat=${Number(info.info.farmer.dLhat).toFixed(2)}`);
-    parts.push(`counter=${Number(info.info.farmer.counter).toFixed(2)}`);
-  }
-  if (info?.info?.bayes) {
-    parts.push(`bayes=${info.info.bayes.landlord}/${info.info.bayes.farmerY}`);
-  }
-  return { phase: 'double', double: !!recommend, reason: parts.join(' | ') };
-}
-
-function computeRemainingByRank(my: Label[], seen: Label[]): Record<string, number> {
-  const total: Record<string, number> = {};
-  for (const r of RANKS) {
-    total[r] = (r === 'x' || r === 'X') ? 1 : 4;
-  }
-  const minus = (obj: Record<string, number>, sub: Record<string, number>) => {
-    const out: Record<string, number> = { ...obj };
-    for (const r of RANKS) out[r] = (out[r] || 0) - (sub[r] || 0);
-    return out;
-  };
-  const seenCnt = tallyByRank(seen);
-  const handCnt = tallyByRank(my);
-  return minus(minus(total, seenCnt), handCnt);
-}
-
-
 // ========== 牌型判定 ==========
 type ComboType =
   | 'single'
@@ -221,98 +137,7 @@ export type Combo = {
   len?: number;
   // 便于二次生成/比较的附属结构
   cards?: Label[];
-  // —— 以下字段仅供外置 bot 参考（不会参与胜负判定） ——
-  label?: string;            // 牌型中文名（例如“对子”、“顺子”）
-  rankLabel?: string;        // rank 对应的人类可读点数（如 '3','A','2','X'）
-  minRankLabel?: string;     // 顺子 / 连对 / 飞机等的最低点字符串
-  maxRankLabel?: string;     // 顺子 / 连对 / 飞机等的最高点字符串
-  description?: string;      // 简要规则说明（需压过什么牌型）
-  rankOrder?: string[];      // Dou Dizhu 点数大小顺序（供外置 bot 参考）
-  orderHint?: string;        // 紧凑文字版顺序提示（例：3<4<...<2<x<X）
 };
-
-const COMBO_LABEL: Record<ComboType, string> = {
-  single: '单张',
-  pair: '对子',
-  triple: '三张',
-  triple_one: '三带一',
-  triple_pair: '三带二',
-  straight: '顺子',
-  pair_seq: '连对',
-  plane: '飞机',
-  plane_single: '飞机带单',
-  plane_pair: '飞机带对',
-  four_two_singles: '四带二',
-  four_two_pairs: '四带两对',
-  bomb: '炸弹',
-  rocket: '王炸',
-};
-
-function rankLabelOf(idx: number | undefined): string | undefined {
-  if (typeof idx !== 'number' || !Number.isFinite(idx)) return undefined;
-  if (idx < 0) return RANKS[0];
-  if (idx >= RANKS.length) return RANKS[RANKS.length - 1];
-  return RANKS[idx];
-}
-
-function describeComboForBot(c: Combo): Combo {
-  const label = COMBO_LABEL[c.type] || c.type;
-  const maxRankLabel = rankLabelOf(c.rank);
-  let minRankLabel = maxRankLabel;
-  if (
-    typeof c.len === 'number' && c.len > 1 &&
-    (c.type === 'straight' || c.type === 'pair_seq' || c.type === 'plane' || c.type === 'plane_single' || c.type === 'plane_pair')
-  ) {
-    const minIdx = Math.max(0, Math.floor(c.rank - (c.len - 1)));
-    minRankLabel = rankLabelOf(minIdx);
-  }
-
-  const desc = (() => {
-    switch (c.type) {
-      case 'single':
-        return `需跟单张且点数要大于${maxRankLabel ?? ''}`.trim();
-      case 'pair':
-        return `需跟对子且点数要大于${maxRankLabel ?? ''}`.trim();
-      case 'triple':
-        return `需跟三张且点数要大于${maxRankLabel ?? ''}`.trim();
-      case 'triple_one':
-        return `需跟三带一，其中三张部分要大于${maxRankLabel ?? ''}`.trim();
-      case 'triple_pair':
-        return `需跟三带二，其中三张部分要大于${maxRankLabel ?? ''}`.trim();
-      case 'straight':
-        return `需跟长度为${c.len ?? 0}的顺子，最高牌需大于${maxRankLabel ?? ''}`.trim();
-      case 'pair_seq':
-        return `需跟长度为${c.len ?? 0}的连对，最高对需大于${maxRankLabel ?? ''}`.trim();
-      case 'plane':
-        return `需跟${c.len ?? 0}连的飞机（不带），最高三张需大于${maxRankLabel ?? ''}`.trim();
-      case 'plane_single':
-        return `需跟${c.len ?? 0}连的飞机带单，最高三张需大于${maxRankLabel ?? ''}`.trim();
-      case 'plane_pair':
-        return `需跟${c.len ?? 0}连的飞机带对，最高三张需大于${maxRankLabel ?? ''}`.trim();
-      case 'four_two_singles':
-        return `需跟四带二（两张单牌），核心四张需大于${maxRankLabel ?? ''}`.trim();
-      case 'four_two_pairs':
-        return `需跟四带二（两对），核心四张需大于${maxRankLabel ?? ''}`.trim();
-      case 'bomb':
-        return `需跟炸弹且点数要大于${maxRankLabel ?? ''}`.trim();
-      case 'rocket':
-        return '需跟王炸，仅王炸可压';
-      default:
-        return '';
-    }
-  })();
-
-  return {
-    ...c,
-    label,
-    rankLabel: maxRankLabel,
-    minRankLabel,
-    maxRankLabel,
-    description: desc || undefined,
-    rankOrder: [...RANKS],
-    orderHint: RANKS.join('<'),
-  };
-}
 
 // 对手牌点数统计
 function countByRank(cards: Label[]) {
@@ -650,8 +475,6 @@ function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy)
 
 // ========== 内置 Bot ==========
 export const RandomLegal: BotFunc = (ctx) => {
-  if (ctx?.phase === 'bid') return fallbackBidMove('RandomLegal', ctx.bid, ctx.hands);
-  if (ctx?.phase === 'double') return fallbackDoubleMove('RandomLegal', ctx.double);
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
 
@@ -764,8 +587,6 @@ export const RandomLegal: BotFunc = (ctx) => {
 
 
 export const GreedyMin: BotFunc = (ctx) => {
-  if (ctx?.phase === 'bid') return fallbackBidMove('GreedyMin', ctx.bid, ctx.hands);
-  if (ctx?.phase === 'double') return fallbackDoubleMove('GreedyMin', ctx.double);
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
   if (ctx.require && ctx.canPass && !legal.length) return { move:'pass' };
@@ -914,8 +735,6 @@ export function RandomLegalBidScore(_hand: Label[]): number {
   return Number.NaN;
 }
 export const GreedyMax: BotFunc = (ctx) => {
-  if (ctx?.phase === 'bid') return fallbackBidMove('GreedyMax', ctx.bid, ctx.hands);
-  if (ctx?.phase === 'double') return fallbackDoubleMove('GreedyMax', ctx.double);
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
   if (ctx.require && ctx.canPass && !legal.length) return { move:'pass' };
@@ -1006,8 +825,6 @@ export const GreedyMax: BotFunc = (ctx) => {
 
 
 export const AllySupport: BotFunc = (ctx) => {
-  if (ctx?.phase === 'bid') return fallbackBidMove('AllySupport', ctx.bid, ctx.hands);
-  if (ctx?.phase === 'double') return fallbackDoubleMove('AllySupport', ctx.double);
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
   if (ctx.require && ctx.canPass && !legal.length) return { move:'pass', reason:'AllySupport: 需跟但无可接' };
@@ -1116,8 +933,6 @@ export const AllySupport: BotFunc = (ctx) => {
 
 
 export const EndgameRush: BotFunc = (ctx) => {
-  if (ctx?.phase === 'bid') return fallbackBidMove('EndgameRush', ctx.bid, ctx.hands);
-  if (ctx?.phase === 'double') return fallbackDoubleMove('EndgameRush', ctx.double);
   const four2 = ctx?.policy?.four2 || 'both';
   const legal = generateMoves(ctx.hands, ctx.require, four2);
   if (ctx.require && ctx.canPass && !legal.length) return { move:'pass', reason:'EndgameRush: 需跟无可接' };
@@ -1306,8 +1121,8 @@ if (opts.bid !== false) {
   last = -1;
   bidMultiplier = 1;
   multiplier = 1;
-    for (let s=0;s<3;s++) {
-      const sc = evalRobScore(hands[s]);
+for (let s=0;s<3;s++) {
+      const sc = evalRobScore(hands[s]); 
 
       // thresholds for both built-ins && external choices (inline for scope)
       const __thMap: Record<string, number> = {
@@ -1337,86 +1152,17 @@ if (opts.bid !== false) {
       const __choice = String((bots as any)[s]?.choice || '').toLowerCase();
       const __name   = String((bots as any)[s]?.name || (bots as any)[s]?.constructor?.name || '').toLowerCase();
       const __th = (__thMapChoice[__choice] ?? __thMap[__name] ?? 1.8);
-      const defaultBid = (sc >= __th);
+      const bid = (sc >= __th);
 
-      const ctxBid: BotCtx = {
-        phase: 'bid',
-        hands: clone(hands[s]),
-        require: null,
-        canPass: true,
-        policy: { four2 },
-        seat: s,
-        landlord: -1,
-        leader: -1,
-        trick: -1,
-        history: [],
-        currentTrick: [],
-        seen: [],
-        bottom: [],
-        seenBySeat: [[], [], []],
-        handsCount: [hands[0].length, hands[1].length, hands[2].length],
-        role: 'farmer',
-        teammates: [],
-        opponents: [ (s + 1) % 3, (s + 2) % 3 ],
-        counts: {
-          handByRank: tallyByRank(hands[s]),
-          seenByRank: tallyByRank([]),
-          remainingByRank: computeRemainingByRank(hands[s], []),
-        },
-        bid: {
-          score: sc,
-          threshold: __th,
-          multiplier,
-          bidMultiplier,
-          recommended: defaultBid,
-          attempt: __attempt + 1,
-          bidders: clone(__bidders),
-        },
-      };
 
-      let bidDecision = defaultBid;
-      let botReason = '';
-      try {
-        const mv: any = await Promise.resolve(bots[s](clone(ctxBid)));
-        if (mv && mv.phase === 'bid' && typeof mv.bid === 'boolean') {
-          bidDecision = !!mv.bid;
-          botReason = mv.reason ?? '';
-        } else if (typeof mv?.bid === 'boolean') {
-          bidDecision = !!mv.bid;
-          botReason = mv.reason ?? '';
-        } else if (mv?.move === 'pass') {
-          bidDecision = false;
-          botReason = mv.reason ?? '';
-        } else if (mv?.move === 'play') {
-          bidDecision = true;
-          botReason = mv.reason ?? '';
-        } else {
-          const fb = fallbackBidMove(__name || __choice || 'fallback', ctxBid.bid, ctxBid.hands);
-          bidDecision = fb.bid;
-          botReason = fb.reason ?? '';
-        }
-      } catch (e) {
-        const fb = fallbackBidMove(__name || __choice || 'fallback', ctxBid.bid, ctxBid.hands);
-        bidDecision = fb.bid;
-        botReason = fb.reason ?? '';
-      }
-
-      const summaryReason = [
-        `${__choice || __name || 'bot'}:bid`,
-        `score=${sc.toFixed(2)}`,
-        `threshold=${__th.toFixed(2)}`,
-        `decision=${bidDecision ? 'bid' : 'pass'}`,
-      ];
-      if (botReason) summaryReason.push(botReason);
-
-      // 记录本轮评估（即使未达到阈值也写日志/存档）
-      yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bidDecision ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier, reason: summaryReason.join(' | ') };
-      if (bidDecision) {
+// 记录本轮评估（即使未达到阈值也写日志/存档）
+yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold: __th, decision: (bid ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+if (bid) {
         __bidders.push({ seat: s, score: sc, threshold: __th, margin: sc - __th });
         multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
 
         last = s;
-        yield { type:'event', kind:'bid', seat:s, bid: bidDecision, score: sc, bidMult: bidMultiplier, mult: multiplier, reason: summaryReason.join(' | ') };
+yield { type:'event', kind:'bid', seat:s, bid, score: sc, bidMult: bidMultiplier, mult: multiplier };
       }
       if (opts.delayMs) await wait(opts.delayMs);
     }
@@ -1549,168 +1295,30 @@ const Lseat = landlord;
 const Yseat = (landlord + 1) % 3;
 const Bseat = (landlord + 2) % 3;
 
-const seenForDouble: Label[] = bottom.slice();
-const seenBySeatDouble: Label[][] = [[], [], []];
-if (Array.isArray(seenBySeatDouble[landlord])) seenBySeatDouble[landlord] = bottom.slice();
-
-type DoubleInfo = NonNullable<BotCtx['double']>['info'];
-const buildDoubleCtx = (seat:number, recommended:number, info?: DoubleInfo) : BotCtx => {
-  const role = (seat === landlord) ? 'landlord' : 'farmer';
-  const teammates = role === 'landlord' ? [] : [ seat === Yseat ? Bseat : Yseat ];
-  const opponents = role === 'landlord' ? [Yseat, Bseat] : [landlord];
-  return {
-    phase: 'double',
-    hands: clone(hands[seat]),
-    require: null,
-    canPass: true,
-    policy: { four2 },
-    seat,
-    landlord,
-    leader: landlord,
-    trick: -1,
-    history: [],
-    currentTrick: [],
-    seen: clone(seenForDouble),
-    bottom: clone(bottom),
-    seenBySeat: clone(seenBySeatDouble),
-    handsCount: [hands[0].length, hands[1].length, hands[2].length],
-    role,
-    teammates,
-    opponents,
-    counts: {
-      handByRank: tallyByRank(hands[seat]),
-      seenByRank: tallyByRank(seenForDouble),
-      remainingByRank: computeRemainingByRank(hands[seat], seenForDouble),
-    },
-    double: {
-      role,
-      recommended: !!recommended,
-      baseMultiplier: multiplier,
-      bidMultiplier: multiplier,
-      landlordSeat: landlord,
-      info,
-    },
-  };
-};
-
 // 地主：基于 before/after 的 Δ 与结构兜底
 const __lordBefore = hands[Lseat].filter(c => !bottom.includes(c)); // 理论上就是并入前
 const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
-let Lflag = lordDecision.L;
-let landlordReason = '';
-try {
-  const ctx = buildDoubleCtx(Lseat, Lflag, { landlord: lordDecision });
-  const mv: any = await Promise.resolve(bots[Lseat](clone(ctx)));
-  if (mv && mv.phase === 'double' && typeof mv.double === 'boolean') {
-    Lflag = mv.double ? 1 : 0;
-    landlordReason = mv.reason ?? '';
-  } else if (typeof mv?.double === 'boolean') {
-    Lflag = mv.double ? 1 : 0;
-    landlordReason = mv.reason ?? '';
-  } else if (mv?.move === 'play') {
-    Lflag = 1;
-    landlordReason = mv.reason ?? '';
-  } else if (mv?.move === 'pass') {
-    Lflag = 0;
-    landlordReason = mv.reason ?? '';
-  } else {
-    const fb = fallbackDoubleMove(String((bots as any)[Lseat]?.name || (bots as any)[Lseat]?.choice || 'fallback'), ctx.double);
-    Lflag = fb.double ? 1 : 0;
-    landlordReason = fb.reason ?? '';
-  }
-  const summary = [`${String((bots as any)[Lseat]?.choice || (bots as any)[Lseat]?.name || 'bot')}:double`, `role=landlord`, `decision=${Lflag ? 'double' : 'keep'}`, landlordReason].filter(Boolean).join(' | ');
-  const reasonText = [lordDecision.reason, landlordReason].filter(Boolean).join(' | ') || undefined;
-  yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: reasonText, via: summary };
-} catch (e) {
-  const ctx = buildDoubleCtx(Lseat, Lflag, { landlord: lordDecision });
-  const fb = fallbackDoubleMove('fallback', ctx.double);
-  Lflag = fb.double ? 1 : 0;
-  const summary = [`fallback:double`, `role=landlord`, `decision=${Lflag ? 'double' : 'keep'}`, fb.reason || ''].filter(Boolean).join(' | ');
-  const reasonText = [lordDecision.reason, fb.reason].filter(Boolean).join(' | ') || undefined;
-  try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: reasonText, via: summary }; } catch {}
-}
+const Lflag = lordDecision.L;
+try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
 
 // 乙（下家）：蒙特卡洛 + 反制能力
 const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
-let yFlag = yBase.F;
-let yReason = '';
-try {
-  const ctx = buildDoubleCtx(Yseat, yFlag, { farmer: yBase });
-  const mv: any = await Promise.resolve(bots[Yseat](clone(ctx)));
-  if (mv && mv.phase === 'double' && typeof mv.double === 'boolean') {
-    yFlag = mv.double ? 1 : 0;
-    yReason = mv.reason ?? yReason;
-  } else if (typeof mv?.double === 'boolean') {
-    yFlag = mv.double ? 1 : 0;
-    yReason = mv.reason ?? yReason;
-  } else if (mv?.move === 'play') {
-    yFlag = 1;
-    yReason = mv.reason ?? yReason;
-  } else if (mv?.move === 'pass') {
-    yFlag = 0;
-    yReason = mv.reason ?? yReason;
-  } else {
-    const fb = fallbackDoubleMove(String((bots as any)[Yseat]?.name || (bots as any)[Yseat]?.choice || 'fallback'), ctx.double);
-    yFlag = fb.double ? 1 : 0;
-    yReason = fb.reason ?? yReason;
-  }
-  const summary = [`${String((bots as any)[Yseat]?.choice || (bots as any)[Yseat]?.name || 'bot')}:double`, `role=farmer`, `decision=${yFlag ? 'double' : 'keep'}`, yReason || ''].filter(Boolean).join(' | ');
-  const reasonText = yReason || undefined;
-  yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yFlag, dLhat:yBase.dLhat, counter:yBase.counter, reason: reasonText, via: summary };
-} catch (e) {
-  const ctx = buildDoubleCtx(Yseat, yFlag, { farmer: yBase });
-  const fb = fallbackDoubleMove('fallback', ctx.double);
-  yFlag = fb.double ? 1 : 0;
-  const summary = [`fallback:double`, `role=farmer`, `decision=${yFlag ? 'double' : 'keep'}`, fb.reason || ''].filter(Boolean).join(' | ');
-  const reasonText = fb.reason || undefined;
-  try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yFlag, dLhat:yBase.dLhat, counter:yBase.counter, reason: reasonText, via: summary }; } catch {}
-}
+try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!yBase.F, dLhat:yBase.dLhat, counter:yBase.counter }; } catch{}
 
 // 丙（上家）：在边缘情况下做贝叶斯式调节
 let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
 let F_b = bBase.F;
-let bReason = '';
-if (F_b === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.counterHi) <= 0.6)) {
+if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.counterHi) <= 0.6)) {
   // 若地主或乙已加倍，提高门槛（更保守）
   let effectiveHi = __DOUBLE_CFG.counterHi;
   if (Lflag === 1) effectiveHi += __DOUBLE_CFG.bayes.landlordRaiseHi;
-  if (yFlag === 1) effectiveHi += __DOUBLE_CFG.bayes.teammateRaiseHi;
+  if (yBase.F === 1) effectiveHi += __DOUBLE_CFG.bayes.teammateRaiseHi;
   F_b = (bBase.counter >= effectiveHi) ? 1 : 0;
 }
-try {
-  const ctx = buildDoubleCtx(Bseat, F_b, { farmer: bBase, bayes: { landlord: Lflag, farmerY: yFlag } });
-  const mv: any = await Promise.resolve(bots[Bseat](clone(ctx)));
-  if (mv && mv.phase === 'double' && typeof mv.double === 'boolean') {
-    F_b = mv.double ? 1 : 0;
-    bReason = mv.reason ?? bReason;
-  } else if (typeof mv?.double === 'boolean') {
-    F_b = mv.double ? 1 : 0;
-    bReason = mv.reason ?? bReason;
-  } else if (mv?.move === 'play') {
-    F_b = 1;
-    bReason = mv.reason ?? bReason;
-  } else if (mv?.move === 'pass') {
-    F_b = 0;
-    bReason = mv.reason ?? bReason;
-  } else {
-    const fb = fallbackDoubleMove(String((bots as any)[Bseat]?.name || (bots as any)[Bseat]?.choice || 'fallback'), ctx.double);
-    F_b = fb.double ? 1 : 0;
-    bReason = fb.reason ?? bReason;
-  }
-  const summary = [`${String((bots as any)[Bseat]?.choice || (bots as any)[Bseat]?.name || 'bot')}:double`, `role=farmer`, `decision=${F_b ? 'double' : 'keep'}`, bReason || ''].filter(Boolean).join(' | ');
-  const reasonText = bReason || undefined;
-  yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!F_b, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord:Lflag, farmerY:yFlag }, reason: reasonText, via: summary };
-} catch (e) {
-  const ctx = buildDoubleCtx(Bseat, F_b, { farmer: bBase, bayes: { landlord: Lflag, farmerY: yFlag } });
-  const fb = fallbackDoubleMove('fallback', ctx.double);
-  F_b = fb.double ? 1 : 0;
-  const summary = [`fallback:double`, `role=farmer`, `decision=${F_b ? 'double' : 'keep'}`, fb.reason || ''].filter(Boolean).join(' | ');
-  const reasonText = fb.reason || undefined;
-  try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!F_b, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord:Lflag, farmerY:yFlag }, reason: reasonText, via: summary }; } catch {}
-}
+try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!F_b, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord:Lflag, farmerY:yBase.F } }; } catch{}
 
 // 记录对位加倍倍数（不含炸弹/春天）
-let __doubleMulY = (1 << Lflag) * (1 << yFlag);
+let __doubleMulY = (1 << Lflag) * (1 << yBase.F);
 let __doubleMulB = (1 << Lflag) * (1 << F_b);
 
 // 上限裁剪到 8（含叫抢）
@@ -1764,10 +1372,9 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
   }
   return arr;
 }
-    const ctx: BotCtx = {
-      phase: 'play',
+const ctx: BotCtx = {
       hands: hands[turn],
-      require: require ? describeComboForBot(require) : null,
+      require,
       canPass: !isLeader,
       policy: { four2 },
       seat: turn,
@@ -1786,15 +1393,27 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
       counts: {
         handByRank: tallyByRank(hands[turn]),
         seenByRank: tallyByRank(seen),
-        remainingByRank: computeRemainingByRank(hands[turn], seen),
+        remainingByRank: (function () {
+          // 54张全集（只看点数计数），减去 seen 与自己的手牌
+          const total: Record<string, number> = {};
+          for (const r of RANKS) {
+            total[r] = (r === 'x' || r === 'X') ? 1 : 4;
+          }
+
+          const minus = (obj:Record<string,number>, sub:Record<string,number>) => {
+            const out: Record<string, number> = { ...obj };
+            for (const r of RANKS) out[r] = (out[r]||0) - (sub[r]||0);
+            return out;
+          };
+
+          const seenCnt = tallyByRank(seen);
+          const handCnt = tallyByRank(hands[turn]);
+          return minus(minus(total, seenCnt), handCnt);
+        })(),
       },
     };
 
     let mv = await Promise.resolve(bots[turn](clone(ctx)));
-    if (mv && (mv as any).phase && (mv as any).phase !== 'play') {
-      mv = { move:'pass', reason:`invalid-phase:${(mv as any).phase}` } as BotMove;
-    }
-    const mvPlay = mv as Extract<BotMove, { move: any }>;
 
     // 兜底：首家不许过，且 move 非法时强制打一张
     const forcePlayOne = () => [hands[turn][0]] as Label[];
@@ -1812,7 +1431,7 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
     };
 
     const decidePlay = (): { kind: 'pass' } | { kind: 'play', pick: Label[], cc: Combo } => {
-      if (mvPlay?.move === 'pass') {
+      if (mv?.move === 'pass') {
         if (!ctx.canPass) {
           const pick = forcePlayOne();
           const cc = classify(pick, four2)!;
@@ -1822,7 +1441,7 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
         return { kind:'pass' };
       }
 
-      const cleaned = pickFromHand((mvPlay as any)?.cards);
+      const cleaned = pickFromHand((mv as any)?.cards);
       const cc = classify(cleaned, four2);
 
       // require 为空 => 只要是合法牌型即可
