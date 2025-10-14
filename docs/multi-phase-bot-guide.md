@@ -38,6 +38,11 @@ During **double**, once the bottom cards are revealed, each bot receives:
 * The current base multiplier, who the landlord is, and whether the engine recommends doubling based on its heuristics (`ctx.double.baseMultiplier`, `ctx.double.landlordSeat`, `ctx.double.recommended`).
 * Additional diagnostic information: landlords receive the score delta of adding the bottom, while farmers get Monte Carlo estimates and counter-strength metrics (`ctx.double.info`).【F:lib/doudizhu/engine.ts†L1461-L1549】
 
+During **play**, the engine attaches the follow-up requirement as a rich `ctx.require` object:
+
+* `type`, `rank`, and `len` continue to mirror the tabled combo, so scripted bots can keep comparing ranks numerically.
+* For LLM or HTTP services, the engine now supplements the combo with `label`, `rankLabel`, `minRankLabel`, `maxRankLabel`, and a short `description`, making rules such as “需跟大于对3的对子” explicit in the payload.【F:lib/doudizhu/engine.ts†L1765-L1789】【F:lib/doudizhu/engine.ts†L200-L282】
+
 ### How the thresholds and recommendations are produced
 
 The `score`, `threshold`, and `recommended` fields are computed by the engine before the

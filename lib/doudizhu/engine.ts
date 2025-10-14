@@ -221,7 +221,94 @@ export type Combo = {
   len?: number;
   // 便于二次生成/比较的附属结构
   cards?: Label[];
+  // —— 以下字段仅供外置 bot 参考（不会参与胜负判定） ——
+  label?: string;            // 牌型中文名（例如“对子”、“顺子”）
+  rankLabel?: string;        // rank 对应的人类可读点数（如 '3','A','2','X'）
+  minRankLabel?: string;     // 顺子 / 连对 / 飞机等的最低点字符串
+  maxRankLabel?: string;     // 顺子 / 连对 / 飞机等的最高点字符串
+  description?: string;      // 简要规则说明（需压过什么牌型）
 };
+
+const COMBO_LABEL: Record<ComboType, string> = {
+  single: '单张',
+  pair: '对子',
+  triple: '三张',
+  triple_one: '三带一',
+  triple_pair: '三带二',
+  straight: '顺子',
+  pair_seq: '连对',
+  plane: '飞机',
+  plane_single: '飞机带单',
+  plane_pair: '飞机带对',
+  four_two_singles: '四带二',
+  four_two_pairs: '四带两对',
+  bomb: '炸弹',
+  rocket: '王炸',
+};
+
+function rankLabelOf(idx: number | undefined): string | undefined {
+  if (typeof idx !== 'number' || !Number.isFinite(idx)) return undefined;
+  if (idx < 0) return RANKS[0];
+  if (idx >= RANKS.length) return RANKS[RANKS.length - 1];
+  return RANKS[idx];
+}
+
+function describeComboForBot(c: Combo): Combo {
+  const label = COMBO_LABEL[c.type] || c.type;
+  const maxRankLabel = rankLabelOf(c.rank);
+  let minRankLabel = maxRankLabel;
+  if (
+    typeof c.len === 'number' && c.len > 1 &&
+    (c.type === 'straight' || c.type === 'pair_seq' || c.type === 'plane' || c.type === 'plane_single' || c.type === 'plane_pair')
+  ) {
+    const minIdx = Math.max(0, Math.floor(c.rank - (c.len - 1)));
+    minRankLabel = rankLabelOf(minIdx);
+  }
+
+  const desc = (() => {
+    switch (c.type) {
+      case 'single':
+        return `需跟单张且点数要大于${maxRankLabel ?? ''}`.trim();
+      case 'pair':
+        return `需跟对子且点数要大于${maxRankLabel ?? ''}`.trim();
+      case 'triple':
+        return `需跟三张且点数要大于${maxRankLabel ?? ''}`.trim();
+      case 'triple_one':
+        return `需跟三带一，其中三张部分要大于${maxRankLabel ?? ''}`.trim();
+      case 'triple_pair':
+        return `需跟三带二，其中三张部分要大于${maxRankLabel ?? ''}`.trim();
+      case 'straight':
+        return `需跟长度为${c.len ?? 0}的顺子，最高牌需大于${maxRankLabel ?? ''}`.trim();
+      case 'pair_seq':
+        return `需跟长度为${c.len ?? 0}的连对，最高对需大于${maxRankLabel ?? ''}`.trim();
+      case 'plane':
+        return `需跟${c.len ?? 0}连的飞机（不带），最高三张需大于${maxRankLabel ?? ''}`.trim();
+      case 'plane_single':
+        return `需跟${c.len ?? 0}连的飞机带单，最高三张需大于${maxRankLabel ?? ''}`.trim();
+      case 'plane_pair':
+        return `需跟${c.len ?? 0}连的飞机带对，最高三张需大于${maxRankLabel ?? ''}`.trim();
+      case 'four_two_singles':
+        return `需跟四带二（两张单牌），核心四张需大于${maxRankLabel ?? ''}`.trim();
+      case 'four_two_pairs':
+        return `需跟四带二（两对），核心四张需大于${maxRankLabel ?? ''}`.trim();
+      case 'bomb':
+        return `需跟炸弹且点数要大于${maxRankLabel ?? ''}`.trim();
+      case 'rocket':
+        return '需跟王炸，仅王炸可压';
+      default:
+        return '';
+    }
+  })();
+
+  return {
+    ...c,
+    label,
+    rankLabel: maxRankLabel,
+    minRankLabel,
+    maxRankLabel,
+    description: desc || undefined,
+  };
+}
 
 // 对手牌点数统计
 function countByRank(cards: Label[]) {
@@ -1676,7 +1763,7 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
     const ctx: BotCtx = {
       phase: 'play',
       hands: hands[turn],
-      require,
+      require: require ? describeComboForBot(require) : null,
       canPass: !isLeader,
       policy: { four2 },
       seat: turn,
