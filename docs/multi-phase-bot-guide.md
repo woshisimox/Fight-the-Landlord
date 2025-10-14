@@ -77,3 +77,17 @@ new phases:
 With these changes, any external AI (HTTP or LLM-based) can make landlord and
 double decisions by respecting `ctx.phase` and returning the corresponding JSON
 shape.
+
+## Coordination between seats
+
+The engine does not broadcast any implicit “team orders” between bots.  Every
+seat receives the full public context (hands, table history, landlord seat,
+teammate/opponent indices, and per-rank tallies) and must decide on its own
+move.  Built-in examples such as `AllySupport` simply read those fields and
+choose to yield when the teammate currently leads the trick, but this is a
+local heuristic rather than a hidden signalling channel.【F:lib/doudizhu/engine.ts†L1045-L1114】
+
+External services receive the same inputs through `ctx`/`require` and may
+implement their own cooperative logic (e.g. prioritising safe follow-ups when a
+teammate leads).  There is no extra API for orchestrating joint plays beyond
+the shared state that each bot already receives.【F:lib/doudizhu/engine.ts†L1687-L1789】
