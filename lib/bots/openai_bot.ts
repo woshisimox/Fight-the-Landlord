@@ -14,11 +14,13 @@ type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 // - 否则：打出第一张手牌（可能不是最优，但可让引擎继续运行）
 function fallbackMove(ctx: BotCtx, reason: string): BotMove {
   if ((ctx as any)?.phase === 'bid') {
-    const rec = !!((ctx as any)?.bid?.recommended);
+    const info: any = (ctx as any)?.bid || {};
+    const rec = (typeof info.recommended === 'boolean') ? !!info.recommended : !!info.default;
     return { phase: 'bid', bid: rec, reason: nonEmptyReason(reason, 'OpenAI') };
   }
   if ((ctx as any)?.phase === 'double') {
-    const rec = !!((ctx as any)?.double?.recommended);
+    const info: any = (ctx as any)?.double || {};
+    const rec = (typeof info.recommended === 'boolean') ? !!info.recommended : !!info.default;
     return { phase: 'double', double: rec, reason: nonEmptyReason(reason, 'OpenAI') };
   }
   if (ctx && ctx.canPass) return { move: 'pass', reason };
@@ -41,8 +43,9 @@ export const OpenAIBot = (o: { apiKey: string; model?: string }): BotFunc =>
       if (phase === 'bid') {
         const info = (ctx as any)?.bid || {};
         const score = typeof info.score === 'number' ? info.score.toFixed(2) : '未知';
-        const th = typeof info.threshold === 'number' ? info.threshold.toFixed(2) : '未知';
         const mult = typeof info.multiplier === 'number' ? info.multiplier : (typeof info.bidMultiplier === 'number' ? info.bidMultiplier : 1);
+        const attempt = typeof info.attempt === 'number' ? info.attempt + 1 : 1;
+        const total = typeof info.maxAttempts === 'number' ? info.maxAttempts : 5;
         const bidders = Array.isArray(info.bidders) ? info.bidders.map((b:any)=>`S${b.seat}`).join(',') : '无';
         messages = [
           { role: 'system', content: 'Only reply with a strict JSON object for the move.' },
@@ -50,9 +53,8 @@ export const OpenAIBot = (o: { apiKey: string; model?: string }): BotFunc =>
             `你是斗地主决策助手，目前阶段是抢地主。\n`+
             `请仅返回一个 JSON 对象：{"phase":"bid","bid":true|false,"reason":"简要说明"}。\n`+
             `手牌：${handsStr}\n`+
-            `启发分：${score}｜阈值：${th}｜当前倍数：${mult}｜默认建议：${info.recommended ? '抢' : '不抢'}\n`+
-            `通常当启发分 ≥ 阈值时会抢地主，否则不抢；如需偏离请给出理由。\n`+
-            `已抢座位：${bidders}\n`+
+            `启发分参考：${score}｜当前倍数：${mult}｜已抢座位：${bidders}\n`+
+            `这是第 ${attempt}/${total} 次尝试，请结合手牌强弱、对手/队友位置与历史抢地主情况，自行判断是否抢地主，并给出简要理由。\n`+
             `${seatLine}\n`+
             `回答必须是严格的 JSON，bid=true 表示抢地主，false 表示不抢。`
           }
@@ -61,7 +63,6 @@ export const OpenAIBot = (o: { apiKey: string; model?: string }): BotFunc =>
         const info = (ctx as any)?.double || {};
         const role = info?.role || 'farmer';
         const base = typeof info?.baseMultiplier === 'number' ? info.baseMultiplier : 1;
-        const rec = info?.recommended ? '加倍' : '不加倍';
         const farmerInfo = info?.info?.farmer || {};
         const landlordInfo = info?.info?.landlord || {};
         const dLhat = typeof farmerInfo.dLhat === 'number' ? farmerInfo.dLhat.toFixed(2) : '未知';
@@ -72,10 +73,10 @@ export const OpenAIBot = (o: { apiKey: string; model?: string }): BotFunc =>
           { role: 'user', content:
             `你是斗地主决策助手，目前阶段是明牌后的加倍决策。\n`+
             `请仅返回一个 JSON 对象：{"phase":"double","double":true|false,"reason":"简要说明"}。\n`+
-            `角色：${role}｜基础倍数：${base}｜默认建议：${rec}\n`+
-            `默认建议基于引擎的启发式：地主看底牌增益，农民结合 Δ̂ 与反制能力；如有不同判断请说明原因。\n`+
-            (role==='landlord' && delta ? `地主底牌增益Δ≈${delta}\n` : '')+
-            (role!=='landlord' ? `估计Δ̂=${dLhat}｜counter=${counter}\n` : '')+
+            `角色：${role}｜基础倍数：${base}\n`+
+            (role==='landlord' && delta ? `地主底牌增益参考 Δ≈${delta}\n` : '')+
+            (role!=='landlord' ? `估计 Δ̂=${dLhat}｜counter=${counter}\n` : '')+
+            `请结合公开信息、自身手牌与局势，自主评估是否加倍，并给出简要理由。\n`+
             `${seatLine}\n`+
             `回答必须是严格的 JSON，double=true 表示加倍，false 表示不加倍。`
           }

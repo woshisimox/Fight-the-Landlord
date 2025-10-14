@@ -1490,8 +1490,15 @@ export async function* runOneGame(opts: {
 
         let decision = recommended;
         if (meta.phaseAware) {
+          const ctxForBot: any = clone(bidCtx);
+          if (ctxForBot?.bid) {
+            const def = !!ctxForBot.bid.recommended;
+            ctxForBot.bid.default = def;
+            delete ctxForBot.bid.recommended;
+            delete ctxForBot.bid.threshold;
+          }
           try {
-            const result = await Promise.resolve(bots[s](clone(bidCtx)));
+            const result = await Promise.resolve(bots[s](ctxForBot));
             const parsed = (()=>{
               if (!result) return null;
               const r: any = result;
@@ -1703,7 +1710,13 @@ let farmerBFlag = F_b ? 1 : 0;
 if (seatMeta[Lseat]?.phaseAware) {
   try {
     const ctx = buildDoubleCtx(Lseat, 'landlord', !!lordDecision.L, { landlord: { delta: lordDecision.delta, reason: lordDecision.reason } });
-    const res = await Promise.resolve(bots[Lseat](clone(ctx)));
+    const ctxForBot: any = clone(ctx);
+    if (ctxForBot?.double) {
+      const def = !!ctxForBot.double.recommended;
+      ctxForBot.double.default = def;
+      delete ctxForBot.double.recommended;
+    }
+    const res = await Promise.resolve(bots[Lseat](ctxForBot));
     const parsed = parseDoubleResult(res);
     if (parsed !== null) Lflag = parsed ? 1 : 0;
   } catch {}
@@ -1712,7 +1725,13 @@ if (seatMeta[Lseat]?.phaseAware) {
 if (seatMeta[Yseat]?.phaseAware) {
   try {
     const ctx = buildDoubleCtx(Yseat, 'farmer', !!yBase.F, { farmer: { dLhat: yBase.dLhat, counter: yBase.counter } });
-    const res = await Promise.resolve(bots[Yseat](clone(ctx)));
+    const ctxForBot: any = clone(ctx);
+    if (ctxForBot?.double) {
+      const def = !!ctxForBot.double.recommended;
+      ctxForBot.double.default = def;
+      delete ctxForBot.double.recommended;
+    }
+    const res = await Promise.resolve(bots[Yseat](ctxForBot));
     const parsed = parseDoubleResult(res);
     if (parsed !== null) farmerYFlag = parsed ? 1 : 0;
   } catch {}
@@ -1721,7 +1740,13 @@ if (seatMeta[Yseat]?.phaseAware) {
 if (seatMeta[Bseat]?.phaseAware) {
   try {
     const ctx = buildDoubleCtx(Bseat, 'farmer', !!F_b, { farmer: { dLhat: bBase.dLhat, counter: bBase.counter }, bayes:{ landlord: lordDecision.L, farmerY: yBase.F } });
-    const res = await Promise.resolve(bots[Bseat](clone(ctx)));
+    const ctxForBot: any = clone(ctx);
+    if (ctxForBot?.double) {
+      const def = !!ctxForBot.double.recommended;
+      ctxForBot.double.default = def;
+      delete ctxForBot.double.recommended;
+    }
+    const res = await Promise.resolve(bots[Bseat](ctxForBot));
     const parsed = parseDoubleResult(res);
     if (parsed !== null) farmerBFlag = parsed ? 1 : 0;
   } catch {}

@@ -29,13 +29,13 @@ During **bid**, the bot receives:
 * Its 17-card starting hand (`ctx.hands`).
 * Seat index, current landlord (always `-1` during bidding), and teammate/opponent indices for convenience (`ctx.seat`, `ctx.landlord`, `ctx.teammates`, `ctx.opponents`).
 * Per-rank counts for its own hand and the remaining deck (`ctx.counts.handByRank`, `ctx.counts.remainingByRank`).
-* The current bidding heuristic, including the heuristic score, default threshold, running multiplier, whether the engine recommends bidding, how many attempts have occurred, and previously successful bidders (`ctx.bid`).【F:lib/doudizhu/engine.ts†L1251-L1283】
+* The current bidding heuristic, including the heuristic score, historical threshold, running multiplier, the engine's internal recommendation, how many attempts have occurred, and previously successful bidders (`ctx.bid`).  When the engine detects a phase-aware external bot it removes `threshold`/`recommended` before invoking it and leaves a boolean `ctx.bid.default` as a purely informational fallback.【F:lib/doudizhu/engine.ts†L1251-L1329】
 
 During **double**, once the bottom cards are revealed, each bot receives:
 
 * Its updated hand (landlord already merged with the bottom), public bottom cards, and a per-seat breakdown of revealed cards (`ctx.hands`, `ctx.bottom`, `ctx.seen`, `ctx.seenBySeat`).
 * Role, teammates, opponents, and per-rank tallies for hand/seen/remaining cards (`ctx.role`, `ctx.teammates`, `ctx.opponents`, `ctx.counts`).
-* The current base multiplier, who the landlord is, and whether the engine recommends doubling based on its heuristics (`ctx.double.baseMultiplier`, `ctx.double.landlordSeat`, `ctx.double.recommended`).
+* The current base multiplier, who the landlord is, and the engine's own doubling heuristics (`ctx.double.baseMultiplier`, `ctx.double.landlordSeat`, `ctx.double.recommended`).  As with bidding, phase-aware external bots only receive a sanitized payload where `ctx.double.recommended` is stripped and its value copied into `ctx.double.default` for reference.【F:lib/doudizhu/engine.ts†L1461-L1559】
 * Additional diagnostic information: landlords receive the score delta of adding the bottom, while farmers get Monte Carlo estimates and counter-strength metrics (`ctx.double.info`).【F:lib/doudizhu/engine.ts†L1461-L1549】
 
 During **play**, the engine attaches the follow-up requirement as a rich `ctx.require` object:
@@ -69,19 +69,22 @@ This keeps both built-in and external implementations on the same public-informa
 
 ### How the thresholds and recommendations are produced
 
-The `score`, `threshold`, and `recommended` fields are computed by the engine before the
-bot is called, so every implementation receives the same baseline heuristics:
+The engine still evaluates every seat before contacting a bot so it can fall back to
+the legacy heuristics when necessary:
 
-* **Bid** – the engine evaluates each hand and chooses a threshold according to the
-  configured bot name/choice.  `ctx.bid.recommended` is simply `ctx.bid.score >= ctx.bid.threshold`,
-  and the built-in fallback also relies on this comparison.【F:lib/doudizhu/engine.ts†L1221-L1325】
-* **Double** – the landlord recommendation is based on the score delta of the bottom cards,
-  while farmers combine Monte Carlo estimates with counterplay strength; these values feed into
-  `ctx.double.recommended` for each seat.【F:lib/doudizhu/engine.ts†L1434-L1559】
+* **Bid** – `ctx.bid.score` is compared against a threshold derived from the seat's configured
+  bot, and the boolean result is stored in `ctx.bid.recommended`.  Phase-aware external bots
+  receive a sanitized copy that omits the numeric threshold and recommended flag, leaving a
+  `ctx.bid.default` hint solely for error recovery; built-in bots continue to use the raw
+  values.【F:lib/doudizhu/engine.ts†L1221-L1329】
+* **Double** – the landlord calculation measures the bottom-card delta, while farmers combine
+  Monte Carlo estimates with counterplay strength.  Those results populate `ctx.double.recommended`
+  for internal logic, while the sanitized context exposes the boolean as `ctx.double.default`
+  when calling external services.【F:lib/doudizhu/engine.ts†L1434-L1559】
 
-Bundled LLM prompts now remind the model that the default decision is to follow the provided
-recommendation (e.g. “启发分 ≥ 阈值时会抢地主”) and to justify any deviation, so logs will show
-the same threshold that the engine supplied even when the AI elects to override it.【F:lib/bots/openai_bot.ts†L53-L70】【F:lib/bots/deepseek_bot.ts†L51-L70】
+Bundled LLM prompts now emphasise that external services should rely on their own evaluation of
+the hand, seating order, and public information instead of the engine's heuristic thresholds, only
+using the provided context as raw data.【F:lib/bots/openai_bot.ts†L46-L108】【F:lib/bots/deepseek_bot.ts†L44-L97】
 
 ## 计分与对局倍数（中文）
 
