@@ -2510,49 +2510,50 @@ const [lang, setLang] = useState<Lang>(() => {
           </label>
 
 
-<div style={{ gridColumn:'1 / 2' }}>
-  <div style={{ display:'flex', alignItems:'center', gap:24 }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-      可抢地主
-      <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
-    </label>
-    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-      农民配合
-      <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
-    </label>
-  </div>
-  <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:6, flexWrap:'wrap' }}>
-    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-      天梯  /  TrueSkill
-    <input
-      ref={allFileRef}
-      type="file"
-      accept="application/json"
-      style={{ display:'none' }}
-      onChange={handleAllFileUploadHome}
-    />
-    <button
-      onClick={()=>allFileRef.current?.click()}
-      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-    >上传</button>
-    
-    </label>
-<button
-      onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
-      style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-    >存档</button>
-  </div>
-</div>
-<div style={{ gridColumn:'2 / 3' }}>
-  <label style={{ display:'flex', alignItems:'center', gap:8 }}>初始分
-          <input
-            type="number"
-            step={10}
-            value={startScore}
-            onChange={e=>setStartScore(Number(e.target.value)||0)}
-            style={{ flex:'1 1 120px', minWidth:0 }} />
-          </label>
-</div>
+          <div style={{ gridColumn:'1 / 2' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:24, flexWrap:'wrap' }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                可抢地主
+                <input type="checkbox" checked={bid} onChange={e=>setBid(e.target.checked)} />
+              </label>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                农民配合
+                <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
+              </label>
+            </div>
+          </div>
+          <div style={{ gridColumn:'2 / 3' }}>
+            <label style={{ display:'flex', alignItems:'center', gap:8 }}>初始分
+            <input
+              type="number"
+              step={10}
+              value={startScore}
+              onChange={e=>setStartScore(Number(e.target.value)||0)}
+              style={{ flex:'1 1 120px', minWidth:0 }} />
+            </label>
+          </div>
+          <div style={{ gridColumn:'1 / 2' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                天梯  /  TrueSkill
+                <input
+                  ref={allFileRef}
+                  type="file"
+                  accept="application/json"
+                  style={{ display:'none' }}
+                  onChange={handleAllFileUploadHome}
+                />
+                <button
+                  onClick={()=>allFileRef.current?.click()}
+                  style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+                >上传</button>
+              </label>
+              <button
+                onClick={()=>window.dispatchEvent(new Event('ddz-all-save'))}
+                style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >存档</button>
+            </div>
+          </div>
           <label style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:8 }}>4带2 规则
             <select
               value={four2}
