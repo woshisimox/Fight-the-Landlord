@@ -2479,7 +2479,13 @@ const [lang, setLang] = useState<Lang>(() => {
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12, gridAutoFlow:'row dense' }}>
+        <div style={{
+          display:'grid',
+          gridTemplateColumns:'repeat(2, minmax(0, 1fr))',
+          gap:12,
+          gridAutoFlow:'row dense',
+          alignItems:'center'
+        }}>
           <div>
             <div style={{ display:'flex', alignItems:'center', gap:10 }}>
               <label style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -2490,14 +2496,20 @@ const [lang, setLang] = useState<Lang>(() => {
                 清空
               </button>
             </div>
-            <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>关闭后不可开始/继续对局；再次勾选即可恢复。</div>
           </div>
 
-          <label>局数
-            <input type="number" min={1} step={1} value={rounds} onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))} style={{ width:'100%' }}/>
+          <label style={{ display:'flex', alignItems:'center', gap:8 }}>局数
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={rounds}
+              onChange={e=>setRounds(Math.max(1, Math.floor(Number(e.target.value)||1)))}
+              style={{ flex:'1 1 120px', minWidth:0 }}
+            />
           </label>
-          
-          
+
+
 <div style={{ gridColumn:'1 / 2' }}>
   <div style={{ display:'flex', alignItems:'center', gap:24 }}>
     <label style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -2532,21 +2544,25 @@ const [lang, setLang] = useState<Lang>(() => {
   </div>
 </div>
 <div style={{ gridColumn:'2 / 3' }}>
-  <label>初始分
-          <input type="number" step={10} value={startScore}
-           onChange={e=>setStartScore(Number(e.target.value)||0)}
-           style={{ width:'100%' }} />
+  <label style={{ display:'flex', alignItems:'center', gap:8 }}>初始分
+          <input
+            type="number"
+            step={10}
+            value={startScore}
+            onChange={e=>setStartScore(Number(e.target.value)||0)}
+            style={{ flex:'1 1 120px', minWidth:0 }} />
           </label>
 </div>
-          <div style={{ gridColumn:'2 / 3' }}>
-  <label>4带2 规则
-            <select value={four2} onChange={e=>setFour2(e.target.value as Four2Policy)} style={{ width:'100%' }}>
+          <label style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:8 }}>4带2 规则
+            <select
+              value={four2}
+              onChange={e=>setFour2(e.target.value as Four2Policy)}
+              style={{ flex:'1 1 160px', minWidth:0 }}>
               <option value="both">都可</option>
               <option value="2singles">两张单牌</option>
               <option value="2pairs">两对</option>
             </select>
           </label>
-</div>
         </div>
 
         <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
