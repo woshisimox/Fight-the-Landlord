@@ -860,6 +860,13 @@ function LivePanel(props: LiveProps) {
     } finally { e.target.value = ''; }
   };
 
+  const makeArchiveName = (suffix: string) => {
+    const d = new Date();
+    const pad = (n:number) => String(n).padStart(2, '0');
+    const tag = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    return `ddz_all_stats_${tag}${suffix}`;
+  };
+
   const handleSaveArchive = () => {
     const ids = [0,1,2].map(seatIdentity);
     ids.forEach((id,i)=>{
@@ -870,7 +877,7 @@ function LivePanel(props: LiveProps) {
     writeStore(tsStoreRef.current);
     const blob = new Blob([JSON.stringify(tsStoreRef.current, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'trueskill_store.json'; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = makeArchiveName('_trueskill.json'); a.click();
     setTimeout(()=>URL.revokeObjectURL(url), 1200);
     setLog(l => [...l, '【TS】已导出当前存档。']);
   };
@@ -2005,7 +2012,7 @@ const handleAllSaveInner = () => {
     const payload = buildAllBundle();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'ddz_all_stats.json'; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = makeArchiveName('.json'); a.click();
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
     setLog(l => [...l, '【ALL】已导出统一统计文件。']);
   };
