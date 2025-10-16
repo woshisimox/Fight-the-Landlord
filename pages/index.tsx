@@ -1311,11 +1311,36 @@ const start = async () => {
           let nextAggCount = aggCountRef.current;
 
           
-          let nextScores = scoreSeriesRef.current.map(x => [...x]);
-          let sawAnyTurn = false;
-          let nextCuts = roundCutsRef.current.slice();
-          let nextLords = roundLordsRef.current.slice();
-for (const raw of batch) {
+            let nextScores = scoreSeriesRef.current.map(x => [...x]);
+            let sawAnyTurn = false;
+            let nextCuts = roundCutsRef.current.slice();
+            let nextLords = roundLordsRef.current.slice();
+
+            const ensureRoundBoundary = (startIndex: number, landlord?: number | null) => {
+              const idx = Number.isFinite(startIndex) ? Math.max(0, Math.floor(startIndex)) : 0;
+              if (nextCuts.length === 0) {
+                nextCuts = [idx];
+              } else {
+                const lastIdx = nextCuts[nextCuts.length - 1];
+                if (idx > lastIdx) {
+                  nextCuts = [...nextCuts, idx];
+                } else if (idx < lastIdx) {
+                  return;
+                }
+              }
+              while (nextLords.length < nextCuts.length) {
+                nextLords = [...nextLords, -1];
+              }
+              const lordVal = (landlord === 0 || landlord === 1 || landlord === 2) ? landlord : -1;
+              if (lordVal !== -1) {
+                const bandIdx = Math.max(0, nextCuts.length - 1);
+                if (nextLords[bandIdx] !== lordVal) {
+                  nextLords = Object.assign([], nextLords, { [bandIdx]: lordVal });
+                }
+              }
+            };
+
+            for (const raw of batch) {
             let m: any = raw;
             // Remap engine->UI indices when startShift != 0
             if (startShift) {
@@ -1346,9 +1371,14 @@ for (const raw of batch) {
               const m_any:any = raw; m = m_any;
             }
 
-            // m already defined above
-            try {
-              // -------- TS 帧（后端主动提供） --------
+              // m already defined above
+              try {
+                const lenBefore = Math.max(
+                  nextScores[0]?.length || 0,
+                  nextScores[1]?.length || 0,
+                  nextScores[2]?.length || 0
+                );
+                // -------- TS 帧（后端主动提供） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
                 setTsArr(incoming);
@@ -1364,10 +1394,11 @@ for (const raw of batch) {
               }
 
               // -------- 事件边界 --------
-              if (m.type === 'event' && m.kind === 'round-start') {
-                nextBidMultiplier = 1;
-                nextMultiplier = 1;
-                // 清空上一局残余手牌/出牌；等待 init/hands 再填充
+                if (m.type === 'event' && m.kind === 'round-start') {
+                  ensureRoundBoundary(lenBefore, null);
+                  nextBidMultiplier = 1;
+                  nextMultiplier = 1;
+                  // 清空上一局残余手牌/出牌；等待 init/hands 再填充
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
@@ -1394,20 +1425,7 @@ for (const raw of batch) {
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
-                  {
-                    const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
-                    const lordVal = (lord ?? -1) as number | -1;
-                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
-                    else if (nextCuts[nextCuts.length-1] !== n0) { nextCuts = [...nextCuts, n0]; nextLords = [...nextLords, lordVal]; }
-                  }
-                  // 若本局地主刚刚确认，回填到最近一段的 roundLords，避免底色为白
-                  if (nextCuts.length > 0) {
-                    const idxBand = Math.max(0, nextCuts.length - 1);
-                    const lordVal2 = (nextLandlord ?? -1) as number | -1;
-                    if (nextLords[idxBand] !== lordVal2) {
-                      nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
-                    }
-                  }
+                  ensureRoundBoundary(lenBefore, nextLandlord);
 
                   nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
 
@@ -1427,28 +1445,7 @@ for (const raw of batch) {
                   if (lord2 != null) nextLandlord = lord2;
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
-                  {
-                    // —— 兜底：没有 init 帧也要推进 roundCuts / roundLords ——
-                    const n0 = Math.max(
-                      nextScores[0]?.length||0,
-                      nextScores[1]?.length||0,
-                      nextScores[2]?.length||0
-                    );
-                    const lordVal = (nextLandlord ?? -1) as number | -1;
-                    if (nextCuts.length === 0) { nextCuts = [n0]; nextLords = [lordVal]; }
-                    else if (nextCuts[nextCuts.length-1] !== n0) {
-                      nextCuts = [...nextCuts, n0];
-                      nextLords = [...nextLords, lordVal];
-                    }
-                    // 若本局地主刚刚确认，回填最近一段的 roundLords，避免底色为白
-                    if (nextCuts.length > 0) {
-                      const idxBand = Math.max(0, nextCuts.length - 1);
-                      const lordVal2 = (nextLandlord ?? -1) as number | -1;
-                      if (nextLords[idxBand] !== lordVal2) {
-                        nextLords = Object.assign([], nextLords, { [idxBand]: lordVal2 });
-                      }
-                    }
-                  }
+                  ensureRoundBoundary(lenBefore, nextLandlord);
 
                 }
               }
