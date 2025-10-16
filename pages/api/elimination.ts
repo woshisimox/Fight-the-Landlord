@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 
 import type { BotSpec } from '../../lib/arenaStream';
 import { runTripleElimination, type ParticipantEntry, type TournamentOptions } from '../../lib/elimination';
+import { defaultConfig } from '../../lib/trueskill';
 
 const OK_METHOD = 'POST';
 
@@ -115,20 +116,32 @@ function buildOptions(body: RequestBody): TournamentOptions {
     opts.seed = Number(body.seed);
   }
   if (body.config) {
-    const cfg: TournamentOptions['config'] = {};
+    const base = defaultConfig();
+    const cfg: TournamentOptions['config'] = {
+      ...base,
+      mu: 1000,
+      sigma: 1000 / 3,
+      beta: 1000 / 6,
+      tau: 1000 / 300,
+    };
+    let touched = false;
     if (body.config.mu != null && Number.isFinite(Number(body.config.mu))) {
       cfg.mu = Number(body.config.mu);
+      touched = true;
     }
     if (body.config.sigma != null && Number.isFinite(Number(body.config.sigma))) {
       cfg.sigma = Number(body.config.sigma);
+      touched = true;
     }
     if (body.config.beta != null && Number.isFinite(Number(body.config.beta))) {
       cfg.beta = Number(body.config.beta);
+      touched = true;
     }
     if (body.config.tau != null && Number.isFinite(Number(body.config.tau))) {
       cfg.tau = Number(body.config.tau);
+      touched = true;
     }
-    if (Object.keys(cfg).length > 0) {
+    if (touched) {
       opts.config = cfg;
     }
   }
