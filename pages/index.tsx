@@ -691,6 +691,7 @@ function LivePanel(props: LiveProps) {
   // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
   const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
+  const lastScoreSeatRef = useRef<number|null>(null);
   const [roundCuts, setRoundCuts] = useState<number[]>([0]);
   const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
 
@@ -1177,6 +1178,7 @@ function LivePanel(props: LiveProps) {
             mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
           }
           setScoreSeries(mapped);
+          lastScoreSeatRef.current = null;
           if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
         } catch (err) {
           console.error('[score upload] parse error', err);
@@ -1222,6 +1224,7 @@ const handleScoreRefresh = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
+    lastScoreSeatRef.current = null;
   };
 const [allLogs, setAllLogs] = useState<string[]>([]);
 const allLogsRef = useRef(allLogs);
@@ -1239,6 +1242,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setTotals([props.startScore || 0, props.startScore || 0, props.startScore || 0]);
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
+    lastScoreSeatRef.current = null;
 
     // TrueSkill：开始时先应用 overall（未知地主）
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -1392,7 +1396,18 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               cards: (cur?.cards || []).map(c => ({ ...c })),
             } as BottomInfo;
           })();
-for (const raw of batch) {
+          const appendScore = (seat:number, val:number|null) => {
+            if (!(seat===0 || seat===1 || seat===2)) return;
+            if (lastScoreSeatRef.current === seat) {
+              nextScores = nextScores.map(arr => Array.isArray(arr) ? [...arr, null] : [null]);
+            }
+            for (let i=0;i<3;i++){
+              const base = Array.isArray(nextScores[i]) ? nextScores[i] : [];
+              nextScores[i] = [...base, (i===seat ? val : null)];
+            }
+            lastScoreSeatRef.current = seat;
+          };
+          for (const raw of batch) {
             let m: any = raw;
             // Remap engine->UI indices when startShift != 0
             if (startShift) {
@@ -1449,6 +1464,7 @@ for (const raw of batch) {
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
                 nextBottom = { landlord: null, cards: [] };
+                lastScoreSeatRef.current = null;
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -1677,10 +1693,7 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                       const mm = /score=([+-]?\d+(?:\.\d+)?)/.exec(rr || '');
                       if (mm) { val = parseFloat(mm[1]); }
                     }
-                    for (let i=0;i<3;i++){
-                      if (!Array.isArray(nextScores[i])) nextScores[i]=[];
-                      nextScores[i] = [...nextScores[i], (i===s ? val : null)];
-                    }
+                    appendScore(s, val);
                   }
                 }
 
@@ -1690,10 +1703,7 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                 if (s>=0 && s<3) {
                   sawAnyTurn = true;
                   const val = (typeof m.score === 'number') ? (m.score as number) : null;
-                  for (let i=0;i<3;i++){
-                    if (!Array.isArray(nextScores[i])) nextScores[i]=[];
-                    nextScores[i] = [...nextScores[i], (i===s ? val : null)];
-                  }
+                  appendScore(s, val);
                 }
                 continue;
               }
@@ -2025,6 +2035,7 @@ const handleAllSaveInner = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
+    lastScoreSeatRef.current = null;
     setLog(l => [...l, '【ALL】已刷新面板数据。']);
   };
 
