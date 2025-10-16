@@ -1,5 +1,6 @@
 // pages/index.tsx
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { TournamentResult } from '../lib/elimination';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -81,6 +82,35 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '当前', en: 'Current' },
   { zh: '未参赛', en: 'Not played' },
   { zh: '历史', en: 'History' },
+  { zh: '淘汰赛（实验功能）', en: 'Elimination (experimental)' },
+  { zh: '内置算法默认加入，可将当前座位添加到列表后运行三人淘汰赛。', en: 'Built-in bots are pre-selected; add current seats to run the triple elimination.' },
+  { zh: '每轮局数', en: 'Games per round' },
+  { zh: '初始 μ', en: 'Initial μ' },
+  { zh: '随机种子（可选）', en: 'Seed (optional)' },
+  { zh: '参赛选手', en: 'Participants' },
+  { zh: '启用', en: 'Enable' },
+  { zh: '标签', en: 'Label' },
+  { zh: '模型（可选）', en: 'Model (optional)' },
+  { zh: 'API Key（可选）', en: 'API Key (optional)' },
+  { zh: 'HTTP Base（可选）', en: 'HTTP Base (optional)' },
+  { zh: 'HTTP Token（可选）', en: 'HTTP Token (optional)' },
+  { zh: '添加当前座位到列表', en: 'Add current seats' },
+  { zh: '运行淘汰赛', en: 'Run elimination' },
+  { zh: '运行中…', en: 'Running…' },
+  { zh: '错误：', en: 'Error: ' },
+  { zh: '最终排名', en: 'Final standings' },
+  { zh: '胜场', en: 'Wins' },
+  { zh: '胜场：', en: 'Wins: ' },
+  { zh: '胜率：', en: 'Win rate: ' },
+  { zh: '轮次总结', en: 'Round summaries' },
+  { zh: /第\s*(\d+)\s*轮/, en: 'Round $1' },
+  { zh: /第\s*(\d+)\s*组/, en: 'Group $1' },
+  { zh: '自动淘汰：', en: 'Auto elimination:' },
+  { zh: '（无）', en: '(none)' },
+  { zh: '决赛', en: 'Final' },
+  { zh: '淘汰：', en: 'Eliminated: ' },
+  { zh: '本轮战绩：', en: 'Round record:' },
+  { zh: '至少选择 3 位参赛选手。', en: 'Select at least 3 participants.' },
 
   // === Added for full UI coverage ===
   { zh: '局数', en: 'Rounds' },
@@ -606,6 +636,438 @@ function choiceLabel(choice: BotChoice): string {
     default: return String(choice);
   }
 }
+
+const BUILTIN_TOURNAMENT_CHOICES: BotChoice[] = [
+  'built-in:greedy-max',
+  'built-in:greedy-min',
+  'built-in:random-legal',
+  'built-in:mininet',
+  'built-in:ally-support',
+  'built-in:endgame-rush',
+];
+
+type TournamentEntryState = {
+  id: string;
+  choice: BotChoice;
+  label: string;
+  include: boolean;
+  model?: string;
+  apiKey?: string;
+  httpBase?: string;
+  httpToken?: string;
+  origin: 'builtin' | 'seat';
+  seatIndex?: number;
+};
+
+type TournamentPanelProps = {
+  seats: BotChoice[];
+  seatModels: string[];
+  seatKeys: any[];
+};
+
+type TournamentApiResponse =
+  | { ok: true; result: TournamentResult }
+  | { ok: false; error: string };
+
+const PROVIDER_KEY_MAP: Partial<Record<BotChoice, string>> = {
+  'ai:openai': 'openai',
+  'ai:gemini': 'gemini',
+  'ai:grok': 'grok',
+  'ai:kimi': 'kimi',
+  'ai:qwen': 'qwen',
+  'ai:deepseek': 'deepseek',
+};
+
+const providerKeyForChoice = (choice: BotChoice): string | null =>
+  PROVIDER_KEY_MAP[choice] ?? null;
+
+const makeBuiltinEntries = (): TournamentEntryState[] =>
+  BUILTIN_TOURNAMENT_CHOICES.map((choice) => ({
+    id: `builtin-${choice}`,
+    choice,
+    label: choiceLabel(choice),
+    include: true,
+    origin: 'builtin',
+  }));
+function TournamentPanel({ seats, seatModels, seatKeys }: TournamentPanelProps) {
+  const { lang } = useI18n();
+  const [entries, setEntries] = useState<TournamentEntryState[]>(() => makeBuiltinEntries());
+  const [gamesPerRound, setGamesPerRound] = useState<number>(100);
+  const [mu, setMu] = useState<number>(1000);
+  const [seedText, setSeedText] = useState<string>('');
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<TournamentResult | null>(null);
+
+  useEffect(() => {
+    setEntries((prev) =>
+      prev.map((entry) => {
+        if (entry.origin !== 'seat' || entry.seatIndex == null) return entry;
+        const idx = entry.seatIndex;
+        if (idx < 0 || idx >= seats.length) return entry;
+        const labelAuto = `${choiceLabel(entry.choice)}（${seatLabel(idx, lang)}）`;
+        if (entry.label === labelAuto) return entry;
+        return { ...entry, label: labelAuto };
+      }),
+    );
+  }, [lang, seats]);
+
+  const toggleInclude = (id: string, include: boolean) => {
+    setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, include } : entry)));
+  };
+
+  const updateEntry = (id: string, patch: Partial<TournamentEntryState>) => {
+    setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
+  };
+
+  const handleAddSeats = () => {
+    setEntries((prev) => {
+      const next = [...prev];
+      let changed = false;
+      for (let i = 0; i < seats.length; i++) {
+        const choice = seats[i];
+        if (!choice) continue;
+        if (choice.startsWith('built-in') && BUILTIN_TOURNAMENT_CHOICES.includes(choice)) {
+          continue;
+        }
+        const label = `${choiceLabel(choice)}（${seatLabel(i, lang)}）`;
+        const model = seatModels[i] || '';
+        const keys = (seatKeys?.[i] || {}) as Record<string, string>;
+        const providerKey = providerKeyForChoice(choice);
+        const apiKey = providerKey ? (keys?.[providerKey] || '') : '';
+        const httpBase = choice === 'http' ? (keys?.httpBase || '') : '';
+        const httpToken = choice === 'http' ? (keys?.httpToken || '') : '';
+        const existingIndex = next.findIndex(
+          (entry) => entry.origin === 'seat' && entry.seatIndex === i,
+        );
+        if (existingIndex >= 0) {
+          next[existingIndex] = {
+            ...next[existingIndex],
+            choice,
+            label,
+            model,
+            apiKey: providerKey ? apiKey : next[existingIndex].apiKey,
+            httpBase: choice === 'http' ? httpBase : next[existingIndex].httpBase,
+            httpToken: choice === 'http' ? httpToken : next[existingIndex].httpToken,
+            seatIndex: i,
+            include: true,
+          };
+        } else {
+          next.push({
+            id: `seat-${i}-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
+            choice,
+            label,
+            include: true,
+            model,
+            apiKey: providerKey ? apiKey : undefined,
+            httpBase: choice === 'http' ? httpBase : undefined,
+            httpToken: choice === 'http' ? httpToken : undefined,
+            origin: 'seat',
+            seatIndex: i,
+          });
+        }
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  };
+
+  const buildParticipants = () => {
+    return entries
+      .filter((entry) => entry.include)
+      .map((entry) => ({
+        id: entry.id,
+        label: entry.label,
+        choice: entry.choice,
+        model: (entry.model || '').trim() || undefined,
+        apiKey: (entry.apiKey || '').trim() || undefined,
+        httpBase: (entry.httpBase || '').trim() || undefined,
+        httpToken: (entry.httpToken || '').trim() || undefined,
+      }));
+  };
+
+  const handleRun = async () => {
+    const participants = buildParticipants();
+    if (participants.length < 3) {
+      setError('至少选择 3 位参赛选手。');
+      return;
+    }
+    const payload: any = {
+      participants,
+      gamesPerRound: Math.max(1, Math.floor(Number(gamesPerRound) || 100)),
+    };
+    if (Number.isFinite(mu) && mu > 0) {
+      payload.config = { mu };
+    }
+    const seedTrim = seedText.trim();
+    if (seedTrim) {
+      const parsed = Number(seedTrim);
+      if (!Number.isNaN(parsed)) payload.seed = parsed;
+    }
+
+    setRunning(true);
+    setError(null);
+    try {
+      const resp = await fetch('/api/elimination', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = (await resp.json()) as TournamentApiResponse;
+      if (!resp.ok || !json.ok) {
+        throw new Error(json.ok ? resp.statusText : json.error);
+      }
+      setResult(json.result);
+    } catch (err: any) {
+      setResult(null);
+      setError(err?.message || 'Request failed');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const renderStandings = () => {
+    if (!result) return null;
+    return (
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>最终排名</div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {result.standings.map((p, idx) => {
+            const stats = p.stats;
+            const winRate = stats.games > 0 ? (stats.wins / stats.games) * 100 : 0;
+            return (
+              <div
+                key={p.id}
+                style={{
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 8,
+                  padding: 10,
+                  background: '#fff',
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                  #{idx + 1} {p.label}
+                </div>
+                <div style={{ fontSize: 12, color: '#4b5563' }}>
+                  CR {p.ladder.toFixed(2)}｜μ {p.rating.mu.toFixed(2)}｜σ {p.rating.sigma.toFixed(2)}
+                </div>
+                <div style={{ fontSize: 12, color: '#4b5563', marginTop: 4 }}>
+                  局数：{stats.games} ｜ 胜场：{stats.wins} ｜ 胜率：{winRate.toFixed(1)}%
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderRounds = () => {
+    if (!result) return null;
+    return (
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>轮次总结</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {result.rounds.map((round) => (
+            <div
+              key={round.round}
+              style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 10, background: '#fff' }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>第 {round.round} 轮</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {round.groups.map((group) => (
+                  <div key={group.groupIndex} style={{ borderTop: '1px dashed #e5e7eb', paddingTop: 6 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>第 {group.groupIndex + 1} 组</div>
+                    <div style={{ fontSize: 12, color: '#4b5563', marginBottom: 4 }}>
+                      淘汰：{group.eliminated ? group.eliminated.label : '（无）'}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {group.players.map((player) => (
+                        <div key={player.id} style={{ fontSize: 12, color: '#4b5563' }}>
+                          {player.label}｜CR {player.ladder.toFixed(2)}｜μ {player.rating.mu.toFixed(2)}｜σ {player.rating.sigma.toFixed(2)}｜本轮战绩：{player.delta.wins}/{player.delta.games}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: '#4b5563', marginTop: 8 }}>
+                自动淘汰：
+                {round.autoEliminated.length
+                  ? round.autoEliminated.map((auto) => auto.player.label).join('、')
+                  : '（无）'}
+              </div>
+            </div>
+          ))}
+          {result.finalRound && (
+            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 10, background: '#fff' }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>决赛</div>
+              <div style={{ fontSize: 12, color: '#4b5563', marginBottom: 6 }}>局数：{result.finalRound.games}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {result.finalRound.group.players.map((player) => (
+                  <div key={player.id} style={{ fontSize: 12, color: '#4b5563' }}>
+                    {player.label}｜CR {player.ladder.toFixed(2)}｜μ {player.rating.mu.toFixed(2)}｜σ {player.rating.sigma.toFixed(2)}｜本轮战绩：{player.delta.wins}/{player.delta.games}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          每轮局数
+          <input
+            type="number"
+            min={1}
+            value={gamesPerRound}
+            onChange={(e) => setGamesPerRound(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+            style={{ padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          初始 μ
+          <input
+            type="number"
+            value={mu}
+            onChange={(e) => setMu(Number(e.target.value) || 0)}
+            style={{ padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          随机种子（可选）
+          <input
+            type="text"
+            value={seedText}
+            onChange={(e) => setSeedText(e.target.value)}
+            style={{ padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+          />
+        </label>
+      </div>
+
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 700 }}>参赛选手</div>
+        <button
+          onClick={handleAddSeats}
+          style={{ padding: '4px 10px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}
+        >
+          添加当前座位到列表
+        </button>
+      </div>
+
+      <div style={{ marginTop: 8, display: 'grid', gap: 10 }}>
+        {entries.map((entry) => {
+          const needsModel = entry.choice.startsWith('ai:');
+          const needsApiKey = entry.choice.startsWith('ai:');
+          const needsHttp = entry.choice === 'http';
+          return (
+            <div
+              key={entry.id}
+              style={{ border: '1px dashed #d1d5db', borderRadius: 8, padding: 10, background: '#f9fafb' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  启用
+                  <input
+                    type="checkbox"
+                    checked={entry.include}
+                    onChange={(e) => toggleInclude(entry.id, e.target.checked)}
+                  />
+                </label>
+                <div style={{ fontSize: 12, color: '#4b5563' }}>{choiceLabel(entry.choice)}</div>
+              </div>
+
+              <label style={{ display: 'block', marginBottom: 6 }}>
+                标签
+                <input
+                  type="text"
+                  value={entry.label}
+                  onChange={(e) => updateEntry(entry.id, { label: e.target.value })}
+                  style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                />
+              </label>
+
+              {needsModel && (
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                  模型（可选）
+                  <input
+                    type="text"
+                    value={entry.model || ''}
+                    placeholder={defaultModelFor(entry.choice)}
+                    onChange={(e) => updateEntry(entry.id, { model: e.target.value })}
+                    style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                  />
+                </label>
+              )}
+
+              {needsApiKey && (
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                  API Key（可选）
+                  <input
+                    type="password"
+                    value={entry.apiKey || ''}
+                    onChange={(e) => updateEntry(entry.id, { apiKey: e.target.value })}
+                    style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                  />
+                </label>
+              )}
+
+              {needsHttp && (
+                <>
+                  <label style={{ display: 'block', marginBottom: 6 }}>
+                    HTTP Base（可选）
+                    <input
+                      type="text"
+                      value={entry.httpBase || ''}
+                      onChange={(e) => updateEntry(entry.id, { httpBase: e.target.value })}
+                      style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                    />
+                  </label>
+                  <label style={{ display: 'block' }}>
+                    HTTP Token（可选）
+                    <input
+                      type="password"
+                      value={entry.httpToken || ''}
+                      onChange={(e) => updateEntry(entry.id, { httpToken: e.target.value })}
+                      style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button
+          onClick={handleRun}
+          disabled={running}
+          style={{
+            padding: '6px 16px',
+            borderRadius: 8,
+            border: '1px solid #2563eb',
+            background: running ? '#bfdbfe' : '#3b82f6',
+            color: '#fff',
+            cursor: running ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {running ? '运行中…' : '运行淘汰赛'}
+        </button>
+        {error && <div style={{ color: '#dc2626', fontSize: 13 }}>错误：{error}</div>}
+      </div>
+
+      {renderStandings()}
+      {renderRounds()}
+    </div>
+  );
+}
+
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; bid:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
@@ -2776,7 +3238,15 @@ const [lang, setLang] = useState<Lang>(() => {
               ))}
             </div>
           </div>
+      </div>
+      </div>
+
+      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>淘汰赛（实验功能）</div>
+        <div style={{ fontSize:12, color:'#6b7280', marginBottom:10 }}>
+          内置算法默认加入，可将当前座位添加到列表后运行三人淘汰赛。
         </div>
+        <TournamentPanel seats={seats} seatModels={seatModels} seatKeys={seatKeys} />
       </div>
 
       <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
