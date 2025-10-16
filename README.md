@@ -16,6 +16,7 @@ npm run build && npm run start
 - lib/doudizhu/engine.ts — 完整斗地主引擎（含正式记分：炸弹/火箭×2，春天/反春天×2）
 - lib/engine.ts — 旧代码兼容适配层（导出 Engine / IBot 等别名）
 - lib/arenaStream.ts — 旧流程的组装/驱动
+- lib/elimination.ts — 三人一组的 TrueSkill 淘汰赛驱动（每轮 100 局）
 
 ## Bot 接口（抢地主 / 翻倍支持）
 
