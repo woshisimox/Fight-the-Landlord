@@ -393,7 +393,7 @@ type LiveProps = {
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
   turnTimeoutSecs?: number[];
-  autoStartKey?: number;
+  autoStartKey?: number | null;
   onGameComplete?: (payload: LiveGameCompletePayload) => void;
   onSeriesComplete?: (info: { aborted: boolean }) => void;
 };
@@ -762,7 +762,7 @@ function TournamentPanel({
   const [result, setResult] = useState<TournamentResult | null>(null);
   const engineRef = useRef<EliminationEngine | null>(null);
   const assignmentRef = useRef<Assignment | null>(null);
-  const [autoStartKey, setAutoStartKey] = useState<number>(0);
+  const [autoStartKey, setAutoStartKey] = useState<number | null>(null);
   const [viewerSeats, setViewerSeats] = useState<BotChoice[]>([
     'built-in:greedy-max',
     'built-in:greedy-min',
@@ -941,7 +941,7 @@ function TournamentPanel({
     });
     setGamesTarget(engine.options.gamesPerRound);
     setGamesPlayed(0);
-    setAutoStartKey((key) => key + 1);
+    setAutoStartKey((key) => (key == null ? 0 : key + 1));
   };
 
   const advanceAssignment = (engine: EliminationEngine) => {
@@ -951,6 +951,7 @@ function TournamentPanel({
       setSeriesInfo(null);
       assignmentRef.current = null;
       setResult(engine.snapshot());
+      setAutoStartKey(null);
       return;
     }
     assignmentRef.current = next;
@@ -1019,6 +1020,7 @@ function TournamentPanel({
       assignmentRef.current = null;
       setSeriesInfo(null);
       setResult(engine.snapshot());
+      setAutoStartKey(null);
       return;
     }
     engine.completeAssignment();
