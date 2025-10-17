@@ -1,6 +1,8 @@
 // pages/index.tsx
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { TournamentResult } from '../lib/elimination';
+import type { BotSpec } from '../lib/arenaStream';
+import { EliminationEngine, type Assignment } from '../lib/eliminationClient';
+import type { ParticipantEntry, TournamentOptions, TournamentResult } from '../lib/elimination';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -88,14 +90,18 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '初始 μ', en: 'Initial μ' },
   { zh: '随机种子（可选）', en: 'Seed (optional)' },
   { zh: '参赛选手', en: 'Participants' },
+  { zh: '新增参赛选手', en: 'Add participant' },
   { zh: '启用', en: 'Enable' },
+  { zh: '删除', en: 'Delete' },
   { zh: '标签', en: 'Label' },
+  { zh: '类型', en: 'Type' },
   { zh: '模型（可选）', en: 'Model (optional)' },
   { zh: 'API Key（可选）', en: 'API Key (optional)' },
   { zh: 'HTTP Base（可选）', en: 'HTTP Base (optional)' },
   { zh: 'HTTP Token（可选）', en: 'HTTP Token (optional)' },
   { zh: '添加当前座位到列表', en: 'Add current seats' },
   { zh: '运行淘汰赛', en: 'Run elimination' },
+  { zh: '实时对局', en: 'Live match' },
   { zh: '运行中…', en: 'Running…' },
   { zh: '错误：', en: 'Error: ' },
   { zh: '最终排名', en: 'Final standings' },
@@ -142,6 +148,8 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '丙', en: 'C' },
 
   { zh: '对局', en: 'Match' },
+  { zh: '常规对局', en: 'Regular match' },
+  { zh: '淘汰赛', en: 'Elimination' },
   { zh: /TrueSkill（实时）|TrueSkill\s*\(实时\)/, en: 'TrueSkill (live)' },
   { zh: /当前使用：?/, en: 'Current: ' },
   { zh: '总体档', en: 'Overall' },
@@ -384,7 +392,22 @@ type LiveProps = {
   farmerCoop: boolean;
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
-  turnTimeoutSecs?: number[];};
+  turnTimeoutSecs?: number[];
+  autoStartKey?: number;
+  onGameComplete?: (payload: LiveGameCompletePayload) => void;
+  onSeriesComplete?: (info: { aborted: boolean }) => void;
+};
+
+type LiveGameCompletePayload = {
+  roundIndex: number;
+  landlordUi: number | null;
+  landlordBase: number | null;
+  winnerUi: number | null;
+  winnerBase: number | null;
+  seatMapping: number[];
+  deltaUi: [number, number, number];
+  deltaBase: [number, number, number];
+};
 
 function SeatTitle({ i }: { i:number }) {
   const { lang } = useI18n();
@@ -637,6 +660,29 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 
+function botSpecFromEntry(entry: TournamentEntryState): BotSpec | null {
+  const model = (entry.model || '').trim();
+  const apiKey = (entry.apiKey || '').trim();
+  const httpBase = (entry.httpBase || '').trim();
+  const httpToken = (entry.httpToken || '').trim();
+  switch (entry.choice) {
+    case 'built-in:greedy-max': return { kind: 'builtin', name: 'greedy-max' };
+    case 'built-in:greedy-min': return { kind: 'builtin', name: 'greedy-min' };
+    case 'built-in:random-legal': return { kind: 'builtin', name: 'random-legal' };
+    case 'built-in:mininet': return { kind: 'builtin', name: 'mininet' };
+    case 'built-in:ally-support': return { kind: 'builtin', name: 'ally-support' };
+    case 'built-in:endgame-rush': return { kind: 'builtin', name: 'endgame-rush' };
+    case 'ai:openai': return { kind: 'ai', name: 'openai', model: model || undefined, apiKey: apiKey || undefined };
+    case 'ai:gemini': return { kind: 'ai', name: 'gemini', model: model || undefined, apiKey: apiKey || undefined };
+    case 'ai:grok': return { kind: 'ai', name: 'grok', model: model || undefined, apiKey: apiKey || undefined };
+    case 'ai:kimi': return { kind: 'ai', name: 'kimi', model: model || undefined, apiKey: apiKey || undefined };
+    case 'ai:qwen': return { kind: 'ai', name: 'qwen', model: model || undefined, apiKey: apiKey || undefined };
+    case 'ai:deepseek': return { kind: 'ai', name: 'deepseek', model: model || undefined, apiKey: apiKey || undefined };
+    case 'http': return { kind: 'http', baseUrl: httpBase, token: httpToken || undefined };
+    default: return null;
+  }
+}
+
 const BUILTIN_TOURNAMENT_CHOICES: BotChoice[] = [
   'built-in:greedy-max',
   'built-in:greedy-min',
@@ -655,7 +701,7 @@ type TournamentEntryState = {
   apiKey?: string;
   httpBase?: string;
   httpToken?: string;
-  origin: 'builtin' | 'seat';
+  origin: 'builtin' | 'seat' | 'custom';
   seatIndex?: number;
 };
 
@@ -663,6 +709,12 @@ type TournamentPanelProps = {
   seats: BotChoice[];
   seatModels: string[];
   seatKeys: any[];
+  seatDelayMs: number[];
+  enabled: boolean;
+  bid: boolean;
+  four2: Four2Policy;
+  farmerCoop: boolean;
+  turnTimeoutSecs?: number[];
 };
 
 type TournamentApiResponse =
@@ -689,7 +741,17 @@ const makeBuiltinEntries = (): TournamentEntryState[] =>
     include: true,
     origin: 'builtin',
   }));
-function TournamentPanel({ seats, seatModels, seatKeys }: TournamentPanelProps) {
+function TournamentPanel({
+  seats,
+  seatModels,
+  seatKeys,
+  seatDelayMs,
+  enabled,
+  bid,
+  four2,
+  farmerCoop,
+  turnTimeoutSecs,
+}: TournamentPanelProps) {
   const { lang } = useI18n();
   const [entries, setEntries] = useState<TournamentEntryState[]>(() => makeBuiltinEntries());
   const [gamesPerRound, setGamesPerRound] = useState<number>(100);
@@ -698,6 +760,21 @@ function TournamentPanel({ seats, seatModels, seatKeys }: TournamentPanelProps) 
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TournamentResult | null>(null);
+  const engineRef = useRef<EliminationEngine | null>(null);
+  const assignmentRef = useRef<Assignment | null>(null);
+  const [autoStartKey, setAutoStartKey] = useState<number>(0);
+  const [viewerSeats, setViewerSeats] = useState<BotChoice[]>([
+    'built-in:greedy-max',
+    'built-in:greedy-min',
+    'built-in:random-legal',
+  ]);
+  const [viewerSeatModels, setViewerSeatModels] = useState<string[]>(['', '', '']);
+  const [viewerSeatKeys, setViewerSeatKeys] = useState<any[]>([{}, {}, {}]);
+  const [seriesInfo, setSeriesInfo] = useState<
+    { round: number; groupIndex: number; type: 'group' | 'final' } | null
+  >(null);
+  const [gamesPlayed, setGamesPlayed] = useState<number>(0);
+  const [gamesTarget, setGamesTarget] = useState<number>(gamesPerRound);
 
   useEffect(() => {
     setEntries((prev) =>
@@ -712,12 +789,35 @@ function TournamentPanel({ seats, seatModels, seatKeys }: TournamentPanelProps) 
     );
   }, [lang, seats]);
 
+  useEffect(() => {
+    if (!running) {
+      setGamesTarget(Math.max(1, gamesPerRound));
+    }
+  }, [gamesPerRound, running]);
+
   const toggleInclude = (id: string, include: boolean) => {
     setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, include } : entry)));
   };
 
   const updateEntry = (id: string, patch: Partial<TournamentEntryState>) => {
-    setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
+    setEntries((prev) =>
+      prev.map((entry) => {
+        if (entry.id !== id) return entry;
+        let next = { ...entry, ...patch } as TournamentEntryState;
+        if (patch.choice && patch.choice !== entry.choice) {
+          const prevDefault = choiceLabel(entry.choice);
+          const nextDefault = choiceLabel(patch.choice as BotChoice);
+          if (!entry.label || entry.label === prevDefault) {
+            next.label = nextDefault;
+          }
+          next.model = '';
+          next.apiKey = '';
+          next.httpBase = '';
+          next.httpToken = '';
+        }
+        return next;
+      }),
+    );
   };
 
   const handleAddSeats = () => {
@@ -772,58 +872,159 @@ function TournamentPanel({ seats, seatModels, seatKeys }: TournamentPanelProps) 
     });
   };
 
-  const buildParticipants = () => {
-    return entries
-      .filter((entry) => entry.include)
-      .map((entry) => ({
-        id: entry.id,
-        label: entry.label,
-        choice: entry.choice,
-        model: (entry.model || '').trim() || undefined,
-        apiKey: (entry.apiKey || '').trim() || undefined,
-        httpBase: (entry.httpBase || '').trim() || undefined,
-        httpToken: (entry.httpToken || '').trim() || undefined,
-      }));
+  const handleAddCustom = () => {
+    const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`;
+    setEntries((prev) => [
+      ...prev,
+      {
+        id,
+        choice: 'built-in:greedy-max',
+        label: choiceLabel('built-in:greedy-max'),
+        include: true,
+        origin: 'custom',
+      },
+    ]);
   };
 
-  const handleRun = async () => {
+  const handleRemoveEntry = (id: string) => {
+    setEntries((prev) => prev.filter((entry) => entry.id !== id));
+  };
+
+  const buildParticipants = () => {
+    const participants: ParticipantEntry[] = [];
+    let autoIndex = 0;
+    for (const entry of entries) {
+      if (!entry.include) continue;
+      const spec = botSpecFromEntry(entry);
+      if (!spec) continue;
+      const id = entry.id || `player-${autoIndex++}`;
+      const label = (entry.label || '').trim() || choiceLabel(entry.choice);
+      participants.push({
+        id,
+        label,
+        spec,
+        ui: {
+          choice: entry.choice,
+          model: (entry.model || '').trim() || undefined,
+          apiKey: (entry.apiKey || '').trim() || undefined,
+          httpBase: (entry.httpBase || '').trim() || undefined,
+          httpToken: (entry.httpToken || '').trim() || undefined,
+        },
+      });
+    }
+    return participants;
+  };
+
+  const configureViewerForAssignment = (engine: EliminationEngine, assignment: Assignment) => {
+    const players = assignment.players;
+    const seatChoices = players.map((p) => p.entry.ui?.choice ?? 'built-in:greedy-max') as BotChoice[];
+    const seatModelsLocal = players.map((p) => p.entry.ui?.model ?? '');
+    const seatKeysLocal = players.map((p, idx) => {
+      const ui = p.entry.ui;
+      const choice = seatChoices[idx];
+      const keys: any = {};
+      const provider = providerKeyForChoice(choice);
+      if (provider && ui?.apiKey) keys[provider] = ui.apiKey;
+      if (choice === 'http') {
+        if (ui?.httpBase) keys.httpBase = ui.httpBase;
+        if (ui?.httpToken) keys.httpToken = ui.httpToken;
+      }
+      return keys;
+    });
+    setViewerSeats(seatChoices);
+    setViewerSeatModels(seatModelsLocal);
+    setViewerSeatKeys(seatKeysLocal);
+    setSeriesInfo({
+      round: assignment.round,
+      groupIndex: assignment.type === 'group' ? assignment.groupIndex : 0,
+      type: assignment.type,
+    });
+    setGamesTarget(engine.options.gamesPerRound);
+    setGamesPlayed(0);
+    setAutoStartKey((key) => key + 1);
+  };
+
+  const advanceAssignment = (engine: EliminationEngine) => {
+    const next = engine.nextAssignment();
+    if (!next) {
+      setRunning(false);
+      setSeriesInfo(null);
+      assignmentRef.current = null;
+      setResult(engine.snapshot());
+      return;
+    }
+    assignmentRef.current = next;
+    configureViewerForAssignment(engine, next);
+  };
+
+  const handleRun = () => {
     const participants = buildParticipants();
     if (participants.length < 3) {
       setError('至少选择 3 位参赛选手。');
       return;
     }
-    const payload: any = {
-      participants,
+
+    const opts: TournamentOptions = {
       gamesPerRound: Math.max(1, Math.floor(Number(gamesPerRound) || 100)),
     };
     if (Number.isFinite(mu) && mu > 0) {
-      payload.config = { mu };
+      opts.config = { mu } as any;
     }
     const seedTrim = seedText.trim();
     if (seedTrim) {
       const parsed = Number(seedTrim);
-      if (!Number.isNaN(parsed)) payload.seed = parsed;
+      if (Number.isFinite(parsed)) opts.seed = parsed;
+      else {
+        let hash = 0;
+        for (const ch of seedTrim) {
+          hash = (hash * 33 + ch.charCodeAt(0)) | 0;
+        }
+        opts.seed = Math.abs(hash);
+      }
     }
 
+    const engine = new EliminationEngine(participants, opts);
+    engineRef.current = engine;
+    assignmentRef.current = null;
     setRunning(true);
     setError(null);
-    try {
-      const resp = await fetch('/api/elimination', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+    setResult(null);
+    setSeriesInfo(null);
+    setGamesTarget(engine.options.gamesPerRound);
+    setGamesPlayed(0);
+    advanceAssignment(engine);
+  };
+
+  const handleGameComplete = (payload: LiveGameCompletePayload) => {
+    const engine = engineRef.current;
+    if (!engine || !assignmentRef.current) return;
+    if (payload.deltaBase) {
+      const landlord = typeof payload.landlordBase === 'number' ? payload.landlordBase : 0;
+      const winner = typeof payload.winnerBase === 'number' ? payload.winnerBase : landlord;
+      engine.recordGame({
+        landlord,
+        winner,
+        seatDeltas: payload.deltaBase,
       });
-      const json = (await resp.json()) as TournamentApiResponse;
-      if (!resp.ok || !json.ok) {
-        throw new Error(json.ok ? resp.statusText : json.error);
-      }
-      setResult(json.result);
-    } catch (err: any) {
-      setResult(null);
-      setError(err?.message || 'Request failed');
-    } finally {
-      setRunning(false);
+      setGamesPlayed(Math.min(engine.options.gamesPerRound, payload.roundIndex + 1));
     }
+  };
+
+  const handleSeriesComplete = (info: { aborted: boolean }) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (info.aborted) {
+      setRunning(false);
+      setError('淘汰赛已停止。');
+      assignmentRef.current = null;
+      setSeriesInfo(null);
+      setResult(engine.snapshot());
+      return;
+    }
+    engine.completeAssignment();
+    setResult(engine.snapshot());
+    assignmentRef.current = null;
+    advanceAssignment(engine);
   };
 
   const renderStandings = () => {
@@ -958,6 +1159,12 @@ function TournamentPanel({ seats, seatModels, seatKeys }: TournamentPanelProps) 
         >
           添加当前座位到列表
         </button>
+        <button
+          onClick={handleAddCustom}
+          style={{ padding: '4px 10px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}
+        >
+          新增参赛选手
+        </button>
       </div>
 
       <div style={{ marginTop: 8, display: 'grid', gap: 10 }}>
@@ -979,8 +1186,40 @@ function TournamentPanel({ seats, seatModels, seatKeys }: TournamentPanelProps) 
                     onChange={(e) => toggleInclude(entry.id, e.target.checked)}
                   />
                 </label>
-                <div style={{ fontSize: 12, color: '#4b5563' }}>{choiceLabel(entry.choice)}</div>
+                <button
+                  onClick={() => handleRemoveEntry(entry.id)}
+                  style={{ padding: '2px 8px', border: '1px solid #e5e7eb', borderRadius: 6, background: '#fff', fontSize: 12 }}
+                >
+                  删除
+                </button>
               </div>
+
+              <label style={{ display: 'block', marginBottom: 6 }}>
+                类型
+                <select
+                  value={entry.choice}
+                  onChange={(e) => updateEntry(entry.id, { choice: e.target.value as BotChoice })}
+                  style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                >
+                  <optgroup label="内置">
+                    <option value="built-in:greedy-max">Greedy Max</option>
+                    <option value="built-in:greedy-min">Greedy Min</option>
+                    <option value="built-in:random-legal">Random Legal</option>
+                    <option value="built-in:mininet">MiniNet</option>
+                    <option value="built-in:ally-support">AllySupport</option>
+                    <option value="built-in:endgame-rush">EndgameRush</option>
+                  </optgroup>
+                  <optgroup label="AI">
+                    <option value="ai:openai">OpenAI</option>
+                    <option value="ai:gemini">Gemini</option>
+                    <option value="ai:grok">Grok</option>
+                    <option value="ai:kimi">Kimi</option>
+                    <option value="ai:qwen">Qwen</option>
+                    <option value="ai:deepseek">DeepSeek</option>
+                    <option value="http">HTTP</option>
+                  </optgroup>
+                </select>
+              </label>
 
               <label style={{ display: 'block', marginBottom: 6 }}>
                 标签
@@ -1043,6 +1282,36 @@ function TournamentPanel({ seats, seatModels, seatKeys }: TournamentPanelProps) 
           );
         })}
       </div>
+
+      {seriesInfo && (
+        <div style={{ marginTop: 12, fontSize: 12, color: '#374151' }}>
+          当前：第 {seriesInfo.round} 轮
+          {seriesInfo.type === 'group' ? ` 第 ${seriesInfo.groupIndex + 1} 组` : '（决赛）'} ｜ 进度：
+          {Math.min(gamesPlayed, gamesTarget)}/{gamesTarget}
+        </div>
+      )}
+
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>实时对局</div>
+        <LivePanel
+          rounds={gamesTarget}
+          startScore={0}
+          seatDelayMs={seatDelayMs}
+          enabled={enabled}
+          bid={bid}
+          four2={four2}
+          seats={viewerSeats}
+          seatModels={viewerSeatModels}
+          seatKeys={viewerSeatKeys}
+          farmerCoop={farmerCoop}
+          turnTimeoutSecs={turnTimeoutSecs}
+          autoStartKey={autoStartKey}
+          onGameComplete={handleGameComplete}
+          onSeriesComplete={handleSeriesComplete}
+        />
+      </div>
+
+      <LadderPanel />
 
       <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
         <button
@@ -1575,6 +1844,7 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
+  const autoStartRef = useRef<number | null>(null);
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
@@ -2238,6 +2508,14 @@ nextTotals     = [
   nextTotals[1] + rot2[1],
   nextTotals[2] + rot2[2]
 ] as any;
+                const seatMapping = [0,1,2].map((ui) => (ui + startShift) % 3);
+                const deltaBase: [number, number, number] = [0, 0, 0];
+                for (let uiSeat = 0; uiSeat < 3; uiSeat++) {
+                  const baseIdx = seatMapping[uiSeat];
+                  if (baseIdx >= 0 && baseIdx < 3) {
+                    deltaBase[baseIdx] = rot2[uiSeat];
+                  }
+                }
                 {
                   const mYi  = Number(((m as any).multiplierYi ?? 0));
                   const mBing= Number(((m as any).multiplierBing ?? 0));
@@ -2257,6 +2535,19 @@ nextTotals     = [
                   }
                 }
                 nextWinner = nextWinnerLocal;
+
+                const landlordBase = nextLandlord != null ? seatMapping[nextLandlord] ?? null : null;
+                const winnerBase = nextWinnerLocal != null ? seatMapping[nextWinnerLocal] ?? null : null;
+                props.onGameComplete?.({
+                  roundIndex: labelRoundNo - 1,
+                  landlordUi: nextLandlord,
+                  landlordBase: landlordBase ?? null,
+                  winnerUi: nextWinnerLocal ?? null,
+                  winnerBase: winnerBase ?? null,
+                  seatMapping,
+                  deltaUi: rot2,
+                  deltaBase,
+                });
 
                 // 标记一局结束 & 雷达图兜底
                 {
@@ -2424,7 +2715,13 @@ nextTotals     = [
     } catch (e: any) {
       if (e?.name === 'AbortError') setLog(l => [...l, '已手动停止。']);
       else setLog(l => [...l, `错误：${e?.message || e}`]);
-    } finally { exitPause(); setRunning(false); }
+    } finally {
+      const aborted = !!controllerRef.current?.signal.aborted;
+      controllerRef.current = null;
+      exitPause();
+      setRunning(false);
+      props.onSeriesComplete?.({ aborted });
+    }
   };
 
   const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); };
@@ -2517,6 +2814,15 @@ const handleAllSaveInner = () => {
       window.removeEventListener('ddz-all-upload', onUpload as any);
     };
   }, []);
+
+  useEffect(() => {
+    if (props.autoStartKey == null) return;
+    if (autoStartRef.current === props.autoStartKey) return;
+    autoStartRef.current = props.autoStartKey;
+    if (!running) {
+      void start();
+    }
+  }, [props.autoStartKey]);
 
   return (
     <div>
@@ -2910,6 +3216,7 @@ const [lang, setLang] = useState<Lang>(() => {
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'match' | 'tournament'>('match');
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
@@ -2950,9 +3257,34 @@ const [lang, setLang] = useState<Lang>(() => {
 </div>
 
 
-      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
-        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
-        <div style={{
+      <div style={{ display:'flex', gap:12, marginBottom:16 }}>
+        <button
+          onClick={() => setActiveTab('match')}
+          style={{
+            padding: '6px 12px',
+            borderRadius: 8,
+            border: '1px solid #2563eb',
+            background: activeTab === 'match' ? '#3b82f6' : '#e5e7eb',
+            color: activeTab === 'match' ? '#fff' : '#1f2937',
+          }}
+        >常规对局</button>
+        <button
+          onClick={() => setActiveTab('tournament')}
+          style={{
+            padding: '6px 12px',
+            borderRadius: 8,
+            border: '1px solid #2563eb',
+            background: activeTab === 'tournament' ? '#3b82f6' : '#e5e7eb',
+            color: activeTab === 'tournament' ? '#fff' : '#1f2937',
+          }}
+        >淘汰赛</button>
+      </div>
+
+      {activeTab === 'match' ? (
+        <>
+          <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+            <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
+            <div style={{
           display:'grid',
           gridTemplateColumns:'repeat(2, minmax(0, 1fr))',
           gap:12,
@@ -3039,237 +3371,247 @@ const [lang, setLang] = useState<Lang>(() => {
           </label>
         </div>
 
-        <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
-          <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
+          <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
+            <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
 
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-            {[0,1,2].map(i=>(
-              <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
-                <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /></div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>(
+                <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
+                  <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /></div>
 
-                <label style={{ display:'block', marginBottom:6 }}>
-                  选择
-                  <select
-                    value={seats[i]}
-                    onChange={e=>{
-                      const v = e.target.value as BotChoice;
-                      setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
-                      // 新增：切换提供商时，把当前输入框改成该提供商的推荐模型
-                      setSeatModels(arr => { const n=[...arr]; n[i] = defaultModelFor(v); return n; });
-                    }}
-                    style={{ width:'100%' }}
-                  >
-                    <optgroup label="内置">
-                      <option value="built-in:greedy-max">Greedy Max</option>
-                      <option value="built-in:greedy-min">Greedy Min</option>
-                      <option value="built-in:random-legal">Random Legal</option>
-                      <option value="built-in:mininet">MiniNet</option>
-                      <option value="built-in:ally-support">AllySupport</option>
-                      <option value="built-in:endgame-rush">EndgameRush</option>
-                    </optgroup>
-                    <optgroup label="AI">
-                      <option value="ai:openai">OpenAI</option>
-                      <option value="ai:gemini">Gemini</option>
-                      <option value="ai:grok">Grok</option>
-                      <option value="ai:kimi">Kimi</option>
-                      <option value="ai:qwen">Qwen</option>
-                      <option value="ai:deepseek">DeepSeek</option>
-                      <option value="http">HTTP</option>
-                    </optgroup>
-                  </select>
-                </label>
-
-                {seats[i].startsWith('ai:') && (
                   <label style={{ display:'block', marginBottom:6 }}>
-                    模型（可选）
-                    <input
-                      type="text"
-                      value={seatModels[i]}
-                      placeholder={defaultModelFor(seats[i])}
+                    选择
+                    <select
+                      value={seats[i]}
                       onChange={e=>{
-                        const v = e.target.value;
-                        setSeatModels(arr => { const n=[...arr]; n[i] = v; return n; });
+                        const v = e.target.value as BotChoice;
+                        setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
+                        // 新增：切换提供商时，把当前输入框改成该提供商的推荐模型
+                        setSeatModels(arr => { const n=[...arr]; n[i] = defaultModelFor(v); return n; });
                       }}
                       style={{ width:'100%' }}
-                    />
-                    <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
-                      留空则使用推荐：{defaultModelFor(seats[i])}
-                    </div>
+                    >
+                      <optgroup label="内置">
+                        <option value="built-in:greedy-max">Greedy Max</option>
+                        <option value="built-in:greedy-min">Greedy Min</option>
+                        <option value="built-in:random-legal">Random Legal</option>
+                        <option value="built-in:mininet">MiniNet</option>
+                        <option value="built-in:ally-support">AllySupport</option>
+                        <option value="built-in:endgame-rush">EndgameRush</option>
+                      </optgroup>
+                      <optgroup label="AI">
+                        <option value="ai:openai">OpenAI</option>
+                        <option value="ai:gemini">Gemini</option>
+                        <option value="ai:grok">Grok</option>
+                        <option value="ai:kimi">Kimi</option>
+                        <option value="ai:qwen">Qwen</option>
+                        <option value="ai:deepseek">DeepSeek</option>
+                        <option value="http">HTTP</option>
+                      </optgroup>
+                    </select>
                   </label>
-                )}
 
-                {seats[i] === 'ai:openai' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    OpenAI API Key
-                    <input type="password" value={seatKeys[i]?.openai||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), openai:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'ai:gemini' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    Gemini API Key
-                    <input type="password" value={seatKeys[i]?.gemini||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), gemini:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'ai:grok' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    xAI (Grok) API Key
-                    <input type="password" value={seatKeys[i]?.grok||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), grok:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'ai:kimi' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    Kimi API Key
-                    <input type="password" value={seatKeys[i]?.kimi||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), kimi:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'ai:qwen' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    Qwen API Key
-                    <input type="password" value={seatKeys[i]?.qwen||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'ai:deepseek' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    DeepSeek API Key
-                    <input type="password" value={seatKeys[i]?.deepseek||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), deepseek:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'http' && (
-                  <>
+                  {seats[i].startsWith('ai:') && (
                     <label style={{ display:'block', marginBottom:6 }}>
-                      HTTP Base / URL
-                      <input type="text" value={seatKeys[i]?.httpBase||''}
+                      模型（可选）
+                      <input
+                        type="text"
+                        value={seatModels[i]}
+                        placeholder={defaultModelFor(seats[i])}
                         onChange={e=>{
                           const v = e.target.value;
-                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpBase:v }; return n; });
+                          setSeatModels(arr => { const n=[...arr]; n[i] = v; return n; });
+                        }}
+                        style={{ width:'100%' }}
+                      />
+                      <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
+                        留空则使用推荐：{defaultModelFor(seats[i])}
+                      </div>
+                    </label>
+                  )}
+
+                  {seats[i] === 'ai:openai' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      OpenAI API Key
+                      <input type="password" value={seatKeys[i]?.openai||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), openai:v }; return n; });
                         }}
                         style={{ width:'100%' }} />
                     </label>
+                  )}
+
+                  {seats[i] === 'ai:gemini' && (
                     <label style={{ display:'block', marginBottom:6 }}>
-                      HTTP Token（可选）
-                      <input type="password" value={seatKeys[i]?.httpToken||''}
+                      Gemini API Key
+                      <input type="password" value={seatKeys[i]?.gemini||''}
                         onChange={e=>{
                           const v = e.target.value;
-                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpToken:v }; return n; });
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), gemini:v }; return n; });
                         }}
                         style={{ width:'100%' }} />
                     </label>
-                  </>
-                )}
+                  )}
+
+                  {seats[i] === 'ai:grok' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      xAI (Grok) API Key
+                      <input type="password" value={seatKeys[i]?.grok||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), grok:v }; return n; });
+                        }}
+                        style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i] === 'ai:kimi' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      Kimi API Key
+                      <input type="password" value={seatKeys[i]?.kimi||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), kimi:v }; return n; });
+                        }}
+                        style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i] === 'ai:qwen' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      Qwen API Key
+                      <input type="password" value={seatKeys[i]?.qwen||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; });
+                        }}
+                        style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i] === 'ai:deepseek' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      DeepSeek API Key
+                      <input type="password" value={seatKeys[i]?.deepseek||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), deepseek:v }; return n; });
+                        }}
+                        style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i] === 'http' && (
+                    <>
+                      <label style={{ display:'block', marginBottom:6 }}>
+                        HTTP Base / URL
+                        <input type="text" value={seatKeys[i]?.httpBase||''}
+                          onChange={e=>{
+                            const v = e.target.value;
+                            setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpBase:v }; return n; });
+                          }}
+                          style={{ width:'100%' }} />
+                      </label>
+                      <label style={{ display:'block', marginBottom:6 }}>
+                        HTTP Token（可选）
+                        <input type="password" value={seatKeys[i]?.httpToken||''}
+                          onChange={e=>{
+                            const v = e.target.value;
+                            setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpToken:v }; return n; });
+                          }}
+                          style={{ width:'100%' }} />
+                      </label>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div style={{ marginTop:12 }}>
+              <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)</div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+                {[0,1,2].map(i=>(
+                  <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
+                    <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
+                    <label style={{ display:'block' }}>
+                      最小间隔 (ms)
+                      <input
+                        type="number" min={0} step={100}
+                        value={ (seatDelayMs[i] ?? 0) }
+                        onChange={e=>setSeatDelay(i, e.target.value)}
+                        style={{ width:'100%' }}
+                      />
+                    </label>
+                  </div>
+
+                ))}
               </div>
-            ))}
-          </div>
-
-          <div style={{ marginTop:12 }}>
-            <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)</div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-              {[0,1,2].map(i=>(
-                <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
-                  <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
-                  <label style={{ display:'block' }}>
-                    最小间隔 (ms)
-                    <input
-                      type="number" min={0} step={100}
-                      value={ (seatDelayMs[i] ?? 0) }
-                      onChange={e=>setSeatDelay(i, e.target.value)}
-                      style={{ width:'100%' }}
-                    />
-                  </label>
-                </div>
-
-              ))}
+            </div>
+            <div style={{ marginTop:12 }}>
+              <div style={{ fontWeight:700, marginBottom:6 }}>每家思考超时（秒）</div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+                {[0,1,2].map(i=>(
+                  <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
+                    <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
+                    <label style={{ display:'block' }}>
+                      弃牌时间（秒）
+                      <input
+                        type="number" min={5} step={1}
+                        value={ (turnTimeoutSecs[i] ?? 30) }
+                        onChange={e=>{
+                          const v = Math.max(5, Math.floor(Number(e.target.value)||0));
+                          setTurnTimeoutSecs(arr=>{ const cp=[...(arr||[30,30,30])]; cp[i]=v; return cp; });
+                        }}
+                        style={{ width:'100%' }}
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-          <div style={{ marginTop:12 }}>
-            <div style={{ fontWeight:700, marginBottom:6 }}>每家思考超时（秒）</div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-              {[0,1,2].map(i=>(
-                <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
-                  <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
-                  <label style={{ display:'block' }}>
-                    弃牌时间（秒）
-                    <input
-                      type="number" min={5} step={1}
-                      value={ (turnTimeoutSecs[i] ?? 30) }
-                      onChange={e=>{
-                        const v = Math.max(5, Math.floor(Number(e.target.value)||0));
-                        setTurnTimeoutSecs(arr=>{ const cp=[...(arr||[30,30,30])]; cp[i]=v; return cp; });
-                      }}
-                      style={{ width:'100%' }}
-                    />
-                  </label>
-                </div>
-              ))}
-            </div>
-          </div>
-      </div>
-      </div>
 
-      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
-        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>淘汰赛（实验功能）</div>
-        <div style={{ fontSize:12, color:'#6b7280', marginBottom:10 }}>
-          内置算法默认加入，可将当前座位添加到列表后运行三人淘汰赛。
+          <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+            <LadderPanel />
+            <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
+            <LivePanel
+              key={resetKey}
+              rounds={rounds}
+              startScore={startScore}
+              seatDelayMs={seatDelayMs}
+              enabled={enabled}
+              bid={bid}
+              four2={four2}
+              seats={seats}
+              seatModels={seatModels}
+              seatKeys={seatKeys}
+              farmerCoop={farmerCoop}
+              onLog={setLiveLog}
+              turnTimeoutSecs={turnTimeoutSecs}
+            />
+          </div>
+
+        </>
+      ) : (
+        <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+          <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>淘汰赛（实验功能）</div>
+          <div style={{ fontSize:12, color:'#6b7280', marginBottom:10 }}>
+            内置算法默认加入，可将当前座位添加到列表后运行三人淘汰赛。
+          </div>
+          <TournamentPanel
+            seats={seats}
+            seatModels={seatModels}
+            seatKeys={seatKeys}
+            seatDelayMs={seatDelayMs}
+            enabled={enabled}
+            bid={bid}
+            four2={four2}
+            farmerCoop={farmerCoop}
+            turnTimeoutSecs={turnTimeoutSecs}
+          />
         </div>
-        <TournamentPanel seats={seats} seatModels={seatModels} seatKeys={seatKeys} />
-      </div>
-
-      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
-        {/* —— 天梯图 —— */}
-      <LadderPanel />
-<div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
-        <LivePanel
-          key={resetKey}
-          rounds={rounds}
-          startScore={startScore}
-          seatDelayMs={seatDelayMs}
-          enabled={enabled}
-          bid={bid}
-          four2={four2}
-          seats={seats}
-          seatModels={seatModels}
-          seatKeys={seatKeys}
-          farmerCoop={farmerCoop}
-          onLog={setLiveLog}
-        
-          turnTimeoutSecs={turnTimeoutSecs}
-        />
-      </div>
+      )}
     </div>
     </LangContext.Provider>
   </>);

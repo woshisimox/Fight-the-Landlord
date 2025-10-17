@@ -173,7 +173,18 @@ export default async function handler(
         if (!spec) return null;
         const id = sanitizeId(payload.id, payload.choice, index);
         const label = sanitizeLabel(payload.label, payload.choice);
-        return { id, label, spec };
+        return {
+          id,
+          label,
+          spec,
+          ui: {
+            choice: payload.choice,
+            model: payload.model,
+            apiKey: payload.apiKey,
+            httpBase: payload.httpBase,
+            httpToken: payload.httpToken,
+          },
+        };
       })
       .filter(isParticipantEntry);
 
