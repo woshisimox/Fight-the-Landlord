@@ -1,5 +1,8 @@
 // pages/index.tsx
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { BotSpec } from '../lib/arenaStream';
+import { EliminationEngine, type Assignment } from '../lib/eliminationClient';
+import type { ParticipantEntry, TournamentOptions, TournamentResult } from '../lib/elimination';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -81,6 +84,39 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '当前', en: 'Current' },
   { zh: '未参赛', en: 'Not played' },
   { zh: '历史', en: 'History' },
+  { zh: '淘汰赛（实验功能）', en: 'Elimination (experimental)' },
+  { zh: '内置算法默认加入，可将当前座位添加到列表后运行三人淘汰赛。', en: 'Built-in bots are pre-selected; add current seats to run the triple elimination.' },
+  { zh: '每轮局数', en: 'Games per round' },
+  { zh: '初始 μ', en: 'Initial μ' },
+  { zh: '随机种子（可选）', en: 'Seed (optional)' },
+  { zh: '参赛选手', en: 'Participants' },
+  { zh: '新增参赛选手', en: 'Add participant' },
+  { zh: '启用', en: 'Enable' },
+  { zh: '删除', en: 'Delete' },
+  { zh: '标签', en: 'Label' },
+  { zh: '类型', en: 'Type' },
+  { zh: '模型（可选）', en: 'Model (optional)' },
+  { zh: 'API Key（可选）', en: 'API Key (optional)' },
+  { zh: 'HTTP Base（可选）', en: 'HTTP Base (optional)' },
+  { zh: 'HTTP Token（可选）', en: 'HTTP Token (optional)' },
+  { zh: '添加当前座位到列表', en: 'Add current seats' },
+  { zh: '运行淘汰赛', en: 'Run elimination' },
+  { zh: '实时对局', en: 'Live match' },
+  { zh: '运行中…', en: 'Running…' },
+  { zh: '错误：', en: 'Error: ' },
+  { zh: '最终排名', en: 'Final standings' },
+  { zh: '胜场', en: 'Wins' },
+  { zh: '胜场：', en: 'Wins: ' },
+  { zh: '胜率：', en: 'Win rate: ' },
+  { zh: '轮次总结', en: 'Round summaries' },
+  { zh: /第\s*(\d+)\s*轮/, en: 'Round $1' },
+  { zh: /第\s*(\d+)\s*组/, en: 'Group $1' },
+  { zh: '自动淘汰：', en: 'Auto elimination:' },
+  { zh: '（无）', en: '(none)' },
+  { zh: '决赛', en: 'Final' },
+  { zh: '淘汰：', en: 'Eliminated: ' },
+  { zh: '本轮战绩：', en: 'Round record:' },
+  { zh: '至少选择 3 位参赛选手。', en: 'Select at least 3 participants.' },
 
   // === Added for full UI coverage ===
   { zh: '局数', en: 'Rounds' },
@@ -112,6 +148,8 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '丙', en: 'C' },
 
   { zh: '对局', en: 'Match' },
+  { zh: '常规对局', en: 'Regular match' },
+  { zh: '淘汰赛', en: 'Elimination' },
   { zh: /TrueSkill（实时）|TrueSkill\s*\(实时\)/, en: 'TrueSkill (live)' },
   { zh: /当前使用：?/, en: 'Current: ' },
   { zh: '总体档', en: 'Overall' },
@@ -354,7 +392,22 @@ type LiveProps = {
   farmerCoop: boolean;
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
-  turnTimeoutSecs?: number[];};
+  turnTimeoutSecs?: number[];
+  autoStartKey?: number | null;
+  onGameComplete?: (payload: LiveGameCompletePayload) => void;
+  onSeriesComplete?: (info: { aborted: boolean }) => void;
+};
+
+type LiveGameCompletePayload = {
+  roundIndex: number;
+  landlordUi: number | null;
+  landlordBase: number | null;
+  winnerUi: number | null;
+  winnerBase: number | null;
+  seatMapping: number[];
+  deltaUi: [number, number, number];
+  deltaBase: [number, number, number];
+};
 
 function SeatTitle({ i }: { i:number }) {
   const { lang } = useI18n();
@@ -606,6 +659,686 @@ function choiceLabel(choice: BotChoice): string {
     default: return String(choice);
   }
 }
+
+function botSpecFromEntry(entry: TournamentEntryState): BotSpec | null {
+  const model = (entry.model || '').trim();
+  const apiKey = (entry.apiKey || '').trim();
+  const httpBase = (entry.httpBase || '').trim();
+  const httpToken = (entry.httpToken || '').trim();
+  switch (entry.choice) {
+    case 'built-in:greedy-max': return { kind: 'builtin', name: 'greedy-max' };
+    case 'built-in:greedy-min': return { kind: 'builtin', name: 'greedy-min' };
+    case 'built-in:random-legal': return { kind: 'builtin', name: 'random-legal' };
+    case 'built-in:mininet': return { kind: 'builtin', name: 'mininet' };
+    case 'built-in:ally-support': return { kind: 'builtin', name: 'ally-support' };
+    case 'built-in:endgame-rush': return { kind: 'builtin', name: 'endgame-rush' };
+    case 'ai:openai': return { kind: 'ai', name: 'openai', model: model || undefined, apiKey: apiKey || undefined };
+    case 'ai:gemini': return { kind: 'ai', name: 'gemini', model: model || undefined, apiKey: apiKey || undefined };
+    case 'ai:grok': return { kind: 'ai', name: 'grok', model: model || undefined, apiKey: apiKey || undefined };
+    case 'ai:kimi': return { kind: 'ai', name: 'kimi', model: model || undefined, apiKey: apiKey || undefined };
+    case 'ai:qwen': return { kind: 'ai', name: 'qwen', model: model || undefined, apiKey: apiKey || undefined };
+    case 'ai:deepseek': return { kind: 'ai', name: 'deepseek', model: model || undefined, apiKey: apiKey || undefined };
+    case 'http': return { kind: 'http', baseUrl: httpBase, token: httpToken || undefined };
+    default: return null;
+  }
+}
+
+const BUILTIN_TOURNAMENT_CHOICES: BotChoice[] = [
+  'built-in:greedy-max',
+  'built-in:greedy-min',
+  'built-in:random-legal',
+  'built-in:mininet',
+  'built-in:ally-support',
+  'built-in:endgame-rush',
+];
+
+type TournamentEntryState = {
+  id: string;
+  choice: BotChoice;
+  label: string;
+  include: boolean;
+  model?: string;
+  apiKey?: string;
+  httpBase?: string;
+  httpToken?: string;
+  origin: 'builtin' | 'seat' | 'custom';
+  seatIndex?: number;
+};
+
+type TournamentPanelProps = {
+  seats: BotChoice[];
+  seatModels: string[];
+  seatKeys: any[];
+  seatDelayMs: number[];
+  enabled: boolean;
+  bid: boolean;
+  four2: Four2Policy;
+  farmerCoop: boolean;
+  turnTimeoutSecs?: number[];
+};
+
+type TournamentApiResponse =
+  | { ok: true; result: TournamentResult }
+  | { ok: false; error: string };
+
+const PROVIDER_KEY_MAP: Partial<Record<BotChoice, string>> = {
+  'ai:openai': 'openai',
+  'ai:gemini': 'gemini',
+  'ai:grok': 'grok',
+  'ai:kimi': 'kimi',
+  'ai:qwen': 'qwen',
+  'ai:deepseek': 'deepseek',
+};
+
+const providerKeyForChoice = (choice: BotChoice): string | null =>
+  PROVIDER_KEY_MAP[choice] ?? null;
+
+const makeBuiltinEntries = (): TournamentEntryState[] =>
+  BUILTIN_TOURNAMENT_CHOICES.map((choice) => ({
+    id: `builtin-${choice}`,
+    choice,
+    label: choiceLabel(choice),
+    include: true,
+    origin: 'builtin',
+  }));
+function TournamentPanel({
+  seats,
+  seatModels,
+  seatKeys,
+  seatDelayMs,
+  enabled,
+  bid,
+  four2,
+  farmerCoop,
+  turnTimeoutSecs,
+}: TournamentPanelProps) {
+  const { lang } = useI18n();
+  const [entries, setEntries] = useState<TournamentEntryState[]>(() => makeBuiltinEntries());
+  const [gamesPerRound, setGamesPerRound] = useState<number>(100);
+  const [mu, setMu] = useState<number>(1000);
+  const [seedText, setSeedText] = useState<string>('');
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<TournamentResult | null>(null);
+  const engineRef = useRef<EliminationEngine | null>(null);
+  const assignmentRef = useRef<Assignment | null>(null);
+  const [autoStartKey, setAutoStartKey] = useState<number | null>(null);
+  const [viewerSeats, setViewerSeats] = useState<BotChoice[]>([
+    'built-in:greedy-max',
+    'built-in:greedy-min',
+    'built-in:random-legal',
+  ]);
+  const [viewerSeatModels, setViewerSeatModels] = useState<string[]>(['', '', '']);
+  const [viewerSeatKeys, setViewerSeatKeys] = useState<any[]>([{}, {}, {}]);
+  const [seriesInfo, setSeriesInfo] = useState<
+    { round: number; groupIndex: number; type: 'group' | 'final' } | null
+  >(null);
+  const [gamesPlayed, setGamesPlayed] = useState<number>(0);
+  const [gamesTarget, setGamesTarget] = useState<number>(gamesPerRound);
+
+  useEffect(() => {
+    setEntries((prev) =>
+      prev.map((entry) => {
+        if (entry.origin !== 'seat' || entry.seatIndex == null) return entry;
+        const idx = entry.seatIndex;
+        if (idx < 0 || idx >= seats.length) return entry;
+        const labelAuto = `${choiceLabel(entry.choice)}（${seatLabel(idx, lang)}）`;
+        if (entry.label === labelAuto) return entry;
+        return { ...entry, label: labelAuto };
+      }),
+    );
+  }, [lang, seats]);
+
+  useEffect(() => {
+    if (!running) {
+      setGamesTarget(Math.max(1, gamesPerRound));
+    }
+  }, [gamesPerRound, running]);
+
+  const toggleInclude = (id: string, include: boolean) => {
+    setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, include } : entry)));
+  };
+
+  const updateEntry = (id: string, patch: Partial<TournamentEntryState>) => {
+    setEntries((prev) =>
+      prev.map((entry) => {
+        if (entry.id !== id) return entry;
+        let next = { ...entry, ...patch } as TournamentEntryState;
+        if (patch.choice && patch.choice !== entry.choice) {
+          const prevDefault = choiceLabel(entry.choice);
+          const nextDefault = choiceLabel(patch.choice as BotChoice);
+          if (!entry.label || entry.label === prevDefault) {
+            next.label = nextDefault;
+          }
+          next.model = '';
+          next.apiKey = '';
+          next.httpBase = '';
+          next.httpToken = '';
+        }
+        return next;
+      }),
+    );
+  };
+
+  const handleAddSeats = () => {
+    setEntries((prev) => {
+      const next = [...prev];
+      let changed = false;
+      for (let i = 0; i < seats.length; i++) {
+        const choice = seats[i];
+        if (!choice) continue;
+        if (choice.startsWith('built-in') && BUILTIN_TOURNAMENT_CHOICES.includes(choice)) {
+          continue;
+        }
+        const label = `${choiceLabel(choice)}（${seatLabel(i, lang)}）`;
+        const model = seatModels[i] || '';
+        const keys = (seatKeys?.[i] || {}) as Record<string, string>;
+        const providerKey = providerKeyForChoice(choice);
+        const apiKey = providerKey ? (keys?.[providerKey] || '') : '';
+        const httpBase = choice === 'http' ? (keys?.httpBase || '') : '';
+        const httpToken = choice === 'http' ? (keys?.httpToken || '') : '';
+        const existingIndex = next.findIndex(
+          (entry) => entry.origin === 'seat' && entry.seatIndex === i,
+        );
+        if (existingIndex >= 0) {
+          next[existingIndex] = {
+            ...next[existingIndex],
+            choice,
+            label,
+            model,
+            apiKey: providerKey ? apiKey : next[existingIndex].apiKey,
+            httpBase: choice === 'http' ? httpBase : next[existingIndex].httpBase,
+            httpToken: choice === 'http' ? httpToken : next[existingIndex].httpToken,
+            seatIndex: i,
+            include: true,
+          };
+        } else {
+          next.push({
+            id: `seat-${i}-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
+            choice,
+            label,
+            include: true,
+            model,
+            apiKey: providerKey ? apiKey : undefined,
+            httpBase: choice === 'http' ? httpBase : undefined,
+            httpToken: choice === 'http' ? httpToken : undefined,
+            origin: 'seat',
+            seatIndex: i,
+          });
+        }
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  };
+
+  const handleAddCustom = () => {
+    const id = `custom-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`;
+    setEntries((prev) => [
+      ...prev,
+      {
+        id,
+        choice: 'built-in:greedy-max',
+        label: choiceLabel('built-in:greedy-max'),
+        include: true,
+        origin: 'custom',
+      },
+    ]);
+  };
+
+  const handleRemoveEntry = (id: string) => {
+    setEntries((prev) => prev.filter((entry) => entry.id !== id));
+  };
+
+  const buildParticipants = () => {
+    const participants: ParticipantEntry[] = [];
+    let autoIndex = 0;
+    for (const entry of entries) {
+      if (!entry.include) continue;
+      const spec = botSpecFromEntry(entry);
+      if (!spec) continue;
+      const id = entry.id || `player-${autoIndex++}`;
+      const label = (entry.label || '').trim() || choiceLabel(entry.choice);
+      participants.push({
+        id,
+        label,
+        spec,
+        ui: {
+          choice: entry.choice,
+          model: (entry.model || '').trim() || undefined,
+          apiKey: (entry.apiKey || '').trim() || undefined,
+          httpBase: (entry.httpBase || '').trim() || undefined,
+          httpToken: (entry.httpToken || '').trim() || undefined,
+        },
+      });
+    }
+    return participants;
+  };
+
+  const configureViewerForAssignment = (engine: EliminationEngine, assignment: Assignment) => {
+    const players = assignment.players;
+    const seatChoices = players.map((p) => p.entry.ui?.choice ?? 'built-in:greedy-max') as BotChoice[];
+    const seatModelsLocal = players.map((p) => p.entry.ui?.model ?? '');
+    const seatKeysLocal = players.map((p, idx) => {
+      const ui = p.entry.ui;
+      const choice = seatChoices[idx];
+      const keys: any = {};
+      const provider = providerKeyForChoice(choice);
+      if (provider && ui?.apiKey) keys[provider] = ui.apiKey;
+      if (choice === 'http') {
+        if (ui?.httpBase) keys.httpBase = ui.httpBase;
+        if (ui?.httpToken) keys.httpToken = ui.httpToken;
+      }
+      return keys;
+    });
+    setViewerSeats(seatChoices);
+    setViewerSeatModels(seatModelsLocal);
+    setViewerSeatKeys(seatKeysLocal);
+    setSeriesInfo({
+      round: assignment.round,
+      groupIndex: assignment.type === 'group' ? assignment.groupIndex : 0,
+      type: assignment.type,
+    });
+    setGamesTarget(engine.options.gamesPerRound);
+    setGamesPlayed(0);
+    setAutoStartKey((key) => (key == null ? 0 : key + 1));
+  };
+
+  const advanceAssignment = (engine: EliminationEngine) => {
+    const next = engine.nextAssignment();
+    if (!next) {
+      setRunning(false);
+      setSeriesInfo(null);
+      assignmentRef.current = null;
+      setResult(engine.snapshot());
+      setAutoStartKey(null);
+      return;
+    }
+    assignmentRef.current = next;
+    configureViewerForAssignment(engine, next);
+  };
+
+  const handleRun = () => {
+    const participants = buildParticipants();
+    if (participants.length < 3) {
+      setError('至少选择 3 位参赛选手。');
+      return;
+    }
+
+    const opts: TournamentOptions = {
+      gamesPerRound: Math.max(1, Math.floor(Number(gamesPerRound) || 100)),
+    };
+    if (Number.isFinite(mu) && mu > 0) {
+      opts.config = { mu } as any;
+    }
+    const seedTrim = seedText.trim();
+    if (seedTrim) {
+      const parsed = Number(seedTrim);
+      if (Number.isFinite(parsed)) opts.seed = parsed;
+      else {
+        let hash = 0;
+        for (const ch of seedTrim) {
+          hash = (hash * 33 + ch.charCodeAt(0)) | 0;
+        }
+        opts.seed = Math.abs(hash);
+      }
+    }
+
+    const engine = new EliminationEngine(participants, opts);
+    engineRef.current = engine;
+    assignmentRef.current = null;
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    setSeriesInfo(null);
+    setGamesTarget(engine.options.gamesPerRound);
+    setGamesPlayed(0);
+    advanceAssignment(engine);
+  };
+
+  const handleGameComplete = (payload: LiveGameCompletePayload) => {
+    const engine = engineRef.current;
+    if (!engine || !assignmentRef.current) return;
+    if (payload.deltaBase) {
+      const landlord = typeof payload.landlordBase === 'number' ? payload.landlordBase : 0;
+      const winner = typeof payload.winnerBase === 'number' ? payload.winnerBase : landlord;
+      engine.recordGame({
+        landlord,
+        winner,
+        seatDeltas: payload.deltaBase,
+      });
+      setGamesPlayed(Math.min(engine.options.gamesPerRound, payload.roundIndex + 1));
+    }
+  };
+
+  const handleSeriesComplete = (info: { aborted: boolean }) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (info.aborted) {
+      setRunning(false);
+      setError('淘汰赛已停止。');
+      assignmentRef.current = null;
+      setSeriesInfo(null);
+      setResult(engine.snapshot());
+      setAutoStartKey(null);
+      return;
+    }
+    engine.completeAssignment();
+    setResult(engine.snapshot());
+    assignmentRef.current = null;
+    advanceAssignment(engine);
+  };
+
+  const renderStandings = () => {
+    if (!result) return null;
+    return (
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>最终排名</div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {result.standings.map((p, idx) => {
+            const stats = p.stats;
+            const winRate = stats.games > 0 ? (stats.wins / stats.games) * 100 : 0;
+            return (
+              <div
+                key={p.id}
+                style={{
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 8,
+                  padding: 10,
+                  background: '#fff',
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                  #{idx + 1} {p.label}
+                </div>
+                <div style={{ fontSize: 12, color: '#4b5563' }}>
+                  CR {p.ladder.toFixed(2)}｜μ {p.rating.mu.toFixed(2)}｜σ {p.rating.sigma.toFixed(2)}
+                </div>
+                <div style={{ fontSize: 12, color: '#4b5563', marginTop: 4 }}>
+                  局数：{stats.games} ｜ 胜场：{stats.wins} ｜ 胜率：{winRate.toFixed(1)}%
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderRounds = () => {
+    if (!result) return null;
+    return (
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>轮次总结</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {result.rounds.map((round) => (
+            <div
+              key={round.round}
+              style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 10, background: '#fff' }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>第 {round.round} 轮</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {round.groups.map((group) => (
+                  <div key={group.groupIndex} style={{ borderTop: '1px dashed #e5e7eb', paddingTop: 6 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>第 {group.groupIndex + 1} 组</div>
+                    <div style={{ fontSize: 12, color: '#4b5563', marginBottom: 4 }}>
+                      淘汰：{group.eliminated ? group.eliminated.label : '（无）'}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {group.players.map((player) => (
+                        <div key={player.id} style={{ fontSize: 12, color: '#4b5563' }}>
+                          {player.label}｜CR {player.ladder.toFixed(2)}｜μ {player.rating.mu.toFixed(2)}｜σ {player.rating.sigma.toFixed(2)}｜本轮战绩：{player.delta.wins}/{player.delta.games}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: '#4b5563', marginTop: 8 }}>
+                自动淘汰：
+                {round.autoEliminated.length
+                  ? round.autoEliminated.map((auto) => auto.player.label).join('、')
+                  : '（无）'}
+              </div>
+            </div>
+          ))}
+          {result.finalRound && (
+            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 10, background: '#fff' }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>决赛</div>
+              <div style={{ fontSize: 12, color: '#4b5563', marginBottom: 6 }}>局数：{result.finalRound.games}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {result.finalRound.group.players.map((player) => (
+                  <div key={player.id} style={{ fontSize: 12, color: '#4b5563' }}>
+                    {player.label}｜CR {player.ladder.toFixed(2)}｜μ {player.rating.mu.toFixed(2)}｜σ {player.rating.sigma.toFixed(2)}｜本轮战绩：{player.delta.wins}/{player.delta.games}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          每轮局数
+          <input
+            type="number"
+            min={1}
+            value={gamesPerRound}
+            onChange={(e) => setGamesPerRound(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+            style={{ padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          初始 μ
+          <input
+            type="number"
+            value={mu}
+            onChange={(e) => setMu(Number(e.target.value) || 0)}
+            style={{ padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          随机种子（可选）
+          <input
+            type="text"
+            value={seedText}
+            onChange={(e) => setSeedText(e.target.value)}
+            style={{ padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+          />
+        </label>
+      </div>
+
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 700 }}>参赛选手</div>
+        <button
+          onClick={handleAddSeats}
+          style={{ padding: '4px 10px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}
+        >
+          添加当前座位到列表
+        </button>
+        <button
+          onClick={handleAddCustom}
+          style={{ padding: '4px 10px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}
+        >
+          新增参赛选手
+        </button>
+      </div>
+
+      <div style={{ marginTop: 8, display: 'grid', gap: 10 }}>
+        {entries.map((entry) => {
+          const needsModel = entry.choice.startsWith('ai:');
+          const needsApiKey = entry.choice.startsWith('ai:');
+          const needsHttp = entry.choice === 'http';
+          return (
+            <div
+              key={entry.id}
+              style={{ border: '1px dashed #d1d5db', borderRadius: 8, padding: 10, background: '#f9fafb' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  启用
+                  <input
+                    type="checkbox"
+                    checked={entry.include}
+                    onChange={(e) => toggleInclude(entry.id, e.target.checked)}
+                  />
+                </label>
+                <button
+                  onClick={() => handleRemoveEntry(entry.id)}
+                  style={{ padding: '2px 8px', border: '1px solid #e5e7eb', borderRadius: 6, background: '#fff', fontSize: 12 }}
+                >
+                  删除
+                </button>
+              </div>
+
+              <label style={{ display: 'block', marginBottom: 6 }}>
+                类型
+                <select
+                  value={entry.choice}
+                  onChange={(e) => updateEntry(entry.id, { choice: e.target.value as BotChoice })}
+                  style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                >
+                  <optgroup label="内置">
+                    <option value="built-in:greedy-max">Greedy Max</option>
+                    <option value="built-in:greedy-min">Greedy Min</option>
+                    <option value="built-in:random-legal">Random Legal</option>
+                    <option value="built-in:mininet">MiniNet</option>
+                    <option value="built-in:ally-support">AllySupport</option>
+                    <option value="built-in:endgame-rush">EndgameRush</option>
+                  </optgroup>
+                  <optgroup label="AI">
+                    <option value="ai:openai">OpenAI</option>
+                    <option value="ai:gemini">Gemini</option>
+                    <option value="ai:grok">Grok</option>
+                    <option value="ai:kimi">Kimi</option>
+                    <option value="ai:qwen">Qwen</option>
+                    <option value="ai:deepseek">DeepSeek</option>
+                    <option value="http">HTTP</option>
+                  </optgroup>
+                </select>
+              </label>
+
+              <label style={{ display: 'block', marginBottom: 6 }}>
+                标签
+                <input
+                  type="text"
+                  value={entry.label}
+                  onChange={(e) => updateEntry(entry.id, { label: e.target.value })}
+                  style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                />
+              </label>
+
+              {needsModel && (
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                  模型（可选）
+                  <input
+                    type="text"
+                    value={entry.model || ''}
+                    placeholder={defaultModelFor(entry.choice)}
+                    onChange={(e) => updateEntry(entry.id, { model: e.target.value })}
+                    style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                  />
+                </label>
+              )}
+
+              {needsApiKey && (
+                <label style={{ display: 'block', marginBottom: 6 }}>
+                  API Key（可选）
+                  <input
+                    type="password"
+                    value={entry.apiKey || ''}
+                    onChange={(e) => updateEntry(entry.id, { apiKey: e.target.value })}
+                    style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                  />
+                </label>
+              )}
+
+              {needsHttp && (
+                <>
+                  <label style={{ display: 'block', marginBottom: 6 }}>
+                    HTTP Base（可选）
+                    <input
+                      type="text"
+                      value={entry.httpBase || ''}
+                      onChange={(e) => updateEntry(entry.id, { httpBase: e.target.value })}
+                      style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                    />
+                  </label>
+                  <label style={{ display: 'block' }}>
+                    HTTP Token（可选）
+                    <input
+                      type="password"
+                      value={entry.httpToken || ''}
+                      onChange={(e) => updateEntry(entry.id, { httpToken: e.target.value })}
+                      style={{ width: '100%', padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {seriesInfo && (
+        <div style={{ marginTop: 12, fontSize: 12, color: '#374151' }}>
+          当前：第 {seriesInfo.round} 轮
+          {seriesInfo.type === 'group' ? ` 第 ${seriesInfo.groupIndex + 1} 组` : '（决赛）'} ｜ 进度：
+          {Math.min(gamesPlayed, gamesTarget)}/{gamesTarget}
+        </div>
+      )}
+
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>实时对局</div>
+        <LivePanel
+          rounds={gamesTarget}
+          startScore={0}
+          seatDelayMs={seatDelayMs}
+          enabled={enabled}
+          bid={bid}
+          four2={four2}
+          seats={viewerSeats}
+          seatModels={viewerSeatModels}
+          seatKeys={viewerSeatKeys}
+          farmerCoop={farmerCoop}
+          turnTimeoutSecs={turnTimeoutSecs}
+          autoStartKey={autoStartKey}
+          onGameComplete={handleGameComplete}
+          onSeriesComplete={handleSeriesComplete}
+        />
+      </div>
+
+      <LadderPanel />
+
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button
+          onClick={handleRun}
+          disabled={running}
+          style={{
+            padding: '6px 16px',
+            borderRadius: 8,
+            border: '1px solid #2563eb',
+            background: running ? '#bfdbfe' : '#3b82f6',
+            color: '#fff',
+            cursor: running ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {running ? '运行中…' : '运行淘汰赛'}
+        </button>
+        {error && <div style={{ color: '#dc2626', fontSize: 13 }}>错误：{error}</div>}
+      </div>
+
+      {renderStandings()}
+      {renderRounds()}
+    </div>
+  );
+}
+
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; bid:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
@@ -691,6 +1424,7 @@ function LivePanel(props: LiveProps) {
   // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
   const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
+  const lastScoreSeatRef = useRef<number|null>(null);
   const [roundCuts, setRoundCuts] = useState<number[]>([0]);
   const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
 
@@ -1112,6 +1846,7 @@ function LivePanel(props: LiveProps) {
   useEffect(() => { props.onLog?.(log); }, [log]);
 
   const controllerRef = useRef<AbortController|null>(null);
+  const autoStartRef = useRef<number | null>(null);
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
@@ -1177,6 +1912,7 @@ function LivePanel(props: LiveProps) {
             mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
           }
           setScoreSeries(mapped);
+          lastScoreSeatRef.current = null;
           if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
         } catch (err) {
           console.error('[score upload] parse error', err);
@@ -1222,6 +1958,7 @@ const handleScoreRefresh = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
+    lastScoreSeatRef.current = null;
   };
 const [allLogs, setAllLogs] = useState<string[]>([]);
 const allLogsRef = useRef(allLogs);
@@ -1239,6 +1976,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setTotals([props.startScore || 0, props.startScore || 0, props.startScore || 0]);
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
+    lastScoreSeatRef.current = null;
 
     // TrueSkill：开始时先应用 overall（未知地主）
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -1392,7 +2130,18 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               cards: (cur?.cards || []).map(c => ({ ...c })),
             } as BottomInfo;
           })();
-for (const raw of batch) {
+          const appendScore = (seat:number, val:number|null) => {
+            if (!(seat===0 || seat===1 || seat===2)) return;
+            if (lastScoreSeatRef.current === seat) {
+              nextScores = nextScores.map(arr => Array.isArray(arr) ? [...arr, null] : [null]);
+            }
+            for (let i=0;i<3;i++){
+              const base = Array.isArray(nextScores[i]) ? nextScores[i] : [];
+              nextScores[i] = [...base, (i===seat ? val : null)];
+            }
+            lastScoreSeatRef.current = seat;
+          };
+          for (const raw of batch) {
             let m: any = raw;
             // Remap engine->UI indices when startShift != 0
             if (startShift) {
@@ -1449,6 +2198,7 @@ for (const raw of batch) {
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
                 nextBottom = { landlord: null, cards: [] };
+                lastScoreSeatRef.current = null;
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -1677,10 +2427,7 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                       const mm = /score=([+-]?\d+(?:\.\d+)?)/.exec(rr || '');
                       if (mm) { val = parseFloat(mm[1]); }
                     }
-                    for (let i=0;i<3;i++){
-                      if (!Array.isArray(nextScores[i])) nextScores[i]=[];
-                      nextScores[i] = [...nextScores[i], (i===s ? val : null)];
-                    }
+                    appendScore(s, val);
                   }
                 }
 
@@ -1690,10 +2437,7 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                 if (s>=0 && s<3) {
                   sawAnyTurn = true;
                   const val = (typeof m.score === 'number') ? (m.score as number) : null;
-                  for (let i=0;i<3;i++){
-                    if (!Array.isArray(nextScores[i])) nextScores[i]=[];
-                    nextScores[i] = [...nextScores[i], (i===s ? val : null)];
-                  }
+                  appendScore(s, val);
                 }
                 continue;
               }
@@ -1766,6 +2510,14 @@ nextTotals     = [
   nextTotals[1] + rot2[1],
   nextTotals[2] + rot2[2]
 ] as any;
+                const seatMapping = [0,1,2].map((ui) => (ui + startShift) % 3);
+                const deltaBase: [number, number, number] = [0, 0, 0];
+                for (let uiSeat = 0; uiSeat < 3; uiSeat++) {
+                  const baseIdx = seatMapping[uiSeat];
+                  if (baseIdx >= 0 && baseIdx < 3) {
+                    deltaBase[baseIdx] = rot2[uiSeat];
+                  }
+                }
                 {
                   const mYi  = Number(((m as any).multiplierYi ?? 0));
                   const mBing= Number(((m as any).multiplierBing ?? 0));
@@ -1785,6 +2537,19 @@ nextTotals     = [
                   }
                 }
                 nextWinner = nextWinnerLocal;
+
+                const landlordBase = nextLandlord != null ? seatMapping[nextLandlord] ?? null : null;
+                const winnerBase = nextWinnerLocal != null ? seatMapping[nextWinnerLocal] ?? null : null;
+                props.onGameComplete?.({
+                  roundIndex: labelRoundNo - 1,
+                  landlordUi: nextLandlord,
+                  landlordBase: landlordBase ?? null,
+                  winnerUi: nextWinnerLocal ?? null,
+                  winnerBase: winnerBase ?? null,
+                  seatMapping,
+                  deltaUi: rot2,
+                  deltaBase,
+                });
 
                 // 标记一局结束 & 雷达图兜底
                 {
@@ -1952,7 +2717,13 @@ nextTotals     = [
     } catch (e: any) {
       if (e?.name === 'AbortError') setLog(l => [...l, '已手动停止。']);
       else setLog(l => [...l, `错误：${e?.message || e}`]);
-    } finally { exitPause(); setRunning(false); }
+    } finally {
+      const aborted = !!controllerRef.current?.signal.aborted;
+      controllerRef.current = null;
+      exitPause();
+      setRunning(false);
+      props.onSeriesComplete?.({ aborted });
+    }
   };
 
   const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); };
@@ -2025,6 +2796,7 @@ const handleAllSaveInner = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
+    lastScoreSeatRef.current = null;
     setLog(l => [...l, '【ALL】已刷新面板数据。']);
   };
 
@@ -2044,6 +2816,15 @@ const handleAllSaveInner = () => {
       window.removeEventListener('ddz-all-upload', onUpload as any);
     };
   }, []);
+
+  useEffect(() => {
+    if (props.autoStartKey == null) return;
+    if (autoStartRef.current === props.autoStartKey) return;
+    autoStartRef.current = props.autoStartKey;
+    if (!running) {
+      void start();
+    }
+  }, [props.autoStartKey]);
 
   return (
     <div>
@@ -2437,6 +3218,7 @@ const [lang, setLang] = useState<Lang>(() => {
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'match' | 'tournament'>('match');
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
@@ -2464,22 +3246,50 @@ const [lang, setLang] = useState<Lang>(() => {
     };
     rd.readAsText(f);
   };
-  return (<>
+  return (
     <LangContext.Provider value={lang}>
-    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
-      <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
-<div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
-  <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
-  <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
-    <option value="zh">中文</option>
-    <option value="en">English</option>
-  </select>
-</div>
+      <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
+        <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
+          <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
+          <select
+            aria-label={lang==='en'?'Language':'语言'}
+            value={lang}
+            onChange={e=>setLang((e.target.value as Lang))}
+            style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+          >
+            <option value="zh">中文</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+        <div style={{ display:'flex', gap:12, marginBottom:16 }}>
+          <button
+            onClick={() => setActiveTab('match')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid #2563eb',
+              background: activeTab === 'match' ? '#3b82f6' : '#e5e7eb',
+              color: activeTab === 'match' ? '#fff' : '#1f2937',
+            }}
+          >常规对局</button>
+          <button
+            onClick={() => setActiveTab('tournament')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid #2563eb',
+              background: activeTab === 'tournament' ? '#3b82f6' : '#e5e7eb',
+              color: activeTab === 'tournament' ? '#fff' : '#1f2937',
+            }}
+          >淘汰赛</button>
+        </div>
 
-
-      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
-        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
-        <div style={{
+          {activeTab === 'match' ? (
+            <>
+              <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+                <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
+                <div style={{
           display:'grid',
           gridTemplateColumns:'repeat(2, minmax(0, 1fr))',
           gap:12,
@@ -2566,232 +3376,251 @@ const [lang, setLang] = useState<Lang>(() => {
           </label>
         </div>
 
-        <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
-          <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
+          <div style={{ marginTop:10, borderTop:'1px dashed #eee', paddingTop:10 }}>
+            <div style={{ fontWeight:700, marginBottom:6 }}>每家 AI 设置（独立）</div>
 
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-            {[0,1,2].map(i=>(
-              <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
-                <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /></div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>(
+                <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
+                  <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /></div>
 
-                <label style={{ display:'block', marginBottom:6 }}>
-                  选择
-                  <select
-                    value={seats[i]}
-                    onChange={e=>{
-                      const v = e.target.value as BotChoice;
-                      setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
-                      // 新增：切换提供商时，把当前输入框改成该提供商的推荐模型
-                      setSeatModels(arr => { const n=[...arr]; n[i] = defaultModelFor(v); return n; });
-                    }}
-                    style={{ width:'100%' }}
-                  >
-                    <optgroup label="内置">
-                      <option value="built-in:greedy-max">Greedy Max</option>
-                      <option value="built-in:greedy-min">Greedy Min</option>
-                      <option value="built-in:random-legal">Random Legal</option>
-                      <option value="built-in:mininet">MiniNet</option>
-                      <option value="built-in:ally-support">AllySupport</option>
-                      <option value="built-in:endgame-rush">EndgameRush</option>
-                    </optgroup>
-                    <optgroup label="AI">
-                      <option value="ai:openai">OpenAI</option>
-                      <option value="ai:gemini">Gemini</option>
-                      <option value="ai:grok">Grok</option>
-                      <option value="ai:kimi">Kimi</option>
-                      <option value="ai:qwen">Qwen</option>
-                      <option value="ai:deepseek">DeepSeek</option>
-                      <option value="http">HTTP</option>
-                    </optgroup>
-                  </select>
-                </label>
-
-                {seats[i].startsWith('ai:') && (
                   <label style={{ display:'block', marginBottom:6 }}>
-                    模型（可选）
-                    <input
-                      type="text"
-                      value={seatModels[i]}
-                      placeholder={defaultModelFor(seats[i])}
+                    选择
+                    <select
+                      value={seats[i]}
                       onChange={e=>{
-                        const v = e.target.value;
-                        setSeatModels(arr => { const n=[...arr]; n[i] = v; return n; });
+                        const v = e.target.value as BotChoice;
+                        setSeats(arr => { const n=[...arr]; n[i] = v; return n; });
+                        // 新增：切换提供商时，把当前输入框改成该提供商的推荐模型
+                        setSeatModels(arr => { const n=[...arr]; n[i] = defaultModelFor(v); return n; });
                       }}
                       style={{ width:'100%' }}
-                    />
-                    <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
-                      留空则使用推荐：{defaultModelFor(seats[i])}
-                    </div>
+                    >
+                      <optgroup label="内置">
+                        <option value="built-in:greedy-max">Greedy Max</option>
+                        <option value="built-in:greedy-min">Greedy Min</option>
+                        <option value="built-in:random-legal">Random Legal</option>
+                        <option value="built-in:mininet">MiniNet</option>
+                        <option value="built-in:ally-support">AllySupport</option>
+                        <option value="built-in:endgame-rush">EndgameRush</option>
+                      </optgroup>
+                      <optgroup label="AI">
+                        <option value="ai:openai">OpenAI</option>
+                        <option value="ai:gemini">Gemini</option>
+                        <option value="ai:grok">Grok</option>
+                        <option value="ai:kimi">Kimi</option>
+                        <option value="ai:qwen">Qwen</option>
+                        <option value="ai:deepseek">DeepSeek</option>
+                        <option value="http">HTTP</option>
+                      </optgroup>
+                    </select>
                   </label>
-                )}
 
-                {seats[i] === 'ai:openai' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    OpenAI API Key
-                    <input type="password" value={seatKeys[i]?.openai||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), openai:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'ai:gemini' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    Gemini API Key
-                    <input type="password" value={seatKeys[i]?.gemini||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), gemini:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'ai:grok' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    xAI (Grok) API Key
-                    <input type="password" value={seatKeys[i]?.grok||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), grok:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'ai:kimi' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    Kimi API Key
-                    <input type="password" value={seatKeys[i]?.kimi||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), kimi:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'ai:qwen' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    Qwen API Key
-                    <input type="password" value={seatKeys[i]?.qwen||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'ai:deepseek' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
-                    DeepSeek API Key
-                    <input type="password" value={seatKeys[i]?.deepseek||''}
-                      onChange={e=>{
-                        const v = e.target.value;
-                        setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), deepseek:v }; return n; });
-                      }}
-                      style={{ width:'100%' }} />
-                  </label>
-                )}
-
-                {seats[i] === 'http' && (
-                  <>
+                  {seats[i].startsWith('ai:') && (
                     <label style={{ display:'block', marginBottom:6 }}>
-                      HTTP Base / URL
-                      <input type="text" value={seatKeys[i]?.httpBase||''}
+                      模型（可选）
+                      <input
+                        type="text"
+                        value={seatModels[i]}
+                        placeholder={defaultModelFor(seats[i])}
                         onChange={e=>{
                           const v = e.target.value;
-                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpBase:v }; return n; });
+                          setSeatModels(arr => { const n=[...arr]; n[i] = v; return n; });
+                        }}
+                        style={{ width:'100%' }}
+                      />
+                      <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
+                        留空则使用推荐：{defaultModelFor(seats[i])}
+                      </div>
+                    </label>
+                  )}
+
+                  {seats[i] === 'ai:openai' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      OpenAI API Key
+                      <input type="password" value={seatKeys[i]?.openai||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), openai:v }; return n; });
                         }}
                         style={{ width:'100%' }} />
                     </label>
+                  )}
+
+                  {seats[i] === 'ai:gemini' && (
                     <label style={{ display:'block', marginBottom:6 }}>
-                      HTTP Token（可选）
-                      <input type="password" value={seatKeys[i]?.httpToken||''}
+                      Gemini API Key
+                      <input type="password" value={seatKeys[i]?.gemini||''}
                         onChange={e=>{
                           const v = e.target.value;
-                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpToken:v }; return n; });
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), gemini:v }; return n; });
                         }}
                         style={{ width:'100%' }} />
                     </label>
-                  </>
-                )}
+                  )}
+
+                  {seats[i] === 'ai:grok' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      xAI (Grok) API Key
+                      <input type="password" value={seatKeys[i]?.grok||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), grok:v }; return n; });
+                        }}
+                        style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i] === 'ai:kimi' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      Kimi API Key
+                      <input type="password" value={seatKeys[i]?.kimi||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), kimi:v }; return n; });
+                        }}
+                        style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i] === 'ai:qwen' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      Qwen API Key
+                      <input type="password" value={seatKeys[i]?.qwen||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), qwen:v }; return n; });
+                        }}
+                        style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i] === 'ai:deepseek' && (
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      DeepSeek API Key
+                      <input type="password" value={seatKeys[i]?.deepseek||''}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), deepseek:v }; return n; });
+                        }}
+                        style={{ width:'100%' }} />
+                    </label>
+                  )}
+
+                  {seats[i] === 'http' && (
+                    <>
+                      <label style={{ display:'block', marginBottom:6 }}>
+                        HTTP Base / URL
+                        <input type="text" value={seatKeys[i]?.httpBase||''}
+                          onChange={e=>{
+                            const v = e.target.value;
+                            setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpBase:v }; return n; });
+                          }}
+                          style={{ width:'100%' }} />
+                      </label>
+                      <label style={{ display:'block', marginBottom:6 }}>
+                        HTTP Token（可选）
+                        <input type="password" value={seatKeys[i]?.httpToken||''}
+                          onChange={e=>{
+                            const v = e.target.value;
+                            setSeatKeys(arr => { const n=[...arr]; n[i] = { ...(n[i]||{}), httpToken:v }; return n; });
+                          }}
+                          style={{ width:'100%' }} />
+                      </label>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div style={{ marginTop:12 }}>
+              <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)</div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+                {[0,1,2].map(i=>(
+                  <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
+                    <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
+                    <label style={{ display:'block' }}>
+                      最小间隔 (ms)
+                      <input
+                        type="number" min={0} step={100}
+                        value={ (seatDelayMs[i] ?? 0) }
+                        onChange={e=>setSeatDelay(i, e.target.value)}
+                        style={{ width:'100%' }}
+                      />
+                    </label>
+                  </div>
+
+                ))}
               </div>
-            ))}
-          </div>
-
-          <div style={{ marginTop:12 }}>
-            <div style={{ fontWeight:700, marginBottom:6 }}>每家出牌最小间隔 (ms)</div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-              {[0,1,2].map(i=>(
-                <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
-                  <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
-                  <label style={{ display:'block' }}>
-                    最小间隔 (ms)
-                    <input
-                      type="number" min={0} step={100}
-                      value={ (seatDelayMs[i] ?? 0) }
-                      onChange={e=>setSeatDelay(i, e.target.value)}
-                      style={{ width:'100%' }}
-                    />
-                  </label>
-                </div>
-
-              ))}
+            </div>
+            <div style={{ marginTop:12 }}>
+              <div style={{ fontWeight:700, marginBottom:6 }}>每家思考超时（秒）</div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+                {[0,1,2].map(i=>(
+                  <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
+                    <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
+                    <label style={{ display:'block' }}>
+                      弃牌时间（秒）
+                      <input
+                        type="number" min={5} step={1}
+                        value={ (turnTimeoutSecs[i] ?? 30) }
+                        onChange={e=>{
+                          const v = Math.max(5, Math.floor(Number(e.target.value)||0));
+                          setTurnTimeoutSecs(arr=>{ const cp=[...(arr||[30,30,30])]; cp[i]=v; return cp; });
+                        }}
+                        style={{ width:'100%' }}
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
             </div>
           </div>
-          <div style={{ marginTop:12 }}>
-            <div style={{ fontWeight:700, marginBottom:6 }}>每家思考超时（秒）</div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-              {[0,1,2].map(i=>(
-                <div key={i} style={{ border:'1px dashed #eee', borderRadius:6, padding:10 }}>
-                  <div style={{ fontWeight:700, marginBottom:8 }}>{seatName(i)}</div>
-                  <label style={{ display:'block' }}>
-                    弃牌时间（秒）
-                    <input
-                      type="number" min={5} step={1}
-                      value={ (turnTimeoutSecs[i] ?? 30) }
-                      onChange={e=>{
-                        const v = Math.max(5, Math.floor(Number(e.target.value)||0));
-                        setTurnTimeoutSecs(arr=>{ const cp=[...(arr||[30,30,30])]; cp[i]=v; return cp; });
-                      }}
-                      style={{ width:'100%' }}
-                    />
-                  </label>
-                </div>
-              ))}
-            </div>
+
+          <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+            <LadderPanel />
+            <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
+            <LivePanel
+              key={resetKey}
+              rounds={rounds}
+              startScore={startScore}
+              seatDelayMs={seatDelayMs}
+              enabled={enabled}
+              bid={bid}
+              four2={four2}
+              seats={seats}
+              seatModels={seatModels}
+              seatKeys={seatKeys}
+              farmerCoop={farmerCoop}
+              onLog={setLiveLog}
+              turnTimeoutSecs={turnTimeoutSecs}
+            />
           </div>
+
+        </>
+      ) : (
+        <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+          <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>淘汰赛（实验功能）</div>
+          <div style={{ fontSize:12, color:'#6b7280', marginBottom:10 }}>
+            内置算法默认加入，可将当前座位添加到列表后运行三人淘汰赛。
+          </div>
+          <TournamentPanel
+            seats={seats}
+            seatModels={seatModels}
+            seatKeys={seatKeys}
+            seatDelayMs={seatDelayMs}
+            enabled={enabled}
+            bid={bid}
+            four2={four2}
+            farmerCoop={farmerCoop}
+            turnTimeoutSecs={turnTimeoutSecs}
+          />
         </div>
+      )}
       </div>
-
-      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
-        {/* —— 天梯图 —— */}
-      <LadderPanel />
-<div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
-        <LivePanel
-          key={resetKey}
-          rounds={rounds}
-          startScore={startScore}
-          seatDelayMs={seatDelayMs}
-          enabled={enabled}
-          bid={bid}
-          four2={four2}
-          seats={seats}
-          seatModels={seatModels}
-          seatKeys={seatKeys}
-          farmerCoop={farmerCoop}
-          onLog={setLiveLog}
-        
-          turnTimeoutSecs={turnTimeoutSecs}
-        />
-      </div>
-    </div>
     </LangContext.Provider>
-  </>);
+  );
 }
 
 export default Home;
