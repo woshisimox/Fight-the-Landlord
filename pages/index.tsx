@@ -3244,47 +3244,50 @@ const [lang, setLang] = useState<Lang>(() => {
     };
     rd.readAsText(f);
   };
-  return (<>
+  return (
     <LangContext.Provider value={lang}>
-    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
-      <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
-<div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
-  <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
-  <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
-    <option value="zh">中文</option>
-    <option value="en">English</option>
-  </select>
-</div>
+      <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
+        <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
+          <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
+          <select
+            aria-label={lang==='en'?'Language':'语言'}
+            value={lang}
+            onChange={e=>setLang((e.target.value as Lang))}
+            style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+          >
+            <option value="zh">中文</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+        <div style={{ display:'flex', gap:12, marginBottom:16 }}>
+          <button
+            onClick={() => setActiveTab('match')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid #2563eb',
+              background: activeTab === 'match' ? '#3b82f6' : '#e5e7eb',
+              color: activeTab === 'match' ? '#fff' : '#1f2937',
+            }}
+          >常规对局</button>
+          <button
+            onClick={() => setActiveTab('tournament')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid #2563eb',
+              background: activeTab === 'tournament' ? '#3b82f6' : '#e5e7eb',
+              color: activeTab === 'tournament' ? '#fff' : '#1f2937',
+            }}
+          >淘汰赛</button>
+        </div>
 
-
-      <div style={{ display:'flex', gap:12, marginBottom:16 }}>
-        <button
-          onClick={() => setActiveTab('match')}
-          style={{
-            padding: '6px 12px',
-            borderRadius: 8,
-            border: '1px solid #2563eb',
-            background: activeTab === 'match' ? '#3b82f6' : '#e5e7eb',
-            color: activeTab === 'match' ? '#fff' : '#1f2937',
-          }}
-        >常规对局</button>
-        <button
-          onClick={() => setActiveTab('tournament')}
-          style={{
-            padding: '6px 12px',
-            borderRadius: 8,
-            border: '1px solid #2563eb',
-            background: activeTab === 'tournament' ? '#3b82f6' : '#e5e7eb',
-            color: activeTab === 'tournament' ? '#fff' : '#1f2937',
-          }}
-        >淘汰赛</button>
-      </div>
-
-      {activeTab === 'match' ? (
-        <>
-          <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
-            <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
-            <div style={{
+          {activeTab === 'match' ? (
+            <>
+              <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+                <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
+                <div style={{
           display:'grid',
           gridTemplateColumns:'repeat(2, minmax(0, 1fr))',
           gap:12,
@@ -3570,6 +3573,7 @@ const [lang, setLang] = useState<Lang>(() => {
                 ))}
               </div>
             </div>
+            </div>
           </div>
 
           <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
@@ -3612,9 +3616,9 @@ const [lang, setLang] = useState<Lang>(() => {
           />
         </div>
       )}
-    </div>
+      </div>
     </LangContext.Provider>
-  </>);
+  );
 }
 
 export default Home;
