@@ -307,6 +307,85 @@ const KO_BYE = '__KO_BYE__';
 type KnockoutPlayer = string | null;
 type KnockoutMatch = { id: string; players: [KnockoutPlayer, KnockoutPlayer]; winner: KnockoutPlayer | null; };
 type KnockoutRound = { matches: KnockoutMatch[] };
+type KnockoutEntry = { id: string; choice: BotChoice; name: string };
+
+const KO_ENTRY_STORAGE = 'ddz_knockout_entries';
+const KO_DEFAULT_CHOICES: BotChoice[] = [
+  'built-in:greedy-max',
+  'built-in:greedy-min',
+  'built-in:random-legal',
+  'built-in:mininet',
+];
+const KO_ALL_CHOICES: BotChoice[] = [
+  'built-in:greedy-max',
+  'built-in:greedy-min',
+  'built-in:random-legal',
+  'built-in:mininet',
+  'built-in:ally-support',
+  'built-in:endgame-rush',
+  'ai:openai',
+  'ai:gemini',
+  'ai:grok',
+  'ai:kimi',
+  'ai:qwen',
+  'ai:deepseek',
+  'http',
+];
+
+function makeKnockoutEntryId() {
+  return `ko-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
+
+function defaultAliasForChoice(choice: BotChoice, existing: KnockoutEntry[]): string {
+  const base = choiceLabel(choice);
+  const taken = new Set(existing.map(e => e.name.trim()));
+  if (!taken.has(base)) return base;
+  let suffix = 2;
+  while (taken.has(`${base} #${suffix}`)) suffix += 1;
+  return `${base} #${suffix}`;
+}
+
+function deriveAutoAliasSuffix(alias: string, choice: BotChoice): string | undefined {
+  const base = choiceLabel(choice);
+  const trimmed = alias.trim();
+  if (!trimmed) return '';
+  if (trimmed === base) return '';
+  const prefix = `${base} #`;
+  if (trimmed.startsWith(prefix)) {
+    const rest = trimmed.slice(prefix.length);
+    if (/^\d+$/.test(rest)) return ` #${rest}`;
+  }
+  return undefined;
+}
+
+function makeDefaultKnockoutEntries(): KnockoutEntry[] {
+  const entries: KnockoutEntry[] = [];
+  for (const choice of KO_DEFAULT_CHOICES) {
+    entries.push({
+      id: makeKnockoutEntryId(),
+      choice,
+      name: defaultAliasForChoice(choice, entries),
+    });
+  }
+  return entries;
+}
+
+function normalizeKnockoutEntries(raw: any): KnockoutEntry[] {
+  if (!Array.isArray(raw)) return makeDefaultKnockoutEntries();
+  const entries: KnockoutEntry[] = [];
+  for (const item of raw) {
+    const choice = KO_ALL_CHOICES.includes(item?.choice) ? (item.choice as BotChoice) : 'built-in:greedy-max';
+    const name = typeof item?.name === 'string' && item.name.trim()
+      ? item.name.trim()
+      : defaultAliasForChoice(choice, entries);
+    const id = typeof item?.id === 'string' && item.id
+      ? item.id
+      : makeKnockoutEntryId();
+    entries.push({ id, choice, name });
+  }
+  if (entries.length < 2) return makeDefaultKnockoutEntries();
+  return entries;
+}
 
 function cloneKnockoutRounds(rounds: KnockoutRound[]): KnockoutRound[] {
   return rounds.map((round, ridx) => ({
@@ -371,12 +450,6 @@ function normalizeKnockoutRounds(base: KnockoutRound[]): KnockoutRound[] {
   rounds.length = roundIndex;
   return rounds;
 }
-
-const defaultKnockoutSeeds = (lang: Lang): string => (
-  lang === 'en'
-    ? 'Team A\nTeam B\nTeam C\nTeam D'
-    : '队伍A\n队伍B\n队伍C\n队伍D'
-);
 
 /* ===== TrueSkill 本地存档（新增） ===== */
 type TsRole = 'landlord'|'farmer';
@@ -632,7 +705,31 @@ function LadderPanel() {
 
 function KnockoutPanel() {
   const { lang } = useI18n();
-  const [seedText, setSeedText] = useState<string>(() => defaultKnockoutSeeds(lang));
+  const [entries, setEntries] = useState<KnockoutEntry[]>(() => {
+    if (typeof window === 'undefined') return makeDefaultKnockoutEntries();
+    try {
+      const stored = localStorage.getItem(KO_ENTRY_STORAGE);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const normalized = normalizeKnockoutEntries(parsed);
+        if (normalized?.length) return normalized;
+      }
+      const legacySeed = localStorage.getItem('ddz_knockout_seed');
+      if (legacySeed) {
+        const names = legacySeed.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        if (names.length >= 2) {
+          const provisional = names.map((name, idx) => ({
+            id: makeKnockoutEntryId(),
+            choice: KO_DEFAULT_CHOICES[idx % KO_DEFAULT_CHOICES.length] ?? 'built-in:greedy-max',
+            name,
+          }));
+          const normalized = normalizeKnockoutEntries(provisional);
+          if (normalized.length) return normalized;
+        }
+      }
+    } catch {}
+    return makeDefaultKnockoutEntries();
+  });
   const [rounds, setRounds] = useState<KnockoutRound[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -640,8 +737,6 @@ function KnockoutPanel() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      const storedSeed = localStorage.getItem('ddz_knockout_seed');
-      if (storedSeed) setSeedText(storedSeed);
       const storedRounds = localStorage.getItem('ddz_knockout_rounds');
       if (storedRounds) {
         const parsed = JSON.parse(storedRounds);
@@ -649,23 +744,41 @@ function KnockoutPanel() {
           setRounds(normalizeKnockoutRounds(parsed as KnockoutRound[]));
         }
       }
+      localStorage.removeItem('ddz_knockout_seed');
     } catch {}
   }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    try { localStorage.setItem('ddz_knockout_seed', seedText); } catch {}
-  }, [seedText]);
+    try { localStorage.setItem(KO_ENTRY_STORAGE, JSON.stringify(entries)); } catch {}
+  }, [entries]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try { localStorage.setItem('ddz_knockout_rounds', JSON.stringify(rounds)); } catch {}
   }, [rounds]);
 
+  const entryDisplay = (entry: KnockoutEntry) => {
+    const alias = entry.name.trim();
+    const provider = choiceLabel(entry.choice);
+    if (alias && provider) return `${alias} · ${provider}`;
+    if (alias) return alias;
+    return provider;
+  };
+
+  const entryToken = (entry: KnockoutEntry) => {
+    const payload = {
+      name: entry.name.trim(),
+      choice: entry.choice,
+    };
+    return JSON.stringify(payload);
+  };
+
   const handleGenerate = () => {
-    const names = seedText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-    if (names.length < 2) {
-      setError(lang === 'en' ? 'Enter at least two participants.' : '请至少输入两支参赛队伍。');
+    const roster = entries.map(entry => ({ token: entryToken(entry), label: entryDisplay(entry) }))
+      .filter(item => item.label);
+    if (roster.length < 2) {
+      setError(lang === 'en' ? 'Add at least two participants.' : '请至少添加两名参赛选手。');
       setNotice(null);
       setRounds([]);
       if (typeof window !== 'undefined') {
@@ -673,8 +786,14 @@ function KnockoutPanel() {
       }
       return;
     }
-    const power = Math.pow(2, Math.ceil(Math.log2(names.length)));
-    const filled = [...names];
+    const uniqueTokens = new Set(roster.map(item => item.token));
+    if (uniqueTokens.size < roster.length) {
+      setError(lang === 'en' ? 'Participant entries must be unique.' : '参赛选手的组合需要唯一，请修改名称。');
+      setNotice(null);
+      return;
+    }
+    const power = Math.pow(2, Math.ceil(Math.log2(roster.length)));
+    const filled = roster.map(item => item.token);
     while (filled.length < power) filled.push(KO_BYE);
     const firstRound: KnockoutRound = {
       matches: [],
@@ -689,7 +808,7 @@ function KnockoutPanel() {
     }
     setRounds(normalizeKnockoutRounds([firstRound]));
     setError(null);
-    if (power !== names.length) {
+    if (power !== roster.length) {
       setNotice(lang === 'en' ? 'Bracket filled with automatic byes.' : '参赛队伍非 2^N，已自动补齐轮空。');
     } else {
       setNotice(null);
@@ -725,25 +844,145 @@ function KnockoutPanel() {
   }, [rounds]);
 
   const displayName = (value: KnockoutPlayer | null) => {
-    if (!value) return lang === 'en' ? 'TBD' : '待定';
     if (value === KO_BYE) return lang === 'en' ? 'BYE' : '轮空';
+    if (!value) return lang === 'en' ? 'TBD' : '待定';
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (parsed && typeof parsed === 'object') {
+          const alias = typeof parsed.name === 'string' ? parsed.name.trim() : '';
+          const rawChoice = typeof parsed.choice === 'string' ? parsed.choice : '';
+          const provider = KO_ALL_CHOICES.includes(rawChoice as BotChoice) ? choiceLabel(rawChoice as BotChoice) : '';
+          if (alias && provider) return `${alias} · ${provider}`;
+          if (alias) return alias;
+          if (provider) return provider;
+        }
+      } catch {}
+    }
     return value;
   };
+
+  const handleAddEntry = () => {
+    setEntries(prev => {
+      const choice = KO_ALL_CHOICES[(prev.length) % KO_ALL_CHOICES.length] ?? 'built-in:greedy-max';
+      const next = [...prev, {
+        id: makeKnockoutEntryId(),
+        choice,
+        name: defaultAliasForChoice(choice, prev),
+      }];
+      return next;
+    });
+  };
+
+  const handleRemoveEntry = (id: string) => {
+    setEntries(prev => prev.filter(entry => entry.id !== id));
+  };
+
+  const handleEntryChoiceChange = (id: string, choice: BotChoice) => {
+    setEntries(prev => prev.map(entry => {
+      if (entry.id !== id) return entry;
+      const others = prev.filter(e => e.id !== id);
+      const suffix = deriveAutoAliasSuffix(entry.name, entry.choice);
+      let nextName = entry.name;
+      if (suffix !== undefined) {
+        if (suffix) {
+          const candidate = `${choiceLabel(choice)}${suffix}`;
+          nextName = others.some(o => o.name.trim() === candidate)
+            ? defaultAliasForChoice(choice, others)
+            : candidate;
+        } else {
+          nextName = defaultAliasForChoice(choice, others);
+        }
+      }
+      return { ...entry, choice, name: nextName };
+    }));
+  };
+
+  const handleEntryNameChange = (id: string, name: string) => {
+    setEntries(prev => prev.map(entry => entry.id === id ? { ...entry, name } : entry));
+  };
+
+  const participantsTitle = lang === 'en' ? 'Participants' : '参赛选手';
+  const participantsHint = lang === 'en'
+    ? 'Pick bots or AIs just like regular matches. The display name appears in the bracket.'
+    : '从常规对局使用的内置 / 外置 AI 中选择参赛选手，显示名称会出现在淘汰赛对阵中。';
 
   return (
     <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
       <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>{lang === 'en' ? 'Knockout tournament' : '淘汰赛'}</div>
       <div style={{ fontSize:14, color:'#4b5563', marginBottom:12 }}>
         {lang === 'en'
-          ? 'Generate a single-elimination bracket. Enter one participant per line; byes are inserted automatically when required.'
-          : '快速生成单败淘汰赛对阵。每行填写一支队伍，不足时会自动补齐轮空。'}
+          ? 'Generate a single-elimination bracket. Add participants below; byes are inserted automatically when required.'
+          : '快速生成单败淘汰赛对阵。先在下方选择参赛选手，不足时会自动补齐轮空。'}
       </div>
-      <textarea
-        value={seedText}
-        onChange={e => setSeedText(e.target.value)}
-        placeholder={defaultKnockoutSeeds(lang)}
-        style={{ width:'100%', minHeight:120, border:'1px solid #e5e7eb', borderRadius:8, padding:10, fontSize:14, fontFamily:'inherit', resize:'vertical' }}
-      />
+      <div style={{ border:'1px dashed #d1d5db', borderRadius:10, padding:12, marginBottom:12 }}>
+        <div style={{ fontWeight:700, marginBottom:4 }}>{participantsTitle}</div>
+        <div style={{ fontSize:13, color:'#4b5563', marginBottom:12 }}>{participantsHint}</div>
+        <div style={{ display:'grid', gap:12 }}>
+          {entries.map((entry, idx) => {
+            const canRemove = entries.length > 2;
+            return (
+              <div key={entry.id} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:10 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8, gap:8 }}>
+                  <div style={{ fontWeight:600 }}>{lang === 'en' ? `Participant ${idx + 1}` : `参赛者 ${idx + 1}`}</div>
+                  <button
+                    onClick={() => handleRemoveEntry(entry.id)}
+                    disabled={!canRemove}
+                    style={{
+                      padding:'4px 8px',
+                      borderRadius:6,
+                      border:'1px solid #d1d5db',
+                      background: canRemove ? '#fff' : '#f3f4f6',
+                      color:'#1f2937',
+                      cursor: canRemove ? 'pointer' : 'not-allowed',
+                    }}
+                  >{lang === 'en' ? 'Remove' : '移除'}</button>
+                </div>
+                <label style={{ display:'block', marginBottom:6 }}>
+                  {lang === 'en' ? 'Source' : '来源'}
+                  <select
+                    value={entry.choice}
+                    onChange={e => handleEntryChoiceChange(entry.id, e.target.value as BotChoice)}
+                    style={{ width:'100%', marginTop:4 }}
+                  >
+                    <optgroup label={lang === 'en' ? 'Built-in' : '内置'}>
+                      <option value="built-in:greedy-max">Greedy Max</option>
+                      <option value="built-in:greedy-min">Greedy Min</option>
+                      <option value="built-in:random-legal">Random Legal</option>
+                      <option value="built-in:mininet">MiniNet</option>
+                      <option value="built-in:ally-support">AllySupport</option>
+                      <option value="built-in:endgame-rush">EndgameRush</option>
+                    </optgroup>
+                    <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
+                      <option value="ai:openai">OpenAI</option>
+                      <option value="ai:gemini">Gemini</option>
+                      <option value="ai:grok">Grok</option>
+                      <option value="ai:kimi">Kimi</option>
+                      <option value="ai:qwen">Qwen</option>
+                      <option value="ai:deepseek">DeepSeek</option>
+                      <option value="http">HTTP</option>
+                    </optgroup>
+                  </select>
+                </label>
+                <label style={{ display:'block' }}>
+                  {lang === 'en' ? 'Display name' : '显示名称'}
+                  <input
+                    type="text"
+                    value={entry.name}
+                    onChange={e => handleEntryNameChange(entry.id, e.target.value)}
+                    placeholder={choiceLabel(entry.choice)}
+                    style={{ width:'100%', marginTop:4 }}
+                  />
+                </label>
+              </div>
+            );
+          })}
+        </div>
+        <button
+          onClick={handleAddEntry}
+          style={{ marginTop:12, padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#f9fafb', cursor:'pointer' }}
+        >{lang === 'en' ? 'Add participant' : '新增参赛者'}</button>
+      </div>
       <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:8 }}>
         <button
           onClick={handleGenerate}
@@ -804,7 +1043,7 @@ function KnockoutPanel() {
                                   color: isActive ? '#fff' : '#1f2937',
                                   cursor:'pointer',
                                 }}
-                              >{lang === 'en' ? `Advance ${player}` : `晋级 ${player}`}</button>
+                              >{lang === 'en' ? `Advance ${displayName(player)}` : `晋级 ${displayName(player)}`}</button>
                             );
                           })}
                         </div>
@@ -824,7 +1063,7 @@ function KnockoutPanel() {
 
       {champion && (
         <div style={{ marginTop:16, padding:12, border:'1px solid #bbf7d0', background:'#ecfdf5', borderRadius:10, color:'#047857', fontWeight:600 }}>
-          {lang === 'en' ? `Champion: ${champion}` : `冠军：${champion}`}
+          {lang === 'en' ? `Champion: ${displayName(champion)}` : `冠军：${displayName(champion)}`}
         </div>
       )}
     </div>
