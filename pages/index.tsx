@@ -1038,15 +1038,33 @@ function KnockoutPanel() {
           ? 'Generate a single-elimination bracket. Add participants below; byes are inserted automatically when required.'
           : '快速生成单败淘汰赛对阵。先在下方选择参赛选手，不足时会自动补齐轮空。'}
       </div>
-      <div style={{ border:'1px dashed #d1d5db', borderRadius:10, padding:12, marginBottom:12 }}>
-        <div style={{ fontWeight:700, marginBottom:4 }}>{participantsTitle}</div>
-        <div style={{ fontSize:13, color:'#4b5563', marginBottom:12 }}>{participantsHint}</div>
-        <div style={{ display:'grid', gap:12 }}>
-          {entries.map((entry, idx) => {
-            const canRemove = entries.length > 2;
-            return (
-              <div key={entry.id} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:10 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8, gap:8 }}>
+        <div style={{ border:'1px dashed #d1d5db', borderRadius:10, padding:12, marginBottom:12 }}>
+          <div style={{ fontWeight:700, marginBottom:4 }}>{participantsTitle}</div>
+          <div style={{ fontSize:13, color:'#4b5563', marginBottom:12 }}>{participantsHint}</div>
+          <div
+            style={{
+              display:'grid',
+              gap:12,
+              gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))',
+              alignItems:'stretch',
+            }}
+          >
+            {entries.map((entry, idx) => {
+              const canRemove = entries.length > 2;
+              return (
+              <div
+                key={entry.id}
+                style={{
+                  border:'1px solid #e5e7eb',
+                  borderRadius:8,
+                  padding:10,
+                  display:'flex',
+                  flexDirection:'column',
+                  gap:8,
+                  height:'100%',
+                }}
+              >
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
                   <div style={{ fontWeight:600 }}>{participantLabel(idx)}</div>
                   <button
                     onClick={() => handleRemoveEntry(entry.id)}
@@ -1061,7 +1079,7 @@ function KnockoutPanel() {
                     }}
                   >{lang === 'en' ? 'Remove' : '移除'}</button>
                 </div>
-                <label style={{ display:'block', marginBottom:6 }}>
+                <label style={{ display:'block' }}>
                   {lang === 'en' ? 'Source' : '来源'}
                   <select
                     value={entry.choice}
@@ -1087,7 +1105,7 @@ function KnockoutPanel() {
                     </optgroup>
                   </select>
                 </label>
-                <label style={{ display:'block', marginBottom:6 }}>
+                <label style={{ display:'block' }}>
                   {lang === 'en' ? 'Display name' : '显示名称'}
                   <input
                     type="text"
@@ -1098,7 +1116,7 @@ function KnockoutPanel() {
                   />
                 </label>
                 {entry.choice.startsWith('ai:') && (
-                  <label style={{ display:'block', marginBottom:6 }}>
+                  <label style={{ display:'block' }}>
                     {lang === 'en' ? 'Model (optional)' : '模型（可选）'}
                     <input
                       type="text"
@@ -1116,7 +1134,7 @@ function KnockoutPanel() {
                 )}
 
                 {entry.choice === 'ai:openai' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
+                  <label style={{ display:'block' }}>
                     OpenAI API Key
                     <input
                       type="password"
@@ -1128,7 +1146,7 @@ function KnockoutPanel() {
                 )}
 
                 {entry.choice === 'ai:gemini' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
+                  <label style={{ display:'block' }}>
                     Gemini API Key
                     <input
                       type="password"
@@ -1140,7 +1158,7 @@ function KnockoutPanel() {
                 )}
 
                 {entry.choice === 'ai:grok' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
+                  <label style={{ display:'block' }}>
                     xAI (Grok) API Key
                     <input
                       type="password"
@@ -1152,7 +1170,7 @@ function KnockoutPanel() {
                 )}
 
                 {entry.choice === 'ai:kimi' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
+                  <label style={{ display:'block' }}>
                     Kimi API Key
                     <input
                       type="password"
@@ -1164,7 +1182,7 @@ function KnockoutPanel() {
                 )}
 
                 {entry.choice === 'ai:qwen' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
+                  <label style={{ display:'block' }}>
                     Qwen API Key
                     <input
                       type="password"
@@ -1176,7 +1194,7 @@ function KnockoutPanel() {
                 )}
 
                 {entry.choice === 'ai:deepseek' && (
-                  <label style={{ display:'block', marginBottom:6 }}>
+                  <label style={{ display:'block' }}>
                     DeepSeek API Key
                     <input
                       type="password"
@@ -1189,7 +1207,7 @@ function KnockoutPanel() {
 
                 {entry.choice === 'http' && (
                   <>
-                    <label style={{ display:'block', marginBottom:6 }}>
+                    <label style={{ display:'block' }}>
                       HTTP Base / URL
                       <input
                         type="text"
@@ -1198,7 +1216,7 @@ function KnockoutPanel() {
                         style={{ width:'100%', marginTop:4 }}
                       />
                     </label>
-                    <label style={{ display:'block', marginBottom:6 }}>
+                    <label style={{ display:'block' }}>
                       HTTP Token（可选）
                       <input
                         type="password"
