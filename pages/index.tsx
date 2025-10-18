@@ -336,6 +336,51 @@ const readStore = (): TsStore => {
 };
 const writeStore = (s: TsStore) => { try { s.updatedAt=new Date().toISOString(); localStorage.setItem(TS_STORE_KEY, JSON.stringify(s)); } catch {} };
 
+type KnockoutSeed = { id:string; label?:string; mu:number; sigma:number };
+type KnockoutStore = { schema:'ddz-ko@1'; updatedAt:string; default: Rating; seeds: KnockoutSeed[] };
+const KO_STORE_KEY = 'ddz_knockout_store_v1';
+
+const defaultKoStore = (): KnockoutStore => ({
+  schema: 'ddz-ko@1',
+  updatedAt: new Date().toISOString(),
+  default: { ...TS_DEFAULT },
+  seeds: [],
+});
+
+const readKoStore = (): KnockoutStore => {
+  try {
+    const raw = localStorage.getItem(KO_STORE_KEY);
+    if (!raw) return defaultKoStore();
+    const obj = JSON.parse(raw);
+    if (obj?.schema === 'ddz-ko@1') {
+      const def = ensureRating(obj.default);
+      const seeds: KnockoutSeed[] = Array.isArray(obj.seeds)
+        ? (obj.seeds as any[]).map((s:any) => {
+            const id = s?.id || s?.identity || s?.key || s?.label;
+            if (!id) return null;
+            const rating = ensureRating(s?.rating ?? s);
+            const label = s?.label || s?.name || s?.meta?.label;
+            return { id: String(id), label: label ? String(label) : undefined, mu: rating.mu, sigma: rating.sigma };
+          }).filter(Boolean) as KnockoutSeed[]
+        : [];
+      return { schema:'ddz-ko@1', updatedAt: obj.updatedAt || new Date().toISOString(), default: def, seeds };
+    }
+  } catch {}
+  return defaultKoStore();
+};
+
+const writeKoStore = (defaultRating: Rating, seeds: KnockoutSeed[]) => {
+  try {
+    const payload: KnockoutStore = {
+      schema: 'ddz-ko@1',
+      updatedAt: new Date().toISOString(),
+      default: { mu: defaultRating.mu, sigma: defaultRating.sigma },
+      seeds: seeds.map(s => ({ id: s.id, label: s.label, mu: s.mu, sigma: s.sigma })),
+    };
+    localStorage.setItem(KO_STORE_KEY, JSON.stringify(payload));
+  } catch {}
+};
+
 /* ====== 其它 UI/逻辑 ====== */
 type LiveProps = {
   rounds: number;
@@ -769,6 +814,13 @@ function LivePanel(props: LiveProps) {
   useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
 
+  const [tsTab, setTsTab] = useState<'live'|'knockout'>('live');
+  const [koDefault, setKoDefault] = useState<Rating>({ ...TS_DEFAULT });
+  const [koSeeds, setKoSeeds] = useState<KnockoutSeed[]>([]);
+  const koFileRef = useRef<HTMLInputElement|null>(null);
+  useEffect(()=>{ try { const saved = readKoStore(); setKoDefault(saved.default || { ...TS_DEFAULT }); setKoSeeds(saved.seeds || []); } catch {} }, []);
+  useEffect(()=>{ if (typeof window === 'undefined') return; writeKoStore(koDefault, koSeeds); }, [koDefault, koSeeds]);
+
   const seatIdentity = (i:number) => {
     const choice = props.seats[i];
     const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
@@ -894,6 +946,118 @@ function LivePanel(props: LiveProps) {
       farmer: p?.roles?.farmer ? ensureRating(p.roles.farmer) : null,
     };
   };
+  const resetKoDefault = () => {
+    setKoDefault({ ...TS_DEFAULT });
+    setLog(l => [...l, `【KO】默认 μ/σ 已重置为 ${fmt2(TS_DEFAULT.mu)} / ${fmt2(TS_DEFAULT.sigma)}`]);
+  };
+
+  const handleKoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = String(reader.result || '');
+        const obj = JSON.parse(text);
+        const seedsMap = new Map<string, KnockoutSeed>();
+        let nextDefault: Rating | null = null;
+
+        const pushSeed = (idRaw:any, payload:any, labelHint?:any) => {
+          const id = idRaw || payload?.id || payload?.identity || payload?.key;
+          if (!id) return;
+          const rating = ensureRating(payload?.rating ?? payload?.overall ?? payload);
+          const label = labelHint ?? payload?.label ?? payload?.name ?? payload?.meta?.label ?? payload?.meta?.choice;
+          seedsMap.set(String(id), {
+            id: String(id),
+            label: label ? String(label) : undefined,
+            mu: rating.mu,
+            sigma: rating.sigma,
+          });
+        };
+
+        const ingest = (players:any) => {
+          if (!players) return;
+          if (Array.isArray(players)) {
+            players.forEach(p => pushSeed(p?.id || p?.identity || p?.key, p, p?.label || p?.name));
+          } else if (typeof players === 'object') {
+            for (const [id, p] of Object.entries<any>(players)) {
+              pushSeed(id, p, p?.label || p?.name);
+            }
+          }
+        };
+
+        if (obj?.schema === 'ddz-ko@1') {
+          if (obj?.default) nextDefault = ensureRating(obj.default);
+          ingest(obj?.seeds);
+          if (!seedsMap.size) ingest(obj?.players);
+        } else {
+          ingest(obj?.players);
+          ingest(obj?.seeds);
+          if (Array.isArray(obj)) ingest(obj);
+          else if (obj?.id || obj?.identity || obj?.key) pushSeed(obj.id || obj.identity || obj.key, obj, obj?.label || obj?.name);
+        }
+
+        const nextSeeds = Array.from(seedsMap.values());
+        setKoSeeds(nextSeeds);
+        setTsTab('knockout');
+        if (nextSeeds.length) {
+          setLog(l => [...l, `【KO】已上传初始 TrueSkill（${nextSeeds.length} 位）。`]);
+        } else {
+          setLog(l => [...l, '【KO】上传文件未包含有效选手。']);
+        }
+        if (nextDefault) {
+          const applied = nextDefault;
+          setKoDefault(applied);
+          setLog(l => [...l, `【KO】默认 μ/σ 已更新为 ${fmt2(applied.mu)} / ${fmt2(applied.sigma)}`]);
+        }
+      } catch (err:any) {
+        setLog(l => [...l, `【KO】上传解析失败：${err?.message || err}`]);
+      } finally {
+        if (koFileRef.current) koFileRef.current.value = '';
+      }
+    };
+    reader.readAsText(f);
+  };
+
+  const handleKoApplyFromTs = () => {
+    const entries = Object.values(tsStoreRef.current.players || {});
+    const seedsMap = new Map<string, KnockoutSeed>();
+    for (const entry of entries) {
+      const id = entry?.id;
+      if (!id) continue;
+      const ratingSrc = entry.overall || entry.roles?.landlord || entry.roles?.farmer;
+      const rating = ensureRating(ratingSrc);
+      let label = entry.label;
+      if (!label && entry.meta?.choice) {
+        try {
+          const choice = entry.meta.choice as BotChoice;
+          label = choiceLabel(choice);
+          const model = (entry.meta?.model || '').trim();
+          if (model) label += `:${model}`;
+        } catch {}
+      }
+      seedsMap.set(id, { id, label, mu: rating.mu, sigma: rating.sigma });
+    }
+    const next = Array.from(seedsMap.values());
+    setKoSeeds(next);
+    setTsTab('knockout');
+    setLog(l => [...l, `【KO】已从当前 TS 存档填充初始值（${next.length} 位）。`]);
+  };
+
+  const clearKoSeeds = () => {
+    setKoSeeds([]);
+    setLog(l => [...l, '【KO】已清空淘汰赛初始名单。']);
+  };
+
+  const removeKoSeed = (idx:number) => {
+    setKoSeeds(prev => {
+      if (idx < 0 || idx >= prev.length) return prev;
+      const target = prev[idx];
+      const next = prev.filter((_, i)=> i !== idx);
+      setLog(l => [...l, `【KO】已移除初始选手：${target?.label || target?.id || `#${idx+1}`}`]);
+      return next;
+    });
+  };
+
   /* ===== Radar（战术画像）本地存档（新增） ===== */
   type RadarAgg = { scores: Score5; count: number };
   type RadarStoreEntry = {
@@ -2076,57 +2240,181 @@ const handleAllSaveInner = () => {
         </span>
       </div>
 
-      {/* ========= TrueSkill（实时） ========= */}
-      <Section title="TrueSkill（实时）">
-        {/* 上传 / 存档 / 刷新 */}
-        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-<div style={{ fontSize:12, color:'#6b7280' }}>按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。</div>
+      <Section title="TrueSkill">
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+          <div style={{ display:'inline-flex', gap:6, background:'#f3f4f6', padding:4, borderRadius:10 }}>
+            <button
+              type="button"
+              onClick={()=>setTsTab('live')}
+              style={{
+                padding:'6px 14px',
+                borderRadius:8,
+                border:'1px solid transparent',
+                background: tsTab==='live' ? '#1f2937' : 'transparent',
+                color: tsTab==='live' ? '#fff' : '#374151',
+                fontWeight: tsTab==='live' ? 700 : 500,
+                cursor:'pointer',
+                transition:'all 0.15s ease-in-out'
+              }}
+            >实时面板</button>
+            <button
+              type="button"
+              onClick={()=>setTsTab('knockout')}
+              style={{
+                padding:'6px 14px',
+                borderRadius:8,
+                border:'1px solid transparent',
+                background: tsTab==='knockout' ? '#1f2937' : 'transparent',
+                color: tsTab==='knockout' ? '#fff' : '#374151',
+                fontWeight: tsTab==='knockout' ? 700 : 500,
+                cursor:'pointer',
+                transition:'all 0.15s ease-in-out'
+              }}
+            >淘汰赛初始值</button>
+          </div>
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-          {[0,1,2].map(i=>{
-            const stored = getStoredForSeat(i);
-            const usingRole: 'overall'|'landlord'|'farmer' =
-              landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
-            return (
-              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                  <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
-                </div>
-                <div style={{ fontSize:13, color:'#374151' }}>
-                  <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
-                  <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
-                  <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
-                </div>
+        {tsTab === 'live' ? (
+          <>
+            <div style={{ fontSize:12, color:'#6b7280', marginBottom:8 }}>
+              按“内置/AI+模型/版本(+HTTP Base)”识别，并区分地主/农民。
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+              {[0,1,2].map(i=>{
+                const stored = getStoredForSeat(i);
+                const usingRole: 'overall'|'landlord'|'farmer' =
+                  landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
+                return (
+                  <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                      <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+                    </div>
+                    <div style={{ fontSize:13, color:'#374151' }}>
+                      <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
+                      <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
+                      <div>CR = μ − 3σ：<b>{fmt2(tsCr(tsArr[i]))}</b></div>
+                    </div>
 
-                {/* 区分显示总体/地主/农民三档，并标注当前使用 */}
-                <div style={{ borderTop:'1px dashed #eee', marginTop:8, paddingTop:8 }}>
-                  <div style={{ fontSize:12, marginBottom:6 }}>
-                    当前使用：<b>
-                      {usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}
-                    </b>
+                    <div style={{ borderTop:'1px dashed #eee', marginTop:8, paddingTop:8 }}>
+                      <div style={{ fontSize:12, marginBottom:6 }}>
+                        当前使用：<b>
+                          {usingRole === 'overall' ? '总体档' : usingRole === 'landlord' ? '地主档' : '农民档'}
+                        </b>
+                      </div>
+                      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12, color:'#374151' }}>
+                        <div>
+                          <div style={{ fontWeight:600, opacity:0.8 }}>总体</div>
+                          <div>{muSig(stored.overall)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontWeight:600, opacity:0.8 }}>地主</div>
+                          <div>{muSig(stored.landlord)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontWeight:600, opacity:0.8 }}>农民</div>
+                          <div>{muSig(stored.farmer)}</div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12, color:'#374151' }}>
-                    <div>
-                      <div style={{ fontWeight:600, opacity:0.8 }}>总体</div>
-                      <div>{muSig(stored.overall)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontWeight:600, opacity:0.8 }}>地主</div>
-                      <div>{muSig(stored.landlord)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontWeight:600, opacity:0.8 }}>农民</div>
-                      <div>{muSig(stored.farmer)}</div>
-                    </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
+              说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize:12, color:'#6b7280', marginBottom:8 }}>
+              未在名单中的选手将使用默认 μ/σ；可从历史存档导入或直接使用当前 TS 面板。
+            </div>
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center', marginBottom:8 }}>
+              <label style={{ display:'flex', alignItems:'center', gap:6 }}>
+                初始 μ
+                <input
+                  type="number"
+                  step={0.1}
+                  value={koDefault.mu}
+                  onChange={e=>{
+                    const v = Number(e.target.value);
+                    setKoDefault(prev => ({ ...prev, mu: Number.isFinite(v) ? v : prev.mu }));
+                  }}
+                  style={{ width:90 }}
+                />
+              </label>
+              <label style={{ display:'flex', alignItems:'center', gap:6 }}>
+                初始 σ
+                <input
+                  type="number"
+                  step={0.1}
+                  value={koDefault.sigma}
+                  onChange={e=>{
+                    const v = Number(e.target.value);
+                    setKoDefault(prev => ({ ...prev, sigma: Number.isFinite(v) ? Math.max(0, v) : prev.sigma }));
+                  }}
+                  style={{ width:90 }}
+                />
+              </label>
+              <button
+                onClick={resetKoDefault}
+                style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >重置默认</button>
+              <input
+                ref={koFileRef}
+                type="file"
+                accept="application/json"
+                style={{ display:'none' }}
+                onChange={handleKoUpload}
+              />
+              <button
+                onClick={()=>koFileRef.current?.click()}
+                style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >上传历史</button>
+              <button
+                onClick={handleKoApplyFromTs}
+                style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >从当前 TS 填充</button>
+              <button
+                onClick={clearKoSeeds}
+                disabled={!koSeeds.length}
+                style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff', opacity: koSeeds.length ? 1 : 0.6 }}
+              >清空名单</button>
+            </div>
+            <div style={{ border:'1px solid #eee', borderRadius:8, padding:'8px 10px', background:'#fff' }}>
+              {koSeeds.length === 0 ? (
+                <div style={{ color:'#9ca3af' }}>（暂无选手；新选手将使用默认 μ/σ）</div>
+              ) : (
+                <>
+                  <div style={{ display:'grid', gridTemplateColumns:'1.8fr 1.8fr 1fr 1fr auto', gap:8, fontSize:12, fontWeight:600, paddingBottom:6, borderBottom:'1px solid #f3f4f6' }}>
+                    <div>身份</div>
+                    <div>标签</div>
+                    <div>μ</div>
+                    <div>σ</div>
+                    <div></div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>
-          说明：CR 为置信下界（越高越稳）；每局结算后自动更新（也兼容后端直接推送 TS）。</div>
+                  <div>
+                    {koSeeds.map((seed, idx) => (
+                      <div
+                        key={`${seed.id}-${idx}`}
+                        style={{ display:'grid', gridTemplateColumns:'1.8fr 1.8fr 1fr 1fr auto', gap:8, alignItems:'center', padding:'6px 0', borderBottom: idx===koSeeds.length-1 ? 'none' : '1px solid #f3f4f6' }}
+                      >
+                        <div style={{ color:'#6b7280', wordBreak:'break-all' }}>{seed.id}</div>
+                        <div style={{ fontWeight:600 }}>{seed.label || '—'}</div>
+                        <div>{fmt2(seed.mu)}</div>
+                        <div>{fmt2(seed.sigma)}</div>
+                        <button
+                          onClick={()=>removeKoSeed(idx)}
+                          style={{ padding:'3px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+                        >移除</button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        )}
       </Section>
 
       {/* ======= 积分下面、手牌上面：雷达图 ======= */}
