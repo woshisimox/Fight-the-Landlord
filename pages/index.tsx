@@ -1,5 +1,6 @@
 // pages/index.tsx
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -307,9 +308,29 @@ const KO_BYE = '__KO_BYE__';
 type KnockoutPlayer = string | null;
 type KnockoutMatch = { id: string; players: [KnockoutPlayer, KnockoutPlayer]; winner: KnockoutPlayer | null; };
 type KnockoutRound = { matches: KnockoutMatch[] };
-type KnockoutEntry = { id: string; choice: BotChoice; name: string };
+type BotCredentials = {
+  openai?: string;
+  gemini?: string;
+  grok?: string;
+  kimi?: string;
+  qwen?: string;
+  deepseek?: string;
+  httpBase?: string;
+  httpToken?: string;
+};
+type KnockoutEntry = {
+  id: string;
+  choice: BotChoice;
+  name: string;
+  model: string;
+  keys: BotCredentials;
+  delayMs: number;
+  timeoutSecs: number;
+};
 
 const KO_ENTRY_STORAGE = 'ddz_knockout_entries';
+const KO_DEFAULT_DELAY = 1000;
+const KO_DEFAULT_TIMEOUT = 30;
 const KO_DEFAULT_CHOICES: BotChoice[] = [
   'built-in:greedy-max',
   'built-in:greedy-min',
@@ -358,16 +379,42 @@ function deriveAutoAliasSuffix(alias: string, choice: BotChoice): string | undef
   return undefined;
 }
 
+function createDefaultKnockoutEntry(choice: BotChoice, existing: KnockoutEntry[]): KnockoutEntry {
+  return {
+    id: makeKnockoutEntryId(),
+    choice,
+    name: defaultAliasForChoice(choice, existing),
+    model: '',
+    keys: {},
+    delayMs: KO_DEFAULT_DELAY,
+    timeoutSecs: KO_DEFAULT_TIMEOUT,
+  };
+}
+
 function makeDefaultKnockoutEntries(): KnockoutEntry[] {
   const entries: KnockoutEntry[] = [];
   for (const choice of KO_DEFAULT_CHOICES) {
-    entries.push({
-      id: makeKnockoutEntryId(),
-      choice,
-      name: defaultAliasForChoice(choice, entries),
-    });
+    entries.push(createDefaultKnockoutEntry(choice, entries));
   }
   return entries;
+}
+
+function sanitizeKnockoutKeys(choice: BotChoice, raw: any): BotCredentials {
+  const base: BotCredentials = typeof raw === 'object' && raw ? raw : {};
+  const out: BotCredentials = {};
+  if (typeof base.openai === 'string') out.openai = base.openai;
+  if (typeof base.gemini === 'string') out.gemini = base.gemini;
+  if (typeof base.grok === 'string') out.grok = base.grok;
+  if (typeof base.kimi === 'string') out.kimi = base.kimi;
+  if (typeof base.qwen === 'string') out.qwen = base.qwen;
+  if (typeof base.deepseek === 'string') out.deepseek = base.deepseek;
+  if (typeof base.httpBase === 'string') out.httpBase = base.httpBase;
+  if (typeof base.httpToken === 'string') out.httpToken = base.httpToken;
+  if (choice === 'http') {
+    if (out.httpBase === undefined) out.httpBase = '';
+    if (out.httpToken === undefined) out.httpToken = '';
+  }
+  return out;
 }
 
 function normalizeKnockoutEntries(raw: any): KnockoutEntry[] {
@@ -381,7 +428,15 @@ function normalizeKnockoutEntries(raw: any): KnockoutEntry[] {
     const id = typeof item?.id === 'string' && item.id
       ? item.id
       : makeKnockoutEntryId();
-    entries.push({ id, choice, name });
+    const model = choice.startsWith('ai:') && typeof item?.model === 'string'
+      ? item.model
+      : '';
+    const keys = sanitizeKnockoutKeys(choice, item?.keys);
+    const delayMs = Number.isFinite(Number(item?.delayMs)) ? Math.max(0, Math.floor(Number(item.delayMs))) : KO_DEFAULT_DELAY;
+    const timeoutSecs = Number.isFinite(Number(item?.timeoutSecs))
+      ? Math.max(5, Math.floor(Number(item.timeoutSecs)))
+      : KO_DEFAULT_TIMEOUT;
+    entries.push({ id, choice, name, model, keys, delayMs, timeoutSecs });
   }
   if (entries.length < 2) return makeDefaultKnockoutEntries();
   return entries;
@@ -733,6 +788,7 @@ function KnockoutPanel() {
   const [rounds, setRounds] = useState<KnockoutRound[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const allFileRef = useRef<HTMLInputElement|null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -758,19 +814,56 @@ function KnockoutPanel() {
     try { localStorage.setItem('ddz_knockout_rounds', JSON.stringify(rounds)); } catch {}
   }, [rounds]);
 
+  const ordinalZh = (idx: number) => {
+    const numerals = ['一','二','三','四','五','六','七','八','九','十','十一','十二','十三','十四','十五','十六','十七','十八','十九','二十','二十一','二十二','二十三','二十四','二十五','二十六','二十七','二十八','二十九','三十','三十一','三十二'];
+    return numerals[idx] || `${idx + 1}`;
+  };
+  const participantLabel = (idx: number) => (lang === 'en' ? `Participant ${idx + 1}` : `参赛${ordinalZh(idx)}`);
+
+  const handleAllFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const obj = JSON.parse(String(reader.result || '{}'));
+        window.dispatchEvent(new CustomEvent('ddz-all-upload', { detail: obj }));
+      } catch (err) {
+        console.error('[ALL-UPLOAD] parse error', err);
+      } finally {
+        if (allFileRef.current) allFileRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const entryDisplay = (entry: KnockoutEntry) => {
     const alias = entry.name.trim();
     const provider = choiceLabel(entry.choice);
-    if (alias && provider) return `${alias} · ${provider}`;
+    let providerLabel = provider;
+    if (entry.choice.startsWith('ai:')) {
+      const model = entry.model.trim() || defaultModelFor(entry.choice);
+      if (model) providerLabel = `${provider}:${model}`;
+    } else if (entry.choice === 'http') {
+      const base = entry.keys?.httpBase?.trim();
+      if (base) providerLabel = `${provider}:${base}`;
+    }
+    if (alias && providerLabel) return `${alias} · ${providerLabel}`;
     if (alias) return alias;
-    return provider;
+    return providerLabel;
   };
 
   const entryToken = (entry: KnockoutEntry) => {
-    const payload = {
+    const payload: Record<string, string> = {
       name: entry.name.trim(),
       choice: entry.choice,
     };
+    if (entry.choice.startsWith('ai:')) {
+      payload.model = entry.model.trim();
+    }
+    if (entry.choice === 'http') {
+      payload.httpBase = (entry.keys?.httpBase || '').trim();
+    }
     return JSON.stringify(payload);
   };
 
@@ -795,9 +888,7 @@ function KnockoutPanel() {
     const power = Math.pow(2, Math.ceil(Math.log2(roster.length)));
     const filled = roster.map(item => item.token);
     while (filled.length < power) filled.push(KO_BYE);
-    const firstRound: KnockoutRound = {
-      matches: [],
-    };
+    const firstRound: KnockoutRound = { matches: [] };
     for (let i = 0; i < filled.length; i += 2) {
       const players: [KnockoutPlayer, KnockoutPlayer] = [filled[i], filled[i + 1] ?? KO_BYE];
       firstRound.matches.push({
@@ -853,9 +944,17 @@ function KnockoutPanel() {
           const alias = typeof parsed.name === 'string' ? parsed.name.trim() : '';
           const rawChoice = typeof parsed.choice === 'string' ? parsed.choice : '';
           const provider = KO_ALL_CHOICES.includes(rawChoice as BotChoice) ? choiceLabel(rawChoice as BotChoice) : '';
-          if (alias && provider) return `${alias} · ${provider}`;
+          let providerLabel = provider;
+          if (typeof rawChoice === 'string' && rawChoice.startsWith('ai:')) {
+            const model = typeof parsed.model === 'string' ? parsed.model.trim() : '';
+            if (provider && model) providerLabel = `${provider}:${model}`;
+          } else if (rawChoice === 'http') {
+            const base = typeof parsed.httpBase === 'string' ? parsed.httpBase.trim() : '';
+            if (provider && base) providerLabel = `${provider}:${base}`;
+          }
+          if (alias && providerLabel) return `${alias} · ${providerLabel}`;
           if (alias) return alias;
-          if (provider) return provider;
+          if (providerLabel) return providerLabel;
         }
       } catch {}
     }
@@ -864,13 +963,8 @@ function KnockoutPanel() {
 
   const handleAddEntry = () => {
     setEntries(prev => {
-      const choice = KO_ALL_CHOICES[(prev.length) % KO_ALL_CHOICES.length] ?? 'built-in:greedy-max';
-      const next = [...prev, {
-        id: makeKnockoutEntryId(),
-        choice,
-        name: defaultAliasForChoice(choice, prev),
-      }];
-      return next;
+      const choice = KO_ALL_CHOICES[prev.length % KO_ALL_CHOICES.length] ?? 'built-in:greedy-max';
+      return [...prev, createDefaultKnockoutEntry(choice, prev)];
     });
   };
 
@@ -894,18 +988,47 @@ function KnockoutPanel() {
           nextName = defaultAliasForChoice(choice, others);
         }
       }
-      return { ...entry, choice, name: nextName };
+      const nextKeys = sanitizeKnockoutKeys(choice, entry.keys);
+      const nextModel = choice.startsWith('ai:')
+        ? (choice === entry.choice ? entry.model : '')
+        : '';
+      return { ...entry, choice, name: nextName, keys: nextKeys, model: nextModel };
     }));
   };
 
+  const updateEntry = (id: string, mutator: (entry: KnockoutEntry) => KnockoutEntry) => {
+    setEntries(prev => prev.map(entry => entry.id === id ? mutator(entry) : entry));
+  };
+
   const handleEntryNameChange = (id: string, name: string) => {
-    setEntries(prev => prev.map(entry => entry.id === id ? { ...entry, name } : entry));
+    updateEntry(id, entry => ({ ...entry, name }));
+  };
+
+  const handleEntryModelChange = (id: string, model: string) => {
+    updateEntry(id, entry => ({ ...entry, model }));
+  };
+
+  const handleEntryKeyChange = (id: string, key: keyof BotCredentials, value: string) => {
+    updateEntry(id, entry => ({ ...entry, keys: { ...(entry.keys || {}), [key]: value } }));
+  };
+
+  const handleEntryDelayChange = (id: string, value: string) => {
+    const num = Math.max(0, Math.floor(Number(value) || 0));
+    updateEntry(id, entry => ({ ...entry, delayMs: num }));
+  };
+
+  const handleEntryTimeoutChange = (id: string, value: string) => {
+    const num = Math.max(5, Math.floor(Number(value) || 0));
+    updateEntry(id, entry => ({ ...entry, timeoutSecs: num }));
   };
 
   const participantsTitle = lang === 'en' ? 'Participants' : '参赛选手';
   const participantsHint = lang === 'en'
     ? 'Pick bots or AIs just like regular matches. The display name appears in the bracket.'
     : '从常规对局使用的内置 / 外置 AI 中选择参赛选手，显示名称会出现在淘汰赛对阵中。';
+
+  const intervalTitle = lang === 'en' ? 'Min play interval (ms)' : '最小间隔 (ms)';
+  const timeoutTitle = lang === 'en' ? 'Think timeout (s)' : '弃牌时间（秒）';
 
   return (
     <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
@@ -924,7 +1047,7 @@ function KnockoutPanel() {
             return (
               <div key={entry.id} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:10 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8, gap:8 }}>
-                  <div style={{ fontWeight:600 }}>{lang === 'en' ? `Participant ${idx + 1}` : `参赛者 ${idx + 1}`}</div>
+                  <div style={{ fontWeight:600 }}>{participantLabel(idx)}</div>
                   <button
                     onClick={() => handleRemoveEntry(entry.id)}
                     disabled={!canRemove}
@@ -964,7 +1087,7 @@ function KnockoutPanel() {
                     </optgroup>
                   </select>
                 </label>
-                <label style={{ display:'block' }}>
+                <label style={{ display:'block', marginBottom:6 }}>
                   {lang === 'en' ? 'Display name' : '显示名称'}
                   <input
                     type="text"
@@ -974,6 +1097,118 @@ function KnockoutPanel() {
                     style={{ width:'100%', marginTop:4 }}
                   />
                 </label>
+                {entry.choice.startsWith('ai:') && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    {lang === 'en' ? 'Model (optional)' : '模型（可选）'}
+                    <input
+                      type="text"
+                      value={entry.model}
+                      placeholder={defaultModelFor(entry.choice)}
+                      onChange={e => handleEntryModelChange(entry.id, e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                    <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
+                      {lang === 'en'
+                        ? `Leave blank to use ${defaultModelFor(entry.choice)}.`
+                        : `留空则使用推荐：${defaultModelFor(entry.choice)}`}
+                    </div>
+                  </label>
+                )}
+
+                {entry.choice === 'ai:openai' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    OpenAI API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.openai || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'openai', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'ai:gemini' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Gemini API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.gemini || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'gemini', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'ai:grok' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    xAI (Grok) API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.grok || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'grok', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'ai:kimi' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Kimi API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.kimi || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'kimi', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'ai:qwen' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    Qwen API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.qwen || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'qwen', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'ai:deepseek' && (
+                  <label style={{ display:'block', marginBottom:6 }}>
+                    DeepSeek API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.deepseek || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'deepseek', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'http' && (
+                  <>
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      HTTP Base / URL
+                      <input
+                        type="text"
+                        value={entry.keys?.httpBase || ''}
+                        onChange={e => handleEntryKeyChange(entry.id, 'httpBase', e.target.value)}
+                        style={{ width:'100%', marginTop:4 }}
+                      />
+                    </label>
+                    <label style={{ display:'block', marginBottom:6 }}>
+                      HTTP Token（可选）
+                      <input
+                        type="password"
+                        value={entry.keys?.httpToken || ''}
+                        onChange={e => handleEntryKeyChange(entry.id, 'httpToken', e.target.value)}
+                        style={{ width:'100%', marginTop:4 }}
+                      />
+                    </label>
+                  </>
+                )}
               </div>
             );
           })}
@@ -983,7 +1218,52 @@ function KnockoutPanel() {
           style={{ marginTop:12, padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#f9fafb', cursor:'pointer' }}
         >{lang === 'en' ? 'Add participant' : '新增参赛者'}</button>
       </div>
-      <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:8 }}>
+
+      <div style={{ marginTop:12 }}>
+        <div style={{ fontWeight:700, marginBottom:6 }}>{lang === 'en' ? 'Min play interval per participant (ms)' : '每位参赛者出牌最小间隔 (ms)'}</div>
+        <div style={{ display:'grid', gap:12, gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          {entries.map((entry, idx) => (
+            <div key={`${entry.id}-delay`} style={{ border:'1px dashed #e5e7eb', borderRadius:6, padding:10 }}>
+              <div style={{ fontWeight:700, marginBottom:8 }}>{participantLabel(idx)}</div>
+              <label style={{ display:'block' }}>
+                {intervalTitle}
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={entry.delayMs}
+                  onChange={e => handleEntryDelayChange(entry.id, e.target.value)}
+                  style={{ width:'100%', marginTop:4 }}
+                />
+              </label>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginTop:12 }}>
+        <div style={{ fontWeight:700, marginBottom:6 }}>{lang === 'en' ? 'Think timeout per participant (s)' : '每位参赛者思考超时（秒）'}</div>
+        <div style={{ display:'grid', gap:12, gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          {entries.map((entry, idx) => (
+            <div key={`${entry.id}-timeout`} style={{ border:'1px dashed #e5e7eb', borderRadius:6, padding:10 }}>
+              <div style={{ fontWeight:700, marginBottom:8 }}>{participantLabel(idx)}</div>
+              <label style={{ display:'block' }}>
+                {timeoutTitle}
+                <input
+                  type="number"
+                  min={5}
+                  step={1}
+                  value={entry.timeoutSecs}
+                  onChange={e => handleEntryTimeoutChange(entry.id, e.target.value)}
+                  style={{ width:'100%', marginTop:4 }}
+                />
+              </label>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:16 }}>
         <button
           onClick={handleGenerate}
           style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#2563eb', color:'#fff', cursor:'pointer' }}
@@ -1000,6 +1280,30 @@ function KnockoutPanel() {
       {notice && !error && (
         <div style={{ marginTop:8, color:'#2563eb', fontSize:13 }}>{notice}</div>
       )}
+
+      <div style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:12, marginTop:16 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:16, flexWrap:'wrap', marginBottom:8 }}>
+          <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+            {lang === 'en' ? 'Ladder / TrueSkill' : '天梯 / TrueSkill'}
+            <input
+              ref={allFileRef}
+              type="file"
+              accept="application/json"
+              style={{ display:'none' }}
+              onChange={handleAllFileUpload}
+            />
+            <button
+              onClick={() => allFileRef.current?.click()}
+              style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+            >{lang === 'en' ? 'Upload' : '上传'}</button>
+          </label>
+          <button
+            onClick={() => window.dispatchEvent(new Event('ddz-all-save'))}
+            style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+          >{lang === 'en' ? 'Save' : '存档'}</button>
+        </div>
+        <LadderPanel />
+      </div>
 
       {rounds.length > 0 && (
         <div style={{ marginTop:16, display:'grid', gap:12 }}>
