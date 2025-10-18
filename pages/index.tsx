@@ -306,7 +306,7 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
 
 const KO_BYE = '__KO_BYE__';
 type KnockoutPlayer = string | null;
-type KnockoutMatch = { id: string; players: [KnockoutPlayer, KnockoutPlayer]; winner: KnockoutPlayer | null; };
+type KnockoutMatch = { id: string; players: KnockoutPlayer[]; eliminated: KnockoutPlayer | null; };
 type KnockoutRound = { matches: KnockoutMatch[] };
 type BotCredentials = {
   openai?: string;
@@ -443,66 +443,123 @@ function normalizeKnockoutEntries(raw: any): KnockoutEntry[] {
 }
 
 function cloneKnockoutRounds(rounds: KnockoutRound[]): KnockoutRound[] {
-  return rounds.map((round, ridx) => ({
-    matches: (round?.matches || []).map((match, midx) => ({
-      id: match?.id ?? `R${ridx}-M${midx}`,
-      players: [match?.players?.[0] ?? null, match?.players?.[1] ?? null],
-      winner: match?.winner ?? null,
-    })),
-  }));
+  return rounds
+    .map((round, ridx) => ({
+      matches: (round?.matches || [])
+        .map((match, midx) => {
+          const rawPlayers = Array.isArray(match?.players) ? match.players : [];
+          const players = rawPlayers
+            .filter((p, idx) => idx < 3 && typeof p === 'string' && p)
+            .map(p => (p === KO_BYE ? null : p))
+            .filter((p): p is KnockoutPlayer => !!p);
+          if (players.length < 2) return null;
+          const eliminated = typeof match?.eliminated === 'string' && players.includes(match.eliminated)
+            ? match.eliminated
+            : typeof (match as any)?.winner === 'string' && players.includes((match as any).winner)
+              ? (match as any).winner
+              : null;
+          return {
+            id: typeof match?.id === 'string' && match.id ? match.id : `R${ridx}-M${midx}`,
+            players,
+            eliminated,
+          };
+        })
+        .filter((match): match is KnockoutMatch => !!match),
+    }))
+    .filter(round => round.matches.length);
 }
 
-const knockoutAutoWinner = (players: [KnockoutPlayer, KnockoutPlayer]): KnockoutPlayer | null => {
-  const [a, b] = players;
-  const aBye = a === KO_BYE;
-  const bBye = b === KO_BYE;
-  if (aBye && bBye) return KO_BYE;
-  if (aBye && b && b !== KO_BYE) return b;
-  if (bBye && a && a !== KO_BYE) return a;
-  return null;
-};
+function distributeKnockoutPlayers(pool: KnockoutPlayer[]): KnockoutPlayer[][] {
+  const players = pool.filter(p => !!p);
+  if (players.length <= 1) return [];
+  const groups: KnockoutPlayer[][] = [];
+  let idx = 0;
+  let remaining = players.length;
+  while (remaining > 0) {
+    const matchesLeft = Math.ceil(remaining / 3);
+    let size = Math.min(3, remaining);
+    while (size > 2 && remaining - size < (matchesLeft - 1) * 2) size -= 1;
+    if (size < 2) size = Math.min(remaining, 2);
+    groups.push(players.slice(idx, idx + size));
+    idx += size;
+    remaining -= size;
+  }
+  return groups;
+}
+
+function buildMatchesFromPool(
+  pool: KnockoutPlayer[],
+  roundIdx: number,
+  template?: KnockoutRound,
+): KnockoutMatch[] {
+  const templateMatches = template ? cloneKnockoutRounds([template])[0]?.matches ?? [] : [];
+  const groups = distributeKnockoutPlayers(pool);
+  return groups.map((players, midx) => {
+    const templateMatch = templateMatches[midx];
+    const samePlayers =
+      templateMatch?.players?.length === players.length &&
+      templateMatch.players.every((p, i) => p === players[i]);
+    const eliminated = samePlayers && templateMatch?.eliminated && players.includes(templateMatch.eliminated)
+      ? templateMatch.eliminated
+      : null;
+    return {
+      id: templateMatch?.id ?? `R${roundIdx}-M${midx}`,
+      players,
+      eliminated,
+    };
+  });
+}
+
+function isRoundComplete(round: KnockoutRound): boolean {
+  return round.matches.every(match => {
+    const active = match.players.filter(p => !!p && p !== KO_BYE);
+    if (active.length <= 1) return true;
+    return !!match.eliminated && active.includes(match.eliminated);
+  });
+}
+
+function collectSurvivors(round: KnockoutRound): KnockoutPlayer[] {
+  const survivors: KnockoutPlayer[] = [];
+  for (const match of round.matches) {
+    for (const player of match.players) {
+      if (player && player !== match.eliminated && player !== KO_BYE) {
+        survivors.push(player);
+      }
+    }
+  }
+  return survivors;
+}
+
+function shuffleArray<T>(input: T[]): T[] {
+  const arr = [...input];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
 function normalizeKnockoutRounds(base: KnockoutRound[]): KnockoutRound[] {
-  const rounds = cloneKnockoutRounds(base);
-  if (!rounds.length) return rounds;
+  const sanitized = cloneKnockoutRounds(base);
+  if (!sanitized.length) return [];
+  const rounds: KnockoutRound[] = [];
+  const first = sanitized[0];
+  if (!first.matches.length) return [];
+  rounds.push({ matches: first.matches });
+  if (!isRoundComplete(first)) return rounds;
 
-  let winners = rounds[0].matches.map(match => {
-    if (match.winner && !match.players.includes(match.winner)) match.winner = null;
-    const auto = knockoutAutoWinner(match.players);
-    if (!match.winner && auto) match.winner = auto;
-    return match.winner;
-  });
-
+  let survivors = collectSurvivors(first);
   let roundIndex = 1;
-  while (winners.length > 1) {
-    const neededMatches = Math.ceil(winners.length / 2);
-    const existing = rounds[roundIndex]?.matches ?? [];
-    const nextMatches: KnockoutMatch[] = [];
-    for (let i = 0; i < neededMatches; i++) {
-      const p1 = winners[i * 2] ?? null;
-      const p2 = winners[i * 2 + 1] ?? null;
-      const players: [KnockoutPlayer, KnockoutPlayer] = [p1, p2];
-      const prev = existing[i];
-      let winner = prev?.winner ?? null;
-      if (winner && !players.includes(winner)) winner = null;
-      const auto = knockoutAutoWinner(players);
-      if (!winner && auto) winner = auto;
-      nextMatches.push({
-        id: prev?.id ?? `R${roundIndex}-M${i}`,
-        players,
-        winner,
-      });
-    }
-    rounds[roundIndex] = { matches: nextMatches };
-    winners = nextMatches.map(match => {
-      const auto = knockoutAutoWinner(match.players);
-      if (!match.winner && auto) match.winner = auto;
-      return match.winner;
-    });
-    roundIndex++;
+  while (survivors.length > 1) {
+    const template = sanitized[roundIndex];
+    const nextMatches = buildMatchesFromPool(survivors, roundIndex, template);
+    if (!nextMatches.length) break;
+    const nextRound: KnockoutRound = { matches: nextMatches };
+    rounds.push(nextRound);
+    if (!isRoundComplete(nextRound)) break;
+    survivors = collectSurvivors(nextRound);
+    roundIndex += 1;
   }
-
-  rounds.length = roundIndex;
   return rounds;
 }
 
@@ -870,8 +927,8 @@ function KnockoutPanel() {
   const handleGenerate = () => {
     const roster = entries.map(entry => ({ token: entryToken(entry), label: entryDisplay(entry) }))
       .filter(item => item.label);
-    if (roster.length < 2) {
-      setError(lang === 'en' ? 'Add at least two participants.' : '请至少添加两名参赛选手。');
+    if (roster.length < 3) {
+      setError(lang === 'en' ? 'Add at least three participants.' : '请至少添加三名参赛选手。');
       setNotice(null);
       setRounds([]);
       if (typeof window !== 'undefined') {
@@ -885,25 +942,19 @@ function KnockoutPanel() {
       setNotice(null);
       return;
     }
-    const power = Math.pow(2, Math.ceil(Math.log2(roster.length)));
-    const filled = roster.map(item => item.token);
-    while (filled.length < power) filled.push(KO_BYE);
-    const firstRound: KnockoutRound = { matches: [] };
-    for (let i = 0; i < filled.length; i += 2) {
-      const players: [KnockoutPlayer, KnockoutPlayer] = [filled[i], filled[i + 1] ?? KO_BYE];
-      firstRound.matches.push({
-        id: `R0-M${i / 2}`,
-        players,
-        winner: knockoutAutoWinner(players),
-      });
+    const shuffled = shuffleArray(roster.map(item => item.token));
+    const firstRoundMatches = buildMatchesFromPool(shuffled, 0);
+    if (!firstRoundMatches.length) {
+      setError(lang === 'en' ? 'Unable to build initial groups.' : '无法生成首轮对阵，请重试。');
+      setRounds([]);
+      return;
     }
-    setRounds(normalizeKnockoutRounds([firstRound]));
+    const firstRound: KnockoutRound = { matches: firstRoundMatches };
+    setRounds([firstRound]);
     setError(null);
-    if (power !== roster.length) {
-      setNotice(lang === 'en' ? 'Bracket filled with automatic byes.' : '参赛队伍非 2^N，已自动补齐轮空。');
-    } else {
-      setNotice(null);
-    }
+    setNotice(lang === 'en'
+      ? 'Participants shuffled into groups of three where possible.'
+      : '已尽量按每组三人随机分组。');
   };
 
   const handleReset = () => {
@@ -915,22 +966,32 @@ function KnockoutPanel() {
     }
   };
 
-  const handleSetWinner = (roundIdx: number, matchIdx: number, winner: string) => {
+  const handleToggleEliminated = (roundIdx: number, matchIdx: number, player: string) => {
     setRounds(prev => {
       const draft = cloneKnockoutRounds(prev);
       const match = draft[roundIdx]?.matches?.[matchIdx];
       if (!match) return prev;
-      match.winner = match.winner === winner ? null : winner;
-      return normalizeKnockoutRounds(draft);
+      match.eliminated = match.eliminated === player ? null : player;
+      draft.length = roundIdx + 1;
+      const current = draft[roundIdx];
+      if (!current || !isRoundComplete(current)) return draft;
+      const survivors = collectSurvivors(current);
+      if (survivors.length <= 1) return draft;
+      const shuffled = shuffleArray(survivors);
+      const nextMatches = buildMatchesFromPool(shuffled, roundIdx + 1);
+      if (nextMatches.length) {
+        draft.push({ matches: nextMatches });
+      }
+      return draft;
     });
   };
 
   const champion = useMemo(() => {
     if (!rounds.length) return null;
-    const finalRound = rounds[rounds.length - 1];
-    if (!finalRound || finalRound.matches.length !== 1) return null;
-    const w = finalRound.matches[0]?.winner;
-    if (w && w !== KO_BYE) return w;
+    const lastRound = rounds[rounds.length - 1];
+    if (!lastRound || !isRoundComplete(lastRound)) return null;
+    const survivors = collectSurvivors(lastRound);
+    if (survivors.length === 1) return survivors[0];
     return null;
   }, [rounds]);
 
@@ -1050,7 +1111,7 @@ function KnockoutPanel() {
             }}
           >
             {entries.map((entry, idx) => {
-              const canRemove = entries.length > 2;
+              const canRemove = entries.length > 3;
               return (
               <div
                 key={entry.id}
@@ -1334,38 +1395,44 @@ function KnockoutPanel() {
                 {round.matches.map((match, midx) => {
                   const players = match.players.map(p => displayName(p));
                   const actionable = match.players.filter(p => p && p !== KO_BYE) as string[];
+                  const eliminatedLabel = match.eliminated ? displayName(match.eliminated) : null;
+                  const survivors = match.eliminated
+                    ? match.players.filter(p => p && p !== match.eliminated)
+                    : [];
                   return (
                     <div key={match.id || `round-${ridx}-match-${midx}`} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:10 }}>
                       <div style={{ display:'flex', flexWrap:'wrap', justifyContent:'space-between', alignItems:'center', gap:8, marginBottom:8 }}>
-                        <span style={{ fontWeight:600 }}>{players[0]} vs {players[1]}</span>
-                        {match.winner && match.winner !== KO_BYE && (
-                          <span style={{ fontSize:12, color:'#047857' }}>
-                            {lang === 'en' ? `Winner: ${displayName(match.winner)}` : `晋级：${displayName(match.winner)}`}
+                        <span style={{ fontWeight:600 }}>{players.join(' vs ')}</span>
+                        {eliminatedLabel && (
+                          <span style={{ fontSize:12, color:'#b91c1c' }}>
+                            {lang === 'en' ? `Eliminated: ${eliminatedLabel}` : `淘汰：${eliminatedLabel}`}
                           </span>
                         )}
-                        {match.winner === KO_BYE && (
-                          <span style={{ fontSize:12, color:'#6b7280' }}>
-                            {lang === 'en' ? 'Auto-advanced (bye)' : '轮空自动晋级'}
+                        {match.eliminated && survivors.length > 0 && (
+                          <span style={{ fontSize:12, color:'#047857' }}>
+                            {lang === 'en'
+                              ? `Advancing: ${survivors.map(p => displayName(p)).join(', ')}`
+                              : `晋级：${survivors.map(p => displayName(p)).join('，')}`}
                           </span>
                         )}
                       </div>
                       {actionable.length ? (
                         <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                           {actionable.map(player => {
-                            const isActive = match.winner === player;
+                            const isActive = match.eliminated === player;
                             return (
                               <button
                                 key={player}
-                                onClick={() => handleSetWinner(ridx, midx, player)}
+                                onClick={() => handleToggleEliminated(ridx, midx, player)}
                                 style={{
                                   padding:'4px 10px',
                                   borderRadius:8,
                                   border:'1px solid #d1d5db',
-                                  background: isActive ? '#2563eb' : '#fff',
+                                  background: isActive ? '#dc2626' : '#fff',
                                   color: isActive ? '#fff' : '#1f2937',
                                   cursor:'pointer',
                                 }}
-                              >{lang === 'en' ? `Advance ${displayName(player)}` : `晋级 ${displayName(player)}`}</button>
+                              >{lang === 'en' ? `Eliminate ${displayName(player)}` : `淘汰 ${displayName(player)}`}</button>
                             );
                           })}
                         </div>
