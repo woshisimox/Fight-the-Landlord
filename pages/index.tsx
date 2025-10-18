@@ -1,5 +1,5 @@
 // pages/index.tsx
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -229,7 +229,7 @@ function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
           (m.addedNodes || []).forEach((node: any) => { if (node && node.nodeType === 1) { i18nBatchQueue.add(node as HTMLElement); i18nSchedule(); } });
         } else if (m.type === 'characterData' && m.target && (m.target as any).parentElement) {
           i18nBatchQueue.add((m.target as any).parentElement as HTMLElement); i18nSchedule();
-        }
+}
 
 
 // --- i18n click-compat shim ---
@@ -302,6 +302,81 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
     r[i].sigma = Math.sqrt(Math.max(1e-6, sig2*(1 - w*mult2)) + TS_TAU*TS_TAU);
   }
 }
+
+const KO_BYE = '__KO_BYE__';
+type KnockoutPlayer = string | null;
+type KnockoutMatch = { id: string; players: [KnockoutPlayer, KnockoutPlayer]; winner: KnockoutPlayer | null; };
+type KnockoutRound = { matches: KnockoutMatch[] };
+
+function cloneKnockoutRounds(rounds: KnockoutRound[]): KnockoutRound[] {
+  return rounds.map((round, ridx) => ({
+    matches: (round?.matches || []).map((match, midx) => ({
+      id: match?.id ?? `R${ridx}-M${midx}`,
+      players: [match?.players?.[0] ?? null, match?.players?.[1] ?? null],
+      winner: match?.winner ?? null,
+    })),
+  }));
+}
+
+const knockoutAutoWinner = (players: [KnockoutPlayer, KnockoutPlayer]): KnockoutPlayer | null => {
+  const [a, b] = players;
+  const aBye = a === KO_BYE;
+  const bBye = b === KO_BYE;
+  if (aBye && bBye) return KO_BYE;
+  if (aBye && b && b !== KO_BYE) return b;
+  if (bBye && a && a !== KO_BYE) return a;
+  return null;
+};
+
+function normalizeKnockoutRounds(base: KnockoutRound[]): KnockoutRound[] {
+  const rounds = cloneKnockoutRounds(base);
+  if (!rounds.length) return rounds;
+
+  let winners = rounds[0].matches.map(match => {
+    if (match.winner && !match.players.includes(match.winner)) match.winner = null;
+    const auto = knockoutAutoWinner(match.players);
+    if (!match.winner && auto) match.winner = auto;
+    return match.winner;
+  });
+
+  let roundIndex = 1;
+  while (winners.length > 1) {
+    const neededMatches = Math.ceil(winners.length / 2);
+    const existing = rounds[roundIndex]?.matches ?? [];
+    const nextMatches: KnockoutMatch[] = [];
+    for (let i = 0; i < neededMatches; i++) {
+      const p1 = winners[i * 2] ?? null;
+      const p2 = winners[i * 2 + 1] ?? null;
+      const players: [KnockoutPlayer, KnockoutPlayer] = [p1, p2];
+      const prev = existing[i];
+      let winner = prev?.winner ?? null;
+      if (winner && !players.includes(winner)) winner = null;
+      const auto = knockoutAutoWinner(players);
+      if (!winner && auto) winner = auto;
+      nextMatches.push({
+        id: prev?.id ?? `R${roundIndex}-M${i}`,
+        players,
+        winner,
+      });
+    }
+    rounds[roundIndex] = { matches: nextMatches };
+    winners = nextMatches.map(match => {
+      const auto = knockoutAutoWinner(match.players);
+      if (!match.winner && auto) match.winner = auto;
+      return match.winner;
+    });
+    roundIndex++;
+  }
+
+  rounds.length = roundIndex;
+  return rounds;
+}
+
+const defaultKnockoutSeeds = (lang: Lang): string => (
+  lang === 'en'
+    ? 'Team A\nTeam B\nTeam C\nTeam D'
+    : '队伍A\n队伍B\n队伍C\n队伍D'
+);
 
 /* ===== TrueSkill 本地存档（新增） ===== */
 type TsRole = 'landlord'|'farmer';
@@ -551,6 +626,207 @@ function LadderPanel() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function KnockoutPanel() {
+  const { lang } = useI18n();
+  const [seedText, setSeedText] = useState<string>(() => defaultKnockoutSeeds(lang));
+  const [rounds, setRounds] = useState<KnockoutRound[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const storedSeed = localStorage.getItem('ddz_knockout_seed');
+      if (storedSeed) setSeedText(storedSeed);
+      const storedRounds = localStorage.getItem('ddz_knockout_rounds');
+      if (storedRounds) {
+        const parsed = JSON.parse(storedRounds);
+        if (Array.isArray(parsed)) {
+          setRounds(normalizeKnockoutRounds(parsed as KnockoutRound[]));
+        }
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try { localStorage.setItem('ddz_knockout_seed', seedText); } catch {}
+  }, [seedText]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try { localStorage.setItem('ddz_knockout_rounds', JSON.stringify(rounds)); } catch {}
+  }, [rounds]);
+
+  const handleGenerate = () => {
+    const names = seedText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (names.length < 2) {
+      setError(lang === 'en' ? 'Enter at least two participants.' : '请至少输入两支参赛队伍。');
+      setNotice(null);
+      setRounds([]);
+      if (typeof window !== 'undefined') {
+        try { localStorage.removeItem('ddz_knockout_rounds'); } catch {}
+      }
+      return;
+    }
+    const power = Math.pow(2, Math.ceil(Math.log2(names.length)));
+    const filled = [...names];
+    while (filled.length < power) filled.push(KO_BYE);
+    const firstRound: KnockoutRound = {
+      matches: [],
+    };
+    for (let i = 0; i < filled.length; i += 2) {
+      const players: [KnockoutPlayer, KnockoutPlayer] = [filled[i], filled[i + 1] ?? KO_BYE];
+      firstRound.matches.push({
+        id: `R0-M${i / 2}`,
+        players,
+        winner: knockoutAutoWinner(players),
+      });
+    }
+    setRounds(normalizeKnockoutRounds([firstRound]));
+    setError(null);
+    if (power !== names.length) {
+      setNotice(lang === 'en' ? 'Bracket filled with automatic byes.' : '参赛队伍非 2^N，已自动补齐轮空。');
+    } else {
+      setNotice(null);
+    }
+  };
+
+  const handleReset = () => {
+    setRounds([]);
+    setError(null);
+    setNotice(null);
+    if (typeof window !== 'undefined') {
+      try { localStorage.removeItem('ddz_knockout_rounds'); } catch {}
+    }
+  };
+
+  const handleSetWinner = (roundIdx: number, matchIdx: number, winner: string) => {
+    setRounds(prev => {
+      const draft = cloneKnockoutRounds(prev);
+      const match = draft[roundIdx]?.matches?.[matchIdx];
+      if (!match) return prev;
+      match.winner = match.winner === winner ? null : winner;
+      return normalizeKnockoutRounds(draft);
+    });
+  };
+
+  const champion = useMemo(() => {
+    if (!rounds.length) return null;
+    const finalRound = rounds[rounds.length - 1];
+    if (!finalRound || finalRound.matches.length !== 1) return null;
+    const w = finalRound.matches[0]?.winner;
+    if (w && w !== KO_BYE) return w;
+    return null;
+  }, [rounds]);
+
+  const displayName = (value: KnockoutPlayer | null) => {
+    if (!value) return lang === 'en' ? 'TBD' : '待定';
+    if (value === KO_BYE) return lang === 'en' ? 'BYE' : '轮空';
+    return value;
+  };
+
+  return (
+    <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+      <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>{lang === 'en' ? 'Knockout tournament' : '淘汰赛'}</div>
+      <div style={{ fontSize:14, color:'#4b5563', marginBottom:12 }}>
+        {lang === 'en'
+          ? 'Generate a single-elimination bracket. Enter one participant per line; byes are inserted automatically when required.'
+          : '快速生成单败淘汰赛对阵。每行填写一支队伍，不足时会自动补齐轮空。'}
+      </div>
+      <textarea
+        value={seedText}
+        onChange={e => setSeedText(e.target.value)}
+        placeholder={defaultKnockoutSeeds(lang)}
+        style={{ width:'100%', minHeight:120, border:'1px solid #e5e7eb', borderRadius:8, padding:10, fontSize:14, fontFamily:'inherit', resize:'vertical' }}
+      />
+      <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:8 }}>
+        <button
+          onClick={handleGenerate}
+          style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#2563eb', color:'#fff', cursor:'pointer' }}
+        >{lang === 'en' ? 'Generate bracket' : '生成对阵'}</button>
+        <button
+          onClick={handleReset}
+          disabled={!rounds.length}
+          style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background: rounds.length ? '#fff' : '#f3f4f6', color:'#1f2937', cursor: rounds.length ? 'pointer' : 'not-allowed' }}
+        >{lang === 'en' ? 'Reset bracket' : '重置对阵'}</button>
+      </div>
+      {error && (
+        <div style={{ marginTop:8, color:'#dc2626', fontSize:13 }}>{error}</div>
+      )}
+      {notice && !error && (
+        <div style={{ marginTop:8, color:'#2563eb', fontSize:13 }}>{notice}</div>
+      )}
+
+      {rounds.length > 0 && (
+        <div style={{ marginTop:16, display:'grid', gap:12 }}>
+          {rounds.map((round, ridx) => (
+            <div key={`round-${ridx}`} style={{ border:'1px dashed #d1d5db', borderRadius:10, padding:12 }}>
+              <div style={{ fontWeight:700, marginBottom:6 }}>
+                {lang === 'en' ? `Round ${ridx + 1}` : `第 ${ridx + 1} 轮`}
+              </div>
+              <div style={{ display:'grid', gap:10 }}>
+                {round.matches.map((match, midx) => {
+                  const players = match.players.map(p => displayName(p));
+                  const actionable = match.players.filter(p => p && p !== KO_BYE) as string[];
+                  return (
+                    <div key={match.id || `round-${ridx}-match-${midx}`} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:10 }}>
+                      <div style={{ display:'flex', flexWrap:'wrap', justifyContent:'space-between', alignItems:'center', gap:8, marginBottom:8 }}>
+                        <span style={{ fontWeight:600 }}>{players[0]} vs {players[1]}</span>
+                        {match.winner && match.winner !== KO_BYE && (
+                          <span style={{ fontSize:12, color:'#047857' }}>
+                            {lang === 'en' ? `Winner: ${displayName(match.winner)}` : `晋级：${displayName(match.winner)}`}
+                          </span>
+                        )}
+                        {match.winner === KO_BYE && (
+                          <span style={{ fontSize:12, color:'#6b7280' }}>
+                            {lang === 'en' ? 'Auto-advanced (bye)' : '轮空自动晋级'}
+                          </span>
+                        )}
+                      </div>
+                      {actionable.length ? (
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                          {actionable.map(player => {
+                            const isActive = match.winner === player;
+                            return (
+                              <button
+                                key={player}
+                                onClick={() => handleSetWinner(ridx, midx, player)}
+                                style={{
+                                  padding:'4px 10px',
+                                  borderRadius:8,
+                                  border:'1px solid #d1d5db',
+                                  background: isActive ? '#2563eb' : '#fff',
+                                  color: isActive ? '#fff' : '#1f2937',
+                                  cursor:'pointer',
+                                }}
+                              >{lang === 'en' ? `Advance ${player}` : `晋级 ${player}`}</button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize:12, color:'#6b7280' }}>
+                          {lang === 'en' ? 'Waiting for previous results.' : '等待上一轮结果。'}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {champion && (
+        <div style={{ marginTop:16, padding:12, border:'1px solid #bbf7d0', background:'#ecfdf5', borderRadius:10, color:'#047857', fontWeight:600 }}>
+          {lang === 'en' ? `Champion: ${champion}` : `冠军：${champion}`}
+        </div>
+      )}
     </div>
   );
 }
@@ -2408,12 +2684,20 @@ const [lang, setLang] = useState<Lang>(() => {
     const v = localStorage.getItem('ddz_lang');
     return (v === 'en' || v === 'zh') ? (v as Lang) : 'zh';
   });
+  const [matchMode, setMatchMode] = useState<'regular'|'knockout'>(() => {
+    if (typeof window === 'undefined') return 'regular';
+    const v = localStorage.getItem('ddz_match_mode');
+    return v === 'knockout' ? 'knockout' : 'regular';
+  });
   useEffect(()=>{
     try {
       localStorage.setItem('ddz_lang', lang);
       if (typeof document !== 'undefined') document.documentElement.lang = lang;
     } catch {}
   }, [lang]);
+  useEffect(() => {
+    try { localStorage.setItem('ddz_match_mode', matchMode); } catch {}
+  }, [matchMode]);
   const mainRef = useRef<HTMLDivElement | null>(null);
   useEffect(()=>{ try { if (typeof document !== 'undefined') autoTranslateContainer(mainRef.current, lang); } catch {} }, [lang]);
 
@@ -2464,28 +2748,63 @@ const [lang, setLang] = useState<Lang>(() => {
     };
     rd.readAsText(f);
   };
-  return (<>
+  const isRegularMode = matchMode === 'regular';
+  const regularLabel = lang === 'en' ? 'Regular match' : '常规对局';
+  const knockoutLabel = lang === 'en' ? 'Knockout' : '淘汰赛';
+  return (<> 
     <LangContext.Provider value={lang}>
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
-<div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
-  <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
-  <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
-    <option value="zh">中文</option>
-    <option value="en">English</option>
-  </select>
-</div>
+      <div style={{ marginLeft:'auto', marginBottom:24, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:12 }} data-i18n-ignore>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
+          <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+            <option value="zh">中文</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+        <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'flex-end' }}>
+          <button
+            onClick={()=>setMatchMode('regular')}
+            aria-pressed={isRegularMode}
+            style={{
+              padding:'6px 12px',
+              borderRadius:8,
+              border:'1px solid #d1d5db',
+              background: isRegularMode ? '#2563eb' : '#fff',
+              color: isRegularMode ? '#fff' : '#1f2937',
+              cursor:'pointer',
+              fontWeight:600,
+            }}
+          >{regularLabel}</button>
+          <button
+            onClick={()=>setMatchMode('knockout')}
+            aria-pressed={!isRegularMode}
+            style={{
+              padding:'6px 12px',
+              borderRadius:8,
+              border:'1px solid #d1d5db',
+              background: !isRegularMode ? '#2563eb' : '#fff',
+              color: !isRegularMode ? '#fff' : '#1f2937',
+              cursor:'pointer',
+              fontWeight:600,
+            }}
+          >{knockoutLabel}</button>
+        </div>
+      </div>
 
 
-      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
-        <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
-        <div style={{
-          display:'grid',
-          gridTemplateColumns:'repeat(2, minmax(0, 1fr))',
-          gap:12,
-          gridAutoFlow:'row dense',
-          alignItems:'center'
-        }}>
+      {isRegularMode ? (
+        <>
+        <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+          <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
+          <div style={{
+            display:'grid',
+            gridTemplateColumns:'repeat(2, minmax(0, 1fr))',
+            gap:12,
+            gridAutoFlow:'row dense',
+            alignItems:'center'
+          }}>
           <div>
             <div style={{ display:'flex', alignItems:'center', gap:10 }}>
               <label style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -2765,30 +3084,34 @@ const [lang, setLang] = useState<Lang>(() => {
               ))}
             </div>
           </div>
+          </div>
         </div>
-      </div>
 
-      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
-        {/* —— 天梯图 —— */}
-      <LadderPanel />
-<div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
-        <LivePanel
-          key={resetKey}
-          rounds={rounds}
-          startScore={startScore}
-          seatDelayMs={seatDelayMs}
-          enabled={enabled}
-          bid={bid}
-          four2={four2}
-          seats={seats}
-          seatModels={seatModels}
-          seatKeys={seatKeys}
-          farmerCoop={farmerCoop}
-          onLog={setLiveLog}
-        
-          turnTimeoutSecs={turnTimeoutSecs}
-        />
-      </div>
+        <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
+          {/* —— 天梯图 —— */}
+          <LadderPanel />
+          <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
+          <LivePanel
+            key={resetKey}
+            rounds={rounds}
+            startScore={startScore}
+            seatDelayMs={seatDelayMs}
+            enabled={enabled}
+            bid={bid}
+            four2={four2}
+            seats={seats}
+            seatModels={seatModels}
+            seatKeys={seatKeys}
+            farmerCoop={farmerCoop}
+            onLog={setLiveLog}
+
+            turnTimeoutSecs={turnTimeoutSecs}
+          />
+        </div>
+        </>
+      ) : (
+        <KnockoutPanel />
+      )}
     </div>
     </LangContext.Provider>
   </>);
