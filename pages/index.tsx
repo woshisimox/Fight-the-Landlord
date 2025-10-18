@@ -867,11 +867,7 @@ function KnockoutPanel() {
     try { localStorage.setItem('ddz_knockout_rounds', JSON.stringify(rounds)); } catch {}
   }, [rounds]);
 
-  const ordinalZh = (idx: number) => {
-    const numerals = ['一','二','三','四','五','六','七','八','九','十','十一','十二','十三','十四','十五','十六','十七','十八','十九','二十','二十一','二十二','二十三','二十四','二十五','二十六','二十七','二十八','二十九','三十','三十一','三十二'];
-    return numerals[idx] || `${idx + 1}`;
-  };
-  const participantLabel = (idx: number) => (lang === 'en' ? `Participant ${idx + 1}` : `参赛${ordinalZh(idx)}`);
+  const participantLabel = (idx: number) => (lang === 'en' ? `Player ${idx + 1}` : `选手${idx + 1}`);
 
   const handleAllFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -890,23 +886,7 @@ function KnockoutPanel() {
     reader.readAsText(file);
   };
 
-  const entryDisplay = (entry: KnockoutEntry) => {
-    const alias = entry.name.trim();
-    const provider = choiceLabel(entry.choice);
-    let providerLabel = provider;
-    if (entry.choice.startsWith('ai:')) {
-      const model = entry.model.trim() || defaultModelFor(entry.choice);
-      if (model) providerLabel = `${provider}:${model}`;
-    } else if (entry.choice === 'http') {
-      const base = entry.keys?.httpBase?.trim();
-      if (base) providerLabel = `${provider}:${base}`;
-    }
-    if (alias && providerLabel) return `${alias} · ${providerLabel}`;
-    if (alias) return alias;
-    return providerLabel;
-  };
-
-  const entryToken = (entry: KnockoutEntry) => {
+  const entryIdentity = (entry: KnockoutEntry) => {
     const payload: Record<string, string> = {
       name: entry.name.trim(),
       choice: entry.choice,
@@ -920,9 +900,29 @@ function KnockoutPanel() {
     return JSON.stringify(payload);
   };
 
+  const entryToken = (entry: KnockoutEntry, slot: number) => {
+    const payload: Record<string, string | number> = {
+      id: entry.id,
+      slot,
+      name: entry.name.trim(),
+      choice: entry.choice,
+    };
+    if (entry.choice.startsWith('ai:')) {
+      const model = entry.model.trim();
+      if (model) payload.model = model;
+    }
+    if (entry.choice === 'http') {
+      const base = (entry.keys?.httpBase || '').trim();
+      if (base) payload.httpBase = base;
+    }
+    return JSON.stringify(payload);
+  };
+
   const handleGenerate = () => {
-    const roster = entries.map(entry => ({ token: entryToken(entry), label: entryDisplay(entry) }))
-      .filter(item => item.label);
+    const roster = entries.map((entry, idx) => ({
+      token: entryToken(entry, idx + 1),
+      identity: entryIdentity(entry),
+    })).filter(item => item.identity);
     if (roster.length < 3) {
       setError(lang === 'en' ? 'Add at least three participants.' : '请至少添加三名参赛选手。');
       setNotice(null);
@@ -932,9 +932,9 @@ function KnockoutPanel() {
       }
       return;
     }
-    const uniqueTokens = new Set(roster.map(item => item.token));
+    const uniqueTokens = new Set(roster.map(item => item.identity));
     if (uniqueTokens.size < roster.length) {
-      setError(lang === 'en' ? 'Participant entries must be unique.' : '参赛选手的组合需要唯一，请修改名称。');
+      setError(lang === 'en' ? 'Participant configurations must be unique.' : '参赛选手配置需要唯一，请调整选择。');
       setNotice(null);
       return;
     }
@@ -998,6 +998,14 @@ function KnockoutPanel() {
       try {
         const parsed = JSON.parse(value);
         if (parsed && typeof parsed === 'object') {
+          const slotNumber = Number((parsed as any).slot);
+          if (Number.isFinite(slotNumber) && slotNumber >= 1) {
+            return participantLabel(slotNumber - 1);
+          }
+          if (typeof (parsed as any).id === 'string') {
+            const idx = entries.findIndex(entry => entry.id === (parsed as any).id);
+            if (idx >= 0) return participantLabel(idx);
+          }
           const alias = typeof parsed.name === 'string' ? parsed.name.trim() : '';
           const rawChoice = typeof parsed.choice === 'string' ? parsed.choice : '';
           const provider = KO_ALL_CHOICES.includes(rawChoice as BotChoice) ? choiceLabel(rawChoice as BotChoice) : '';
@@ -1057,10 +1065,6 @@ function KnockoutPanel() {
     setEntries(prev => prev.map(entry => entry.id === id ? mutator(entry) : entry));
   };
 
-  const handleEntryNameChange = (id: string, name: string) => {
-    updateEntry(id, entry => ({ ...entry, name }));
-  };
-
   const handleEntryModelChange = (id: string, model: string) => {
     updateEntry(id, entry => ({ ...entry, model }));
   };
@@ -1081,8 +1085,8 @@ function KnockoutPanel() {
 
   const participantsTitle = lang === 'en' ? 'Participants' : '参赛选手';
   const participantsHint = lang === 'en'
-    ? 'Pick bots or AIs just like regular matches. The display name appears in the bracket.'
-    : '从常规对局使用的内置 / 外置 AI 中选择参赛选手，显示名称会出现在淘汰赛对阵中。';
+    ? 'Pick bots or AIs just like regular matches.'
+    : '从常规对局使用的内置 / 外置 AI 中选择参赛选手。';
 
   const intervalTitle = lang === 'en' ? 'Min play interval (ms)' : '最小间隔 (ms)';
   const timeoutTitle = lang === 'en' ? 'Think timeout (s)' : '弃牌时间（秒）';
@@ -1137,7 +1141,7 @@ function KnockoutPanel() {
                   >{lang === 'en' ? 'Remove' : '移除'}</button>
                 </div>
                 <label style={{ display:'block' }}>
-                  {lang === 'en' ? 'Source' : '来源'}
+                  {lang === 'en' ? 'Select' : '选择'}
                   <select
                     value={entry.choice}
                     onChange={e => handleEntryChoiceChange(entry.id, e.target.value as BotChoice)}
@@ -1161,16 +1165,6 @@ function KnockoutPanel() {
                       <option value="http">HTTP</option>
                     </optgroup>
                   </select>
-                </label>
-                <label style={{ display:'block' }}>
-                  {lang === 'en' ? 'Display name' : '显示名称'}
-                  <input
-                    type="text"
-                    value={entry.name}
-                    onChange={e => handleEntryNameChange(entry.id, e.target.value)}
-                    placeholder={choiceLabel(entry.choice)}
-                    style={{ width:'100%', marginTop:4 }}
-                  />
                 </label>
                 {entry.choice.startsWith('ai:') && (
                   <label style={{ display:'block' }}>
