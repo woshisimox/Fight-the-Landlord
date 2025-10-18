@@ -471,18 +471,14 @@ function cloneKnockoutRounds(rounds: KnockoutRound[]): KnockoutRound[] {
 
 function distributeKnockoutPlayers(pool: KnockoutPlayer[]): KnockoutPlayer[][] {
   const players = pool.filter(p => !!p);
-  if (players.length <= 1) return [];
+  if (!players.length) return [];
+  const padded: KnockoutPlayer[] = [...players];
+  while (padded.length % 3 !== 0) {
+    padded.push(KO_BYE);
+  }
   const groups: KnockoutPlayer[][] = [];
-  let idx = 0;
-  let remaining = players.length;
-  while (remaining > 0) {
-    const matchesLeft = Math.ceil(remaining / 3);
-    let size = Math.min(3, remaining);
-    while (size > 2 && remaining - size < (matchesLeft - 1) * 2) size -= 1;
-    if (size < 2) size = Math.min(remaining, 2);
-    groups.push(players.slice(idx, idx + size));
-    idx += size;
-    remaining -= size;
+  for (let idx = 0; idx < padded.length; idx += 3) {
+    groups.push(padded.slice(idx, idx + 3));
   }
   return groups;
 }
