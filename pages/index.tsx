@@ -328,7 +328,17 @@ type KnockoutEntry = {
   timeoutSecs: number;
 };
 
+type KnockoutSettings = {
+  enabled: boolean;
+  roundsPerGroup: number;
+  startScore: number;
+  bid: boolean;
+  four2: Four2Policy;
+  farmerCoop: boolean;
+};
+
 const KO_ENTRY_STORAGE = 'ddz_knockout_entries';
+const KO_SETTINGS_STORAGE = 'ddz_knockout_settings';
 const KO_DEFAULT_DELAY = 1000;
 const KO_DEFAULT_TIMEOUT = 30;
 const KO_DEFAULT_CHOICES: BotChoice[] = [
@@ -352,6 +362,35 @@ const KO_ALL_CHOICES: BotChoice[] = [
   'ai:deepseek',
   'http',
 ];
+
+const KO_DEFAULT_SETTINGS: KnockoutSettings = {
+  enabled: true,
+  roundsPerGroup: 10,
+  startScore: 100,
+  bid: true,
+  four2: 'both',
+  farmerCoop: true,
+};
+
+function defaultKnockoutSettings(): KnockoutSettings {
+  return { ...KO_DEFAULT_SETTINGS };
+}
+
+function sanitizeKnockoutSettings(raw: any): KnockoutSettings {
+  const base = typeof raw === 'object' && raw ? raw : {};
+  const next = defaultKnockoutSettings();
+  if (typeof base.enabled === 'boolean') next.enabled = base.enabled;
+  const rounds = Math.max(1, Math.floor(Number(base.roundsPerGroup) || 0));
+  if (Number.isFinite(rounds) && rounds > 0) next.roundsPerGroup = rounds;
+  const start = Number(base.startScore);
+  if (Number.isFinite(start)) next.startScore = start;
+  if (typeof base.bid === 'boolean') next.bid = base.bid;
+  if (typeof base.farmerCoop === 'boolean') next.farmerCoop = base.farmerCoop;
+  if (base.four2 === 'both' || base.four2 === '2singles' || base.four2 === '2pairs') {
+    next.four2 = base.four2;
+  }
+  return next;
+}
 
 function makeKnockoutEntryId() {
   return `ko-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
@@ -813,6 +852,16 @@ function LadderPanel() {
 
 function KnockoutPanel() {
   const { lang } = useI18n();
+  const [settings, setSettings] = useState<KnockoutSettings>(() => {
+    if (typeof window === 'undefined') return defaultKnockoutSettings();
+    try {
+      const stored = localStorage.getItem(KO_SETTINGS_STORAGE);
+      if (stored) {
+        return sanitizeKnockoutSettings(JSON.parse(stored));
+      }
+    } catch {}
+    return defaultKnockoutSettings();
+  });
   const [entries, setEntries] = useState<KnockoutEntry[]>(() => {
     if (typeof window === 'undefined') return makeDefaultKnockoutEntries();
     try {
@@ -845,6 +894,11 @@ function KnockoutPanel() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    try { localStorage.setItem(KO_SETTINGS_STORAGE, JSON.stringify(settings)); } catch {}
+  }, [settings]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
     try {
       const storedRounds = localStorage.getItem('ddz_knockout_rounds');
       if (storedRounds) {
@@ -868,6 +922,10 @@ function KnockoutPanel() {
   }, [rounds]);
 
   const participantLabel = (idx: number) => (lang === 'en' ? `Player ${idx + 1}` : `选手${idx + 1}`);
+  const updateSettings = (patch: Partial<KnockoutSettings>) => {
+    setSettings(prev => sanitizeKnockoutSettings({ ...prev, ...patch }));
+  };
+  const { enabled, roundsPerGroup, startScore, bid, four2, farmerCoop } = settings;
 
   const handleAllFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -919,6 +977,11 @@ function KnockoutPanel() {
   };
 
   const handleGenerate = () => {
+    if (!enabled) {
+      setError(lang === 'en' ? 'Enable the tournament before generating a bracket.' : '请先启用淘汰赛。');
+      setNotice(null);
+      return;
+    }
     const roster = entries.map((entry, idx) => ({
       token: entryToken(entry, idx + 1),
       identity: entryIdentity(entry),
@@ -949,8 +1012,8 @@ function KnockoutPanel() {
     setRounds([firstRound]);
     setError(null);
     setNotice(lang === 'en'
-      ? 'Participants shuffled into groups of three where possible.'
-      : '已尽量按每组三人随机分组。');
+      ? `Participants shuffled into groups of three where possible. Each trio plays ${roundsPerGroup} game(s).`
+      : `已尽量按每组三人随机分组。每组三人对局 ${roundsPerGroup} 局。`);
   };
 
   const handleReset = () => {
@@ -962,7 +1025,25 @@ function KnockoutPanel() {
     }
   };
 
+  const handleResetAll = () => {
+    setSettings(defaultKnockoutSettings());
+    setEntries(makeDefaultKnockoutEntries());
+    setRounds([]);
+    setError(null);
+    setNotice(null);
+    if (typeof window !== 'undefined') {
+      try { localStorage.removeItem(KO_SETTINGS_STORAGE); } catch {}
+      try { localStorage.removeItem(KO_ENTRY_STORAGE); } catch {}
+      try { localStorage.removeItem('ddz_knockout_rounds'); } catch {}
+    }
+  };
+
   const handleToggleEliminated = (roundIdx: number, matchIdx: number, player: string) => {
+    if (!enabled) {
+      setError(lang === 'en' ? 'Enable the tournament to record eliminations.' : '请先启用淘汰赛以记录淘汰结果。');
+      setNotice(null);
+      return;
+    }
     setRounds(prev => {
       const draft = cloneKnockoutRounds(prev);
       const match = draft[roundIdx]?.matches?.[matchIdx];
@@ -1099,11 +1180,113 @@ function KnockoutPanel() {
           ? 'Generate a single-elimination bracket. Add participants below; byes are inserted automatically when required.'
           : '快速生成单败淘汰赛对阵。先在下方选择参赛选手，不足时会自动补齐轮空。'}
       </div>
-        <div style={{ border:'1px dashed #d1d5db', borderRadius:10, padding:12, marginBottom:12 }}>
-          <div style={{ fontWeight:700, marginBottom:4 }}>{participantsTitle}</div>
-          <div style={{ fontSize:13, color:'#4b5563', marginBottom:12 }}>{participantsHint}</div>
-          <div
-            style={{
+      <div style={{ border:'1px solid #e5e7eb', borderRadius:12, padding:14, marginBottom:16 }}>
+        <div style={{ fontSize:16, fontWeight:700, marginBottom:10 }}>{lang === 'en' ? 'Match settings' : '对局设置'}</div>
+        <div
+          style={{
+            display:'grid',
+            gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))',
+            gap:12,
+            alignItems:'center',
+          }}
+        >
+          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+            <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+              {lang === 'en' ? 'Enable match' : '启用对局'}
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={e => updateSettings({ enabled: e.target.checked })}
+              />
+            </label>
+            <button
+              onClick={handleResetAll}
+              style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+            >{lang === 'en' ? 'Reset' : '清空'}</button>
+          </div>
+          <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            <span>{lang === 'en' ? 'Games per trio' : '每组三人局数'}</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={roundsPerGroup}
+              onChange={e => updateSettings({ roundsPerGroup: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+              style={{ width:'100%' }}
+            />
+            <span style={{ fontSize:12, color:'#6b7280' }}>
+              {lang === 'en'
+                ? 'Applies to each elimination trio per round.'
+                : '用于本轮每组三名选手的对局局数。'}
+            </span>
+          </label>
+          <div style={{ display:'flex', alignItems:'center', gap:24, flexWrap:'wrap' }}>
+            <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+              {lang === 'en' ? 'Outbid landlord' : '可抢地主'}
+              <input
+                type="checkbox"
+                checked={bid}
+                onChange={e => updateSettings({ bid: e.target.checked })}
+              />
+            </label>
+            <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+              {lang === 'en' ? 'Farmer cooperation' : '农民配合'}
+              <input
+                type="checkbox"
+                checked={farmerCoop}
+                onChange={e => updateSettings({ farmerCoop: e.target.checked })}
+              />
+            </label>
+          </div>
+          <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            <span>{lang === 'en' ? 'Initial score' : '初始分'}</span>
+            <input
+              type="number"
+              step={10}
+              value={startScore}
+              onChange={e => updateSettings({ startScore: Number(e.target.value) || 0 })}
+              style={{ width:'100%' }}
+            />
+          </label>
+          <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            <span>{lang === 'en' ? '4-with-2 rule' : '4带2 规则'}</span>
+            <select
+              value={four2}
+              onChange={e => updateSettings({ four2: e.target.value as Four2Policy })}
+              style={{ width:'100%' }}
+            >
+              <option value="both">{lang === 'en' ? 'Allowed' : '都可'}</option>
+              <option value="2singles">{lang === 'en' ? 'Two singles' : '两张单牌'}</option>
+              <option value="2pairs">{lang === 'en' ? 'Two pairs' : '两对'}</option>
+            </select>
+          </label>
+          <div style={{ gridColumn:'1 / -1', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+            <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+              {lang === 'en' ? 'Ladder / TrueSkill' : '天梯 / TrueSkill'}
+              <input
+                ref={allFileRef}
+                type="file"
+                accept="application/json"
+                style={{ display:'none' }}
+                onChange={handleAllFileUpload}
+              />
+              <button
+                onClick={() => allFileRef.current?.click()}
+                style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >{lang === 'en' ? 'Upload' : '上传'}</button>
+            </label>
+            <button
+              onClick={() => window.dispatchEvent(new Event('ddz-all-save'))}
+              style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+            >{lang === 'en' ? 'Save' : '存档'}</button>
+          </div>
+        </div>
+      </div>
+      <div style={{ border:'1px dashed #d1d5db', borderRadius:10, padding:12, marginBottom:12 }}>
+        <div style={{ fontWeight:700, marginBottom:4 }}>{participantsTitle}</div>
+        <div style={{ fontSize:13, color:'#4b5563', marginBottom:12 }}>{participantsHint}</div>
+        <div
+          style={{
               display:'grid',
               gap:12,
               gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))',
@@ -1335,12 +1518,27 @@ function KnockoutPanel() {
       <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:16 }}>
         <button
           onClick={handleGenerate}
-          style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#2563eb', color:'#fff', cursor:'pointer' }}
+          disabled={!enabled}
+          style={{
+            padding:'6px 12px',
+            borderRadius:8,
+            border:'1px solid #d1d5db',
+            background: enabled ? '#2563eb' : '#9ca3af',
+            color:'#fff',
+            cursor: enabled ? 'pointer' : 'not-allowed',
+          }}
         >{lang === 'en' ? 'Generate bracket' : '生成对阵'}</button>
         <button
           onClick={handleReset}
-          disabled={!rounds.length}
-          style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background: rounds.length ? '#fff' : '#f3f4f6', color:'#1f2937', cursor: rounds.length ? 'pointer' : 'not-allowed' }}
+          disabled={!enabled || !rounds.length}
+          style={{
+            padding:'6px 12px',
+            borderRadius:8,
+            border:'1px solid #d1d5db',
+            background: rounds.length && enabled ? '#fff' : '#f3f4f6',
+            color:'#1f2937',
+            cursor: rounds.length && enabled ? 'pointer' : 'not-allowed',
+          }}
         >{lang === 'en' ? 'Reset bracket' : '重置对阵'}</button>
       </div>
       {error && (
@@ -1351,26 +1549,6 @@ function KnockoutPanel() {
       )}
 
       <div style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:12, marginTop:16 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:16, flexWrap:'wrap', marginBottom:8 }}>
-          <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-            {lang === 'en' ? 'Ladder / TrueSkill' : '天梯 / TrueSkill'}
-            <input
-              ref={allFileRef}
-              type="file"
-              accept="application/json"
-              style={{ display:'none' }}
-              onChange={handleAllFileUpload}
-            />
-            <button
-              onClick={() => allFileRef.current?.click()}
-              style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-            >{lang === 'en' ? 'Upload' : '上传'}</button>
-          </label>
-          <button
-            onClick={() => window.dispatchEvent(new Event('ddz-all-save'))}
-            style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-          >{lang === 'en' ? 'Save' : '存档'}</button>
-        </div>
         <LadderPanel />
       </div>
 
@@ -1380,6 +1558,11 @@ function KnockoutPanel() {
             <div key={`round-${ridx}`} style={{ border:'1px dashed #d1d5db', borderRadius:10, padding:12 }}>
               <div style={{ fontWeight:700, marginBottom:6 }}>
                 {lang === 'en' ? `Round ${ridx + 1}` : `第 ${ridx + 1} 轮`}
+              </div>
+              <div style={{ fontSize:13, color:'#4b5563', marginBottom:8 }}>
+                {lang === 'en'
+                  ? `Each trio plays ${roundsPerGroup} game(s) this round.`
+                  : `本轮每组三人进行 ${roundsPerGroup} 局。`}
               </div>
               <div style={{ display:'grid', gap:10 }}>
                 {round.matches.map((match, midx) => {
