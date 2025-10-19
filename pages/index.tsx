@@ -705,6 +705,7 @@ type LiveProps = {
   onPauseChange?: (paused: boolean) => void;
   onFinished?: (result: LivePanelFinishPayload) => void;
   controlsHidden?: boolean;
+  initialTotals?: [number, number, number] | null;
   turnTimeoutSecs?: number[];};
 
 type LivePanelHandle = {
@@ -966,6 +967,13 @@ function KnockoutPanel() {
   const [liveTotals, setLiveTotals] = useState<[number, number, number] | null>(null);
   const liveTotalsRef = useRef<[number, number, number] | null>(null);
   useEffect(() => { liveTotalsRef.current = liveTotals; }, [liveTotals]);
+  const [seriesTotals, setSeriesTotals] = useState<[number, number, number] | null>(null);
+  const seriesTotalsRef = useRef<[number, number, number] | null>(seriesTotals);
+  useEffect(() => { seriesTotalsRef.current = seriesTotals; }, [seriesTotals]);
+  const [seriesRounds, setSeriesRounds] = useState<number>(() => settings.roundsPerGroup);
+  const [overtimeCount, setOvertimeCount] = useState(0);
+  const overtimeCountRef = useRef(overtimeCount);
+  useEffect(() => { overtimeCountRef.current = overtimeCount; }, [overtimeCount]);
   const [liveRunning, setLiveRunning] = useState(false);
   const [livePaused, setLivePaused] = useState(false);
   const [automationActive, setAutomationActive] = useState(false);
@@ -1014,6 +1022,9 @@ function KnockoutPanel() {
     setAutomationActive(false);
     setCurrentMatch(null);
     setLiveTotals(null);
+    setSeriesTotals(null);
+    setSeriesRounds(settings.roundsPerGroup);
+    setOvertimeCount(0);
     setLiveRunning(false);
     setLivePaused(false);
   }, [rounds.length]);
@@ -1131,6 +1142,9 @@ function KnockoutPanel() {
     setLivePaused(false);
     setCurrentMatch(null);
     setLiveTotals(null);
+    setSeriesTotals(null);
+    setSeriesRounds(settings.roundsPerGroup);
+    setOvertimeCount(0);
     setRounds([]);
     setError(null);
     setNotice(null);
@@ -1146,6 +1160,9 @@ function KnockoutPanel() {
     setLivePaused(false);
     setCurrentMatch(null);
     setLiveTotals(null);
+    setSeriesTotals(null);
+    setSeriesRounds(KO_DEFAULT_SETTINGS.roundsPerGroup);
+    setOvertimeCount(0);
     setSettings(defaultKnockoutSettings());
     setEntries(makeDefaultKnockoutEntries());
     setRounds([]);
@@ -1282,7 +1299,12 @@ function KnockoutPanel() {
       return false;
     }
     setCurrentMatch(context);
-    setLiveTotals(null);
+    const baseScore = Number.isFinite(startScore) ? startScore : 0;
+    const baseTotals = [baseScore, baseScore, baseScore] as [number, number, number];
+    setSeriesRounds(roundsPerGroup);
+    setSeriesTotals(baseTotals);
+    setOvertimeCount(0);
+    setLiveTotals(baseTotals);
     setMatchKey(key => key + 1);
     setTimeout(() => { livePanelRef.current?.start(); }, 0);
     return true;
@@ -1291,6 +1313,21 @@ function KnockoutPanel() {
   const scheduleNextMatch = () => {
     if (!autoRunRef.current) return;
     if (livePanelRef.current?.isRunning()) return;
+    const pendingContext = currentMatchRef.current;
+    if (overtimeCountRef.current > 0 && pendingContext) {
+      const round = roundsRef.current?.[pendingContext.roundIdx];
+      const match = round?.matches?.[pendingContext.matchIdx];
+      if (match && !match.eliminated) {
+        const active = match.players.filter(p => p && p !== KO_BYE);
+        if (active.length >= 3) {
+          if (seriesTotalsRef.current) setLiveTotals(seriesTotalsRef.current);
+          setSeriesRounds(3);
+          setMatchKey(key => key + 1);
+          setTimeout(() => { livePanelRef.current?.start(); }, 0);
+          return;
+        }
+      }
+    }
     const next = findNextPlayableMatch(roundsRef.current || []);
     if (!next) {
       setAutomation(false);
@@ -1306,6 +1343,10 @@ function KnockoutPanel() {
     const active = match.players.filter(p => p && p !== KO_BYE);
     if (active.length < 3) {
       const byeToken = match.players.find(p => p === KO_BYE || !p) ?? KO_BYE;
+      setSeriesTotals(null);
+      setLiveTotals(null);
+      setSeriesRounds(roundsPerGroup);
+      setOvertimeCount(0);
       setRounds(prev => {
         const draft = cloneKnockoutRounds(prev);
         applyEliminationToDraft(draft, next.roundIdx, next.matchIdx, byeToken);
@@ -1321,7 +1362,6 @@ function KnockoutPanel() {
   };
 
   const handleLiveFinished = (result: LivePanelFinishPayload) => {
-    setLiveTotals(result.totals);
     if (result.aborted) {
       setAutomation(false);
       return;
@@ -1337,6 +1377,14 @@ function KnockoutPanel() {
     if (!ctx) return;
     const totals = result.totals || liveTotalsRef.current;
     if (!totals) return;
+    const baseScore = Number.isFinite(startScore) ? startScore : 0;
+    const totalsTuple = [0, 0, 0] as [number, number, number];
+    for (let i = 0; i < 3; i++) {
+      const raw = Number((totals as number[])[i]);
+      totalsTuple[i] = Number.isFinite(raw) ? raw : baseScore;
+    }
+    setLiveTotals(totalsTuple);
+    setSeriesTotals(totalsTuple);
     const scored = ctx.tokens.map((token, idx) => {
       const val = Number(totals[idx]);
       return {
@@ -1365,10 +1413,14 @@ function KnockoutPanel() {
       const tiedLabels = tiedLowest
         .map(entry => displayName(entry.token))
         .join(lang === 'en' ? ', ' : '、');
-      setAutomation(false);
+      const nextAttempt = overtimeCountRef.current + 1;
+      setOvertimeCount(nextAttempt);
+      setSeriesRounds(3);
       setNotice(lang === 'en'
-        ? `Round ${ctx.roundIdx + 1}: lowest score tie among ${tiedLabels}. Please select the eliminated player manually.`
-        : `第 ${ctx.roundIdx + 1} 轮积分最低的选手出现平局（${tiedLabels}），请手动选择淘汰选手。`);
+        ? `Round ${ctx.roundIdx + 1}: lowest score tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
+        : `第 ${ctx.roundIdx + 1} 轮积分最低出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
+      setMatchKey(key => key + 1);
+      setTimeout(() => { livePanelRef.current?.start(); }, 0);
       return;
     }
     const eliminatedToken = tiedLowest[0]?.token;
@@ -1382,6 +1434,8 @@ function KnockoutPanel() {
       applyEliminationToDraft(draft, ctx.roundIdx, ctx.matchIdx, eliminatedToken);
       return draft;
     });
+    setSeriesRounds(roundsPerGroup);
+    setOvertimeCount(0);
     setNotice(lang === 'en'
       ? `Round ${ctx.roundIdx + 1}: eliminated ${label}.`
       : `第 ${ctx.roundIdx + 1} 轮淘汰：${label}`);
@@ -1443,10 +1497,11 @@ function KnockoutPanel() {
 
   const scoreboardTotals = useMemo(() => {
     if (liveTotals) return liveTotals;
+    if (seriesTotals) return seriesTotals;
     if (!currentMatch) return null;
     const base = Number.isFinite(startScore) ? startScore : 0;
     return [base, base, base] as [number, number, number];
-  }, [liveTotals, currentMatch, startScore]);
+  }, [liveTotals, seriesTotals, currentMatch, startScore]);
 
   const seatsForLive = currentMatch ? currentMatch.seats : fallbackLive.seats;
   const modelsForLive = currentMatch ? currentMatch.seatModels : fallbackLive.seatModels;
@@ -2106,6 +2161,13 @@ function KnockoutPanel() {
                     );
                   })}
                 </div>
+                {overtimeCount > 0 && (
+                  <div style={{ fontSize:12, color:'#b91c1c', marginBottom:12 }}>
+                    {lang === 'en'
+                      ? `Overtime playoff #${overtimeCount} (3 games) is running because of a lowest-score tie.`
+                      : `由于积分最低出现平局，正在进行第 ${overtimeCount} 次加时赛（每次 3 局）。`}
+                  </div>
+                )}
               </>
             ) : (
               <div style={{ fontSize:13, color:'#6b7280', marginBottom:12 }}>
@@ -2116,7 +2178,7 @@ function KnockoutPanel() {
               <LivePanel
                 key={matchKey}
                 ref={livePanelRef}
-                rounds={roundsPerGroup}
+                rounds={seriesRounds}
                 startScore={startScore}
                 seatDelayMs={delaysForLive}
                 enabled={enabled && !!currentMatch}
@@ -2131,6 +2193,7 @@ function KnockoutPanel() {
                 onPauseChange={setLivePaused}
                 onFinished={handleLiveFinished}
                 controlsHidden
+                initialTotals={seriesTotals}
                 turnTimeoutSecs={timeoutsForLive}
               />
             </div>
@@ -2306,6 +2369,21 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   return out;
 };
 
+const sanitizeTotalsArray = (
+  value: [number, number, number] | number[] | null | undefined,
+  fallback: number,
+): [number, number, number] => {
+  const safe = Number.isFinite(fallback) ? fallback : 0;
+  if (Array.isArray(value) && value.length === 3) {
+    const mapped = value.map(v => {
+      const num = Number(v);
+      return Number.isFinite(num) ? num : safe;
+    }) as number[];
+    return [mapped[0], mapped[1], mapped[2]] as [number, number, number];
+  }
+  return [safe, safe, safe];
+};
+
 /* ==================== LivePanel（对局） ==================== */
 const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(props, ref) {
   const [running, setRunning] = useState(false);
@@ -2353,9 +2431,29 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [] });
   const [log, setLog] = useState<string[]>([]);
-  const [totals, setTotals] = useState<[number,number,number]>([
-    props.startScore || 0, props.startScore || 0, props.startScore || 0,
-  ]);
+  const initialTotals = useMemo(
+    () => sanitizeTotalsArray(props.initialTotals, props.startScore || 0),
+    [props.initialTotals, props.startScore],
+  );
+  const [totals, setTotals] = useState<[number, number, number]>(() => (
+    [initialTotals[0], initialTotals[1], initialTotals[2]]
+  ));
+  const initialTotalsRef = useRef<[number, number, number]>(initialTotals);
+  useEffect(() => {
+    initialTotalsRef.current = initialTotals;
+    if (!runningRef.current) {
+      setTotals(prev => {
+        if (
+          prev[0] === initialTotals[0] &&
+          prev[1] === initialTotals[1] &&
+          prev[2] === initialTotals[2]
+        ) {
+          return prev;
+        }
+        return [initialTotals[0], initialTotals[1], initialTotals[2]] as [number, number, number];
+      });
+    }
+  }, [initialTotals]);
   const [finishedCount, setFinishedCount] = useState(0);
   // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
@@ -2905,7 +3003,8 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setLandlord(null); setHands([[], [], []]); setPlays([]);
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
-    setTotals([props.startScore || 0, props.startScore || 0, props.startScore || 0]);
+    const base = initialTotalsRef.current;
+    setTotals([base[0], base[1], base[2]] as [number, number, number]);
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
 
@@ -3627,9 +3726,11 @@ nextTotals     = [
       setRunning(false);
       const totalsSnap = (() => {
         const value = totalsRef.current;
-        if (value && Array.isArray(value) && value.length === 3) return value as [number, number, number];
-        const base = props.startScore || 0;
-        return [base, base, base] as [number, number, number];
+        if (value && Array.isArray(value) && value.length === 3) {
+          return [value[0], value[1], value[2]] as [number, number, number];
+        }
+        const base = initialTotalsRef.current;
+        return [base[0], base[1], base[2]] as [number, number, number];
       })();
       const finishedGames = finishedRef.current || 0;
       const targetRounds = Math.max(1, Number(props.rounds) || 1);
