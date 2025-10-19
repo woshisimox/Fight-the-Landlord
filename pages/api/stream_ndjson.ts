@@ -477,7 +477,7 @@ function makeHumanBot(
 
   (bot as any).phaseAware = true;
   (bot as any).choice = 'human';
-  (bot as any).name = 'Human';
+  Object.defineProperty(bot, 'name', { value: 'Human', configurable: true });
   return bot;
 }
 
