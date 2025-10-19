@@ -2197,6 +2197,78 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
     bid: a*curr.bid  + (1-a)*prev.bid,
   };
 }
+
+type RadarPanelProps = {
+  aggStats: Score5[] | null;
+  aggCount: number;
+  aggMode: 'mean'|'ewma';
+  alpha: number;
+  onChangeMode: (m: 'mean'|'ewma') => void;
+  onChangeAlpha: (a: number) => void;
+};
+
+const RadarPanel = ({ aggStats, aggCount, aggMode, alpha, onChangeMode, onChangeAlpha }: RadarPanelProps) => {
+  const [mode, setMode] = useState<'mean'|'ewma'>(aggMode);
+  const [a, setA] = useState<number>(alpha);
+
+  useEffect(() => { setMode(aggMode); }, [aggMode]);
+  useEffect(() => { setA(alpha); }, [alpha]);
+
+  return (
+    <>
+      <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:8 }}>
+        <label>
+          汇总方式
+          <select
+            value={mode}
+            onChange={e => {
+              const v = e.target.value as ('mean'|'ewma');
+              setMode(v);
+              onChangeMode(v);
+            }}
+            style={{ marginLeft:6 }}
+          >
+            <option value="ewma">指数加权（推荐）</option>
+            <option value="mean">简单平均</option>
+          </select>
+        </label>
+        {mode === 'ewma' && (
+          <label>
+            α（0.05–0.95）
+            <input
+              type="number"
+              min={0.05}
+              max={0.95}
+              step={0.05}
+              value={a}
+              onChange={e => {
+                const v = Math.min(0.95, Math.max(0.05, Number(e.target.value) || 0.35));
+                setA(v);
+                onChangeAlpha(v);
+              }}
+              style={{ width:80, marginLeft:6 }}
+            />
+          </label>
+        )}
+        <div style={{ fontSize:12, color:'#6b7280' }}>
+          {mode === 'ewma' ? '越大越看重最近几局' : `已累计 ${aggCount} 局`}
+        </div>
+      </div>
+
+      {aggStats
+        ? (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
+            {[0, 1, 2].map(i => (
+              <RadarChart key={i} title={`${['甲', '乙', '丙'][i]}（累计）`} scores={aggStats[i]} />
+            ))}
+          </div>
+        )
+        : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
+      }
+    </>
+  );
+};
+
 /* ---------- 文本改写：把“第 x 局”固定到本局 ---------- */
 const makeRewriteRoundLabel = (n: number) => (msg: string) => {
   if (typeof msg !== 'string') return msg;
@@ -3922,60 +3994,7 @@ const handleAllSaveInner = () => {
       </div>
     </div>
   );
-}
-
-function RadarPanel({
-  aggStats, aggCount, aggMode, alpha,
-  onChangeMode, onChangeAlpha,
-}:{ aggStats: Score5[] | null; aggCount: number; aggMode:'mean'|'ewma'; alpha:number;
-   onChangeMode:(m:'mean'|'ewma')=>void; onChangeAlpha:(a:number)=>void; }) {
-  const [mode, setMode] = useState<'mean'|'ewma'>(aggMode);
-  const [a, setA] = useState<number>(alpha);
-
-  useEffect(()=>{ setMode(aggMode); }, [aggMode]);
-  useEffect(()=>{ setA(alpha); }, [alpha]);
-
-  return (
-    <>
-      <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:8 }}>
-        <label>
-          汇总方式
-          <select value={mode} onChange={e=>{ const v=e.target.value as ('mean'|'ewma'); setMode(v); onChangeMode(v); }} style={{ marginLeft:6 }}>
-            <option value="ewma">指数加权（推荐）</option>
-            <option value="mean">简单平均</option>
-          </select>
-        </label>
-        {mode === 'ewma' && (
-          <label>
-            α（0.05–0.95）
-            <input type="number" min={0.05} max={0.95} step={0.05}
-              value={a}
-              onChange={e=>{
-                const v = Math.min(0.95, Math.max(0.05, Number(e.target.value)||0.35));
-                setA(v); onChangeAlpha(v);
-              }}
-              style={{ width:80, marginLeft:6 }}
-            />
-          </label>
-        )}
-        <div style={{ fontSize:12, color:'#6b7280' }}>
-          {mode==='ewma' ? '越大越看重最近几局' : `已累计 ${aggCount} 局`}
-        </div>
-      </div>
-
-      {aggStats
-        ? (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
-            {[0,1,2].map(i=>(
-              <RadarChart key={i} title={`${['甲','乙','丙'][i]}（累计）`} scores={aggStats[i]} />
-            ))}
-          </div>
-        )
-        : <div style={{ opacity:0.6 }}>（等待至少一局完成后生成累计画像）</div>
-      }
-    </>
-  );
-}
+});
 
 /* ========= 默认值（含“清空”按钮的重置） ========= */
 const DEFAULTS = {
