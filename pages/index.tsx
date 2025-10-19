@@ -469,6 +469,26 @@ function sanitizeKnockoutKeys(choice: BotChoice, raw: any): BotCredentials {
   return out;
 }
 
+function reviveStoredKnockoutKeys(choice: BotChoice, raw: any): BotCredentials {
+  if (choice === 'http') {
+    const base = typeof raw?.httpBase === 'string' ? raw.httpBase : '';
+    return base ? { httpBase: base } : {};
+  }
+  return {};
+}
+
+function persistableKnockoutEntry(entry: KnockoutEntry) {
+  const { keys, ...rest } = entry;
+  if (entry.choice === 'http') {
+    const base = typeof keys?.httpBase === 'string' ? keys.httpBase.trim() : '';
+    const safe: BotCredentials = {};
+    if (base) safe.httpBase = base;
+    if (Object.keys(safe).length) return { ...rest, keys: safe };
+    return rest;
+  }
+  return rest;
+}
+
 function normalizeKnockoutEntries(raw: any): KnockoutEntry[] {
   if (!Array.isArray(raw)) return makeDefaultKnockoutEntries();
   const entries: KnockoutEntry[] = [];
@@ -483,7 +503,7 @@ function normalizeKnockoutEntries(raw: any): KnockoutEntry[] {
     const model = choice.startsWith('ai:') && typeof item?.model === 'string'
       ? item.model
       : '';
-    const keys = sanitizeKnockoutKeys(choice, item?.keys);
+    const keys = reviveStoredKnockoutKeys(choice, item?.keys);
     const delayMs = Number.isFinite(Number(item?.delayMs)) ? Math.max(0, Math.floor(Number(item.delayMs))) : KO_DEFAULT_DELAY;
     const timeoutSecs = Number.isFinite(Number(item?.timeoutSecs))
       ? Math.max(5, Math.floor(Number(item.timeoutSecs)))
@@ -1033,7 +1053,10 @@ function KnockoutPanel() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    try { localStorage.setItem(KO_ENTRY_STORAGE, JSON.stringify(entries)); } catch {}
+    try {
+      const payload = entries.map(persistableKnockoutEntry);
+      localStorage.setItem(KO_ENTRY_STORAGE, JSON.stringify(payload));
+    } catch {}
   }, [entries]);
 
   useEffect(() => {
