@@ -26,8 +26,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const { sessionId, decisionId, action } = (typeof req.body === 'object' && req.body) ? req.body : {};
-    if (typeof sessionId !== 'string' || !sessionId || typeof decisionId !== 'string' || !decisionId) {
+    const body =
+      req.body && typeof req.body === 'object'
+        ? (req.body as Record<string, unknown>)
+        : null;
+    const sessionId = typeof body?.sessionId === 'string' ? (body.sessionId as string) : undefined;
+    const decisionId = typeof body?.decisionId === 'string' ? (body.decisionId as string) : undefined;
+    const action = body?.action;
+
+    if (!sessionId || !decisionId) {
       res.status(400).json({ error: 'Invalid payload' });
       return;
     }
