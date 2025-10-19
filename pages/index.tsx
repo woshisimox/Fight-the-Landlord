@@ -1185,100 +1185,109 @@ function KnockoutPanel() {
         <div
           style={{
             display:'grid',
-            gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))',
+            gridTemplateColumns:'repeat(2, minmax(0, 1fr))',
             gap:12,
+            gridAutoFlow:'row dense',
             alignItems:'center',
           }}
         >
-          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-            <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-              {lang === 'en' ? 'Enable match' : '启用对局'}
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={e => updateSettings({ enabled: e.target.checked })}
-              />
-            </label>
-            <button
-              onClick={handleResetAll}
-              style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-            >{lang === 'en' ? 'Reset' : '清空'}</button>
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {lang === 'en' ? 'Enable match' : '启用对局'}
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={e => updateSettings({ enabled: e.target.checked })}
+                />
+              </label>
+              <button
+                onClick={handleResetAll}
+                style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >{lang === 'en' ? 'Reset' : '清空'}</button>
+            </div>
           </div>
-          <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
-            <span>{lang === 'en' ? 'Games per trio' : '每组三人局数'}</span>
+          <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+            {lang === 'en' ? 'Games per trio' : '每组三人局数'}
             <input
               type="number"
               min={1}
               step={1}
               value={roundsPerGroup}
               onChange={e => updateSettings({ roundsPerGroup: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
-              style={{ width:'100%' }}
+              style={{ flex:'1 1 120px', minWidth:0 }}
             />
-            <span style={{ fontSize:12, color:'#6b7280' }}>
-              {lang === 'en'
-                ? 'Applies to each elimination trio per round.'
-                : '用于本轮每组三名选手的对局局数。'}
-            </span>
           </label>
-          <div style={{ display:'flex', alignItems:'center', gap:24, flexWrap:'wrap' }}>
+          <div style={{ gridColumn:'1 / 2' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:24, flexWrap:'wrap' }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {lang === 'en' ? 'Outbid landlord' : '可抢地主'}
+                <input
+                  type="checkbox"
+                  checked={bid}
+                  onChange={e => updateSettings({ bid: e.target.checked })}
+                />
+              </label>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {lang === 'en' ? 'Farmer cooperation' : '农民配合'}
+                <input
+                  type="checkbox"
+                  checked={farmerCoop}
+                  onChange={e => updateSettings({ farmerCoop: e.target.checked })}
+                />
+              </label>
+            </div>
+          </div>
+          <div style={{ gridColumn:'2 / 3' }}>
             <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-              {lang === 'en' ? 'Outbid landlord' : '可抢地主'}
+              {lang === 'en' ? 'Initial score' : '初始分'}
               <input
-                type="checkbox"
-                checked={bid}
-                onChange={e => updateSettings({ bid: e.target.checked })}
-              />
-            </label>
-            <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-              {lang === 'en' ? 'Farmer cooperation' : '农民配合'}
-              <input
-                type="checkbox"
-                checked={farmerCoop}
-                onChange={e => updateSettings({ farmerCoop: e.target.checked })}
+                type="number"
+                step={10}
+                value={startScore}
+                onChange={e => updateSettings({ startScore: Number(e.target.value) || 0 })}
+                style={{ flex:'1 1 120px', minWidth:0 }}
               />
             </label>
           </div>
-          <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
-            <span>{lang === 'en' ? 'Initial score' : '初始分'}</span>
-            <input
-              type="number"
-              step={10}
-              value={startScore}
-              onChange={e => updateSettings({ startScore: Number(e.target.value) || 0 })}
-              style={{ width:'100%' }}
-            />
-          </label>
-          <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
-            <span>{lang === 'en' ? '4-with-2 rule' : '4带2 规则'}</span>
+          <div style={{ gridColumn:'1 / 2' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {lang === 'en' ? 'Ladder / TrueSkill' : '天梯  /  TrueSkill'}
+                <input
+                  ref={allFileRef}
+                  type="file"
+                  accept="application/json"
+                  style={{ display:'none' }}
+                  onChange={handleAllFileUpload}
+                />
+                <button
+                  onClick={() => allFileRef.current?.click()}
+                  style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+                >{lang === 'en' ? 'Upload' : '上传'}</button>
+              </label>
+              <button
+                onClick={() => window.dispatchEvent(new Event('ddz-all-save'))}
+                style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >{lang === 'en' ? 'Save' : '存档'}</button>
+            </div>
+          </div>
+          <label style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:8 }}>
+            {lang === 'en' ? '4-with-2 rule' : '4带2 规则'}
             <select
               value={four2}
               onChange={e => updateSettings({ four2: e.target.value as Four2Policy })}
-              style={{ width:'100%' }}
+              style={{ flex:'1 1 160px', minWidth:0 }}
             >
               <option value="both">{lang === 'en' ? 'Allowed' : '都可'}</option>
               <option value="2singles">{lang === 'en' ? 'Two singles' : '两张单牌'}</option>
               <option value="2pairs">{lang === 'en' ? 'Two pairs' : '两对'}</option>
             </select>
           </label>
-          <div style={{ gridColumn:'1 / -1', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-            <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-              {lang === 'en' ? 'Ladder / TrueSkill' : '天梯 / TrueSkill'}
-              <input
-                ref={allFileRef}
-                type="file"
-                accept="application/json"
-                style={{ display:'none' }}
-                onChange={handleAllFileUpload}
-              />
-              <button
-                onClick={() => allFileRef.current?.click()}
-                style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-              >{lang === 'en' ? 'Upload' : '上传'}</button>
-            </label>
-            <button
-              onClick={() => window.dispatchEvent(new Event('ddz-all-save'))}
-              style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
-            >{lang === 'en' ? 'Save' : '存档'}</button>
+          <div style={{ gridColumn:'1 / -1', fontSize:12, color:'#6b7280' }}>
+            {lang === 'en'
+              ? 'Applies to each elimination trio per round.'
+              : '用于本轮每组三名选手的对局局数。'}
           </div>
         </div>
       </div>
