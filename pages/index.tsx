@@ -1612,21 +1612,37 @@ function KnockoutPanel() {
     }
     return rounds.length;
   }, [rounds]);
+  const podiumPlacements = useMemo(() => {
+    if (!finalStandings?.placements?.length) return [] as { token: KnockoutPlayer; total: number | null }[];
+    return finalStandings.placements
+      .filter(entry => entry?.token && entry.token !== KO_BYE)
+      .slice(0, 3)
+      .map(entry => {
+        const numericTotal = Number(entry.total);
+        return {
+          token: entry.token,
+          total: Number.isFinite(numericTotal) ? numericTotal : null,
+        };
+      })
+      .sort((a, b) => {
+        const aScore = typeof a.total === 'number' ? a.total : Number.NEGATIVE_INFINITY;
+        const bScore = typeof b.total === 'number' ? b.total : Number.NEGATIVE_INFINITY;
+        return bScore - aScore;
+      });
+  }, [finalStandings]);
+
   const finalPlacementLookup = useMemo(() => {
     const map = new Map<string, { rank: number; total: number | null }>();
-    if (finalStandings?.placements?.length) {
-      finalStandings.placements.slice(0, 3).forEach((placement, idx) => {
-        const token = typeof placement.token === 'string' ? placement.token : null;
-        if (!token) return;
-        const numericTotal = Number(placement.total);
-        map.set(token, {
-          rank: idx,
-          total: Number.isFinite(numericTotal) ? numericTotal : null,
-        });
+    podiumPlacements.forEach((placement, idx) => {
+      const token = typeof placement.token === 'string' ? placement.token : null;
+      if (!token) return;
+      map.set(token, {
+        rank: idx,
+        total: typeof placement.total === 'number' ? placement.total : null,
       });
-    }
+    });
     return map;
-  }, [finalStandings]);
+  }, [podiumPlacements]);
 
   const scoreboardTotals = useMemo(() => {
     if (liveTotals) return liveTotals;
@@ -2380,7 +2396,7 @@ function KnockoutPanel() {
         </div>
       )}
 
-      {finalStandings?.placements?.length ? (
+      {podiumPlacements.length ? (
         <div style={{
           marginTop:16,
           padding:12,
@@ -2392,21 +2408,30 @@ function KnockoutPanel() {
           <div style={{ fontWeight:700, marginBottom:6 }}>
             {lang === 'en' ? 'Final standings' : '最终排名'}
           </div>
-          <div style={{ display:'grid', gap:4 }}>
-            {finalStandings.placements.slice(0, 3).map((placement, idx) => {
+          <div style={{ display:'flex', flexWrap:'wrap', gap:16 }}>
+            {podiumPlacements.map((placement, idx) => {
               const label = idx === 0
                 ? (lang === 'en' ? 'Champion' : '冠军')
                 : idx === 1
                   ? (lang === 'en' ? 'Runner-up' : '亚军')
                   : (lang === 'en' ? 'Third place' : '季军');
-              const score = Number.isFinite(placement.total)
+              const score = typeof placement.total === 'number'
                 ? placement.total
                 : '';
               return (
-                <div key={`${placement.token || 'placement'}-${idx}`} style={{ display:'flex', flexWrap:'wrap', gap:6, fontWeight:600 }}>
+                <div
+                  key={`${placement.token || 'placement'}-${idx}`}
+                  style={{
+                    display:'flex',
+                    flexWrap:'wrap',
+                    gap:8,
+                    fontWeight:700,
+                    fontSize:16,
+                  }}
+                >
                   <span>{`${label}：${displayName(placement.token)}`}</span>
                   {score !== '' && (
-                    <span style={{ fontSize:12, color:'#047857cc' }}>
+                    <span style={{ fontSize:14, color:'#047857cc' }}>
                       {lang === 'en' ? `(Points: ${score})` : `（积分：${score}）`}
                     </span>
                   )}
