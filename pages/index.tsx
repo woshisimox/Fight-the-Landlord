@@ -1344,11 +1344,34 @@ function KnockoutPanel() {
         total: Number.isFinite(val) ? val : Number.POSITIVE_INFINITY,
       };
     });
-    let loserIdx = 0;
-    for (let i = 1; i < scored.length; i++) {
-      if (scored[i].total < scored[loserIdx].total) loserIdx = i;
+    const ranked = scored
+      .filter(entry => !!entry.token)
+      .sort((a, b) => a.total - b.total);
+    const lowest = ranked[0];
+    if (!lowest) {
+      setAutomation(false);
+      return;
     }
-    const eliminatedToken = scored[loserIdx]?.token;
+    if (!Number.isFinite(lowest.total)) {
+      setAutomation(false);
+      setNotice(lang === 'en'
+        ? 'The trio did not record valid scores. Please review the results and mark the eliminated player manually.'
+        : '该组三人未产生有效积分，请核对结果并手动标记淘汰选手。');
+      return;
+    }
+    const epsilon = 1e-6;
+    const tiedLowest = ranked.filter(entry => Math.abs(entry.total - lowest.total) <= epsilon);
+    if (tiedLowest.length !== 1) {
+      const tiedLabels = tiedLowest
+        .map(entry => displayName(entry.token))
+        .join(lang === 'en' ? ', ' : '、');
+      setAutomation(false);
+      setNotice(lang === 'en'
+        ? `Round ${ctx.roundIdx + 1}: lowest score tie among ${tiedLabels}. Please select the eliminated player manually.`
+        : `第 ${ctx.roundIdx + 1} 轮积分最低的选手出现平局（${tiedLabels}），请手动选择淘汰选手。`);
+      return;
+    }
+    const eliminatedToken = tiedLowest[0]?.token;
     if (!eliminatedToken) {
       setAutomation(false);
       return;
