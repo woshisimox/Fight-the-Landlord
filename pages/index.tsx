@@ -308,6 +308,7 @@ const KO_BYE = '__KO_BYE__';
 type KnockoutPlayer = string | null;
 type KnockoutMatch = { id: string; players: KnockoutPlayer[]; eliminated: KnockoutPlayer | null; };
 type KnockoutRound = { matches: KnockoutMatch[] };
+type KnockoutFinalStandings = { placements: { token: KnockoutPlayer; total: number }[] };
 
 type KnockoutMatchContext = {
   roundIdx: number;
@@ -578,6 +579,25 @@ function collectSurvivors(round: KnockoutRound): KnockoutPlayer[] {
   return survivors;
 }
 
+function isFinalRoundStructure(round: KnockoutRound | null | undefined): boolean {
+  if (!round || !Array.isArray(round.matches) || round.matches.length !== 1) return false;
+  const match = round.matches[0];
+  if (!match) return false;
+  const active = match.players.filter(p => p && p !== KO_BYE);
+  return active.length === 3;
+}
+
+function isFinalRoundMatch(rounds: KnockoutRound[], roundIdx: number, matchIdx: number): boolean {
+  if (!rounds.length) return false;
+  if (roundIdx !== rounds.length - 1) return false;
+  const round = rounds[roundIdx];
+  if (!isFinalRoundStructure(round)) return false;
+  const match = round.matches[matchIdx];
+  if (!match) return false;
+  const active = match.players.filter(p => p && p !== KO_BYE);
+  return active.length === 3;
+}
+
 function shuffleArray<T>(input: T[]): T[] {
   const arr = [...input];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -624,6 +644,7 @@ function applyEliminationToDraft(
   const current = draft[roundIdx];
   if (!current || !isRoundComplete(current)) return;
   const survivors = collectSurvivors(current);
+  if (isFinalRoundStructure(current)) return;
   if (survivors.length <= 1) return;
   const shuffled = shuffleArray(survivors);
   const nextMatches = buildMatchesFromPool(shuffled, roundIdx + 1);
@@ -979,6 +1000,7 @@ function KnockoutPanel() {
   const [liveRunning, setLiveRunning] = useState(false);
   const [livePaused, setLivePaused] = useState(false);
   const [automationActive, setAutomationActive] = useState(false);
+  const [finalStandings, setFinalStandings] = useState<KnockoutFinalStandings | null>(null);
   const livePanelRef = useRef<LivePanelHandle | null>(null);
   const roundsRef = useRef<KnockoutRound[]>(rounds);
   useEffect(() => { roundsRef.current = rounds; }, [rounds]);
@@ -1029,6 +1051,7 @@ function KnockoutPanel() {
     setOvertimeCount(0);
     setLiveRunning(false);
     setLivePaused(false);
+    setFinalStandings(null);
   }, [rounds.length]);
 
   const participantLabel = (idx: number) => (lang === 'en' ? `Player ${idx + 1}` : `选手${idx + 1}`);
@@ -1103,6 +1126,7 @@ function KnockoutPanel() {
     setLivePaused(false);
     setCurrentMatch(null);
     setLiveTotals(null);
+    setFinalStandings(null);
     const roster = entries.map((entry, idx) => ({
       token: entryToken(entry, idx + 1),
       identity: entryIdentity(entry),
@@ -1147,6 +1171,7 @@ function KnockoutPanel() {
     setSeriesTotals(null);
     setSeriesRounds(settings.roundsPerGroup);
     setOvertimeCount(0);
+    setFinalStandings(null);
     setRounds([]);
     setError(null);
     setNotice(null);
@@ -1167,6 +1192,7 @@ function KnockoutPanel() {
     setOvertimeCount(0);
     setSettings(defaultKnockoutSettings());
     setEntries(makeDefaultKnockoutEntries());
+    setFinalStandings(null);
     setRounds([]);
     setError(null);
     setNotice(null);
@@ -1183,6 +1209,7 @@ function KnockoutPanel() {
       setNotice(null);
       return;
     }
+    setFinalStandings(null);
     setRounds(prev => {
       const draft = cloneKnockoutRounds(prev);
       const match = draft[roundIdx]?.matches?.[matchIdx];
@@ -1192,15 +1219,6 @@ function KnockoutPanel() {
       return draft;
     });
   };
-
-  const champion = useMemo(() => {
-    if (!rounds.length) return null;
-    const lastRound = rounds[rounds.length - 1];
-    if (!lastRound || !isRoundComplete(lastRound)) return null;
-    const survivors = collectSurvivors(lastRound);
-    if (survivors.length === 1) return survivors[0];
-    return null;
-  }, [rounds]);
 
   const displayName = (value: KnockoutPlayer | null) => {
     if (value === KO_BYE) return lang === 'en' ? 'BYE' : '轮空';
@@ -1378,6 +1396,7 @@ function KnockoutPanel() {
     }
     const ctx = currentMatchRef.current;
     if (!ctx) return;
+    const wasFinalMatch = isFinalRoundMatch(roundsRef.current || [], ctx.roundIdx, ctx.matchIdx);
     const totals = result.totals || liveTotalsRef.current;
     if (!totals) return;
     const baseScore = Number.isFinite(startScore) ? startScore : 0;
@@ -1398,6 +1417,12 @@ function KnockoutPanel() {
     const ranked = scored
       .filter(entry => !!entry.token)
       .sort((a, b) => a.total - b.total);
+    const placementsDesc = wasFinalMatch
+      ? ctx.tokens
+          .map((token, idx) => ({ token, total: totalsTuple[idx] }))
+          .filter(entry => !!entry.token && entry.token !== KO_BYE)
+          .sort((a, b) => b.total - a.total)
+      : null;
     const lowest = ranked[0];
     if (!lowest) {
       setAutomation(false);
@@ -1439,6 +1464,32 @@ function KnockoutPanel() {
     });
     setSeriesRounds(roundsPerGroup);
     setOvertimeCount(0);
+    if (wasFinalMatch) {
+      const ordered = (placementsDesc && placementsDesc.length
+        ? placementsDesc
+        : ranked.slice().reverse())
+        .slice(0, 3);
+      if (ordered.length) {
+        setFinalStandings({ placements: ordered });
+      } else {
+        setFinalStandings(null);
+      }
+      if (ordered.length >= 3) {
+        const championLabel = displayName(ordered[0].token);
+        const runnerUpLabel = displayName(ordered[1].token);
+        const thirdLabel = displayName(ordered[2].token);
+        setNotice(lang === 'en'
+          ? `Final standings — Champion: ${championLabel}, Runner-up: ${runnerUpLabel}, Third: ${thirdLabel}.`
+          : `最终排名：冠军 ${championLabel}，亚军 ${runnerUpLabel}，季军 ${thirdLabel}。`);
+      } else {
+        setNotice(lang === 'en'
+          ? `Final round complete. Eliminated ${label}${endedEarly ? ' after an early finish caused by a negative score.' : '.'}`
+          : `决赛结束：淘汰 ${label}${endedEarly ? '（因出现负分提前结束）' : ''}`);
+      }
+      setAutomation(false);
+      return;
+    }
+    setFinalStandings(null);
     setNotice(lang === 'en'
       ? `Round ${ctx.roundIdx + 1}: eliminated ${label}${endedEarly ? ' after an early finish caused by a negative score.' : '.'}`
       : `第 ${ctx.roundIdx + 1} 轮淘汰：${label}${endedEarly ? '（因出现负分提前结束）' : ''}`);
@@ -2204,11 +2255,42 @@ function KnockoutPanel() {
         </div>
       )}
 
-      {champion && (
-        <div style={{ marginTop:16, padding:12, border:'1px solid #bbf7d0', background:'#ecfdf5', borderRadius:10, color:'#047857', fontWeight:600 }}>
-          {lang === 'en' ? `Champion: ${displayName(champion)}` : `冠军：${displayName(champion)}`}
+      {finalStandings?.placements?.length ? (
+        <div style={{
+          marginTop:16,
+          padding:12,
+          border:'1px solid #bbf7d0',
+          background:'#ecfdf5',
+          borderRadius:10,
+          color:'#047857',
+        }}>
+          <div style={{ fontWeight:700, marginBottom:6 }}>
+            {lang === 'en' ? 'Final standings' : '最终排名'}
+          </div>
+          <div style={{ display:'grid', gap:4 }}>
+            {finalStandings.placements.slice(0, 3).map((placement, idx) => {
+              const label = idx === 0
+                ? (lang === 'en' ? 'Champion' : '冠军')
+                : idx === 1
+                  ? (lang === 'en' ? 'Runner-up' : '亚军')
+                  : (lang === 'en' ? 'Third place' : '季军');
+              const score = Number.isFinite(placement.total)
+                ? placement.total
+                : '';
+              return (
+                <div key={`${placement.token || 'placement'}-${idx}`} style={{ display:'flex', flexWrap:'wrap', gap:6, fontWeight:600 }}>
+                  <span>{`${label}：${displayName(placement.token)}`}</span>
+                  {score !== '' && (
+                    <span style={{ fontSize:12, color:'#047857cc' }}>
+                      {lang === 'en' ? `(Points: ${score})` : `（积分：${score}）`}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
