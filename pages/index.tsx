@@ -1,6 +1,6 @@
 // pages/index.tsx
 import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent } from 'react';
+import type { ChangeEvent, MouseEvent } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -272,7 +272,8 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
-  | 'http';
+  | 'http'
+  | 'human';
 
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
 type Rating = { mu:number; sigma:number };
@@ -374,6 +375,7 @@ const KO_ALL_CHOICES: BotChoice[] = [
   'ai:qwen',
   'ai:deepseek',
   'http',
+  'human',
 ];
 
 const KO_DEFAULT_SETTINGS: KnockoutSettings = {
@@ -767,6 +769,35 @@ type LivePanelFinishPayload = {
   endedEarlyForNegative?: boolean;
 };
 
+type HumanPrompt = {
+  sessionId: string;
+  decisionId: string;
+  phase: 'play' | 'bid' | 'double';
+  seat: number;
+  allowPass: boolean;
+  hand?: string[];
+  require?: any;
+  legalMoves?: string[][];
+  legalTotal?: number;
+  bid?: {
+    score: number | null;
+    multiplier: number | null;
+    bidMultiplier: number | null;
+    default: boolean | null;
+    attempt: number | null;
+    maxAttempts: number | null;
+  };
+  double?: {
+    baseMultiplier: number | null;
+    role: string | null;
+    default: boolean | null;
+    info: any;
+  };
+  landlord?: number | null;
+  leader?: number | null;
+  trick?: number | null;
+};
+
 function SeatTitle({ i }: { i:number }) {
   const { lang } = useI18n();
   return <span style={{ fontWeight:700 }}>{seatLabel(i, lang)}</span>;
@@ -826,7 +857,19 @@ function resolveBottomDecorations(raw: string[], landlord: number | null, hands:
   });
 }
 
-function Card({ label, dimmed = false, compact = false }: { label:string; dimmed?:boolean; compact?:boolean }) {
+function Card({
+  label,
+  dimmed = false,
+  compact = false,
+  selected = false,
+  onClick,
+}: {
+  label: string;
+  dimmed?: boolean;
+  compact?: boolean;
+  selected?: boolean;
+  onClick?: (() => void) | ((event: MouseEvent<HTMLSpanElement>) => void);
+}) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
@@ -837,24 +880,49 @@ function Card({ label, dimmed = false, compact = false }: { label:string; dimmed
   const rankStyle = dimmed
     ? { color: '#9ca3af' }
     : (rankColor ? { color: rankColor } : {});
+  const interactive = typeof onClick === 'function';
+  const borderColor = selected ? '#2563eb' : dimmed ? '#d1d5db' : '#ddd';
+  const background = selected ? '#dbeafe' : dimmed ? '#f3f4f6' : '#fff';
   return (
     <span style={{
       display:'inline-flex', alignItems:'center', gap:6,
-      border:'1px solid #ddd', borderRadius:8, padding: pad,
+      border:`1px solid ${borderColor}`, borderRadius:8, padding: pad,
       marginRight:6, marginBottom:6, fontWeight:800,
       color: suitColor,
-      background: dimmed ? '#f3f4f6' : '#fff',
+      background,
       opacity: dimmed ? 0.65 : 1,
-      borderColor: dimmed ? '#d1d5db' : '#ddd'
-    }}>
+      cursor: interactive ? 'pointer' : 'default',
+      userSelect: interactive ? 'none' : undefined,
+      transition: 'background 0.15s, border-color 0.15s',
+    }} onClick={onClick as any}>
       <span style={{ fontSize }}>{suit}</span>
       <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
     </span>
   );
 }
-function Hand({ cards }: { cards: string[] }) {
+function Hand({ cards, concealed = false }: { cards: string[]; concealed?: boolean }) {
   const { t } = useI18n();
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>{t('Empty')}</span>;
+  if (concealed) {
+    return (
+      <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+        {cards.map((_, idx) => (
+          <div
+            key={`concealed-${idx}`}
+            style={{
+              width:42,
+              height:58,
+              borderRadius:8,
+              border:'1px solid #cbd5f5',
+              background:'linear-gradient(135deg, #1d4ed8 0%, #3b82f6 50%, #93c5fd 100%)',
+              boxShadow:'inset 0 0 0 2px #fff8',
+            }}
+            aria-hidden="true"
+          />
+        ))}
+      </div>
+    );
+  }
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
       {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
@@ -1963,6 +2031,7 @@ function KnockoutPanel() {
                       <option value="ai:qwen">Qwen</option>
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
+                      <option value="human">{lang === 'en' ? 'Human' : '人类玩家'}</option>
                     </optgroup>
                   </select>
                 </label>
@@ -2582,6 +2651,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':               return 'Qwen';
     case 'ai:deepseek':           return 'DeepSeek';
     case 'http':                  return 'HTTP';
+    case 'human':                 return 'Human';
     default: return String(choice);
   }
 }
@@ -2768,6 +2838,115 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [] });
   const [log, setLog] = useState<string[]>([]);
+  const humanSeatSet = useMemo(() => {
+    const set = new Set<number>();
+    (props.seats || []).forEach((choice, idx) => {
+      if (choice === 'human') set.add(idx);
+    });
+    return set;
+  }, [props.seats]);
+  const hasHumanSeat = humanSeatSet.size > 0;
+  const { lang } = useI18n();
+  const [humanSessionId, setHumanSessionId] = useState<string | null>(null);
+  const humanSessionIdRef = useRef<string | null>(null);
+  useEffect(() => { humanSessionIdRef.current = humanSessionId; }, [humanSessionId]);
+  const [humanPrompt, setHumanPrompt] = useState<HumanPrompt | null>(null);
+  const humanPromptRef = useRef<HumanPrompt | null>(null);
+  useEffect(() => { humanPromptRef.current = humanPrompt; }, [humanPrompt]);
+  const [humanSelection, setHumanSelection] = useState<string[]>([]);
+  const [humanSubmitting, setHumanSubmitting] = useState(false);
+  const [humanError, setHumanError] = useState<string | null>(null);
+  useEffect(() => {
+    setHumanSelection([]);
+    setHumanError(null);
+    setHumanSubmitting(false);
+  }, [humanPrompt?.decisionId]);
+  const humanLegalMoves = useMemo(() => {
+    if (!humanPrompt || !Array.isArray(humanPrompt.legalMoves)) return [] as string[][];
+    return humanPrompt.legalMoves;
+  }, [humanPrompt]);
+  const humanLegalKeySet = useMemo(() => {
+    const set = new Set<string>();
+    humanLegalMoves.forEach(move => {
+      const key = move ? [...move].sort().join('|') : '';
+      if (key) set.add(key);
+    });
+    return set;
+  }, [humanLegalMoves]);
+  const humanSelectionKey = useMemo(() => [...humanSelection].sort().join('|'), [humanSelection]);
+  const humanSelectionKnown = useMemo(() => (
+    humanPrompt?.phase === 'play' ? humanLegalKeySet.has(humanSelectionKey) : false
+  ), [humanPrompt, humanLegalKeySet, humanSelectionKey]);
+  const toggleHumanCard = useCallback((card: string) => {
+    setHumanSelection(prev => {
+      const idx = prev.indexOf(card);
+      if (idx >= 0) {
+        const next = prev.slice();
+        next.splice(idx, 1);
+        return next;
+      }
+      return [...prev, card];
+    });
+  }, []);
+  const applyHumanMove = useCallback((cards: string[]) => {
+    setHumanSelection(Array.isArray(cards) ? [...cards] : []);
+  }, []);
+  const clearHumanSelection = useCallback(() => setHumanSelection([]), []);
+  const submitHumanDecision = useCallback(async (action: any) => {
+    const prompt = humanPromptRef.current;
+    const sessionId = humanSessionIdRef.current;
+    if (!prompt || !sessionId || !prompt.decisionId) return;
+    setHumanSubmitting(true);
+    try {
+      const res = await fetch('/api/human_decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, decisionId: prompt.decisionId, action }),
+      });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data?.error) msg = data.error;
+        } catch {}
+        throw new Error(msg);
+      }
+      setHumanPrompt(null);
+      setHumanSessionId(null);
+      setHumanSelection([]);
+      setHumanError(null);
+    } catch (err: any) {
+      setHumanError(err?.message || '提交失败');
+    } finally {
+      setHumanSubmitting(false);
+    }
+  }, []);
+  const describeRequirement = useCallback((req: any) => {
+    if (!req) return lang === 'en' ? 'Any valid play' : '任意合法出牌';
+    const labelMap: Record<string, { zh: string; en: string }> = {
+      single: { zh: '单张', en: 'Single' },
+      pair: { zh: '对子', en: 'Pair' },
+      triple: { zh: '三张', en: 'Triple' },
+      triple_one: { zh: '三带一', en: 'Triple with single' },
+      triple_pair: { zh: '三带对', en: 'Triple with pair' },
+      plane: { zh: '飞机', en: 'Plane' },
+      plane_single: { zh: '飞机带单', en: 'Plane with singles' },
+      plane_pair: { zh: '飞机带对', en: 'Plane with pairs' },
+      straight: { zh: '顺子', en: 'Straight' },
+      pair_seq: { zh: '连对', en: 'Pair sequence' },
+      four_two_singles: { zh: '四带二', en: 'Four with two singles' },
+      four_two_pairs: { zh: '四带两对', en: 'Four with two pairs' },
+      bomb: { zh: '炸弹', en: 'Bomb' },
+      rocket: { zh: '王炸', en: 'Rocket' },
+    };
+    const type = String(req.type || '');
+    const base = labelMap[type] ? (lang === 'en' ? labelMap[type].en : labelMap[type].zh) : type;
+    const parts = [base];
+    const len = typeof req.length === 'number' ? req.length : (typeof req.len === 'number' ? req.len : null);
+    if (len && len > 1) parts.push(lang === 'en' ? `Length ${len}` : `长度 ${len}`);
+    if (req.rank) parts.push(lang === 'en' ? `Rank ≥ ${req.rank}` : `需大过 ${req.rank}`);
+    return parts.join(' · ');
+  }, [lang]);
   const initialTotals = useMemo(
     () => sanitizeTotalsArray(props.initialTotals, props.startScore || 0),
     [props.initialTotals, props.startScore],
@@ -3350,6 +3529,11 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setLandlord(null); setHands([[], [], []]); setPlays([]);
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
+    setHumanPrompt(null);
+    setHumanSelection([]);
+    setHumanError(null);
+    setHumanSessionId(null);
+    setHumanSubmitting(false);
     const base = initialTotalsRef.current;
     setTotals([base[0], base[1], base[2]] as [number, number, number]);
     lastReasonRef.current = [null, null, null];
@@ -3540,6 +3724,59 @@ for (const raw of batch) {
 
             // m already defined above
             try {
+              if (m.type === 'event' && m.kind === 'human-session') {
+                const sid = typeof m.sessionId === 'string' && m.sessionId ? m.sessionId : null;
+                if (sid) setHumanSessionId(sid);
+                continue;
+              }
+              if (m.type === 'event' && m.kind === 'human-request') {
+                const sid = typeof m.sessionId === 'string' && m.sessionId ? m.sessionId : (humanSessionIdRef.current || null);
+                if (!sid) continue;
+                setHumanSessionId(sid);
+                const seat = typeof m.seat === 'number' ? m.seat : -1;
+                if (!humanSeatSet.has(seat)) {
+                  setHumanPrompt(null);
+                  continue;
+                }
+                const phaseRaw = typeof m.phase === 'string' ? m.phase : 'play';
+                const phase: 'play' | 'bid' | 'double' = (phaseRaw === 'bid' || phaseRaw === 'double') ? phaseRaw : 'play';
+                const decisionId = typeof m.decisionId === 'string' ? m.decisionId : '';
+                if (!decisionId) continue;
+                const prompt: HumanPrompt = {
+                  sessionId: sid,
+                  decisionId,
+                  phase,
+                  seat,
+                  allowPass: !!m.allowPass,
+                  hand: Array.isArray(m.hand) ? m.hand as string[] : undefined,
+                  require: m.require ?? null,
+                  legalMoves: Array.isArray(m.legalMoves) ? (m.legalMoves as string[][]) : undefined,
+                  legalTotal: typeof m.legalTotal === 'number' ? m.legalTotal : undefined,
+                  bid: m.bid ? {
+                    score: typeof m.bid.score === 'number' ? m.bid.score : null,
+                    multiplier: typeof m.bid.multiplier === 'number' ? m.bid.multiplier : null,
+                    bidMultiplier: typeof m.bid.bidMultiplier === 'number' ? m.bid.bidMultiplier : null,
+                    default: typeof m.bid.default === 'boolean' ? m.bid.default : null,
+                    attempt: typeof m.bid.attempt === 'number' ? m.bid.attempt : null,
+                    maxAttempts: typeof m.bid.maxAttempts === 'number' ? m.bid.maxAttempts : null,
+                  } : undefined,
+                  double: m.double ? {
+                    baseMultiplier: typeof m.double.baseMultiplier === 'number' ? m.double.baseMultiplier : null,
+                    role: typeof m.double.role === 'string' ? m.double.role : null,
+                    default: typeof m.double.default === 'boolean' ? m.double.default : null,
+                    info: m.double.info ?? null,
+                  } : undefined,
+                  landlord: typeof m.landlord === 'number' ? m.landlord : null,
+                  leader: typeof m.leader === 'number' ? m.leader : null,
+                  trick: typeof m.trick === 'number' ? m.trick : null,
+                };
+                setHumanPrompt(prompt);
+                continue;
+              }
+              if (m.type === 'event' && m.kind === 'human-clear') {
+                setHumanPrompt(null);
+                continue;
+              }
               // -------- TS 帧（后端主动提供） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
@@ -4076,6 +4313,10 @@ nextTotals     = [
     } finally {
       exitPause();
       setRunning(false);
+      setHumanPrompt(null);
+      setHumanSelection([]);
+      setHumanSubmitting(false);
+      setHumanError(null);
       const totalsSnap = (() => {
         const value = totalsRef.current;
         if (value && Array.isArray(value) && value.length === 3) {
@@ -4096,7 +4337,15 @@ nextTotals     = [
     }
   };
 
-  const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); };
+  const stop = () => {
+    exitPause();
+    controllerRef.current?.abort();
+    setRunning(false);
+    setHumanPrompt(null);
+    setHumanSelection([]);
+    setHumanError(null);
+    setHumanSubmitting(false);
+  };
 
   const togglePause = () => {
     if (!running) return;
@@ -4249,6 +4498,282 @@ const handleAllSaveInner = () => {
         </span>
       </div>
       )}
+
+      {hasHumanSeat && humanPrompt && (() => {
+        const seatIdx = humanPrompt.seat;
+        const seatLabel = seatName(seatIdx);
+        const phaseLabel = humanPrompt.phase === 'bid'
+          ? (lang === 'en' ? 'Landlord bid' : '抢地主决策')
+          : humanPrompt.phase === 'double'
+            ? (lang === 'en' ? 'Doubling decision' : '加倍决策')
+            : (lang === 'en' ? 'Play cards' : '出牌阶段');
+        const handCards = Array.isArray(humanPrompt.hand) ? humanPrompt.hand : [];
+        const quickMoves = humanLegalMoves.slice(0, 12);
+        const moreMoves = (typeof humanPrompt.legalTotal === 'number') && humanPrompt.legalTotal > quickMoves.length;
+        const selectedText = humanSelection.length ? humanSelection.join(' ') : '';
+        const submittingText = humanSubmitting ? (lang === 'en' ? 'Submitting…' : '提交中…') : '';
+        return (
+          <div
+            style={{
+              border:'1px solid #bfdbfe',
+              borderRadius:10,
+              padding:12,
+              marginBottom:12,
+              background:'#eff6ff',
+            }}
+          >
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+              <div style={{ fontWeight:700 }}>
+                {lang === 'en' ? 'Human control' : '人类手动操作'} · {seatLabel}
+              </div>
+              <div style={{ fontSize:12, color:'#1d4ed8', fontWeight:600 }}>{phaseLabel}</div>
+            </div>
+
+            {humanPrompt.phase === 'play' && (
+              <div style={{ display:'grid', gap:10 }}>
+                <div style={{ fontSize:13, color:'#1f2937' }}>
+                  {lang === 'en' ? 'Required combo:' : '需跟牌型：'} {describeRequirement(humanPrompt.require)}
+                </div>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:6, padding:8, border:'1px dashed #bfdbfe', borderRadius:8, background:'#fff' }}>
+                  {handCards.length ? handCards.map(card => (
+                    <Card
+                      key={`human-card-${card}`}
+                      label={card}
+                      selected={humanSelection.includes(card)}
+                      onClick={() => toggleHumanCard(card)}
+                    />
+                  )) : (
+                    <span style={{ fontSize:12, color:'#6b7280' }}>{lang === 'en' ? 'Waiting for hand data…' : '等待手牌数据…'}</span>
+                  )}
+                </div>
+                <div style={{ fontSize:12, color: humanSelection.length ? '#1f2937' : '#6b7280' }}>
+                  {humanSelection.length
+                    ? (
+                      <>
+                        {lang === 'en' ? 'Selected:' : '已选：'} {selectedText || '—'}
+                        {!humanSelectionKnown && (
+                          <span style={{ marginLeft:6, color:'#b45309' }}>
+                            {lang === 'en'
+                              ? 'Not in suggested moves; backend may adjust.'
+                              : '不在推荐牌型中，后端可能自动调整。'}
+                          </span>
+                        )}
+                      </>
+                    )
+                    : (lang === 'en' ? 'Click cards above to choose a play.' : '点击上方手牌选择要出的牌。')}
+                </div>
+                {quickMoves.length > 0 && (
+                  <div style={{ display:'grid', gap:6 }}>
+                    <div style={{ fontSize:12, color:'#1f2937' }}>{lang === 'en' ? 'Suggested moves:' : '推荐牌型：'}</div>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                      {quickMoves.map((move, idx) => {
+                        const key = move.slice().sort().join('|') || `move-${idx}`;
+                        const label = move.join(' ');
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => applyHumanMove(move)}
+                            disabled={humanSubmitting}
+                            style={{
+                              padding:'4px 8px',
+                              borderRadius:8,
+                              border:'1px solid #93c5fd',
+                              background:'#fff',
+                              color:'#1d4ed8',
+                              fontSize:12,
+                              cursor: humanSubmitting ? 'not-allowed' : 'pointer',
+                            }}
+                          >{label}</button>
+                        );
+                      })}
+                    </div>
+                    {moreMoves && (
+                      <div style={{ fontSize:12, color:'#2563eb' }}>
+                        {lang === 'en'
+                          ? `Showing ${quickMoves.length} of ${humanPrompt.legalTotal} options.`
+                          : `展示前 ${quickMoves.length} 种，共 ${humanPrompt.legalTotal} 种可选。`}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                  <button
+                    onClick={() => submitHumanDecision({ phase:'play', move:'play', cards: humanSelection.slice() })}
+                    disabled={humanSubmitting || humanSelection.length === 0}
+                    style={{
+                      padding:'6px 12px',
+                      borderRadius:8,
+                      border:'1px solid #2563eb',
+                      background: humanSelection.length === 0 ? '#bfdbfe' : '#2563eb',
+                      color:'#fff',
+                      cursor: humanSelection.length === 0 || humanSubmitting ? 'not-allowed' : 'pointer',
+                      fontWeight:600,
+                    }}
+                  >{lang === 'en' ? 'Play selected' : '出牌'}</button>
+                  <button
+                    onClick={() => submitHumanDecision({ phase:'play', move:'pass' })}
+                    disabled={humanSubmitting || !humanPrompt.allowPass}
+                    style={{
+                      padding:'6px 12px',
+                      borderRadius:8,
+                      border:'1px solid #d1d5db',
+                      background: humanPrompt.allowPass ? '#fff' : '#f3f4f6',
+                      color: humanPrompt.allowPass ? '#1f2937' : '#9ca3af',
+                      cursor: humanPrompt.allowPass && !humanSubmitting ? 'pointer' : 'not-allowed',
+                      fontWeight:600,
+                    }}
+                  >{lang === 'en' ? 'Pass' : '过'}</button>
+                  <button
+                    onClick={clearHumanSelection}
+                    disabled={humanSubmitting || humanSelection.length === 0}
+                    style={{
+                      padding:'6px 12px',
+                      borderRadius:8,
+                      border:'1px solid #d1d5db',
+                      background:'#fff',
+                      color:'#1f2937',
+                      cursor: humanSelection.length === 0 || humanSubmitting ? 'not-allowed' : 'pointer',
+                      fontWeight:600,
+                    }}
+                  >{lang === 'en' ? 'Clear' : '清除'}</button>
+                </div>
+              </div>
+            )}
+
+            {humanPrompt.phase === 'bid' && (
+              <div style={{ display:'grid', gap:10 }}>
+                {humanPrompt.bid && (
+                  <div style={{ fontSize:13, color:'#1f2937' }}>
+                    {(lang === 'en' ? 'Score:' : '评分：')}
+                    {typeof humanPrompt.bid.score === 'number' ? humanPrompt.bid.score.toFixed(2) : '—'}
+                    {humanPrompt.bid.multiplier != null && (
+                      <span style={{ marginLeft:8 }}>
+                        {lang === 'en' ? `Multiplier ×${humanPrompt.bid.multiplier}` : `对局倍数 ×${humanPrompt.bid.multiplier}`}
+                      </span>
+                    )}
+                    {humanPrompt.bid.bidMultiplier != null && (
+                      <span style={{ marginLeft:8 }}>
+                        {lang === 'en' ? `Bid ×${humanPrompt.bid.bidMultiplier}` : `叫抢倍数 ×${humanPrompt.bid.bidMultiplier}`}
+                      </span>
+                    )}
+                    {humanPrompt.bid.attempt != null && humanPrompt.bid.maxAttempts != null && (
+                      <span style={{ marginLeft:8 }}>
+                        {lang === 'en'
+                          ? `Attempt ${humanPrompt.bid.attempt + 1}/${humanPrompt.bid.maxAttempts}`
+                          : `第 ${humanPrompt.bid.attempt + 1} 次（共 ${humanPrompt.bid.maxAttempts} 次）`}
+                      </span>
+                    )}
+                    {humanPrompt.bid.default != null && (
+                      <span style={{ marginLeft:8, color:'#2563eb' }}>
+                        {humanPrompt.bid.default
+                          ? (lang === 'en' ? 'Recommended to bid' : '推荐抢地主')
+                          : (lang === 'en' ? 'Recommended to pass' : '推荐不抢')}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                  <button
+                    onClick={() => submitHumanDecision({ phase:'bid', bid:true })}
+                    disabled={humanSubmitting}
+                    style={{
+                      padding:'6px 12px',
+                      borderRadius:8,
+                      border:'1px solid #2563eb',
+                      background:'#2563eb',
+                      color:'#fff',
+                      cursor: humanSubmitting ? 'not-allowed' : 'pointer',
+                      fontWeight:600,
+                    }}
+                  >{lang === 'en' ? 'Bid landlord' : '抢地主'}</button>
+                  <button
+                    onClick={() => submitHumanDecision({ phase:'bid', bid:false })}
+                    disabled={humanSubmitting}
+                    style={{
+                      padding:'6px 12px',
+                      borderRadius:8,
+                      border:'1px solid #d1d5db',
+                      background:'#fff',
+                      color:'#1f2937',
+                      cursor: humanSubmitting ? 'not-allowed' : 'pointer',
+                      fontWeight:600,
+                    }}
+                  >{lang === 'en' ? 'Do not bid' : '不抢'}</button>
+                </div>
+              </div>
+            )}
+
+            {humanPrompt.phase === 'double' && (
+              <div style={{ display:'grid', gap:10 }}>
+                {humanPrompt.double && (
+                  <div style={{ fontSize:13, color:'#1f2937' }}>
+                    {humanPrompt.double.baseMultiplier != null && (
+                      <span style={{ marginRight:8 }}>
+                        {lang === 'en'
+                          ? `Base multiplier ×${humanPrompt.double.baseMultiplier}`
+                          : `基础倍数 ×${humanPrompt.double.baseMultiplier}`}
+                      </span>
+                    )}
+                    {humanPrompt.double.role && (
+                      <span style={{ marginRight:8 }}>
+                        {lang === 'en'
+                          ? `Role: ${humanPrompt.double.role}`
+                          : `身份：${humanPrompt.double.role}`}
+                      </span>
+                    )}
+                    {humanPrompt.double.default != null && (
+                      <span style={{ color:'#2563eb' }}>
+                        {humanPrompt.double.default
+                          ? (lang === 'en' ? 'Recommended to double' : '推荐加倍')
+                          : (lang === 'en' ? 'Recommended to stay' : '推荐不加倍')}
+                      </span>
+                    )}
+                    {humanPrompt.double.info && (
+                      <div style={{ marginTop:4, fontSize:12, color:'#4b5563' }}>
+                        {JSON.stringify(humanPrompt.double.info)}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                  <button
+                    onClick={() => submitHumanDecision({ phase:'double', double:true })}
+                    disabled={humanSubmitting}
+                    style={{
+                      padding:'6px 12px',
+                      borderRadius:8,
+                      border:'1px solid #2563eb',
+                      background:'#2563eb',
+                      color:'#fff',
+                      cursor: humanSubmitting ? 'not-allowed' : 'pointer',
+                      fontWeight:600,
+                    }}
+                  >{lang === 'en' ? 'Double' : '加倍'}</button>
+                  <button
+                    onClick={() => submitHumanDecision({ phase:'double', double:false })}
+                    disabled={humanSubmitting}
+                    style={{
+                      padding:'6px 12px',
+                      borderRadius:8,
+                      border:'1px solid #d1d5db',
+                      background:'#fff',
+                      color:'#1f2937',
+                      cursor: humanSubmitting ? 'not-allowed' : 'pointer',
+                      fontWeight:600,
+                    }}
+                  >{lang === 'en' ? 'No double' : '不加倍'}</button>
+                </div>
+              </div>
+            )}
+
+            {(humanError || submittingText) && (
+              <div style={{ marginTop:8, fontSize:12, color: humanError ? '#b91c1c' : '#2563eb', fontWeight:500 }}>
+                {humanError || submittingText}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
@@ -4404,7 +4929,7 @@ const handleAllSaveInner = () => {
 <div style={{ marginBottom:6 }}>
                 <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
               </div>
-              <Hand cards={hands[i]} />
+              <Hand cards={hands[i]} concealed={hasHumanSeat && !humanSeatSet.has(i)} />
             </div>
           ))}
         </div>
@@ -4766,6 +5291,7 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="ai:qwen">Qwen</option>
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
+                      <option value="human">{lang === 'en' ? 'Human' : '人类玩家'}</option>
                     </optgroup>
                   </select>
                 </label>

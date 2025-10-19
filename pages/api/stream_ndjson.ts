@@ -1,6 +1,17 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
+import {
+  runOneGame,
+  GreedyMax,
+  GreedyMin,
+  RandomLegal,
+  AllySupport,
+  EndgameRush,
+  generateMoves,
+  type Combo,
+  type Label,
+  type Four2Policy,
+} from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -198,7 +209,8 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
-  | 'http';
+  | 'http'
+  | 'human';
 
 type SeatSpec = {
   choice: BotChoice;
@@ -221,6 +233,41 @@ type RunBody = {
   debug?: any;
 };
 
+type PendingDecision = {
+  resolve: (value: any) => void;
+  reject: (reason?: any) => void;
+};
+
+type HumanSession = {
+  id: string;
+  pending: Map<string, PendingDecision>;
+};
+
+const HUMAN_SESSIONS: Map<string, HumanSession> = ((): Map<string, HumanSession> => {
+  const globalAny = globalThis as any;
+  if (!globalAny.__DDZ_HUMAN_SESSIONS) {
+    globalAny.__DDZ_HUMAN_SESSIONS = new Map<string, HumanSession>();
+  }
+  return globalAny.__DDZ_HUMAN_SESSIONS as Map<string, HumanSession>;
+})();
+
+function createHumanSession(): HumanSession {
+  const id = `human-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const session: HumanSession = { id, pending: new Map() };
+  HUMAN_SESSIONS.set(id, session);
+  return session;
+}
+
+function destroyHumanSession(id: string) {
+  const session = HUMAN_SESSIONS.get(id);
+  if (!session) return;
+  HUMAN_SESSIONS.delete(id);
+  for (const pending of session.pending.values()) {
+    try { pending.reject?.(new Error('session closed')); } catch {}
+  }
+  session.pending.clear();
+}
+
 /* ========== Bot 工厂 ========== */
 function providerLabel(choice: BotChoice) {
   switch (choice) {
@@ -236,6 +283,7 @@ function providerLabel(choice: BotChoice) {
     case 'ai:qwen': return 'Qwen';
     case 'ai:deepseek': return 'DeepSeek';
     case 'http': return 'HTTP';
+    case 'human': return 'Human';
   }
 }
 
@@ -271,8 +319,9 @@ function traceWrap(
 ){
   const label = providerLabel(choice);
   const supportsPhase = typeof choice === 'string'
-    ? (choice.startsWith('ai:') || choice === 'http')
+    ? (choice.startsWith('ai:') || choice === 'http' || choice === 'human')
     : false;
+  const isHuman = choice === 'human';
 
   const wrapped = async (ctx:any) => {
     if (startDelayMs && startDelayMs>0) {
@@ -281,16 +330,23 @@ function traceWrap(
     const phase = ctx?.phase || 'play';
     try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch {}
 
-    const timeout = new Promise((resolve)=> {
-      setTimeout(()=> resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` }), Math.max(1000, turnTimeoutMs));
-    });
+    const timeout = isHuman
+      ? null
+      : new Promise((resolve)=> {
+          setTimeout(
+            () => resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` }),
+            Math.max(1000, turnTimeoutMs)
+          );
+        });
 
     let result:any;
     const t0 = Date.now();
     try {
       const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
       try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
-      result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
+      const races: Promise<any>[] = [Promise.resolve(bot(ctxWithSeen))];
+      if (timeout) races.push(timeout as Promise<any>);
+      result = await Promise.race(races);
     } catch (e:any) {
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
     }
@@ -339,6 +395,90 @@ function traceWrap(
   } catch {}
 
   return wrapped;
+}
+
+type HumanRequestPhase = 'play' | 'bid' | 'double';
+
+function makeHumanBot(
+  session: HumanSession,
+  seatIndex: number,
+  res: NextApiResponse,
+): (ctx: any) => Promise<any> {
+  const emit = (payload: any) => {
+    try { writeLine(res, payload); } catch {}
+  };
+
+  const bot = async (ctx: any) => {
+    const phase: HumanRequestPhase = ctx?.phase === 'bid'
+      ? 'bid'
+      : ctx?.phase === 'double'
+        ? 'double'
+        : 'play';
+    const decisionId = `${session.id}-${seatIndex}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const basePayload: any = {
+      type: 'event',
+      kind: 'human-request',
+      sessionId: session.id,
+      decisionId,
+      seat: seatIndex,
+      phase,
+    };
+
+    if (phase === 'play') {
+      const four2: Four2Policy = (ctx?.policy?.four2 || 'both');
+      const hand: Label[] = Array.isArray(ctx?.hands) ? [...ctx.hands] : [];
+      const moves = generateMoves(hand, (ctx?.require ?? null) as Combo | null, four2) || [];
+      const MAX_SAMPLES = 150;
+      basePayload.allowPass = !!ctx?.canPass;
+      basePayload.hand = hand;
+      basePayload.require = ctx?.require ?? null;
+      basePayload.legalMoves = moves.slice(0, MAX_SAMPLES);
+      basePayload.legalTotal = moves.length;
+      basePayload.landlord = ctx?.landlord ?? null;
+      basePayload.leader = ctx?.leader ?? null;
+      basePayload.trick = ctx?.trick ?? null;
+    } else if (phase === 'bid') {
+      const bid = ctx?.bid || {};
+      basePayload.allowPass = true;
+      basePayload.bid = {
+        score: typeof bid.score === 'number' ? bid.score : null,
+        multiplier: typeof bid.multiplier === 'number' ? bid.multiplier : null,
+        bidMultiplier: typeof bid.bidMultiplier === 'number' ? bid.bidMultiplier : null,
+        default: typeof bid.default === 'boolean' ? bid.default : (typeof bid.recommended === 'boolean' ? bid.recommended : null),
+        attempt: typeof bid.attempt === 'number' ? bid.attempt : null,
+        maxAttempts: typeof bid.maxAttempts === 'number' ? bid.maxAttempts : null,
+      };
+    } else if (phase === 'double') {
+      const dbl = ctx?.double || {};
+      basePayload.allowPass = true;
+      basePayload.double = {
+        baseMultiplier: typeof dbl.baseMultiplier === 'number' ? dbl.baseMultiplier : null,
+        role: typeof dbl.role === 'string' ? dbl.role : null,
+        default: typeof dbl.default === 'boolean' ? dbl.default : (typeof dbl.recommended === 'boolean' ? dbl.recommended : null),
+        info: dbl.info ?? null,
+      };
+    }
+
+    emit(basePayload);
+
+    return await new Promise<any>((resolve, reject) => {
+      session.pending.set(decisionId, {
+        resolve: (value: any) => {
+          session.pending.delete(decisionId);
+          resolve(value);
+        },
+        reject: (reason?: any) => {
+          session.pending.delete(decisionId);
+          reject(reason);
+        },
+      });
+    });
+  };
+
+  (bot as any).phaseAware = true;
+  (bot as any).choice = 'human';
+  (bot as any).name = 'Human';
+  return bot;
 }
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
@@ -543,6 +683,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const keepAlive = setInterval(() => { try { (res as any).write('\n'); } catch {} }, 15000);
 
+  let activeHumanSession: HumanSession | null = null;
+
   try {
     const body: RunBody = (req as any).body as any;
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
@@ -554,7 +696,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const turnTimeoutMsArr = parseTurnTimeoutMsArr(req);
     const seatSpecs = (body.seats || []).slice(0,3) as SeatSpec[];
-    const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
+    const humanSeats = seatSpecs
+      .map((spec, idx) => (spec?.choice === 'human' ? idx : -1))
+      .filter((idx): idx is number => idx >= 0);
+    const humanSession = humanSeats.length ? createHumanSession() : null;
+    if (humanSession) {
+      activeHumanSession = humanSession;
+      writeLine(res, { type:'event', kind:'human-session', sessionId: humanSession.id, seats: humanSeats });
+    }
+
+    const baseBots = seatSpecs.map((s, idx) => {
+      if (s?.choice === 'human') {
+        if (!humanSession) return asBot('built-in:greedy-max', s); // fallback, should not happen
+        return makeHumanBot(humanSession, idx, res);
+      }
+      return asBot(s.choice, s);
+    });
     const delays = ((body.seatDelayMs || []) as number[]);
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
@@ -587,6 +744,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (e:any) {
     writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
   } finally {
+    if (activeHumanSession) {
+      try { destroyHumanSession(activeHumanSession.id); } catch {}
+      activeHumanSession = null;
+    }
     try{ clearInterval(keepAlive as any);}catch{};
     try{ (res as any).end(); }catch{}
   }
