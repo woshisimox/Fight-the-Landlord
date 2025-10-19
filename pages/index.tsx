@@ -722,6 +722,7 @@ type LivePanelFinishPayload = {
   finishedCount: number;
   totals: [number, number, number];
   completedAll: boolean;
+  endedEarlyForNegative?: boolean;
 };
 
 function SeatTitle({ i }: { i:number }) {
@@ -1367,7 +1368,8 @@ function KnockoutPanel() {
       setAutomation(false);
       return;
     }
-    if (!result.completedAll) {
+    const endedEarly = !!result.endedEarlyForNegative;
+    if (!result.completedAll && !endedEarly) {
       setAutomation(false);
       setNotice(lang === 'en'
         ? 'The trio stopped before finishing all games; automation has been paused.'
@@ -1418,8 +1420,8 @@ function KnockoutPanel() {
       setOvertimeCount(nextAttempt);
       setSeriesRounds(3);
       setNotice(lang === 'en'
-        ? `Round ${ctx.roundIdx + 1}: lowest score tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
-        : `第 ${ctx.roundIdx + 1} 轮积分最低出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
+        ? `Round ${ctx.roundIdx + 1}${endedEarly ? ' ended early after a negative score;' : ''} lowest score tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
+        : `第 ${ctx.roundIdx + 1} 轮${endedEarly ? '出现负分提前结束，' : ''}积分最低出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
       setMatchKey(key => key + 1);
       setTimeout(() => { livePanelRef.current?.start(); }, 0);
       return;
@@ -1438,8 +1440,8 @@ function KnockoutPanel() {
     setSeriesRounds(roundsPerGroup);
     setOvertimeCount(0);
     setNotice(lang === 'en'
-      ? `Round ${ctx.roundIdx + 1}: eliminated ${label}.`
-      : `第 ${ctx.roundIdx + 1} 轮淘汰：${label}`);
+      ? `Round ${ctx.roundIdx + 1}: eliminated ${label}${endedEarly ? ' after an early finish caused by a negative score.' : '.'}`
+      : `第 ${ctx.roundIdx + 1} 轮淘汰：${label}${endedEarly ? '（因出现负分提前结束）' : ''}`);
     setTimeout(() => { if (autoRunRef.current) scheduleNextMatch(); else setAutomation(false); }, 0);
   };
 
@@ -3707,6 +3709,7 @@ nextTotals     = [
     };
 
     let aborted = false;
+    let endedEarlyForNegative = false;
     try {
       for (let i = 0; i < props.rounds; i++) {
         if (controllerRef.current?.signal.aborted) break;
@@ -3716,7 +3719,11 @@ nextTotals     = [
         if (controllerRef.current?.signal.aborted) break;
         if (pauseRef.current) await waitWhilePaused();
         const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
-        if (hasNegative) { setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']); break; }
+        if (hasNegative) {
+          endedEarlyForNegative = true;
+          setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']);
+          break;
+        }
         await restBetweenRounds();
       }
     } catch (e: any) {
@@ -3739,7 +3746,8 @@ nextTotals     = [
         aborted,
         finishedCount: finishedGames,
         totals: totalsSnap,
-        completedAll: !aborted && finishedGames >= targetRounds,
+        completedAll: !aborted && (finishedGames >= targetRounds || endedEarlyForNegative),
+        endedEarlyForNegative,
       });
     }
   };
