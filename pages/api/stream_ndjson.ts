@@ -424,6 +424,12 @@ function makeHumanBot(
       phase,
     };
 
+    if (Array.isArray(ctx?.hands)) {
+      basePayload.hand = [...ctx.hands];
+    } else {
+      basePayload.hand = [];
+    }
+
     if (phase === 'play') {
       const four2: Four2Policy = (ctx?.policy?.four2 || 'both');
       const hand: Label[] = Array.isArray(ctx?.hands) ? [...ctx.hands] : [];
