@@ -2775,37 +2775,47 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       const bands = (cuts && cuts.length ? [...cuts] : [0]).sort((a,b)=>a-b);
       if (bands[0] !== 0) bands.unshift(0);
       if (bands[bands.length-1] !== n) bands.push(n);
+      let totalRounds = 0;
       const perSeatRounds:number[][] = [[],[],[]];
       for (let b=0;b<bands.length-1;b++){
         const st = bands[b], ed = bands[b+1];
         const len = Math.max(0, ed - st);
         if (len <= 0) continue;
+        totalRounds++;
         for (let s=0;s<3;s++){
           const arr = series[s]||[];
           let sum = 0, cnt = 0;
           for (let i=st;i<ed;i++){
             const v = arr[i];
-            if (typeof v === 'number') { sum += v; cnt++; }
+            if (typeof v === 'number' && Number.isFinite(v)) { sum += v; cnt++; }
           }
           if (cnt>0) perSeatRounds[s].push(sum/cnt);
+          else perSeatRounds[s].push(Number.NaN);
         }
       }
       const stats = [0,1,2].map(s=>{
         const rs = perSeatRounds[s];
-        const rounds = rs.length;
+        const rounds = totalRounds;
         if (rounds===0) return { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-        const sum = rs.reduce((a,b)=>a+b,0);
-        const overall = sum/rounds;
-        const last = rs[rounds-1];
-        const best = Math.max(...rs);
-        const worst = Math.min(...rs);
+        const valid = rs.filter(v => Number.isFinite(v));
+        const overall = valid.length ? (valid.reduce((a,b)=>a+b,0) / valid.length) : 0;
+        const last = (() => {
+          for (let idx = rs.length - 1; idx >= 0; idx--) {
+            const v = rs[idx];
+            if (Number.isFinite(v)) return v as number;
+          }
+          return 0;
+        })();
+        const best = valid.length ? Math.max(...valid) : 0;
+        const worst = valid.length ? Math.min(...valid) : 0;
         const mu = overall;
-        const varv = rs.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / rounds;
-        const sigma = Math.sqrt(Math.max(0, varv));
+        const sigma = valid.length
+          ? Math.sqrt(Math.max(0, valid.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / valid.length))
+          : 0;
         return { rounds, overallAvg: overall, lastAvg: last, best, worst, mean: mu, sigma };
       });
       setScoreStats(stats);
-      setScoreDists(perSeatRounds);
+      setScoreDists(perSeatRounds.map(rs => rs.filter(v => Number.isFinite(v))));
     } catch (e) { console.error('[stats] recompute error', e); }
   }
   // 每局结束或数据变化时刷新统计
