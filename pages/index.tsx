@@ -2202,33 +2202,39 @@ function KnockoutPanel() {
                       const manualDisabled = automationActive || liveRunning;
                       const isFinalMatchCard = isFinalRoundMatch(rounds, ridx, midx);
                       const finalStatusNodes = isFinalMatchCard
-                        ? match.players.reduce<JSX.Element[]>((acc, playerToken) => {
-                            if (typeof playerToken !== 'string') return acc;
-                            const placement = finalPlacementLookup.get(playerToken);
-                            if (!placement) return acc;
-                            const labelText = placement.rank === 0
-                              ? (lang === 'en' ? 'Champion' : '冠军')
-                              : placement.rank === 1
-                                ? (lang === 'en' ? 'Runner-up' : '亚军')
-                                : (lang === 'en' ? 'Third place' : '季军');
-                            const baseText = lang === 'en'
-                              ? `${labelText}: ${displayName(playerToken)}`
-                              : `${labelText}：${displayName(playerToken)}`;
-                            const scoreText = placement.total != null
-                              ? (lang === 'en'
-                                ? ` (Points: ${placement.total})`
-                                : `（积分：${placement.total}）`)
-                              : '';
-                            acc.push(
-                              <span
-                                key={`${match.id || `match-${midx}`}-final-${playerToken}`}
-                                style={{ fontSize:12, color:'#047857', fontWeight:600 }}
-                              >
-                                {baseText}{scoreText}
-                              </span>
-                            );
-                            return acc;
-                          }, [])
+                        ? (() => {
+                            const placements = match.players
+                              .filter((playerToken): playerToken is string => typeof playerToken === 'string')
+                              .map(playerToken => {
+                                const placement = finalPlacementLookup.get(playerToken);
+                                return placement ? { playerToken, placement } : null;
+                              })
+                              .filter((entry): entry is { playerToken: string; placement: { rank: number; total: number | null } } => !!entry)
+                              .sort((a, b) => a.placement.rank - b.placement.rank);
+                            return placements.map(({ playerToken, placement }) => {
+                              const labelText = placement.rank === 0
+                                ? (lang === 'en' ? 'Champion' : '冠军')
+                                : placement.rank === 1
+                                  ? (lang === 'en' ? 'Runner-up' : '亚军')
+                                  : (lang === 'en' ? 'Third place' : '季军');
+                              const baseText = lang === 'en'
+                                ? `${labelText}: ${displayName(playerToken)}`
+                                : `${labelText}：${displayName(playerToken)}`;
+                              const scoreText = placement.total != null
+                                ? (lang === 'en'
+                                  ? ` (Points: ${placement.total})`
+                                  : `（积分：${placement.total}）`)
+                                : '';
+                              return (
+                                <span
+                                  key={`${match.id || `match-${midx}`}-final-${playerToken}`}
+                                  style={{ fontSize:12, color:'#047857', fontWeight:600 }}
+                                >
+                                  {baseText}{scoreText}
+                                </span>
+                              );
+                            });
+                          })()
                         : [];
                       return (
                         <div
