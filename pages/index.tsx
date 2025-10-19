@@ -1257,6 +1257,32 @@ function KnockoutPanel() {
     return value;
   };
 
+  const playerMeta = (value: KnockoutPlayer | null): { label: string; provider: string } => {
+    const label = displayName(value);
+    if (!value || value === KO_BYE) return { label, provider: '' };
+    try {
+      const parsed = JSON.parse(String(value));
+      const entryId = typeof parsed?.id === 'string' ? parsed.id : '';
+      const entry = entryId ? entries.find(item => item.id === entryId) : null;
+      if (entry) {
+        return {
+          label,
+          provider: providerSummary(entry.choice, entry.model, entry.keys?.httpBase),
+        };
+      }
+      const rawChoice = typeof parsed?.choice === 'string' ? parsed.choice : '';
+      if (KO_ALL_CHOICES.includes(rawChoice as BotChoice)) {
+        const model = typeof parsed?.model === 'string' ? parsed.model : '';
+        const httpBase = typeof parsed?.httpBase === 'string' ? parsed.httpBase : '';
+        return {
+          label,
+          provider: providerSummary(rawChoice as BotChoice, model, httpBase),
+        };
+      }
+    } catch {}
+    return { label, provider: '' };
+  };
+
   const fallbackLive = useMemo(() => ({
     seats: KO_DEFAULT_CHOICES.slice(0, 3),
     seatModels: ['', '', ''],
@@ -2201,14 +2227,23 @@ function KnockoutPanel() {
                           <div style={{ display:'flex', flexWrap:'wrap', justifyContent:'space-between', alignItems:'center', gap:8, marginBottom:8 }}>
                             <div style={{ display:'flex', flexWrap:'wrap', gap:6, alignItems:'center' }}>
                               {match.players.map((playerToken, pidx) => {
-                                const label = displayName(playerToken);
+                                const meta = playerMeta(playerToken);
                                 const eliminated = match.eliminated === playerToken || playerToken === KO_BYE;
+                                const labelColor = eliminated ? '#9ca3af' : '#1f2937';
+                                const detailColor = eliminated ? '#9ca3af' : '#6b7280';
                                 return (
                                   <div key={`${match.id || `match-${midx}`}-player-${pidx}`} style={{ display:'flex', alignItems:'center', gap:6 }}>
-                                    <span style={{ fontWeight:600, color: eliminated ? '#9ca3af' : '#1f2937', opacity: eliminated ? 0.65 : 1 }}>
-                                      {label}
-                                    </span>
-                                    {pidx < match.players.length - 1 && <span style={{ color:'#6b7280', fontSize:12 }}>vs</span>}
+                                    <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-start', gap:2 }}>
+                                      <span style={{ fontWeight:700, fontSize:16, color: labelColor, opacity: eliminated ? 0.7 : 1 }}>
+                                        {meta.label}
+                                      </span>
+                                      {meta.provider && (
+                                        <span style={{ fontSize:12, color: detailColor, opacity: eliminated ? 0.65 : 1 }}>
+                                          {meta.provider}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {pidx < match.players.length - 1 && <span style={{ color:'#6b7280', fontSize:14 }}>vs</span>}
                                   </div>
                                 );
                               })}
@@ -2287,14 +2322,11 @@ function KnockoutPanel() {
                     const label = currentMatch.labels[idx] || displayName(token);
                     const total = scoreboardTotals ? scoreboardTotals[idx] : null;
                     const seatChoice = currentMatch.seats[idx];
-                    const provider = choiceLabel(seatChoice);
                     const model = (currentMatch.seatModels[idx] || '').trim();
                     const httpBase = typeof currentMatch.seatKeys[idx]?.httpBase === 'string'
                       ? currentMatch.seatKeys[idx]!.httpBase!.trim()
                       : '';
-                    const providerText = seatChoice === 'http'
-                      ? (httpBase ? `${provider} · ${httpBase}` : provider)
-                      : (seatChoice.startsWith('ai:') ? (model ? `${provider} · ${model}` : provider) : provider);
+                    const providerText = providerSummary(seatChoice, model, httpBase);
                     return (
                       <div key={`${token}-score`} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:10, background:'#fff' }}>
                         <div style={{ fontWeight:700, marginBottom:4 }}>{label}</div>
@@ -2438,6 +2470,19 @@ function choiceLabel(choice: BotChoice): string {
     case 'http':                  return 'HTTP';
     default: return String(choice);
   }
+}
+
+function providerSummary(choice: BotChoice, model?: string, httpBase?: string): string {
+  const provider = choiceLabel(choice);
+  if (choice === 'http') {
+    const base = (httpBase || '').trim();
+    return base ? `${provider} · ${base}` : provider;
+  }
+  if (choice.startsWith('ai:')) {
+    const trimmedModel = (model || '').trim();
+    return trimmedModel ? `${provider} · ${trimmedModel}` : provider;
+  }
+  return provider;
 }
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; bid:number };
