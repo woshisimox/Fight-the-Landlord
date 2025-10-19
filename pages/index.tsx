@@ -1,5 +1,5 @@
 // pages/index.tsx
-import { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
@@ -746,6 +746,7 @@ type LiveProps = {
   onRunningChange?: (running: boolean) => void;
   onPauseChange?: (paused: boolean) => void;
   onFinished?: (result: LivePanelFinishPayload) => void;
+  onRoundProgress?: (finished: number, target: number) => void;
   controlsHidden?: boolean;
   initialTotals?: [number, number, number] | null;
   turnTimeoutSecs?: number[];};
@@ -1014,10 +1015,24 @@ function KnockoutPanel() {
   const seriesTotalsRef = useRef<[number, number, number] | null>(seriesTotals);
   useEffect(() => { seriesTotalsRef.current = seriesTotals; }, [seriesTotals]);
   const [seriesRounds, setSeriesRounds] = useState<number>(() => settings.roundsPerGroup);
+  const [liveRoundsCompleted, setLiveRoundsCompleted] = useState(0);
+  const [liveRoundTarget, setLiveRoundTarget] = useState<number>(() => (
+    Number.isFinite(settings.roundsPerGroup)
+      ? Math.max(0, Math.floor(settings.roundsPerGroup))
+      : 0
+  ));
   const [overtimeCount, setOvertimeCount] = useState(0);
   const [overtimeReason, setOvertimeReason] = useState<'lowest' | 'final'>('lowest');
   const overtimeCountRef = useRef(overtimeCount);
   useEffect(() => { overtimeCountRef.current = overtimeCount; }, [overtimeCount]);
+  useEffect(() => {
+    const raw = Number(seriesRounds);
+    const nextTarget = Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
+    setLiveRoundTarget(prev => (prev === nextTarget ? prev : nextTarget));
+  }, [seriesRounds]);
+  useEffect(() => {
+    setLiveRoundsCompleted(0);
+  }, [matchKey]);
   const [liveRunning, setLiveRunning] = useState(false);
   const [livePaused, setLivePaused] = useState(false);
   const [automationActive, setAutomationActive] = useState(false);
@@ -1151,6 +1166,8 @@ function KnockoutPanel() {
     setCurrentMatch(null);
     setLiveTotals(null);
     setFinalStandings(null);
+    setLiveRoundsCompleted(0);
+    setLiveRoundTarget(Number.isFinite(settings.roundsPerGroup) ? Math.max(0, Math.floor(settings.roundsPerGroup)) : 0);
     const roster = entries.map((entry, idx) => ({
       token: entryToken(entry, idx + 1),
       identity: entryIdentity(entry),
@@ -1197,6 +1214,8 @@ function KnockoutPanel() {
     setOvertimeCount(0);
     setFinalStandings(null);
     setRounds([]);
+    setLiveRoundsCompleted(0);
+    setLiveRoundTarget(Number.isFinite(settings.roundsPerGroup) ? Math.max(0, Math.floor(settings.roundsPerGroup)) : 0);
     setError(null);
     setNotice(null);
     if (typeof window !== 'undefined') {
@@ -1433,6 +1452,14 @@ function KnockoutPanel() {
       setAutomation(false);
     }
   };
+
+  const handleRoundProgress = useCallback((finished: number, target: number) => {
+    const safeTarget = Number.isFinite(target) ? Math.max(0, Math.floor(target)) : 0;
+    const safeFinishedRaw = Number.isFinite(finished) ? Math.max(0, Math.floor(finished)) : 0;
+    const boundedFinished = safeTarget > 0 ? Math.min(safeTarget, safeFinishedRaw) : safeFinishedRaw;
+    setLiveRoundTarget(prev => (prev === safeTarget ? prev : safeTarget));
+    setLiveRoundsCompleted(prev => (prev === boundedFinished ? prev : boundedFinished));
+  }, []);
 
   const handleLiveFinished = (result: LivePanelFinishPayload) => {
     if (result.aborted) {
@@ -1674,6 +1701,13 @@ function KnockoutPanel() {
     const base = Number.isFinite(startScore) ? startScore : 0;
     return [base, base, base] as [number, number, number];
   }, [liveTotals, seriesTotals, currentMatch, startScore]);
+
+  const gamesRemaining = useMemo(() => {
+    const target = Math.max(0, Number.isFinite(liveRoundTarget) ? liveRoundTarget : 0);
+    if (target === 0) return 0;
+    const finished = Math.max(0, Math.min(target, Number.isFinite(liveRoundsCompleted) ? liveRoundsCompleted : 0));
+    return Math.max(0, target - finished);
+  }, [liveRoundTarget, liveRoundsCompleted]);
 
   const seatsForLive = currentMatch ? currentMatch.seats : fallbackLive.seats;
   const modelsForLive = currentMatch ? currentMatch.seatModels : fallbackLive.seatModels;
@@ -2238,6 +2272,12 @@ function KnockoutPanel() {
                       const cardBackground = isActiveMatch ? '#f0f9ff' : '#fff';
                       const manualDisabled = automationActive || liveRunning;
                       const isFinalMatchCard = isFinalRoundMatch(rounds, ridx, midx);
+                      const showRemaining = isActiveMatch && !match.eliminated;
+                      const remainingLabel = showRemaining
+                        ? (lang === 'en'
+                          ? `Games remaining: ${gamesRemaining}`
+                          : `剩余局数：${gamesRemaining}`)
+                        : null;
                       const finalStatusNodes = isFinalMatchCard
                         ? (() => {
                             const placements = match.players
@@ -2308,6 +2348,11 @@ function KnockoutPanel() {
                               })}
                             </div>
                             <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
+                              {remainingLabel && (
+                                <span style={{ fontSize:13, fontWeight:600, color:'#1d4ed8' }}>
+                                  {remainingLabel}
+                                </span>
+                              )}
                               {finalStatusNodes.length > 0 ? (
                                 finalStatusNodes
                               ) : (
@@ -2430,6 +2475,7 @@ function KnockoutPanel() {
                 onRunningChange={setLiveRunning}
                 onPauseChange={setLivePaused}
                 onFinished={handleLiveFinished}
+                onRoundProgress={handleRoundProgress}
                 controlsHidden
                 initialTotals={seriesTotals}
                 turnTimeoutSecs={timeoutsForLive}
@@ -4065,6 +4111,13 @@ nextTotals     = [
     isRunning: () => runningRef.current,
     isPaused: () => pauseRef.current,
   }));
+
+  useEffect(() => {
+    if (!props.onRoundProgress) return;
+    const raw = Number(props.rounds);
+    const target = Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
+    props.onRoundProgress(finishedCount, target);
+  }, [finishedCount, props.rounds, props.onRoundProgress]);
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
