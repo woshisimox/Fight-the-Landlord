@@ -560,6 +560,8 @@ function isRoundComplete(round: KnockoutRound): boolean {
   return round.matches.every(match => {
     const active = match.players.filter(p => !!p && p !== KO_BYE);
     if (active.length <= 1) return true;
+    const hasBye = match.players.some(p => p === KO_BYE);
+    if (hasBye && match.eliminated === KO_BYE) return true;
     return !!match.eliminated && active.includes(match.eliminated);
   });
 }
