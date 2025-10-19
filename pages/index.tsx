@@ -501,17 +501,16 @@ function cloneKnockoutRounds(rounds: KnockoutRound[]): KnockoutRound[] {
           const rawPlayers = Array.isArray(match?.players) ? match.players : [];
           const players = rawPlayers
             .filter((p, idx) => idx < 3 && typeof p === 'string' && p)
-            .map(p => (p === KO_BYE ? null : p))
-            .filter((p): p is KnockoutPlayer => !!p);
-          if (players.length < 2) return null;
-          const eliminated = typeof match?.eliminated === 'string' && players.includes(match.eliminated)
+            .map(p => (p === KO_BYE ? KO_BYE : (p as KnockoutPlayer)));
+          if (!players.length) return null;
+          const eliminated = typeof match?.eliminated === 'string' && players.includes(match.eliminated as KnockoutPlayer)
             ? match.eliminated
-            : typeof (match as any)?.winner === 'string' && players.includes((match as any).winner)
+            : typeof (match as any)?.winner === 'string' && players.includes((match as any).winner as KnockoutPlayer)
               ? (match as any).winner
               : null;
           return {
             id: typeof match?.id === 'string' && match.id ? match.id : `R${ridx}-M${midx}`,
-            players,
+            players: players as KnockoutPlayer[],
             eliminated,
           };
         })
