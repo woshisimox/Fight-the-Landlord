@@ -2033,7 +2033,14 @@ function KnockoutPanel() {
 
       <div style={{ marginTop:12 }}>
         <div style={{ fontWeight:700, marginBottom:6 }}>{lang === 'en' ? 'Min play interval per participant (ms)' : '每位参赛者出牌最小间隔 (ms)'}</div>
-        <div style={{ display:'grid', gap:12, gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))' }}>
+        <div
+          style={{
+            display:'grid',
+            gap:12,
+            gridTemplateColumns:'repeat(3, minmax(0, 1fr))',
+            alignItems:'stretch',
+          }}
+        >
           {entries.map((entry, idx) => (
             <div key={`${entry.id}-delay`} style={{ border:'1px dashed #e5e7eb', borderRadius:6, padding:10 }}>
               <div style={{ fontWeight:700, marginBottom:8 }}>{participantLabel(idx)}</div>
@@ -2055,7 +2062,14 @@ function KnockoutPanel() {
 
       <div style={{ marginTop:12 }}>
         <div style={{ fontWeight:700, marginBottom:6 }}>{lang === 'en' ? 'Think timeout per participant (s)' : '每位参赛者思考超时（秒）'}</div>
-        <div style={{ display:'grid', gap:12, gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))' }}>
+        <div
+          style={{
+            display:'grid',
+            gap:12,
+            gridTemplateColumns:'repeat(3, minmax(0, 1fr))',
+            alignItems:'stretch',
+          }}
+        >
           {entries.map((entry, idx) => (
             <div key={`${entry.id}-timeout`} style={{ border:'1px dashed #e5e7eb', borderRadius:6, padding:10 }}>
               <div style={{ fontWeight:700, marginBottom:8 }}>{participantLabel(idx)}</div>
