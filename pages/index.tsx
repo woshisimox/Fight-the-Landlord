@@ -995,6 +995,7 @@ function KnockoutPanel() {
   useEffect(() => { seriesTotalsRef.current = seriesTotals; }, [seriesTotals]);
   const [seriesRounds, setSeriesRounds] = useState<number>(() => settings.roundsPerGroup);
   const [overtimeCount, setOvertimeCount] = useState(0);
+  const [overtimeReason, setOvertimeReason] = useState<'lowest' | 'final'>('lowest');
   const overtimeCountRef = useRef(overtimeCount);
   useEffect(() => { overtimeCountRef.current = overtimeCount; }, [overtimeCount]);
   const [liveRunning, setLiveRunning] = useState(false);
@@ -1190,6 +1191,7 @@ function KnockoutPanel() {
     setSeriesTotals(null);
     setSeriesRounds(KO_DEFAULT_SETTINGS.roundsPerGroup);
     setOvertimeCount(0);
+    setOvertimeReason('lowest');
     setSettings(defaultKnockoutSettings());
     setEntries(makeDefaultKnockoutEntries());
     setFinalStandings(null);
@@ -1324,6 +1326,7 @@ function KnockoutPanel() {
     setSeriesRounds(roundsPerGroup);
     setSeriesTotals(baseTotals);
     setOvertimeCount(0);
+    setOvertimeReason('lowest');
     setLiveTotals(baseTotals);
     setMatchKey(key => key + 1);
     setTimeout(() => { livePanelRef.current?.start(); }, 0);
@@ -1367,6 +1370,7 @@ function KnockoutPanel() {
       setLiveTotals(null);
       setSeriesRounds(roundsPerGroup);
       setOvertimeCount(0);
+      setOvertimeReason('lowest');
       setRounds(prev => {
         const draft = cloneKnockoutRounds(prev);
         applyEliminationToDraft(draft, next.roundIdx, next.matchIdx, byeToken);
@@ -1423,6 +1427,39 @@ function KnockoutPanel() {
           .filter(entry => !!entry.token && entry.token !== KO_BYE)
           .sort((a, b) => b.total - a.total)
       : null;
+    const epsilon = 1e-6;
+    if (wasFinalMatch) {
+      const trioTotals = ctx.tokens.map((token, idx) => ({ token, total: totalsTuple[idx] }))
+        .filter(entry => !!entry.token && entry.token !== KO_BYE);
+      const tiedFinalTokens = new Set<string>();
+      for (let i = 0; i < trioTotals.length; i++) {
+        for (let j = i + 1; j < trioTotals.length; j++) {
+          const a = trioTotals[i];
+          const b = trioTotals[j];
+          if (Math.abs(a.total - b.total) <= epsilon) {
+            tiedFinalTokens.add(String(a.token));
+            tiedFinalTokens.add(String(b.token));
+          }
+        }
+      }
+      if (tiedFinalTokens.size > 0) {
+        const tiedLabels = ctx.tokens
+          .filter(token => tiedFinalTokens.has(String(token)))
+          .map(token => displayName(token))
+          .join(lang === 'en' ? ', ' : '、');
+        const nextAttempt = overtimeCountRef.current + 1;
+        setOvertimeCount(nextAttempt);
+        setOvertimeReason('final');
+        setSeriesRounds(3);
+        setFinalStandings(null);
+        setNotice(lang === 'en'
+          ? `Final round tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
+          : `决赛积分出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
+        setMatchKey(key => key + 1);
+        setTimeout(() => { livePanelRef.current?.start(); }, 0);
+        return;
+      }
+    }
     const lowest = ranked[0];
     if (!lowest) {
       setAutomation(false);
@@ -1435,7 +1472,6 @@ function KnockoutPanel() {
         : '该组三人未产生有效积分，请核对结果并手动标记淘汰选手。');
       return;
     }
-    const epsilon = 1e-6;
     const tiedLowest = ranked.filter(entry => Math.abs(entry.total - lowest.total) <= epsilon);
     if (tiedLowest.length !== 1) {
       const tiedLabels = tiedLowest
@@ -1443,6 +1479,7 @@ function KnockoutPanel() {
         .join(lang === 'en' ? ', ' : '、');
       const nextAttempt = overtimeCountRef.current + 1;
       setOvertimeCount(nextAttempt);
+      setOvertimeReason('lowest');
       setSeriesRounds(3);
       setNotice(lang === 'en'
         ? `Round ${ctx.roundIdx + 1}${endedEarly ? ' ended early after a negative score;' : ''} lowest score tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
@@ -1464,6 +1501,7 @@ function KnockoutPanel() {
     });
     setSeriesRounds(roundsPerGroup);
     setOvertimeCount(0);
+    setOvertimeReason('lowest');
     if (wasFinalMatch) {
       const ordered = (placementsDesc && placementsDesc.length
         ? placementsDesc
@@ -1548,6 +1586,21 @@ function KnockoutPanel() {
     }
     return rounds.length;
   }, [rounds]);
+  const finalPlacementLookup = useMemo(() => {
+    const map = new Map<string, { rank: number; total: number | null }>();
+    if (finalStandings?.placements?.length) {
+      finalStandings.placements.slice(0, 3).forEach((placement, idx) => {
+        const token = typeof placement.token === 'string' ? placement.token : null;
+        if (!token) return;
+        const numericTotal = Number(placement.total);
+        map.set(token, {
+          rank: idx,
+          total: Number.isFinite(numericTotal) ? numericTotal : null,
+        });
+      });
+    }
+    return map;
+  }, [finalStandings]);
 
   const scoreboardTotals = useMemo(() => {
     if (liveTotals) return liveTotals;
@@ -2105,6 +2158,36 @@ function KnockoutPanel() {
                       const cardBorder = isActiveMatch ? '#2563eb' : '#e5e7eb';
                       const cardBackground = isActiveMatch ? '#f0f9ff' : '#fff';
                       const manualDisabled = automationActive || liveRunning;
+                      const isFinalMatchCard = isFinalRoundMatch(rounds, ridx, midx);
+                      const finalStatusNodes = isFinalMatchCard
+                        ? match.players.reduce<JSX.Element[]>((acc, playerToken) => {
+                            if (typeof playerToken !== 'string') return acc;
+                            const placement = finalPlacementLookup.get(playerToken);
+                            if (!placement) return acc;
+                            const labelText = placement.rank === 0
+                              ? (lang === 'en' ? 'Champion' : '冠军')
+                              : placement.rank === 1
+                                ? (lang === 'en' ? 'Runner-up' : '亚军')
+                                : (lang === 'en' ? 'Third place' : '季军');
+                            const baseText = lang === 'en'
+                              ? `${labelText}: ${displayName(playerToken)}`
+                              : `${labelText}：${displayName(playerToken)}`;
+                            const scoreText = placement.total != null
+                              ? (lang === 'en'
+                                ? ` (Points: ${placement.total})`
+                                : `（积分：${placement.total}）`)
+                              : '';
+                            acc.push(
+                              <span
+                                key={`${match.id || `match-${midx}`}-final-${playerToken}`}
+                                style={{ fontSize:12, color:'#047857', fontWeight:600 }}
+                              >
+                                {baseText}{scoreText}
+                              </span>
+                            );
+                            return acc;
+                          }, [])
+                        : [];
                       return (
                         <div
                           key={match.id || `round-${ridx}-match-${midx}`}
@@ -2131,17 +2214,23 @@ function KnockoutPanel() {
                               })}
                             </div>
                             <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
-                              {eliminatedLabel && (
-                                <span style={{ fontSize:12, color:'#b91c1c' }}>
-                                  {lang === 'en' ? `Eliminated: ${eliminatedLabel}` : `淘汰：${eliminatedLabel}`}
-                                </span>
-                              )}
-                              {match.eliminated && survivors.length > 0 && (
-                                <span style={{ fontSize:12, color:'#047857' }}>
-                                  {lang === 'en'
-                                    ? `Advancing: ${survivors.map(p => displayName(p)).join(', ')}`
-                                    : `晋级：${survivors.map(p => displayName(p)).join('，')}`}
-                                </span>
+                              {finalStatusNodes.length > 0 ? (
+                                finalStatusNodes
+                              ) : (
+                                <>
+                                  {eliminatedLabel && (
+                                    <span style={{ fontSize:12, color:'#b91c1c' }}>
+                                      {lang === 'en' ? `Eliminated: ${eliminatedLabel}` : `淘汰：${eliminatedLabel}`}
+                                    </span>
+                                  )}
+                                  {match.eliminated && survivors.length > 0 && (
+                                    <span style={{ fontSize:12, color:'#047857' }}>
+                                      {lang === 'en'
+                                        ? `Advancing: ${survivors.map(p => displayName(p)).join(', ')}`
+                                        : `晋级：${survivors.map(p => displayName(p)).join('，')}`}
+                                    </span>
+                                  )}
+                                </>
                               )}
                             </div>
                           </div>
@@ -2217,9 +2306,13 @@ function KnockoutPanel() {
                 </div>
                 {overtimeCount > 0 && (
                   <div style={{ fontSize:12, color:'#b91c1c', marginBottom:12 }}>
-                    {lang === 'en'
-                      ? `Overtime playoff #${overtimeCount} (3 games) is running because of a lowest-score tie.`
-                      : `由于积分最低出现平局，正在进行第 ${overtimeCount} 次加时赛（每次 3 局）。`}
+                    {overtimeReason === 'final'
+                      ? (lang === 'en'
+                        ? `Final round overtime #${overtimeCount} (3 games) is running to break the tie.`
+                        : `决赛积分出现平局，正在进行第 ${overtimeCount} 次加时赛（每次 3 局）。`)
+                      : (lang === 'en'
+                        ? `Overtime playoff #${overtimeCount} (3 games) is running because of a lowest-score tie.`
+                        : `由于积分最低出现平局，正在进行第 ${overtimeCount} 次加时赛（每次 3 局）。`)}
                   </div>
                 )}
               </>
