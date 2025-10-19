@@ -4148,9 +4148,11 @@ const handleAllSaveInner = () => {
           style={{
             padding:'8px 12px',
             borderRadius:8,
-            background: running ? '#9ca3af' : '#bbf7d0',
-            color: running ? '#fff' : '#065f46',
-            cursor: running ? 'not-allowed' : 'pointer'
+            border:'1px solid #d1d5db',
+            background: running ? '#f3f4f6' : '#2563eb',
+            color: running ? '#9ca3af' : '#fff',
+            cursor: running ? 'not-allowed' : 'pointer',
+            fontWeight:600,
           }}
         >开始</button>
         <button
@@ -4159,12 +4161,26 @@ const handleAllSaveInner = () => {
           style={{
             padding:'8px 12px',
             borderRadius:8,
-            background: !running ? '#d1d5db' : (paused ? '#bfdbfe' : '#fde68a'),
-            color: !running ? '#6b7280' : (paused ? '#1e3a8a' : '#92400e'),
-            cursor: !running ? 'not-allowed' : 'pointer'
+            border:'1px solid #d1d5db',
+            background: !running ? '#f3f4f6' : (paused ? '#bfdbfe' : '#fde68a'),
+            color: !running ? '#9ca3af' : (paused ? '#1e3a8a' : '#92400e'),
+            cursor: !running ? 'not-allowed' : 'pointer',
+            fontWeight:600,
           }}
         >{paused ? '继续' : '暂停'}</button>
-        <button onClick={stop} style={{ padding:'8px 12px', borderRadius:8 }}>停止</button>
+        <button
+          onClick={stop}
+          disabled={!running}
+          style={{
+            padding:'8px 12px',
+            borderRadius:8,
+            border:'1px solid #d1d5db',
+            background: running ? '#fee2e2' : '#f3f4f6',
+            color: running ? '#b91c1c' : '#9ca3af',
+            cursor: running ? 'pointer' : 'not-allowed',
+            fontWeight:600,
+          }}
+        >停止</button>
         <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
           剩余局数：{remainingGames}
         </span>
