@@ -2432,12 +2432,12 @@ function KnockoutPanel() {
                     flexWrap:'wrap',
                     gap:8,
                     fontWeight:700,
-                    fontSize:16,
+                    fontSize:20,
                   }}
                 >
                   <span>{`${label}：${displayName(placement.token)}`}</span>
                   {score !== '' && (
-                    <span style={{ fontSize:14, color:'#047857cc' }}>
+                    <span style={{ fontSize:18, color:'#047857cc' }}>
                       {lang === 'en' ? `(Points: ${score})` : `（积分：${score}）`}
                     </span>
                   )}
