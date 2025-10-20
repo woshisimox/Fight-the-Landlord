@@ -1564,7 +1564,13 @@ export async function* runOneGame(opts: {
     }
   }
   // 亮底 & 地主收底
-  yield { type:'event', kind:'reveal', bottom: bottom.slice() };
+  yield {
+    type:'event',
+    kind:'reveal',
+    bottom: bottom.slice(),
+    landlordIdx: landlord,
+    landlord,
+  };
   hands[landlord].push(...bottom);
   hands[landlord] = sorted(hands[landlord]);
 
