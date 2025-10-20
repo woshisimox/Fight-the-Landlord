@@ -218,7 +218,7 @@ function projectCardsToHand(cards: Label[] | undefined, hand: Label[]): Label[] 
       pool.splice(idx, 1);
       continue;
     }
-    resolved.push(card);
+    return [];
   }
   return resolved;
 }
@@ -251,22 +251,31 @@ export async function suggestHumanHint(ctx: BotCtx): Promise<HumanHint | null> {
       return null;
     }
 
-    const normalizeFromLegal = (cards: Label[] | undefined) => {
-      if (!cards || !cards.length) return undefined;
+    const resolveFromLegal = (cards: Label[] | undefined): Label[] | null => {
+      if (!cards || !cards.length) return null;
       const match = legal.find(mv => sameCardSet(mv, cards));
       const picked = match ? match.slice() : cards.slice();
       const resolved = projectCardsToHand(picked, hand);
-      return resolved.length ? resolved : picked;
+      return resolved.length === picked.length ? resolved : null;
     };
 
-    let chosen = legal[0].slice();
+    const ensureResolved = (cards: Label[] | undefined | null): Label[] | null => {
+      if (!cards || !cards.length) return null;
+      const resolved = projectCardsToHand(cards, hand);
+      return resolved.length === cards.length ? resolved : null;
+    };
+
+    const firstResolved = ensureResolved(legal[0]);
+    if (!firstResolved) return null;
+
+    let chosen = firstResolved;
     let via = 'Enumerate';
 
     try {
       const botMove = await Promise.resolve(GreedyMin(ctx));
       if (botMove?.move === 'play' && Array.isArray(botMove.cards) && botMove.cards.length) {
-        const norm = normalizeFromLegal(botMove.cards as Label[]);
-        if (norm?.length) { chosen = norm; via = 'GreedyMin'; }
+        const norm = resolveFromLegal(botMove.cards as Label[]);
+        if (norm && norm.length) { chosen = norm; via = 'GreedyMin'; }
       } else if (botMove?.move === 'pass' && ctx.require && ctx.canPass) {
         const desc = describeFollowRequirement(ctx.require);
         const detail = desc?.description
@@ -288,17 +297,19 @@ export async function suggestHumanHint(ctx: BotCtx): Promise<HumanHint | null> {
           return a.combo.rank - b.combo.rank;
         });
       if (scored.length) {
-        chosen = scored[0].mv.slice();
-        via = 'FollowMin';
+        const resolved = ensureResolved(scored[0].mv);
+        if (resolved && resolved.length) {
+          chosen = resolved;
+          via = 'FollowMin';
+        }
       }
     }
 
     if (!chosen || !chosen.length) {
-      chosen = legal[0].slice();
+      chosen = firstResolved;
     }
 
-    const projected = projectCardsToHand(chosen, hand);
-    const finalCards = projected.length ? projected : chosen;
+    const finalCards = ensureResolved(chosen) ?? firstResolved;
     const combo = classify(finalCards, four2);
     const cardsText = finalCards.join(' ');
     const title = combo ? `建议：${comboTypeName(combo)}` : '出牌建议';
