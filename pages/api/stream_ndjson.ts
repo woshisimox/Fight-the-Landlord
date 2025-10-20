@@ -297,15 +297,23 @@ function traceWrap(
     if (isHuman) {
       const safeCtx = (() => { try { return JSON.parse(JSON.stringify(ctxWithSeen)); } catch { return ctxWithSeen; } })();
       const timeoutSeconds = Math.max(1, Math.round(turnTimeoutMs / 1000));
-      const defaultMove = (() => {
-        if (phase === 'bid') return { phase: 'bid', bid: false, reason: `timeout@${timeoutSeconds}s` };
-        if (phase === 'double') return { phase: 'double', double: false, reason: `timeout@${timeoutSeconds}s` };
-        return { phase: 'play', move: 'pass', reason: `timeout@${timeoutSeconds}s` };
-      })();
-      const reg = registerHumanRequest({ seat: seatIndex, phase, sessionId, timeoutMs: turnTimeoutMs, defaultMove });
-      requestId = reg.id;
-      try { writeLine(res, { type:'event', kind:'human-request', seat: seatIndex, phase, requestId, sessionId, ctx: safeCtx, timeoutMs: turnTimeoutMs }); } catch {}
-      result = await reg.promise;
+      const isEmptyHand = phase === 'play'
+        && ((Array.isArray(ctxWithSeen?.hands) && ctxWithSeen.hands.length === 0)
+          || (Array.isArray(ctxWithSeen?.handsCount) && (ctxWithSeen.handsCount[seatIndex] ?? 0) === 0));
+
+      if (isEmptyHand) {
+        result = { phase: 'play', move: 'pass', reason: 'auto:empty-hand' };
+      } else {
+        const defaultMove = (() => {
+          if (phase === 'bid') return { phase: 'bid', bid: false, reason: `timeout@${timeoutSeconds}s` };
+          if (phase === 'double') return { phase: 'double', double: false, reason: `timeout@${timeoutSeconds}s` };
+          return { phase: 'play', move: 'pass', reason: `timeout@${timeoutSeconds}s` };
+        })();
+        const reg = registerHumanRequest({ seat: seatIndex, phase, sessionId, timeoutMs: turnTimeoutMs, defaultMove });
+        requestId = reg.id;
+        try { writeLine(res, { type:'event', kind:'human-request', seat: seatIndex, phase, requestId, sessionId, ctx: safeCtx, timeoutMs: turnTimeoutMs }); } catch {}
+        result = await reg.promise;
+      }
     } else {
       const timeout = new Promise((resolve)=> {
         setTimeout(()=> resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` }), Math.max(1000, turnTimeoutMs));
