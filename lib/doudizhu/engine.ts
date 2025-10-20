@@ -1423,6 +1423,8 @@ export async function* runOneGame(opts: {
     let last = -1;
     let lastAttemptScores: number[] = [0,0,0];
     let lastAttemptHumanDecline: boolean[] = [false,false,false];
+    const permanentHumanDecline: boolean[] = [false,false,false];
+    let startingSeat = 0;
 
     for (let attempt = 0; attempt < MAX_BID_ATTEMPTS; attempt++) {
       const bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
@@ -1431,9 +1433,10 @@ export async function* runOneGame(opts: {
       multiplier = 1;
 
       const attemptScores: number[] = [0,0,0];
-      const attemptHumanDecline: boolean[] = [false,false,false];
+      const attemptHumanDecline: boolean[] = permanentHumanDecline.slice();
 
-      for (let s = 0; s < 3; s++) {
+      for (let step = 0; step < 3; step++) {
+        const s = (startingSeat + step) % 3;
         const sc = evalRobScore(hands[s]);
         attemptScores[s] = sc;
 
@@ -1505,7 +1508,8 @@ export async function* runOneGame(opts: {
 
         let decision = recommended;
         let overridden = false;
-        if (meta.phaseAware) {
+        const humanRetired = meta.choice === 'human' && permanentHumanDecline[s];
+        if (meta.phaseAware && !humanRetired) {
           const ctxForBot: any = clone(bidCtx);
           if (ctxForBot?.bid) {
             const def = !!ctxForBot.bid.recommended;
@@ -1529,12 +1533,16 @@ export async function* runOneGame(opts: {
               overridden = true;
             }
           } catch {}
+        } else if (humanRetired) {
+          decision = false;
+          overridden = true;
         }
 
         yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold, decision: (recommended ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
 
-        if (overridden && !decision && meta.choice === 'human') {
+        if ((overridden || humanRetired) && !decision && meta.choice === 'human') {
           attemptHumanDecline[s] = true;
+          permanentHumanDecline[s] = true;
         }
 
         if (decision) {
@@ -1572,6 +1580,10 @@ export async function* runOneGame(opts: {
           bottom = deck.slice(17*3);
           for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
           try { yield { type:'state', kind:'hands', hands: hands.map(h => [...h]) }; } catch {}
+          if (anyHumanSeat) {
+            try { yield { type:'event', kind:'bottom-preview', bottom: bottom.slice() }; } catch {}
+          }
+          startingSeat = (startingSeat + 1) % 3;
           continue;
         }
 
