@@ -410,24 +410,81 @@ function decorateHandCycle(raw: string[]): string[] {
   });
 }
 
-const normalizeHand = (raw: string[]) => sortHandLabels(decorateHandCycle(raw));
-
-function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
+function decorateHandWithReuse(raw: string[], prev?: string[], avoid?: Iterable<string>): string[] {
   if (!Array.isArray(raw)) return [];
-  const seat = (typeof landlord === 'number' && landlord >= 0 && landlord < 3) ? landlord : null;
-  if (seat == null) return decorateHandCycle(raw);
-  const pool = [...(hands?.[seat] || [])];
+
+  const previous = new Map<string, string[]>();
+  if (Array.isArray(prev)) {
+    for (const label of prev) {
+      const key = rankOf(label);
+      if (!previous.has(key)) previous.set(key, []);
+      previous.get(key)!.push(label);
+    }
+    for (const arr of previous.values()) arr.sort();
+  }
+
+  const avoidSet = new Set<string>();
+  if (avoid) {
+    for (const label of avoid) avoidSet.add(label);
+  }
+  const used = new Set<string>();
+
+  const takeCandidate = (label: string | undefined | null, allowAvoid = false): string | null => {
+    if (!label) return null;
+    if (used.has(label)) return null;
+    if (!allowAvoid && avoidSet.has(label)) return null;
+    used.add(label);
+    avoidSet.add(label);
+    return label;
+  };
+
   return raw.map(card => {
+    if (!card) return card;
     const options = candDecorations(card);
-    for (const opt of options) {
-      const idx = pool.indexOf(opt);
-      if (idx >= 0) {
-        pool.splice(idx, 1);
-        return opt;
+    const base = rankOf(card);
+
+    const prevArr = previous.get(base);
+    if (prevArr && prevArr.length) {
+      for (let i = 0; i < prevArr.length; i++) {
+        const candidate = prevArr[i];
+        const taken = takeCandidate(candidate, true);
+        if (taken) {
+          prevArr.splice(i, 1);
+          return taken;
+        }
       }
     }
-    return options[0] || card;
+
+    for (const opt of options) {
+      const taken = takeCandidate(opt, false);
+      if (taken) return taken;
+    }
+
+    for (const opt of options) {
+      const taken = takeCandidate(opt, true);
+      if (taken) return taken;
+    }
+
+    const fallback = options[0] ?? String(card);
+    if (!used.has(fallback)) used.add(fallback);
+    return fallback;
   });
+}
+
+const normalizeHand = (raw: string[], prev?: string[], avoid?: Iterable<string>) =>
+  sortHandLabels(decorateHandWithReuse(raw, prev, avoid));
+
+function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][], prev?: string[]): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seat = (typeof landlord === 'number' && landlord >= 0 && landlord < 3) ? landlord : null;
+  const prevDecor = Array.isArray(prev) ? prev : undefined;
+  if (seat == null) {
+    return decorateHandWithReuse(raw, prevDecor);
+  }
+  const avoid = new Set<string>();
+  const seatHand = Array.isArray(hands?.[seat]) ? hands[seat]! : [];
+  for (const label of seatHand) avoid.add(label);
+  return decorateHandWithReuse(raw, prevDecor, avoid);
 }
 
 function Card({ label, dimmed = false, compact = false, selectable = false, selected = false, onToggle, faceDown = false }: { label:string; dimmed?:boolean; compact?:boolean; selectable?:boolean; selected?:boolean; onToggle?:()=>void; faceDown?:boolean }) {
@@ -1645,7 +1702,8 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   nextWinner = null;
                   nextDelta = null;
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
-                  nextHands = (rh as string[][]).map(normalizeHand);
+                  const prevHands = handsRef.current;
+                  nextHands = (rh as string[][]).map((arr, idx) => normalizeHand(arr, prevHands[idx]));
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
@@ -1723,7 +1781,8 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               {
                 const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
                 if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
-                  nextHands = (rh0 as string[][]).map(normalizeHand);
+                  const prevHands = handsRef.current;
+                  nextHands = (rh0 as string[][]).map((arr, idx) => normalizeHand(arr, prevHands[idx]));
                   const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
                   if (lord2 != null) {
                     nextLandlord = lord2;
@@ -1817,7 +1876,10 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               // ------ 底牌预览（人类参与叫抢时提前显示） ------
               if (m.type === 'event' && m.kind === 'bottom-preview') {
                 const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
-                const mapped = resolveBottomDecorations(btm, null, nextHands as string[][]);
+                const prevLabels = Array.isArray(nextBottom.cards)
+                  ? nextBottom.cards.map(c => c.label)
+                  : undefined;
+                const mapped = resolveBottomDecorations(btm, null, nextHands as string[][], prevLabels);
                 nextBottom = {
                   landlord: nextBottom.landlord ?? null,
                   cards: mapped.map(label => ({ label, used: false })),
@@ -1830,40 +1892,43 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
 
               // ------ 明牌（显示底牌） ------
               if (m.type === 'event' && m.kind === 'reveal') {
-  const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
-  const seatIdxRaw = (typeof (m.landlordIdx ?? m.landlord) === 'number')
-    ? (m.landlordIdx ?? m.landlord) as number
-    : nextLandlord;
-  const landlordSeat = (typeof seatIdxRaw === 'number') ? seatIdxRaw : (nextLandlord ?? nextBottom.landlord ?? null);
-  const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][]);
+                const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
+                const seatIdxRaw = (typeof (m.landlordIdx ?? m.landlord) === 'number')
+                  ? (m.landlordIdx ?? m.landlord) as number
+                  : nextLandlord;
+                const landlordSeat = (typeof seatIdxRaw === 'number') ? seatIdxRaw : (nextLandlord ?? nextBottom.landlord ?? null);
+                const prevLabels = Array.isArray(nextBottom.cards)
+                  ? nextBottom.cards.map(c => c.label)
+                  : undefined;
+                const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][], prevLabels);
 
-  if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
-    let seatHand = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
-    const prevBottom = bottomRef.current;
-    if (prevBottom && prevBottom.landlord === landlordSeat && Array.isArray(prevBottom.cards)) {
-      for (const prevCard of prevBottom.cards) {
-        const idxPrev = seatHand.indexOf(prevCard.label);
-        if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
-      }
-    }
-    seatHand = sortHandLabels([...seatHand, ...mapped]);
-    nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
-  }
+                if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
+                  let seatHand = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
+                  const prevBottom = bottomRef.current;
+                  if (prevBottom && prevBottom.landlord === landlordSeat && Array.isArray(prevBottom.cards)) {
+                    for (const prevCard of prevBottom.cards) {
+                      const idxPrev = seatHand.indexOf(prevCard.label);
+                      if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
+                    }
+                  }
+                  seatHand = sortHandLabels([...seatHand, ...mapped]);
+                  nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
+                }
 
-  if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
-    nextLandlord = landlordSeat;
-  }
+                if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
+                  nextLandlord = landlordSeat;
+                }
 
-  nextBottom = {
-    landlord: landlordSeat ?? nextBottom.landlord ?? null,
-    cards: mapped.map(label => ({ label, used: false })),
-    visibleToAll: false,
-  };
-  const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
-  nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
-  // 不改变 nextMultiplier，仅展示
-  continue;
-}
+                nextBottom = {
+                  landlord: landlordSeat ?? nextBottom.landlord ?? null,
+                  cards: mapped.map(label => ({ label, used: false })),
+                  visibleToAll: false,
+                };
+                const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
+                nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
+                // 不改变 nextMultiplier，仅展示
+                continue;
+              }
 if (m.type === 'event' && m.kind === 'multiplier-sync') {
   const cur = Math.max(1, (nextMultiplier || 1));
   const mlt = Math.max(1, Number((m as any).multiplier || 1));
