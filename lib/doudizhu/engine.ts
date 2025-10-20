@@ -200,6 +200,29 @@ function sameCardSet(a: Label[], b: Label[]): boolean {
   return true;
 }
 
+function projectCardsToHand(cards: Label[] | undefined, hand: Label[]): Label[] {
+  if (!Array.isArray(cards) || cards.length === 0) return [];
+  const pool = hand.slice();
+  const resolved: Label[] = [];
+  for (const card of cards) {
+    let idx = pool.indexOf(card);
+    if (idx >= 0) {
+      resolved.push(pool[idx]);
+      pool.splice(idx, 1);
+      continue;
+    }
+    const rk = rankOf(card);
+    idx = pool.findIndex(c => rankOf(c) === rk);
+    if (idx >= 0) {
+      resolved.push(pool[idx]);
+      pool.splice(idx, 1);
+      continue;
+    }
+    resolved.push(card);
+  }
+  return resolved;
+}
+
 export async function suggestHumanHint(ctx: BotCtx): Promise<HumanHint | null> {
   try {
     if (!ctx || !Array.isArray(ctx.hands)) return null;
@@ -231,7 +254,9 @@ export async function suggestHumanHint(ctx: BotCtx): Promise<HumanHint | null> {
     const normalizeFromLegal = (cards: Label[] | undefined) => {
       if (!cards || !cards.length) return undefined;
       const match = legal.find(mv => sameCardSet(mv, cards));
-      return match ? match.slice() : cards.slice();
+      const picked = match ? match.slice() : cards.slice();
+      const resolved = projectCardsToHand(picked, hand);
+      return resolved.length ? resolved : picked;
     };
 
     let chosen = legal[0].slice();
@@ -272,8 +297,10 @@ export async function suggestHumanHint(ctx: BotCtx): Promise<HumanHint | null> {
       chosen = legal[0].slice();
     }
 
-    const combo = classify(chosen, four2);
-    const cardsText = chosen.join(' ');
+    const projected = projectCardsToHand(chosen, hand);
+    const finalCards = projected.length ? projected : chosen;
+    const combo = classify(finalCards, four2);
+    const cardsText = finalCards.join(' ');
     const title = combo ? `建议：${comboTypeName(combo)}` : '出牌建议';
     let detail = cardsText ? `推荐出：${cardsText}` : '推荐出牌。';
 
@@ -285,7 +312,7 @@ export async function suggestHumanHint(ctx: BotCtx): Promise<HumanHint | null> {
 
     return {
       move: 'play',
-      cards: chosen.slice(),
+      cards: finalCards.slice(),
       comboType: combo?.type,
       title,
       detail,
