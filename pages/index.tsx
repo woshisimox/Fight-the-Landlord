@@ -443,25 +443,29 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
     ? { color: '#9ca3af' }
     : (rankColor ? { color: rankColor } : {});
   const handleClick = () => { if (!faceDown && selectable && onToggle) onToggle(); };
+  const baseCardStyle = {
+    borderRadius: cardRadius,
+    width,
+    height,
+    marginRight: 6,
+    marginBottom: 6,
+    boxSizing: 'border-box' as const,
+  };
   if (faceDown) {
     return (
       <span
         style={{
-          display:'inline-flex',
-          alignItems:'center',
-          justifyContent:'center',
-          border:'1px solid #1e3a8a',
-          borderRadius: cardRadius,
-          width,
-          height,
-          marginRight:6,
-          marginBottom:6,
-          fontWeight:800,
-          color:'#bfdbfe',
-          background:'linear-gradient(135deg, #1e40af, #2563eb)',
-          boxShadow:'inset 0 0 0 1px rgba(255,255,255,0.25)',
-          cursor:'default',
-          userSelect:'none',
+          ...baseCardStyle,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid #1e3a8a',
+          fontWeight: 800,
+          color: '#bfdbfe',
+          background: 'linear-gradient(135deg, #1e40af, #2563eb)',
+          boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.25)',
+          cursor: 'default',
+          userSelect: 'none',
         }}
       >
         <span style={{ fontSize }}>{'🂠'}</span>
@@ -472,13 +476,16 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
     <span
       onClick={handleClick}
       style={{
-        display:'inline-flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4,
-        border:'1px solid #ddd', borderRadius: cardRadius,
-        width,
-        height,
-        marginRight:6, marginBottom:6, fontWeight:800,
+        ...baseCardStyle,
+        display: 'inline-flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        alignItems: 'stretch',
+        padding: compact ? '4px 4px 5px' : '6px 5px 7px',
+        border: '1px solid #ddd',
+        fontWeight: 800,
         color: suitColor,
-        background: dimmed ? '#f3f4f6' : (selected ? '#e0f2fe' : '#fff'),
+        background: dimmed ? '#f3f4f6' : selected ? '#e0f2fe' : '#fff',
         opacity: dimmed ? 0.65 : 1,
         borderColor: selected ? '#2563eb' : dimmed ? '#d1d5db' : '#ddd',
         boxShadow: selected ? '0 0 0 2px rgba(37, 99, 235, 0.25)' : 'none',
@@ -487,8 +494,20 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
         transition: 'transform 120ms ease, box-shadow 120ms ease, background 120ms ease',
       }}
     >
-      <span style={{ fontSize }}>{suit}</span>
-      <span style={{ fontSize: rankFont, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+      <span style={{ fontSize, lineHeight: 1, display: 'flex', alignItems: 'flex-start' }}>{suit}</span>
+      <span
+        style={{
+          fontSize: rankFont,
+          lineHeight: 1,
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'flex-end',
+          transform: 'rotate(180deg)',
+          ...rankStyle,
+        }}
+      >
+        <span style={{ transform: 'rotate(180deg)' }}>{rank === 'T' ? '10' : rank}</span>
+      </span>
     </span>
   );
 }
