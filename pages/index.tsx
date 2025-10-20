@@ -1793,6 +1793,10 @@ else if (m.type === 'event' && m.kind === 'bid-eval') {
     nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
   }
 
+  if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
+    nextLandlord = landlordSeat;
+  }
+
   nextBottom = {
     landlord: landlordSeat ?? nextBottom.landlord ?? null,
     cards: mapped.map(label => ({ label, used: false })),
@@ -2426,11 +2430,13 @@ const handleAllSaveInner = () => {
             const defaultBid = prompt?.ctx?.bid?.default;
             const defaultDouble = prompt?.ctx?.double?.default;
             const hideFaces = anyHumanSeat && !seatIsHuman[i];
+            const resolvedLandlord = landlord ?? bottomInfo.landlord;
+            const isLandlordSeat = resolvedLandlord === i;
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
                 <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}</div>
                 <div style={{ marginBottom:6 }}>
-                  <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
+                  <SeatTitle i={i} /> {isLandlordSeat && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
                   {prompt && <span style={{ marginLeft:8, fontSize:12, color:'#2563eb' }}>（人类）</span>}
                 </div>
                 <Hand
@@ -2478,7 +2484,8 @@ const handleAllSaveInner = () => {
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
           {[0,1,2].map(i=>{
-            const isLandlord = bottomInfo.landlord === i;
+            const resolvedLandlord = landlord ?? bottomInfo.landlord;
+            const isLandlord = resolvedLandlord === i;
             const showForSeat = bottomInfo.visibleToAll || isLandlord;
             const bottomLabelSuffix = isLandlord
               ? '（地主）'
