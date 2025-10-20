@@ -2432,6 +2432,11 @@ const handleAllSaveInner = () => {
             const hideFaces = anyHumanSeat && !seatIsHuman[i];
             const resolvedLandlord = landlord ?? bottomInfo.landlord;
             const isLandlordSeat = resolvedLandlord === i;
+            const showBottom = bottomInfo.visibleToAll || isLandlordSeat;
+            const bottomCards = showBottom ? bottomInfo.cards : [];
+            const bottomLabelSuffix = isLandlordSeat
+              ? '（地主）'
+              : (bottomInfo.visibleToAll ? '（待确认）' : '');
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
                 <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}</div>
@@ -2446,6 +2451,34 @@ const handleAllSaveInner = () => {
                   onToggle={card => toggleHumanCard(i, card)}
                   hideFaces={hideFaces}
                 />
+
+                {(bottomInfo.cards.length > 0 || showBottom) && (
+                  <div
+                    style={{
+                      marginTop:8,
+                      padding:'6px 8px',
+                      border:'1px dashed #d1d5db',
+                      borderRadius:6,
+                      background: showBottom ? (isLandlordSeat ? '#f0fdf4' : '#f9fafb') : '#f9fafb',
+                      textAlign:'center'
+                    }}
+                  >
+                    <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌{bottomLabelSuffix}</div>
+                    {showBottom ? (
+                      bottomCards.length ? (
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:4, justifyContent:'center' }}>
+                          {bottomCards.map((c, idx) => (
+                            <Card key={`${c.label}-${idx}`} label={c.label} dimmed={c.used} compact />
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize:12, color:'#9ca3af' }}>（待明牌）</div>
+                      )
+                    ) : (
+                      <div style={{ fontSize:12, color:'#d1d5db' }}>—</div>
+                    )}
+                  </div>
+                )}
 
                 {prompt && (
                   <div style={{ marginTop:8, borderTop:'1px dashed #e5e7eb', paddingTop:8, fontSize:12, color:'#1f2937', display:'flex', flexDirection:'column', gap:6 }}>
@@ -2477,48 +2510,6 @@ const handleAllSaveInner = () => {
                     )}
                     {submitting && <div style={{ color:'#2563eb' }}>已提交，等待后端确认…</div>}
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
-          {[0,1,2].map(i=>{
-            const resolvedLandlord = landlord ?? bottomInfo.landlord;
-            const isLandlord = resolvedLandlord === i;
-            const showForSeat = bottomInfo.visibleToAll || isLandlord;
-            const bottomLabelSuffix = isLandlord
-              ? '（地主）'
-              : (bottomInfo.visibleToAll ? '（待确认）' : '');
-            const cards = showForSeat ? bottomInfo.cards : [];
-            return (
-              <div
-                key={`bottom-${i}`}
-                style={{
-                  border:'1px dashed #d1d5db',
-                  borderRadius:8,
-                  padding:'6px 8px',
-                  minHeight:64,
-                  display:'flex',
-                  flexDirection:'column',
-                  justifyContent:'center',
-                  alignItems:'center',
-                  background:isLandlord ? '#f0fdf4' : '#f9fafb'
-                }}
-              >
-                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌{bottomLabelSuffix}</div>
-                {showForSeat ? (
-                  cards.length ? (
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:4, justifyContent:'center' }}>
-                      {cards.map((c, idx) => (
-                        <Card key={`${c.label}-${idx}`} label={c.label} dimmed={c.used} compact />
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize:12, color:'#9ca3af' }}>（待明牌）</div>
-                  )
-                ) : (
-                  <div style={{ fontSize:12, color:'#d1d5db' }}>—</div>
                 )}
               </div>
             );
