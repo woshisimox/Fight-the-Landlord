@@ -366,7 +366,7 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
-type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[] };
+type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[]; visibleToAll:boolean };
 
 const rankOf = (l: string) => {
   if (!l) return '';
@@ -730,7 +730,7 @@ function LivePanel(props: LiveProps) {
   const [bidMultiplier, setBidMultiplier] = useState(1);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
-  const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [] });
+  const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [], visibleToAll: false });
   const [log, setLog] = useState<string[]>([]);
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
@@ -1523,6 +1523,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
             return {
               landlord: cur?.landlord ?? null,
               cards: (cur?.cards || []).map(c => ({ ...c })),
+              visibleToAll: !!cur?.visibleToAll,
             } as BottomInfo;
           })();
         for (const raw of batch) {
@@ -1583,7 +1584,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
-                nextBottom = { landlord: null, cards: [] };
+                nextBottom = { landlord: null, cards: [], visibleToAll: false };
 
                 resetHumanState();
 
@@ -1609,7 +1610,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
-                  nextBottom = { landlord: lord ?? null, cards: [] };
+                  nextBottom = { landlord: lord ?? null, cards: [], visibleToAll: false };
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
@@ -1684,7 +1685,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                       const keep = Array.isArray(nextBottom.cards)
                         ? nextBottom.cards.map(c => ({ ...c }))
                         : [];
-                      nextBottom = { landlord: lord2, cards: keep };
+                      nextBottom = { landlord: lord2, cards: keep, visibleToAll: !!nextBottom.visibleToAll };
                     }
                   }
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
@@ -1756,8 +1757,22 @@ else if (m.type === 'event' && m.kind === 'bid-eval') {
               // -------- 明牌后额外加倍 --------
 // -------- 倍数校准（兜底） --------
 
-// ------ 明牌（显示底牌） ------
-if (m.type === 'event' && m.kind === 'reveal') {
+              // ------ 底牌预览（人类参与叫抢时提前显示） ------
+              if (m.type === 'event' && m.kind === 'bottom-preview') {
+                const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
+                const mapped = resolveBottomDecorations(btm, null, nextHands as string[][]);
+                nextBottom = {
+                  landlord: nextBottom.landlord ?? null,
+                  cards: mapped.map(label => ({ label, used: false })),
+                  visibleToAll: true,
+                };
+                const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
+                nextLog = [...nextLog, `底牌预览：${pretty.join(' ')}`];
+                continue;
+              }
+
+              // ------ 明牌（显示底牌） ------
+              if (m.type === 'event' && m.kind === 'reveal') {
   const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
   const seatIdxRaw = (typeof (m.landlordIdx ?? m.landlord) === 'number')
     ? (m.landlordIdx ?? m.landlord) as number
@@ -1781,6 +1796,7 @@ if (m.type === 'event' && m.kind === 'reveal') {
   nextBottom = {
     landlord: landlordSeat ?? nextBottom.landlord ?? null,
     cards: mapped.map(label => ({ label, used: false })),
+    visibleToAll: false,
   };
   const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
   nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
@@ -2070,7 +2086,7 @@ nextTotals     = [
             const keep = Array.isArray(nextBottom.cards)
               ? nextBottom.cards.map(c => ({ ...c }))
               : [];
-            nextBottom = { landlord: nextLandlord, cards: keep };
+            nextBottom = { landlord: nextLandlord, cards: keep, visibleToAll: !!nextBottom.visibleToAll };
           }
 
           setRoundLords(nextLords);
@@ -2463,7 +2479,11 @@ const handleAllSaveInner = () => {
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
           {[0,1,2].map(i=>{
             const isLandlord = bottomInfo.landlord === i;
-            const cards = isLandlord ? bottomInfo.cards : [];
+            const showForSeat = bottomInfo.visibleToAll || isLandlord;
+            const bottomLabelSuffix = isLandlord
+              ? '（地主）'
+              : (bottomInfo.visibleToAll ? '（待确认）' : '');
+            const cards = showForSeat ? bottomInfo.cards : [];
             return (
               <div
                 key={`bottom-${i}`}
@@ -2479,8 +2499,8 @@ const handleAllSaveInner = () => {
                   background:isLandlord ? '#f0fdf4' : '#f9fafb'
                 }}
               >
-                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌</div>
-                {isLandlord ? (
+                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌{bottomLabelSuffix}</div>
+                {showForSeat ? (
                   cards.length ? (
                     <div style={{ display:'flex', flexWrap:'wrap', gap:4, justifyContent:'center' }}>
                       {cards.map((c, idx) => (

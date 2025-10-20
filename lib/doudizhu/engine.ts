@@ -1413,6 +1413,11 @@ export async function* runOneGame(opts: {
     name: String((bot as any)?.name || (bot as any)?.constructor?.name || '').toLowerCase(),
   }));
 
+  const anyHumanSeat = seatMeta.some(meta => meta.choice === 'human');
+  if (anyHumanSeat) {
+    try { yield { type:'event', kind:'bottom-preview', bottom: bottom.slice() }; } catch {}
+  }
+
   const MAX_BID_ATTEMPTS = 5;
   if (opts.bid !== false) {
     let last = -1;
