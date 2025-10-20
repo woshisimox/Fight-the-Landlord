@@ -22,6 +22,15 @@ export type BotMove =
 
 type CoopRecommendation = (BotMove & { via?: string });
 
+export type HumanHint = {
+  move: 'play' | 'pass';
+  cards?: Label[];
+  comboType?: Combo['type'];
+  title: string;
+  detail: string;
+  via?: string;
+};
+
 export type PlayEvent = {
   seat: number;
   move: 'play' | 'pass';
@@ -178,6 +187,112 @@ function removeLabels(hand: Label[], pick: Label[]) {
   for (const c of pick) {
     const i = hand.indexOf(c);
     if (i >= 0) hand.splice(i, 1);
+  }
+}
+
+function sameCardSet(a: Label[], b: Label[]): boolean {
+  if (a.length !== b.length) return false;
+  const aa = sorted(a);
+  const bb = sorted(b);
+  for (let i = 0; i < aa.length; i++) {
+    if (aa[i] !== bb[i]) return false;
+  }
+  return true;
+}
+
+export async function suggestHumanHint(ctx: BotCtx): Promise<HumanHint | null> {
+  try {
+    if (!ctx || !Array.isArray(ctx.hands)) return null;
+    const four2 = ctx?.policy?.four2 || 'both';
+    const hand = Array.isArray(ctx.hands) ? ctx.hands.slice() : [];
+    if (!hand.length) {
+      if (ctx.require && ctx.canPass) {
+        const desc = describeFollowRequirement(ctx.require);
+        const detail = desc?.description
+          ? `暂无可压组合，${desc.description}`
+          : '暂无可压组合，建议选择过牌。';
+        return { move: 'pass', title: '建议过牌', detail, via: 'EmptyHand' };
+      }
+      return null;
+    }
+
+    const legal = generateMoves(hand, ctx.require ?? null, four2);
+    if (!legal.length) {
+      if (ctx.require && ctx.canPass) {
+        const desc = describeFollowRequirement(ctx.require);
+        const detail = desc?.description
+          ? `暂无可压组合，${desc.description}`
+          : '暂无可压组合，建议选择过牌。';
+        return { move: 'pass', title: '建议过牌', detail, via: 'NoLegalFollow' };
+      }
+      return null;
+    }
+
+    const normalizeFromLegal = (cards: Label[] | undefined) => {
+      if (!cards || !cards.length) return undefined;
+      const match = legal.find(mv => sameCardSet(mv, cards));
+      return match ? match.slice() : cards.slice();
+    };
+
+    let chosen = legal[0].slice();
+    let via = 'Enumerate';
+
+    try {
+      const botMove = await Promise.resolve(GreedyMin(ctx));
+      if (botMove?.move === 'play' && Array.isArray(botMove.cards) && botMove.cards.length) {
+        const norm = normalizeFromLegal(botMove.cards as Label[]);
+        if (norm?.length) { chosen = norm; via = 'GreedyMin'; }
+      } else if (botMove?.move === 'pass' && ctx.require && ctx.canPass) {
+        const desc = describeFollowRequirement(ctx.require);
+        const detail = desc?.description
+          ? `建议过牌：${desc.description}`
+          : '建议过牌。';
+        return { move: 'pass', title: '建议过牌', detail, via: 'GreedyMinPass' };
+      }
+    } catch {}
+
+    if (ctx.require && (!chosen || !chosen.length)) {
+      const scored = legal
+        .map(mv => ({ mv, combo: classify(mv, four2)! }))
+        .sort((a, b) => {
+          const lenDiff = (a.combo.len ?? 0) - (b.combo.len ?? 0);
+          if (lenDiff !== 0) return lenDiff;
+          if (a.combo.type === b.combo.type) return a.combo.rank - b.combo.rank;
+          if (a.combo.type === 'bomb' && b.combo.type !== 'bomb') return 1;
+          if (b.combo.type === 'bomb' && a.combo.type !== 'bomb') return -1;
+          return a.combo.rank - b.combo.rank;
+        });
+      if (scored.length) {
+        chosen = scored[0].mv.slice();
+        via = 'FollowMin';
+      }
+    }
+
+    if (!chosen || !chosen.length) {
+      chosen = legal[0].slice();
+    }
+
+    const combo = classify(chosen, four2);
+    const cardsText = chosen.join(' ');
+    const title = combo ? `建议：${comboTypeName(combo)}` : '出牌建议';
+    let detail = cardsText ? `推荐出：${cardsText}` : '推荐出牌。';
+
+    if (ctx.require) {
+      const desc = describeFollowRequirement(ctx.require);
+      const label = desc?.label || comboTypeName(ctx.require as Combo);
+      detail = `可压住对手的${label || '出牌'}：${cardsText}`;
+    }
+
+    return {
+      move: 'play',
+      cards: chosen.slice(),
+      comboType: combo?.type,
+      title,
+      detail,
+      via,
+    };
+  } catch {
+    return null;
   }
 }
 

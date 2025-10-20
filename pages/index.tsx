@@ -931,6 +931,26 @@ function LivePanel(props: LiveProps) {
     submitHumanAction(seat, { phase:'double', double: !!doDouble });
   };
 
+  const applyHumanHint = (seat:number) => {
+    const prompt = humanPromptsRef.current[seat];
+    const hint = prompt?.ctx?.hint;
+    if (!hint) return;
+    if (hint.move === 'play' && Array.isArray(hint.cards) && hint.cards.length) {
+      const hand = handsRef.current[seat] || [];
+      const available = hint.cards.filter((card:string) => hand.includes(card));
+      if (!available.length) return;
+      setHumanSelections(prev => {
+        const next = prev.map((arr, idx) => (idx === seat ? available.slice() : [...arr])) as string[][];
+        return next;
+      });
+    } else if (hint.move === 'pass') {
+      setHumanSelections(prev => {
+        const next = prev.map((arr, idx) => (idx === seat ? [] : [...arr])) as string[][];
+        return next;
+      });
+    }
+  };
+
   const humanPhaseLabel = (phase:string) => phase === 'bid' ? '叫抢' : phase === 'double' ? '加倍' : '出牌';
 
   /* ====== 评分统计（每局） ====== */
@@ -2581,6 +2601,11 @@ const handleAllSaveInner = () => {
             const canPass = prompt?.ctx?.canPass !== false;
             const defaultBid = prompt?.ctx?.bid?.default;
             const defaultDouble = prompt?.ctx?.double?.default;
+            const hint: any = prompt?.ctx?.hint;
+            const hintMove = hint?.move;
+            const hintCards: string[] = Array.isArray(hint?.cards) ? hint.cards.slice() : [];
+            const hintTitle = typeof hint?.title === 'string' ? hint.title : '';
+            const hintDetail = typeof hint?.detail === 'string' ? hint.detail : '';
             const hideFaces = anyHumanSeat && !seatIsHuman[i];
             const resolvedLandlord = landlord ?? bottomInfo.landlord;
             const isLandlordSeat = resolvedLandlord === i;
@@ -2641,9 +2666,24 @@ const handleAllSaveInner = () => {
                         <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                           <button onClick={()=>handleHumanPlay(i)} disabled={submitting} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #2563eb', background:'#dbeafe', color:'#1d4ed8' }}>出牌</button>
                           {canPass && <button onClick={()=>handleHumanPass(i)} disabled={submitting} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #d1d5db', background:'#fff' }}>过</button>}
+                          {hint && <button onClick={()=>applyHumanHint(i)} disabled={submitting} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #f59e0b', background:'#fef3c7', color:'#b45309' }}>提示</button>}
                           <button onClick={()=>clearHumanSelection(i)} disabled={submitting || selection.length===0} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #d1d5db', background:'#fff' }}>重选</button>
                         </div>
                         {selection.length > 0 && <div style={{ opacity:0.75 }}>已选：{selection.join(' ')}</div>}
+                        {hint && (
+                          <div style={{ display:'flex', flexDirection:'column', gap:4, marginTop:4, padding:'6px 8px', border:'1px dashed #fcd34d', borderRadius:6, background:'#fff7ed' }}>
+                            <div style={{ fontWeight:600, color:'#c2410c' }}>{hintTitle || '提示'}</div>
+                            {hintDetail && <div style={{ opacity:0.8 }}>{hintDetail}</div>}
+                            {hintMove === 'play' && hintCards.length > 0 && (
+                              <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                                {hintCards.map((c, idx) => (
+                                  <Card key={`${c}-${idx}`} label={c} compact />
+                                ))}
+                              </div>
+                            )}
+                            {hintMove === 'pass' && <div style={{ opacity:0.7 }}>建议点击“过”。</div>}
+                          </div>
+                        )}
                       </>
                     )}
                     {phase === 'bid' && (

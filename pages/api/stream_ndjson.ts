@@ -1,6 +1,6 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush, suggestHumanHint } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -296,6 +296,14 @@ function traceWrap(
 
     if (isHuman) {
       const safeCtx = (() => { try { return JSON.parse(JSON.stringify(ctxWithSeen)); } catch { return ctxWithSeen; } })();
+      if (phase === 'play') {
+        try {
+          const hint = await suggestHumanHint(ctxWithSeen as any);
+          if (hint) (safeCtx as any).hint = hint;
+        } catch (e) {
+          console.error('[human-hint] failed', e);
+        }
+      }
       const timeoutSeconds = Math.max(1, Math.round(turnTimeoutMs / 1000));
       const isEmptyHand = phase === 'play'
         && ((Array.isArray(ctxWithSeen?.hands) && ctxWithSeen.hands.length === 0)
