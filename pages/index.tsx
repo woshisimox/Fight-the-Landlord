@@ -1610,7 +1610,14 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
-                  nextBottom = { landlord: lord ?? null, cards: [], visibleToAll: false };
+                  const prevCards = Array.isArray(nextBottom.cards)
+                    ? nextBottom.cards.map(c => ({ ...c }))
+                    : [];
+                  nextBottom = {
+                    landlord: lord ?? nextBottom.landlord ?? null,
+                    cards: prevCards,
+                    visibleToAll: false,
+                  };
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
