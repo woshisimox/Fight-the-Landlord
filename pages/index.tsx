@@ -509,6 +509,15 @@ function projectLabelsOntoHand(cards: string[] | undefined, hand: string[]): str
     }
     return null;
   };
+  const takeByRank = (rank: string | undefined | null) => {
+    if (!rank) return null;
+    const idx = pool.findIndex(label => rankOf(label) === rank);
+    if (idx >= 0) {
+      const [picked] = pool.splice(idx, 1);
+      return picked;
+    }
+    return null;
+  };
 
   const resolved: string[] = [];
   for (const raw of cards) {
@@ -523,6 +532,12 @@ function projectLabelsOntoHand(cards: string[] | undefined, hand: string[]): str
       taken = takeFromPool(opt);
       if (taken) break;
     }
+    if (taken) {
+      resolved.push(taken);
+      continue;
+    }
+    const rank = rankOf(raw);
+    taken = takeByRank(rank);
     if (taken) {
       resolved.push(taken);
       continue;
