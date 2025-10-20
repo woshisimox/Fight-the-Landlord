@@ -1400,6 +1400,9 @@ export async function* runOneGame(opts: {
   let bottom = deck.slice(17*3); // 3 张
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
 
+  // 在叫抢开始前，先将初始牌面广播出去，确保前端（尤其是人类座位）能够渲染手牌
+  yield { type:'state', kind:'hands', hands: hands.map(h => [...h]) };
+
   // 抢地主流程（简单实现）
   let landlord = 0;
   let multiplier = 1;
@@ -1441,6 +1444,7 @@ export async function* runOneGame(opts: {
           'external':              2.2,
           'external:ai':           2.2,
           'external:http':         2.2,
+          'human':                 2.2,
           'ai':                    2.2,
           'http':                  2.2,
           'openai':                2.2,
@@ -1544,6 +1548,7 @@ export async function* runOneGame(opts: {
         for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
         bottom = deck.slice(17*3);
         for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
+        try { yield { type:'state', kind:'hands', hands: hands.map(h => [...h]) }; } catch {}
         continue;
       }
 

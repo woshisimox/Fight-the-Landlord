@@ -9,6 +9,7 @@ import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
+import { registerHumanRequest, abortHumanSession } from '../../lib/humanChannel';
 
 // ---- stable hash for ruleId ----
 function stableHash(s: string): string { let h=5381; for (let i=0;i<s.length;i++){ h=((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); }
@@ -198,7 +199,8 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
-  | 'http';
+  | 'http'
+  | 'human';
 
 type SeatSpec = {
   choice: BotChoice;
@@ -229,6 +231,7 @@ function providerLabel(choice: BotChoice) {
     case 'built-in:random-legal': return 'RandomLegal';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'human': return 'Human';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
     case 'ai:grok': return 'Grok';
@@ -246,6 +249,7 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
     case 'built-in:random-legal': return RandomLegal;
     case 'built-in:ally-support': return AllySupport;
     case 'built-in:endgame-rush': return EndgameRush;
+    case 'human': return async () => ({ move: 'pass' });
     case 'ai:openai':  return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
     case 'ai:gemini':  return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-pro' });
     case 'ai:grok':    return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
@@ -267,12 +271,14 @@ function traceWrap(
   onScore: (seat:number, sc?:number)=>void,
   turnTimeoutMs: number,
   startDelayMs: number,
-  seatIndex: number
+  seatIndex: number,
+  sessionId?: string,
 ){
   const label = providerLabel(choice);
   const supportsPhase = typeof choice === 'string'
-    ? (choice.startsWith('ai:') || choice === 'http')
+    ? (choice.startsWith('ai:') || choice === 'http' || choice === 'human')
     : false;
+  const isHuman = choice === 'human';
 
   const wrapped = async (ctx:any) => {
     if (startDelayMs && startDelayMs>0) {
@@ -281,18 +287,34 @@ function traceWrap(
     const phase = ctx?.phase || 'play';
     try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch {}
 
-    const timeout = new Promise((resolve)=> {
-      setTimeout(()=> resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` }), Math.max(1000, turnTimeoutMs));
-    });
+    const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
+    try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
 
     let result:any;
+    let requestId: string | null = null;
     const t0 = Date.now();
-    try {
-      const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
-      try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
-      result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
-    } catch (e:any) {
-      result = { move:'pass', reason:`error:${e?.message||String(e)}` };
+
+    if (isHuman) {
+      const safeCtx = (() => { try { return JSON.parse(JSON.stringify(ctxWithSeen)); } catch { return ctxWithSeen; } })();
+      const timeoutSeconds = Math.max(1, Math.round(turnTimeoutMs / 1000));
+      const defaultMove = (() => {
+        if (phase === 'bid') return { phase: 'bid', bid: false, reason: `timeout@${timeoutSeconds}s` };
+        if (phase === 'double') return { phase: 'double', double: false, reason: `timeout@${timeoutSeconds}s` };
+        return { phase: 'play', move: 'pass', reason: `timeout@${timeoutSeconds}s` };
+      })();
+      const reg = registerHumanRequest({ seat: seatIndex, phase, sessionId, timeoutMs: turnTimeoutMs, defaultMove });
+      requestId = reg.id;
+      try { writeLine(res, { type:'event', kind:'human-request', seat: seatIndex, phase, requestId, sessionId, ctx: safeCtx, timeoutMs: turnTimeoutMs }); } catch {}
+      result = await reg.promise;
+    } else {
+      const timeout = new Promise((resolve)=> {
+        setTimeout(()=> resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` }), Math.max(1000, turnTimeoutMs));
+      });
+      try {
+        result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
+      } catch (e:any) {
+        result = { move:'pass', reason:`error:${e?.message||String(e)}` };
+      }
     }
 
     const resPhase = (result && typeof result.phase === 'string') ? result.phase : phase;
@@ -323,6 +345,12 @@ function traceWrap(
     if (resPhase === 'play') {
       try { onScore(seatIndex, unified as any); } catch {}
     }
+    if (isHuman && requestId) {
+      try {
+        writeLine(res, { type:'event', kind:'human-resolved', seat: seatIndex, phase: resPhase, requestId, sessionId, move: result, reason: reasonText, score: unified });
+      } catch {}
+    }
+
     try {
       const payload: any = { type:'event', kind:'bot-done', seat: seatIndex, by: label, model: spec?.model||'', tookMs: Date.now()-t0, reason: reasonText, score: unified, phase: resPhase };
       if (resPhase === 'bid') payload.bid = typeof result?.bid === 'boolean' ? !!result.bid : (result?.move === 'pass' ? false : true);
@@ -542,9 +570,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch {}
 
   const keepAlive = setInterval(() => { try { (res as any).write('\n'); } catch {} }, 15000);
+  let cleanupHuman = () => {};
 
   try {
     const body: RunBody = (req as any).body as any;
+    const sessionId = String((body as any)?.clientTraceId || req.headers['x-trace-id'] || `session-${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`);
+    let cleaned = false;
+    cleanupHuman = () => {
+      if (cleaned) return;
+      cleaned = true;
+      try { abortHumanSession(sessionId); } catch {}
+    };
+    try { req.on('close', cleanupHuman as any); } catch {}
+    try { res.on('close', cleanupHuman as any); } catch {}
+
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
     const four2  = (body.four2 || 'both') as 'both'|'2singles'|'2pairs';
 
@@ -576,7 +615,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot as any, res, onReason, onScore,
                   turnTimeoutMsArr[i] ?? turnTimeoutMsArr[0],
                   Math.max(0, Math.floor(delays[i] ?? 0)),
-                  i)
+                  i,
+                  sessionId)
       );
 
       await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
@@ -585,9 +625,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
   } catch (e:any) {
-    writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` });
+    try { writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` }); } catch {}
+    try {
+      if (!(res as any).headersSent) {
+        res.status(500).json({ error: e?.message || 'internal error' });
+        return;
+      }
+    } catch {}
   } finally {
-    try{ clearInterval(keepAlive as any);}catch{};
-    try{ (res as any).end(); }catch{}
+    try { cleanupHuman(); } catch {}
+    try { clearInterval(keepAlive as any);}catch{};
+    try { (res as any).end(); }catch{}
   }
 }
