@@ -433,8 +433,11 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
   const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
-  const pad = compact ? '4px 6px' : '6px 10px';
-  const fontSize = compact ? 14 : 16;
+  const height = compact ? 52 : 64;
+  const width = compact ? 38 : 48;
+  const cardRadius = compact ? 6 : 8;
+  const fontSize = compact ? 18 : 20;
+  const rankFont = compact ? 16 : 18;
   const suitColor = dimmed ? '#9ca3af' : baseColor;
   const rankStyle = dimmed
     ? { color: '#9ca3af' }
@@ -448,8 +451,9 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
           alignItems:'center',
           justifyContent:'center',
           border:'1px solid #1e3a8a',
-          borderRadius:8,
-          padding: pad,
+          borderRadius: cardRadius,
+          width,
+          height,
           marginRight:6,
           marginBottom:6,
           fontWeight:800,
@@ -468,8 +472,10 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
     <span
       onClick={handleClick}
       style={{
-        display:'inline-flex', alignItems:'center', gap:6,
-        border:'1px solid #ddd', borderRadius:8, padding: pad,
+        display:'inline-flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4,
+        border:'1px solid #ddd', borderRadius: cardRadius,
+        width,
+        height,
         marginRight:6, marginBottom:6, fontWeight:800,
         color: suitColor,
         background: dimmed ? '#f3f4f6' : (selected ? '#e0f2fe' : '#fff'),
@@ -482,7 +488,7 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
       }}
     >
       <span style={{ fontSize }}>{suit}</span>
-      <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+      <span style={{ fontSize: rankFont, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
     </span>
   );
 }
