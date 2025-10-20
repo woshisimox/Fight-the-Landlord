@@ -372,6 +372,8 @@ const rankOf = (l: string) => {
   if (!l) return '';
   const raw = `${l}`.trim();
   if (!raw) return '';
+  if (raw === 'x') return 'X';
+  if (raw === 'X') return 'Y';
   if (raw.startsWith('🃏')) return (raw.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
   const c0 = raw[0];
   if ('♠♥♦♣'.includes(c0)) return raw.slice(1).replace(/10/i, 'T').toUpperCase();
@@ -455,6 +457,7 @@ function decorateHandWithReuse(raw: string[], prev?: string[], avoid?: Iterable<
     if (prevArr && prevArr.length) {
       for (let i = 0; i < prevArr.length; i++) {
         const candidate = prevArr[i];
+        if (!options.includes(candidate)) continue;
         const taken = takeCandidate(candidate, true);
         if (taken) {
           prevArr.splice(i, 1);
