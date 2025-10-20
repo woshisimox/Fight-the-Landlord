@@ -498,16 +498,63 @@ function resolveBottomDecorations(raw: string[], landlord: number | null, hands:
   return decorateHandWithReuse(raw, prevDecor, avoid);
 }
 
+function projectLabelsOntoHand(cards: string[] | undefined, hand: string[]): string[] {
+  if (!Array.isArray(cards) || cards.length === 0) return [];
+  const pool = hand.slice();
+  const takeFromPool = (candidate: string) => {
+    const idx = pool.indexOf(candidate);
+    if (idx >= 0) {
+      const [picked] = pool.splice(idx, 1);
+      return picked;
+    }
+    return null;
+  };
+
+  const resolved: string[] = [];
+  for (const raw of cards) {
+    if (typeof raw !== 'string') continue;
+    let taken = takeFromPool(raw);
+    if (taken) {
+      resolved.push(taken);
+      continue;
+    }
+    const options = candDecorations(raw);
+    for (const opt of options) {
+      taken = takeFromPool(opt);
+      if (taken) break;
+    }
+    if (taken) {
+      resolved.push(taken);
+      continue;
+    }
+    const fallback = options[0] ?? raw;
+    resolved.push(fallback);
+  }
+  return resolved;
+}
+
+function formatHintDetail(detail: unknown, cards: string[]): string | undefined {
+  const joined = cards.join(' ');
+  const base = typeof detail === 'string' ? detail : '';
+  if (!joined) return base || undefined;
+  if (!base) return `推荐出：${joined}`;
+  if (base.includes('：')) return base.replace(/：[^：:]*$/, `：${joined}`);
+  if (base.includes(':')) return base.replace(/:[^：:]*$/, `: ${joined}`);
+  return `${base}：${joined}`;
+}
+
 function Card({ label, dimmed = false, compact = false, selectable = false, selected = false, onToggle, faceDown = false }: { label:string; dimmed?:boolean; compact?:boolean; selectable?:boolean; selected?:boolean; onToggle?:()=>void; faceDown?:boolean }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
-  const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-  const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
+  const rawRank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
+  const isJoker = suit === '🃏';
+  const rank = isJoker ? (rawRank === 'Y' ? '大王' : '小王') : rawRank;
+  const rankColor = suit === '🃏' ? (rawRank === 'Y' ? '#d11' : '#16a34a') : undefined;
   const height = compact ? 52 : 64;
   const width = compact ? 38 : 48;
   const cardRadius = compact ? 6 : 8;
   const fontSize = compact ? 18 : 20;
-  const rankFont = compact ? 16 : 18;
+  const rankFont = compact ? (isJoker ? 14 : 16) : (isJoker ? 16 : 18);
   const suitColor = dimmed ? '#9ca3af' : baseColor;
   const rankStyle = dimmed
     ? { color: '#9ca3af' }
@@ -1772,10 +1819,31 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               if (m.type === 'event' && m.kind === 'human-request') {
                 const seat = (typeof m.seat === 'number' && m.seat >=0 && m.seat <3) ? m.seat : -1;
                 if (seat >= 0) {
+                  const ctxRaw = (m.ctx && typeof m.ctx === 'object') ? m.ctx : {};
+                  let ctx: any;
+                  try { ctx = JSON.parse(JSON.stringify(ctxRaw)); }
+                  catch { ctx = { ...ctxRaw }; }
+                  if (!ctx || typeof ctx !== 'object') ctx = {};
+                  const seatHand = Array.isArray((nextHands as any)?.[seat])
+                    ? (nextHands as any)[seat] as string[]
+                    : (Array.isArray(handsRef.current?.[seat]) ? handsRef.current?.[seat] || [] : []);
+                  if (ctx?.hint && ctx.hint.move === 'play') {
+                    const mapped = projectLabelsOntoHand(ctx.hint.cards as string[] | undefined, seatHand || []);
+                    const detail = formatHintDetail(ctx.hint.detail, mapped);
+                    ctx = {
+                      ...ctx,
+                      hint: {
+                        ...ctx.hint,
+                        cards: mapped,
+                        detail: detail ?? ctx.hint.detail,
+                        rawCards: ctx.hint.cards,
+                      },
+                    };
+                  }
                   const prompt: HumanPrompt = {
                     requestId: String(m.requestId || `${Date.now()}-${Math.random().toString(36).slice(2,6)}`),
                     phase: typeof m.phase === 'string' ? m.phase : 'play',
-                    ctx: m.ctx ?? {},
+                    ctx,
                     timeoutMs: typeof m.timeoutMs === 'number' ? m.timeoutMs : undefined,
                     sessionId: typeof m.sessionId === 'string' ? m.sessionId : undefined,
                     startedAt: Date.now(),
