@@ -370,10 +370,17 @@ type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[]
 
 const rankOf = (l: string) => {
   if (!l) return '';
-  const c0 = l[0];
-  if ('♠♥♦♣'.includes(c0)) return l.slice(1).replace(/10/i, 'T').toUpperCase();
-  if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
-  return l.replace(/10/i, 'T').toUpperCase();
+  const raw = `${l}`.trim();
+  if (!raw) return '';
+  if (raw.startsWith('🃏')) return (raw.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
+  const c0 = raw[0];
+  if ('♠♥♦♣'.includes(c0)) return raw.slice(1).replace(/10/i, 'T').toUpperCase();
+  const upper = raw.replace(/10/i, 'T').toUpperCase();
+  const compact = upper.replace(/\s+/g, '');
+  if (compact === 'BJ' || compact === 'BIGJOKER' || compact === 'BLACKJOKER' || compact === '大王') return 'Y';
+  if (compact === 'SJ' || compact === 'SMALLJOKER' || compact === 'SMALL' || compact === '小王') return 'X';
+  if (compact === 'JOKER') return 'Y';
+  return upper;
 };
 const RANK_SEQUENCE = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','X','Y'] as const;
 const RANK_WEIGHT: Record<string, number> = Object.fromEntries(
@@ -394,7 +401,8 @@ function candDecorations(l: string): string[] {
   if (l.startsWith('🃏')) return [l];
   if ('♠♥♦♣'.includes(l[0])) return [l];
   const r = rankOf(l);
-  if (r === 'JOKER') return ['🃏Y'];
+  if (r === 'X') return ['🃏X'];
+  if (r === 'Y') return ['🃏Y'];
   return SUITS.map(s => `${s}${r}`);
 }
 function decorateHandCycle(raw: string[]): string[] {
