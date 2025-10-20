@@ -695,7 +695,7 @@ function generateAllMoves(hand: Label[], four2: Four2Policy): Label[][] {
   });
 }
 
-function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy): Label[][] {
+export function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy): Label[][] {
   const all = generateAllMoves(hand, four2);
   if (!require) return all;
 
