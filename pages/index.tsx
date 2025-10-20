@@ -410,6 +410,8 @@ function decorateHandCycle(raw: string[]): string[] {
   });
 }
 
+const normalizeHand = (raw: string[]) => sortHandLabels(decorateHandCycle(raw));
+
 function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
   if (!Array.isArray(raw)) return [];
   const seat = (typeof landlord === 'number' && landlord >= 0 && landlord < 3) ? landlord : null;
@@ -1643,7 +1645,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   nextWinner = null;
                   nextDelta = null;
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
-                  nextHands = (rh as string[][]).map(decorateHandCycle);
+                  nextHands = (rh as string[][]).map(normalizeHand);
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
@@ -1721,7 +1723,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               {
                 const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
                 if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
-                  nextHands = (rh0 as string[][]).map(decorateHandCycle);
+                  nextHands = (rh0 as string[][]).map(normalizeHand);
                   const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
                   if (lord2 != null) {
                     nextLandlord = lord2;
