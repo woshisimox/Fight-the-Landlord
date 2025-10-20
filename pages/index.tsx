@@ -1942,19 +1942,38 @@ if (m.type === 'event' && m.kind === 'play') {
                 (m.type === 'event' && (m.kind === 'win' || m.kind === 'result' || m.kind === 'game-over' || m.kind === 'game_end')) ||
                 (m.type === 'result') || (m.type === 'game-over') || (m.type === 'game_end');
               if (isWinLike) {
-                const L = (nextLandlord ?? 0) as number;
-                const ds = (Array.isArray(m.deltaScores) ? m.deltaScores
+                const landlordFromEvent = (() => {
+                  if (typeof m.landlord === 'number') return m.landlord as number;
+                  if (typeof m.landlordIdx === 'number') return m.landlordIdx as number;
+                  if (typeof m.payload?.landlord === 'number') return m.payload.landlord as number;
+                  if (typeof m.state?.landlord === 'number') return m.state.landlord as number;
+                  if (typeof m.init?.landlord === 'number') return m.init.landlord as number;
+                  return null;
+                })();
+                if (typeof landlordFromEvent === 'number' && landlordFromEvent >= 0 && landlordFromEvent < 3) {
+                  nextLandlord = landlordFromEvent;
+                }
+
+                const L = (typeof nextLandlord === 'number' && nextLandlord >= 0 && nextLandlord < 3)
+                  ? nextLandlord
+                  : (typeof nextBottom.landlord === 'number' ? nextBottom.landlord : 0);
+                const dsRaw = Array.isArray(m.deltaScores) ? m.deltaScores
                           : Array.isArray(m.delta) ? m.delta
-                          : [0,0,0]) as [number,number,number];
+                          : [0,0,0];
+                const ds = dsRaw.map((v:any) => {
+                  const num = Number(v);
+                  return Number.isFinite(num) ? num : 0;
+                }) as [number,number,number];
 
                 // 将“以地主为基准”的增减分旋转成“按座位顺序”的展示
                 const rot: [number,number,number] = [
-                  ds[(0 - L + 3) % 3],
-                  ds[(1 - L + 3) % 3],
-                  ds[(2 - L + 3) % 3],
+                  Number(ds[(0 - L + 3) % 3] ?? 0),
+                  Number(ds[(1 - L + 3) % 3] ?? 0),
+                  Number(ds[(2 - L + 3) % 3] ?? 0),
                 ];
                 let nextWinnerLocal     = m.winner ?? nextWinner ?? null;
-                const effMult = (m.multiplier ?? (nextMultiplier ?? 1));
+                const effMultRaw = Number(m.multiplier ?? nextMultiplier ?? 1);
+                const effMult = Number.isFinite(effMultRaw) && effMultRaw > 0 ? effMultRaw : 1;
 // 判定 rot 是否已经按倍数放大：基分 |-2|+|+1|+|+1| = 4
 const sumAbs = Math.abs(rot[0]) + Math.abs(rot[1]) + Math.abs(rot[2]);
 const needScale = effMult > 1 && (sumAbs === 4 || (sumAbs % effMult !== 0));
@@ -1964,9 +1983,9 @@ const rot2 = needScale
 nextMultiplier = effMult;
 nextDelta      = rot2;
 nextTotals     = [
-  nextTotals[0] + rot2[0],
-  nextTotals[1] + rot2[1],
-  nextTotals[2] + rot2[2]
+  Number(nextTotals[0] ?? 0) + rot2[0],
+  Number(nextTotals[1] ?? 0) + rot2[1],
+  Number(nextTotals[2] ?? 0) + rot2[2]
 ] as any;
                 {
                   const mYi  = Number(((m as any).multiplierYi ?? 0));
