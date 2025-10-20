@@ -1583,6 +1583,11 @@ export async function* runOneGame(opts: {
           if (anyHumanSeat) {
             try { yield { type:'event', kind:'bottom-preview', bottom: bottom.slice() }; } catch {}
           }
+          for (let s = 0; s < 3; s++) {
+            if (seatMeta[s]?.choice === 'human') {
+              permanentHumanDecline[s] = false;
+            }
+          }
           startingSeat = (startingSeat + 1) % 3;
           continue;
         }
