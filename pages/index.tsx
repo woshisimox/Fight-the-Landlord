@@ -416,7 +416,7 @@ function resolveBottomDecorations(raw: string[], landlord: number | null, hands:
   });
 }
 
-function Card({ label, dimmed = false, compact = false, selectable = false, selected = false, onToggle }: { label:string; dimmed?:boolean; compact?:boolean; selectable?:boolean; selected?:boolean; onToggle?:()=>void }) {
+function Card({ label, dimmed = false, compact = false, selectable = false, selected = false, onToggle, faceDown = false }: { label:string; dimmed?:boolean; compact?:boolean; selectable?:boolean; selected?:boolean; onToggle?:()=>void; faceDown?:boolean }) {
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
@@ -427,7 +427,31 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
   const rankStyle = dimmed
     ? { color: '#9ca3af' }
     : (rankColor ? { color: rankColor } : {});
-  const handleClick = () => { if (selectable && onToggle) onToggle(); };
+  const handleClick = () => { if (!faceDown && selectable && onToggle) onToggle(); };
+  if (faceDown) {
+    return (
+      <span
+        style={{
+          display:'inline-flex',
+          alignItems:'center',
+          justifyContent:'center',
+          border:'1px solid #1e3a8a',
+          borderRadius:8,
+          padding: pad,
+          marginRight:6,
+          marginBottom:6,
+          fontWeight:800,
+          color:'#bfdbfe',
+          background:'linear-gradient(135deg, #1e40af, #2563eb)',
+          boxShadow:'inset 0 0 0 1px rgba(255,255,255,0.25)',
+          cursor:'default',
+          userSelect:'none',
+        }}
+      >
+        <span style={{ fontSize }}>{'🂠'}</span>
+      </span>
+    );
+  }
   return (
     <span
       onClick={handleClick}
@@ -450,7 +474,7 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
     </span>
   );
 }
-function Hand({ cards, interactive = false, selected = [], onToggle }: { cards: string[]; interactive?:boolean; selected?:string[]; onToggle?:(card:string)=>void }) {
+function Hand({ cards, interactive = false, selected = [], onToggle, hideFaces = false }: { cards: string[]; interactive?:boolean; selected?:string[]; onToggle?:(card:string)=>void; hideFaces?:boolean }) {
   const { t } = useI18n();
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>{t('Empty')}</span>;
   const selectedSet = new Set(selected || []);
@@ -458,11 +482,12 @@ function Hand({ cards, interactive = false, selected = [], onToggle }: { cards: 
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
       {cards.map((c, idx) => (
         <Card
-          key={`${c}-${idx}`}
+          key={`${hideFaces ? 'hidden' : c}-${idx}`}
           label={c}
-          selectable={interactive}
-          selected={interactive ? selectedSet.has(c) : false}
+          selectable={interactive && !hideFaces}
+          selected={interactive && !hideFaces ? selectedSet.has(c) : false}
           onToggle={() => onToggle?.(c)}
+          faceDown={hideFaces}
         />
       ))}
     </div>
@@ -667,6 +692,10 @@ function LivePanel(props: LiveProps) {
   const [paused, setPaused] = useState(false);
   const pauseRef = useRef(false);
   const pauseResolversRef = useRef<Array<() => void>>([]);
+
+  const seatChoices = (props.seats || []).slice(0, 3);
+  const seatIsHuman = seatChoices.map(choice => choice === 'human');
+  const anyHumanSeat = seatIsHuman.some(Boolean);
 
   const flushPauseResolvers = () => {
     const list = pauseResolversRef.current.slice();
@@ -2380,6 +2409,7 @@ const handleAllSaveInner = () => {
             const canPass = prompt?.ctx?.canPass !== false;
             const defaultBid = prompt?.ctx?.bid?.default;
             const defaultDouble = prompt?.ctx?.double?.default;
+            const hideFaces = anyHumanSeat && !seatIsHuman[i];
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
                 <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}</div>
@@ -2389,9 +2419,10 @@ const handleAllSaveInner = () => {
                 </div>
                 <Hand
                   cards={hands[i]}
-                  interactive={canInteract}
+                  interactive={canInteract && !hideFaces}
                   selected={selection}
                   onToggle={card => toggleHumanCard(i, card)}
+                  hideFaces={hideFaces}
                 />
 
                 {prompt && (
