@@ -1404,7 +1404,7 @@ export async function* runOneGame(opts: {
   yield { type:'state', kind:'hands', hands: hands.map(h => [...h]) };
 
   // 抢地主流程（简单实现）
-  let landlord = 0;
+  let landlord = -1;
   let multiplier = 1;
   let bidMultiplier = 1;
   const seatMeta = bots.map((bot:any)=>({
@@ -1421,6 +1421,8 @@ export async function* runOneGame(opts: {
   const MAX_BID_ATTEMPTS = 5;
   if (opts.bid !== false) {
     let last = -1;
+    let lastAttemptScores: number[] = [0,0,0];
+    let lastAttemptHumanDecline: boolean[] = [false,false,false];
 
     for (let attempt = 0; attempt < MAX_BID_ATTEMPTS; attempt++) {
       const bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
@@ -1428,8 +1430,12 @@ export async function* runOneGame(opts: {
       bidMultiplier = 1;
       multiplier = 1;
 
+      const attemptScores: number[] = [0,0,0];
+      const attemptHumanDecline: boolean[] = [false,false,false];
+
       for (let s = 0; s < 3; s++) {
         const sc = evalRobScore(hands[s]);
+        attemptScores[s] = sc;
 
         const __thMap: Record<string, number> = {
           greedymax: 1.6,
@@ -1498,6 +1504,7 @@ export async function* runOneGame(opts: {
         };
 
         let decision = recommended;
+        let overridden = false;
         if (meta.phaseAware) {
           const ctxForBot: any = clone(bidCtx);
           if (ctxForBot?.bid) {
@@ -1517,11 +1524,18 @@ export async function* runOneGame(opts: {
               if (r.move === 'play') return true;
               return null;
             })();
-            if (parsed !== null) decision = parsed;
+            if (parsed !== null) {
+              decision = parsed;
+              overridden = true;
+            }
           } catch {}
         }
 
         yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold, decision: (recommended ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+
+        if (overridden && !decision && meta.choice === 'human') {
+          attemptHumanDecline[s] = true;
+        }
 
         if (decision) {
           const margin = sc - threshold;
@@ -1533,6 +1547,9 @@ export async function* runOneGame(opts: {
 
         if (opts.delayMs) await wait(opts.delayMs);
       }
+
+      lastAttemptScores = attemptScores.slice();
+      lastAttemptHumanDecline = attemptHumanDecline.slice();
 
       if (bidders.length > 0) {
         let bestSeat = -1;
@@ -1547,14 +1564,53 @@ export async function* runOneGame(opts: {
         }
         landlord = bestSeat;
       } else {
-        try { yield { type:'event', kind:'bid-skip', reason:'no-bidders' }; } catch {}
-        deck = shuffle(freshDeck());
-        hands = [[],[],[]] as any;
-        for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
-        bottom = deck.slice(17*3);
-        for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
-        try { yield { type:'state', kind:'hands', hands: hands.map(h => [...h]) }; } catch {}
-        continue;
+        if (attempt < MAX_BID_ATTEMPTS - 1) {
+          try { yield { type:'event', kind:'bid-skip', reason:'no-bidders' }; } catch {}
+          deck = shuffle(freshDeck());
+          hands = [[],[],[]] as any;
+          for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
+          bottom = deck.slice(17*3);
+          for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
+          try { yield { type:'state', kind:'hands', hands: hands.map(h => [...h]) }; } catch {}
+          continue;
+        }
+
+        let fallbackSeat = -1;
+        let fallbackScore = -Infinity;
+        for (let s = 0; s < 3; s++) {
+          const meta = seatMeta[s];
+          const declined = lastAttemptHumanDecline[s];
+          const score = lastAttemptScores[s];
+          const effective = (meta.choice === 'human' && declined) ? Number.NEGATIVE_INFINITY : score;
+          if (effective > fallbackScore) {
+            fallbackScore = effective;
+            fallbackSeat = s;
+          }
+        }
+        if (fallbackSeat < 0) {
+          fallbackScore = -Infinity;
+          for (let s = 0; s < 3; s++) {
+            const score = lastAttemptScores[s];
+            if (score > fallbackScore) {
+              fallbackScore = score;
+              fallbackSeat = s;
+            }
+          }
+        }
+        if (fallbackSeat < 0) fallbackSeat = 0;
+        landlord = fallbackSeat;
+        last = landlord;
+        try {
+          yield {
+            type:'event',
+            kind:'bid-force',
+            seat: landlord,
+            score: lastAttemptScores[landlord],
+            reason: 'no-accept',
+            attempts: MAX_BID_ATTEMPTS,
+          };
+        } catch {}
+        break;
       }
 
       yield { type:'event', kind:'multiplier-sync', multiplier: multiplier, bidMult: bidMultiplier };
@@ -1563,6 +1619,7 @@ export async function* runOneGame(opts: {
       break;
     }
   }
+  if (landlord < 0) landlord = 0;
   // 亮底 & 地主收底
   yield {
     type:'event',
