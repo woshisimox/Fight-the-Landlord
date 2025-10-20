@@ -375,6 +375,18 @@ const rankOf = (l: string) => {
   if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
   return l.replace(/10/i, 'T').toUpperCase();
 };
+const RANK_SEQUENCE = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','X','Y'] as const;
+const RANK_WEIGHT: Record<string, number> = Object.fromEntries(
+  RANK_SEQUENCE.map((rank, idx) => [rank, idx])
+);
+const cardWeight = (label: string) => RANK_WEIGHT[rankOf(label)] ?? -1;
+const sortHandLabels = (cards: string[]) =>
+  [...cards].sort((a, b) => {
+    const va = cardWeight(a);
+    const vb = cardWeight(b);
+    if (va !== vb) return va - vb;
+    return a.localeCompare(b);
+  });
 function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l === 'x') return ['🃏X'];
@@ -1807,7 +1819,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
         if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
       }
     }
-    seatHand = [...seatHand, ...mapped];
+    seatHand = sortHandLabels([...seatHand, ...mapped]);
     nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
   }
 
