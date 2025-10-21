@@ -168,6 +168,71 @@ function stringifyMove(m:any){
   return `${type}${cards}`;
 }
 
+function normalizeHumanInputLabel(raw: unknown): string {
+  const label = typeof raw === 'string' ? raw.trim() : '';
+  if (!label) return '';
+  if (label === '🃏X') return 'x';
+  if (label === '🃏Y') return 'X';
+  if (label.startsWith('🃏')) {
+    const tail = label.slice(2).toUpperCase();
+    if (tail.startsWith('Y')) return 'X';
+    return 'x';
+  }
+  const upper = label.toUpperCase();
+  if (upper === 'SJ' || upper === 'SMALLJOKER' || upper === 'SMALL' || label === '小王') return 'x';
+  if (upper === 'BJ' || upper === 'BIGJOKER' || upper === 'JOKER' || label === '大王') return 'X';
+  if (label === 'x' || label === 'X') return label;
+  return label;
+}
+
+function rankOfLabel(label: string): string {
+  if (!label) return '';
+  if (label === 'x' || label === 'X') return label;
+  const first = label[0];
+  if ('♠♥♦♣'.includes(first)) {
+    const rest = label.slice(1);
+    if (!rest) return '';
+    if (rest === '10') return 'T';
+    return rest.toUpperCase();
+  }
+  if (label.length === 1) return label.toUpperCase();
+  const upper = label.toUpperCase();
+  if (upper === '10') return 'T';
+  return upper;
+}
+
+function projectHumanCardsOntoHand(cards: any, hand: string[]): string[] {
+  if (!Array.isArray(cards) || cards.length === 0) return [];
+  const pool = hand.slice();
+  const resolved: string[] = [];
+  for (const raw of cards) {
+    if (typeof raw !== 'string') continue;
+    let candidate = raw.trim();
+    if (!candidate) continue;
+    let idx = pool.indexOf(candidate);
+    if (idx < 0) {
+      const normalized = normalizeHumanInputLabel(candidate);
+      if (normalized && normalized !== candidate) {
+        candidate = normalized;
+        idx = pool.indexOf(candidate);
+      } else {
+        candidate = normalized;
+      }
+    }
+    if (idx < 0) {
+      const rank = rankOfLabel(candidate);
+      if (rank) {
+        idx = pool.findIndex(label => rankOfLabel(normalizeHumanInputLabel(label)) === rank);
+      }
+    }
+    if (idx >= 0) {
+      resolved.push(pool[idx]);
+      pool.splice(idx, 1);
+    }
+  }
+  return resolved;
+}
+
 /** 解析每座位思考超时（毫秒） */
 function parseTurnTimeoutMsArr(req: NextApiRequest): [number,number,number] {
   const fromQuery = (k:string) => {
@@ -342,6 +407,18 @@ function traceWrap(
         result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
       } catch (e:any) {
         result = { move:'pass', reason:`error:${e?.message||String(e)}` };
+      }
+    }
+
+    if (isHuman && result && typeof result === 'object') {
+      const phaseForResult = typeof result?.phase === 'string' ? result.phase : phase;
+      const cards = Array.isArray(result?.cards) ? result.cards.slice() : null;
+      const hand = Array.isArray(ctx?.hands) ? (ctx.hands as string[]) : [];
+      if (phaseForResult === 'play' && result?.move === 'play' && cards) {
+        const mapped = projectHumanCardsOntoHand(cards, hand);
+        if (mapped.length === cards.length && mapped.length > 0) {
+          result = { ...result, cards: mapped, rawCards: cards };
+        }
       }
     }
 
