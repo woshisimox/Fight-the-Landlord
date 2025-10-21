@@ -1831,6 +1831,66 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 continue;
               }
 
+              if (m.type === 'state' && m.kind === 'hands') {
+                const rh = Array.isArray(m.hands)
+                  ? m.hands
+                  : Array.isArray(m.state?.hands)
+                    ? m.state.hands
+                    : Array.isArray(m.payload?.hands)
+                      ? m.payload.hands
+                      : null;
+                if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
+                  const prevHands = handsRef.current;
+                  nextHands = (rh as string[][]).map((arr, idx) => normalizeHand(arr, prevHands[idx]));
+
+                  const landlordRaw = (() => {
+                    if (typeof m.landlordIdx === 'number') return m.landlordIdx as number;
+                    if (typeof m.landlord === 'number') return m.landlord as number;
+                    if (typeof m.state?.landlord === 'number') return m.state.landlord as number;
+                    if (typeof m.payload?.landlord === 'number') return m.payload.landlord as number;
+                    return null;
+                  })();
+                  if (typeof landlordRaw === 'number' && landlordRaw >= 0 && landlordRaw < 3) {
+                    nextLandlord = landlordRaw;
+                  } else {
+                    nextLandlord = null;
+                  }
+
+                  const bottomRaw = (() => {
+                    if (Array.isArray(m.bottom)) return m.bottom;
+                    if (Array.isArray(m.state?.bottom)) return m.state.bottom;
+                    if (Array.isArray(m.payload?.bottom)) return m.payload.bottom;
+                    return [];
+                  })();
+
+                  if (Array.isArray(bottomRaw) && bottomRaw.length > 0) {
+                    const prevLabels = Array.isArray(nextBottom.cards)
+                      ? nextBottom.cards.map(c => c.label)
+                      : undefined;
+                    const mapped = resolveBottomDecorations(
+                      bottomRaw,
+                      typeof nextLandlord === 'number' ? nextLandlord : null,
+                      nextHands as string[][],
+                      prevLabels,
+                    );
+                    nextBottom = {
+                      landlord: typeof nextLandlord === 'number' ? nextLandlord : nextBottom.landlord ?? null,
+                      cards: mapped.map(label => ({ label, used: false })),
+                      visibleToAll: false,
+                    };
+                  } else {
+                    nextBottom = {
+                      landlord: typeof nextLandlord === 'number' ? nextLandlord : null,
+                      cards: [],
+                      visibleToAll: false,
+                    };
+                  }
+
+                  nextLog = [...nextLog, '同步手牌状态'];
+                }
+                continue;
+              }
+
               if (m.type === 'event' && m.kind === 'human-request') {
                 const seat = (typeof m.seat === 'number' && m.seat >=0 && m.seat <3) ? m.seat : -1;
                 if (seat >= 0) {
