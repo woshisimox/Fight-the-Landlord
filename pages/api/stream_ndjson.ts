@@ -451,19 +451,40 @@ async function runOneRoundWithGuard(
       : (preDealHands ? preDealHands.map(hand => hand.slice()) : null);
     if (!handsSnapshot) return null;
     const seatCounts = handsSnapshot.map(hand => hand.length);
-    const total = seatCounts.reduce((sum, n) => sum + n, 0);
+    let total = seatCounts.reduce((sum, n) => sum + n, 0);
     const uniqueSet = new Set<string>();
-    const occurrences = new Map<string, Map<number, number>>();
+    const occurrences = new Map<string, Map<number | '底牌', number>>();
+    const normalizeCard = (raw: any): string => {
+      if (typeof raw === 'string') return raw;
+      if (raw == null) return '';
+      return String(raw);
+    };
+    const recordCard = (card: string, owner: number | '底牌') => {
+      if (!card) return;
+      uniqueSet.add(card);
+      if (!occurrences.has(card)) occurrences.set(card, new Map());
+      const entry = occurrences.get(card)!;
+      entry.set(owner, (entry.get(owner) ?? 0) + 1);
+    };
     handsSnapshot.forEach((hand, seatIdx) => {
       hand.forEach(rawCard => {
-        const card = typeof rawCard === 'string' ? rawCard : String(rawCard ?? '');
+        const card = normalizeCard(rawCard);
         if (!card) return;
-        uniqueSet.add(card);
-        if (!occurrences.has(card)) occurrences.set(card, new Map());
-        const entry = occurrences.get(card)!;
-        entry.set(seatIdx, (entry.get(seatIdx) ?? 0) + 1);
+        recordCard(card, seatIdx);
       });
     });
+    let bottomStandalone = 0;
+    bottomSnapshot.forEach(rawCard => {
+      const card = normalizeCard(rawCard);
+      if (!card) return;
+      if (!occurrences.has(card)) {
+        recordCard(card, '底牌');
+        bottomStandalone += 1;
+      }
+    });
+    if (bottomStandalone > 0) {
+      total += bottomStandalone;
+    }
     const duplicates = Array.from(occurrences.entries()).filter(([, seatMap]) => {
       if (seatMap.size > 1) return true;
       for (const count of seatMap.values()) {
@@ -476,7 +497,9 @@ async function runOneRoundWithGuard(
     }));
     const missing = Array.from(__FULL_DECK_SET).filter(card => !uniqueSet.has(card));
     const unexpected = Array.from(uniqueSet).filter(card => !__FULL_DECK_SET.has(card));
-    const bottomMissing = bottomSnapshot.filter(card => !uniqueSet.has(card));
+    const bottomMissing = bottomSnapshot
+      .map(card => normalizeCard(card))
+      .filter(card => !!card && !uniqueSet.has(card));
     const ok = (total === 54 && uniqueSet.size === 54 && duplicates.length === 0 && missing.length === 0 && unexpected.length === 0);
     const preCounts = preDealHands ? preDealHands.map(hand => hand.length) : null;
     const preTotal = preCounts ? preCounts.reduce((sum, n) => sum + n, 0) + bottomSnapshot.length : null;
