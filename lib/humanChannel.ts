@@ -67,13 +67,60 @@ export function registerHumanRequest(params: {
   return { id, promise };
 }
 
-export function resolveHumanRequest(id: string, payload: any, sessionId?: string): boolean {
+function sessionsMatch(expected?: string, incoming?: string) {
+  if (!expected || !incoming) return true;
+  return expected === incoming;
+}
+
+export function resolveHumanRequest(
+  id: string,
+  payload: any,
+  sessionId?: string,
+  seatHint?: number,
+): boolean {
   const registry = ensureRegistry();
   const entry = registry.get(id);
-  if (!entry) return false;
-  if (entry.sessionId && sessionId && entry.sessionId !== sessionId) return false;
-  entry.settle(payload);
-  return true;
+  if (entry) {
+    if (sessionsMatch(entry.sessionId, sessionId) || (typeof seatHint === 'number' && seatHint === entry.seat)) {
+      entry.settle(payload);
+      return true;
+    }
+    return false;
+  }
+
+  const seat = typeof seatHint === 'number' ? seatHint : null;
+  if (seat != null) {
+    let candidate: PendingEntry | null = null;
+    for (const value of registry.values()) {
+      if (value.seat !== seat) continue;
+      if (!sessionsMatch(value.sessionId, sessionId)) {
+        if (sessionId) continue;
+      }
+      if (!candidate || value.createdAt > candidate.createdAt) {
+        candidate = value;
+      }
+    }
+    if (candidate) {
+      candidate.settle(payload);
+      return true;
+    }
+  }
+
+  if (sessionId) {
+    let candidate: PendingEntry | null = null;
+    for (const value of registry.values()) {
+      if (!sessionsMatch(value.sessionId, sessionId)) continue;
+      if (!candidate || value.createdAt > candidate.createdAt) {
+        candidate = value;
+      }
+    }
+    if (candidate) {
+      candidate.settle(payload);
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function abortHumanSession(sessionId: string | undefined) {

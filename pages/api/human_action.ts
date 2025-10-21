@@ -12,6 +12,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const body = (req as any).body || {};
     const requestId = typeof body.requestId === 'string' ? body.requestId.trim() : '';
     const action = body.action;
+    const seat = Number.isInteger(body.seat) ? Number(body.seat) : undefined;
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined;
 
     if (!requestId) {
@@ -23,7 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
 
-    const ok = resolveHumanRequest(requestId, action, sessionId);
+    const ok = resolveHumanRequest(requestId, action, sessionId, seat);
     if (!ok) {
       res.status(404).json({ error: 'request-not-found' });
       return;

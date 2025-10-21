@@ -953,10 +953,12 @@ function LivePanel(props: LiveProps) {
     if (!prompt) return;
     setHumanSubmitting(prev => { const next=[...prev]; next[seat] = true; return next; });
     try {
+      const payload: any = { requestId: prompt.requestId, action, seat };
+      if (prompt.sessionId) payload.sessionId = prompt.sessionId;
       const res = await fetch('/api/human_action', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ requestId: prompt.requestId, sessionId: prompt.sessionId || traceIdRef.current, action }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         let errMsg = res.statusText;
