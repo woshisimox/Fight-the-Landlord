@@ -2014,20 +2014,36 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 const prevLabels = Array.isArray(nextBottom.cards)
                   ? nextBottom.cards.map(c => c.label)
                   : undefined;
-                const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][], prevLabels);
 
+                let seatHandAfterReveal: string[] | null = null;
+                let bottomRaw: string[] = [];
                 if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
-                  let seatHand = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
+                  const prevHandDecor = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
                   const prevBottom = bottomRef.current;
                   if (prevBottom && prevBottom.landlord === landlordSeat && Array.isArray(prevBottom.cards)) {
                     for (const prevCard of prevBottom.cards) {
-                      const idxPrev = seatHand.indexOf(prevCard.label);
-                      if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
+                      const idxPrev = prevHandDecor.indexOf(prevCard.label);
+                      if (idxPrev >= 0) prevHandDecor.splice(idxPrev, 1);
                     }
                   }
-                  seatHand = sortHandLabels([...seatHand, ...mapped]);
-                  nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
+
+                  bottomRaw = btm.filter((label: any): label is string => typeof label === 'string' && label.trim().length > 0);
+                  const combinedRaw = [...prevHandDecor, ...bottomRaw];
+                  const redecorated = decorateHandWithReuse(combinedRaw, prevHandDecor);
+                  seatHandAfterReveal = sortHandLabels(redecorated);
+                  nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHandAfterReveal });
                 }
+
+                const mapped = (() => {
+                  const targetHand = seatHandAfterReveal || (typeof landlordSeat === 'number' ? nextHands[landlordSeat] : undefined);
+                  const projected = Array.isArray(targetHand)
+                    ? projectLabelsOntoHand(btm, targetHand as string[])
+                    : [];
+                  if (projected.length === bottomRaw.length) {
+                    return projected;
+                  }
+                  return resolveBottomDecorations(btm, landlordSeat, nextHands as string[][], prevLabels);
+                })();
 
                 if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
                   nextLandlord = landlordSeat;
