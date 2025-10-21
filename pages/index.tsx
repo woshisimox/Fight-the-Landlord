@@ -2170,12 +2170,16 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                       if (info && typeof info === 'object') {
                         const seatIdx = typeof info.seat === 'number' ? info.seat : (Array.isArray(info) ? info[0] : '?');
                         const count = typeof info.count === 'number' ? info.count : (Array.isArray(info) ? info[1] : '?');
-                        return `${seatName(seatIdx)}x${count}`;
+                        const seatLabel = typeof seatIdx === 'number' ? seatName(seatIdx) : String(seatIdx);
+                        const countLabel = typeof count === 'number' ? count : String(count);
+                        return `${seatLabel}x${countLabel}`;
                       }
                       if (Array.isArray(info)) {
                         const seatIdx = typeof info[0] === 'number' ? info[0] : '?';
                         const count = typeof info[1] === 'number' ? info[1] : '?';
-                        return `${seatName(seatIdx)}x${count}`;
+                        const seatLabel = typeof seatIdx === 'number' ? seatName(seatIdx) : String(seatIdx);
+                        const countLabel = typeof count === 'number' ? count : String(count);
+                        return `${seatLabel}x${countLabel}`;
                       }
                       return String(info ?? '?');
                     }).join(',') : '';
