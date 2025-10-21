@@ -34,6 +34,18 @@ const __POSALL: Record<string, number> = Object.fromEntries(__ORDER.map((r,i)=>[
 const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
 const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
 const __remove=(h:string[],p:string[])=>{const a=h.slice(); for(const c of p){const i=a.indexOf(c); if(i>=0) a.splice(i,1);} return a; };
+const __DECK_SUITS = ['♠','♥','♦','♣'] as const;
+const __DECK_RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const;
+const __FULL_DECK: string[] = (() => {
+  const cards: string[] = [];
+  for (const r of __DECK_RANKS) {
+    if (r === 'x' || r === 'X') continue;
+    for (const s of __DECK_SUITS) cards.push(`${s}${r}`);
+  }
+  cards.push('x', 'X');
+  return cards;
+})();
+const __FULL_DECK_SET = new Set(__FULL_DECK);
 const __isStraight = (cnt:Map<string,number>)=>{
   const rs = Array.from(cnt.entries()).filter(([r,n])=>n===1 && r!=='2' && r!=='x' && r!=='X').map(([r])=>r).sort((a,b)=>(__POS[a]??-1)-(__POS[b]??-1));
   if (rs.length<5) return false;
@@ -405,6 +417,91 @@ async function runOneRoundWithGuard(
     rockets: 0
   }));
 
+  const cloneHands = (hands: any): string[][] => {
+    const out: string[][] = [[], [], []];
+    if (!Array.isArray(hands)) return out;
+    for (let i = 0; i < 3; i++) {
+      const arr = Array.isArray(hands[i]) ? hands[i] as string[] : [];
+      out[i] = arr.map((card: any) => {
+        if (typeof card === 'string') return card;
+        if (card == null) return '';
+        return String(card);
+      }).filter((label: string) => typeof label === 'string' && label.trim().length > 0);
+    }
+    return out;
+  };
+  const cloneBottom = (cards: any): string[] => {
+    if (!Array.isArray(cards)) return [];
+    return cards
+      .map((card: any) => {
+        if (typeof card === 'string') return card;
+        if (card == null) return '';
+        return String(card);
+      })
+      .filter((label: string) => typeof label === 'string' && label.trim().length > 0);
+  };
+  let preDealHands: string[][] | null = null;
+  let finalHands: string[][] | null = null;
+  let bottomCards: string[] = [];
+
+  const buildDealAudit = () => {
+    const bottomSnapshot = bottomCards.slice();
+    const handsSnapshot = finalHands
+      ? finalHands.map(hand => hand.slice())
+      : (preDealHands ? preDealHands.map(hand => hand.slice()) : null);
+    if (!handsSnapshot) return null;
+    const seatCounts = handsSnapshot.map(hand => hand.length);
+    const total = seatCounts.reduce((sum, n) => sum + n, 0);
+    const uniqueSet = new Set<string>();
+    const occurrences = new Map<string, Map<number, number>>();
+    handsSnapshot.forEach((hand, seatIdx) => {
+      hand.forEach(rawCard => {
+        const card = typeof rawCard === 'string' ? rawCard : String(rawCard ?? '');
+        if (!card) return;
+        uniqueSet.add(card);
+        if (!occurrences.has(card)) occurrences.set(card, new Map());
+        const entry = occurrences.get(card)!;
+        entry.set(seatIdx, (entry.get(seatIdx) ?? 0) + 1);
+      });
+    });
+    const duplicates = Array.from(occurrences.entries()).filter(([, seatMap]) => {
+      if (seatMap.size > 1) return true;
+      for (const count of seatMap.values()) {
+        if (count > 1) return true;
+      }
+      return false;
+    }).map(([card, seatMap]) => ({
+      card,
+      seats: Array.from(seatMap.entries()).map(([seat, count]) => ({ seat, count })),
+    }));
+    const missing = Array.from(__FULL_DECK_SET).filter(card => !uniqueSet.has(card));
+    const unexpected = Array.from(uniqueSet).filter(card => !__FULL_DECK_SET.has(card));
+    const bottomMissing = bottomSnapshot.filter(card => !uniqueSet.has(card));
+    const ok = (total === 54 && uniqueSet.size === 54 && duplicates.length === 0 && missing.length === 0 && unexpected.length === 0);
+    const preCounts = preDealHands ? preDealHands.map(hand => hand.length) : null;
+    const preTotal = preCounts ? preCounts.reduce((sum, n) => sum + n, 0) + bottomSnapshot.length : null;
+    const preUnique = preDealHands ? (() => {
+      const s = new Set<string>();
+      preDealHands!.forEach(hand => hand.forEach(card => { if (card) s.add(card); }));
+      bottomSnapshot.forEach(card => { if (card) s.add(card); });
+      return s.size;
+    })() : null;
+    return {
+      ok,
+      total,
+      unique: uniqueSet.size,
+      seatCounts,
+      bottomCount: bottomSnapshot.length,
+      duplicates,
+      missing,
+      unexpected,
+      bottomMissing,
+      preCounts,
+      preTotal,
+      preUnique,
+    };
+  };
+
   const countPlay = (seat:number, move:'play'|'pass', cards?:string[])=>{
     const cc: string[] = Array.isArray(cards) ? cards : [];
     if (move === 'play') {
@@ -427,49 +524,96 @@ async function runOneRoundWithGuard(
   };
 
 for await (const ev of (iter as any)) {
+    const handsFromEv = (() => {
+      if (Array.isArray(ev?.hands)) return ev.hands;
+      if (Array.isArray(ev?.state?.hands)) return ev.state.hands;
+      if (Array.isArray(ev?.payload?.hands)) return ev.payload.hands;
+      return null;
+    })();
+    if (ev?.type === 'state' && ev?.kind === 'hands' && Array.isArray(handsFromEv) && handsFromEv.length >= 3) {
+      preDealHands = cloneHands(handsFromEv);
+      finalHands = null;
+      bottomCards = [];
+    }
+    if (ev?.type === 'event' && (ev.kind === 'bottom-preview' || ev.kind === 'reveal')) {
+      const rawBottom = (() => {
+        if (Array.isArray(ev.bottom)) return ev.bottom;
+        if (Array.isArray(ev.state?.bottom)) return ev.state.bottom;
+        if (Array.isArray(ev.payload?.bottom)) return ev.payload.bottom;
+        return null;
+      })();
+      if (Array.isArray(rawBottom)) bottomCards = cloneBottom(rawBottom);
+    }
     // 初始发牌/地主
-    if (!sentInit && ev?.type==='init') {
+    const isInitLike = ev?.type === 'init' || (ev?.type === 'state' && ev?.kind === 'init');
+    if (!sentInit && isInitLike) {
       sentInit = true;
-      landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
-      // 修复：添加 landlord 字段确保前端能正确识别地主
-      writeLine(res, { 
-        type:'init', 
-        landlordIdx, 
-        landlord: landlordIdx,  // 添加 landlord 字段
-        bottom: ev.bottom, 
-        hands: ev.hands 
+      const landlordVal = (typeof ev?.landlordIdx === 'number')
+        ? (ev.landlordIdx as number)
+        : (typeof ev?.landlord === 'number' ? (ev.landlord as number) : -1);
+      landlordIdx = landlordVal;
+      const handsRawInit = Array.isArray(ev?.hands)
+        ? ev.hands
+        : Array.isArray(ev?.state?.hands)
+          ? ev.state.hands
+          : Array.isArray(ev?.payload?.hands)
+            ? ev.payload.hands
+            : (handsFromEv ?? []);
+      const clonedHands = cloneHands(handsRawInit);
+      finalHands = cloneHands(handsRawInit);
+      if (!preDealHands) {
+        preDealHands = cloneHands(handsRawInit);
+      }
+      const bottomRawInit = (() => {
+        if (Array.isArray(ev?.bottom)) return ev.bottom;
+        if (Array.isArray(ev?.state?.bottom)) return ev.state.bottom;
+        if (Array.isArray(ev?.payload?.bottom)) return ev.payload.bottom;
+        return null;
+      })();
+      if (Array.isArray(bottomRawInit)) {
+        bottomCards = cloneBottom(bottomRawInit);
+      }
+      const initHandsSnapshot = clonedHands.map(hand => hand.slice());
+      const initBottomSnapshot = bottomCards.slice();
+      writeLine(res, {
+        type: 'init',
+        kind: 'init',
+        landlordIdx: landlordVal,
+        landlord: landlordVal,
+        bottom: initBottomSnapshot,
+        hands: initHandsSnapshot,
       });
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
-      // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
-try {
-  const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
-  const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
-  const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
-  const hands: string[][] = Array.isArray(ev.hands) ? ev.hands as string[][] : [[],[],[]];
-  let extraMult = 1;
-  const decideExtraDouble = (seat:number)=>{
-    const role = (seat===landlordIdx) ? 'landlord' : 'farmer';
-    const all = role==='landlord' ? ([] as string[]).concat(hands[seat]||[], bottom) : (hands[seat]||[]);
-    const cnt = __count(all);
-    const hasRocket = (cnt.get('x')||0)>=1 && (cnt.get('X')||0)>=1
-    const hasBomb = Array.from(cnt.values()).some(n=>n===4)
-    // 极简启发：地主看到炸弹则愿意加倍；农民看到底牌显著增强（火箭或炸弹）时愿意加倍
-    if (role==='landlord') return hasBomb;
-    return (hasRocket || hasBomb);
-  };
-  for (let k=0;k<3;k++){
-    const s=(landlordIdx + k) % 3;
-    const will = decideExtraDouble(s);
-    writeLine(res, { type:'event', kind:'extra-double', seat: s, do: will });
-    if (will) extraMult *= 2;
-  }
-  if (extraMult > 1) {
-    // 同步一次倍数（可被前端用于兜底校准）
-    writeLine(res, { type:'event', kind:'multiplier-sync', multiplier: extraMult });
-  }
-} catch {}
-continue;
+      try {
+        if (landlordVal >= 0) {
+          const handsForExtra = initHandsSnapshot;
+          const bottomForExtra = initBottomSnapshot;
+          let extraMult = 1;
+          const decideExtraDouble = (seat:number) => {
+            const role = (seat === landlordVal) ? 'landlord' : 'farmer';
+            const seatHand = Array.isArray(handsForExtra[seat]) ? handsForExtra[seat] : [];
+            const all = role === 'landlord'
+              ? ([] as string[]).concat(seatHand, bottomForExtra)
+              : seatHand;
+            const cnt = __count(all);
+            const hasRocket = (cnt.get('x') || 0) >= 1 && (cnt.get('X') || 0) >= 1;
+            const hasBomb = Array.from(cnt.values()).some(n => n === 4);
+            if (role === 'landlord') return hasBomb;
+            return hasRocket || hasBomb;
+          };
+          for (let k = 0; k < 3; k++) {
+            const s = (landlordVal + k + 3) % 3;
+            const will = decideExtraDouble(s);
+            writeLine(res, { type: 'event', kind: 'extra-double', seat: s, do: will });
+            if (will) extraMult *= 2;
+          }
+          if (extraMult > 1) {
+            writeLine(res, { type: 'event', kind: 'multiplier-sync', multiplier: extraMult });
+          }
+        }
+      } catch {}
+      continue;
     }
 
     // 兼容两种出牌事件：turn 或 event:play
@@ -534,6 +678,17 @@ continue;
       (ev?.type==='game-over') || (ev?.type==='game_end');
 
     if (isResultLike) {
+      try {
+        const audit = buildDealAudit();
+        if (audit) {
+          writeLine(res, { type: 'event', kind: 'deal-audit', ...audit });
+          if (!audit.ok) {
+            console.warn('[deal-audit]', audit);
+          }
+        }
+      } catch (err) {
+        console.error('[deal-audit] failed', err);
+      }
       // —— 在 result 之前产出画像（前端会立即累计，避免兜底 2.5）——
       const perSeat = [0,1,2].map((i)=>{
         const s = stats[i];

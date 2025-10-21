@@ -2009,7 +2009,17 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
 
 
   // 初始化（带上地主）
-  yield { type:'state', kind:'init', landlord, hands: hands.map(h => [...h]) };
+  const initHands = hands.map(h => [...h]);
+  const initPayload = {
+    type: 'init' as const,
+    kind: 'init' as const,
+    landlord,
+    landlordIdx: landlord,
+    hands: initHands.map(h => [...h]),
+    bottom: bottom.slice(),
+    state: { kind: 'init' as const, landlord, hands: initHands.map(h => [...h]) },
+  };
+  yield initPayload;
   // 历史与记牌数据
   let trick = 0;                          // 轮次（从 0 开始）
   const history: PlayEvent[] = [];        // 全部出牌/过牌历史

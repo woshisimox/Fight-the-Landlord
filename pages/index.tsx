@@ -2128,7 +2128,68 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                 }
                 continue;
               }
-if (m.type === 'event' && m.kind === 'play') {
+              if (m.type === 'event' && m.kind === 'deal-audit') {
+                const totalVal = typeof m.total === 'number' ? m.total as number : NaN;
+                const uniqueVal = typeof m.unique === 'number' ? m.unique as number : NaN;
+                const seatCountsArr = Array.isArray(m.seatCounts) ? (m.seatCounts as number[]) : [];
+                const bottomCount = typeof m.bottomCount === 'number' ? m.bottomCount as number : 0;
+                const preCountsArr = Array.isArray(m.preCounts) ? (m.preCounts as number[]) : null;
+                const preTotalVal = typeof m.preTotal === 'number' ? m.preTotal as number : null;
+                const preUniqueVal = typeof m.preUnique === 'number' ? m.preUnique as number : null;
+                const duplicatesArr = Array.isArray(m.duplicates) ? (m.duplicates as any[]) : [];
+                const missingArr = Array.isArray(m.missing) ? (m.missing as string[]) : [];
+                const unexpectedArr = Array.isArray(m.unexpected) ? (m.unexpected as string[]) : [];
+                const bottomMissingArr = Array.isArray(m.bottomMissing) ? (m.bottomMissing as string[]) : [];
+                const ok = (m.ok !== false)
+                  && Number.isFinite(totalVal) && totalVal === 54
+                  && Number.isFinite(uniqueVal) && uniqueVal === 54
+                  && duplicatesArr.length === 0
+                  && missingArr.length === 0
+                  && unexpectedArr.length === 0;
+                const baseParts: string[] = [];
+                baseParts.push(`总数 ${Number.isFinite(totalVal) ? totalVal : '?'}/54`);
+                baseParts.push(`去重 ${Number.isFinite(uniqueVal) ? uniqueVal : '?'}/54`);
+                if (seatCountsArr.length) {
+                  baseParts.push(`手牌 ${seatCountsArr.join('/')}`);
+                }
+                baseParts.push(`底牌 ${bottomCount}`);
+                if (preCountsArr && preCountsArr.length) {
+                  const preDetail: string[] = [`初发 ${preCountsArr.join('/')}`];
+                  if (preTotalVal != null) preDetail.push(`总=${preTotalVal}`);
+                  if (preUniqueVal != null) preDetail.push(`唯一=${preUniqueVal}`);
+                  baseParts.push(preDetail.join(' '));
+                }
+                const issues: string[] = [];
+                if (missingArr.length) issues.push(`缺失 ${missingArr.join(' ')}`);
+                if (unexpectedArr.length) issues.push(`异常 ${unexpectedArr.join(' ')}`);
+                if (bottomMissingArr.length) issues.push(`底牌未分配 ${bottomMissingArr.join(' ')}`);
+                if (duplicatesArr.length) {
+                  const dupText = duplicatesArr.map((dup: any) => {
+                    const card = typeof dup?.card === 'string' ? dup.card : '?';
+                    const seats = Array.isArray(dup?.seats) ? (dup.seats as any[]).map((info: any) => {
+                      if (info && typeof info === 'object') {
+                        const seatIdx = typeof info.seat === 'number' ? info.seat : (Array.isArray(info) ? info[0] : '?');
+                        const count = typeof info.count === 'number' ? info.count : (Array.isArray(info) ? info[1] : '?');
+                        return `${seatName(seatIdx)}x${count}`;
+                      }
+                      if (Array.isArray(info)) {
+                        const seatIdx = typeof info[0] === 'number' ? info[0] : '?';
+                        const count = typeof info[1] === 'number' ? info[1] : '?';
+                        return `${seatName(seatIdx)}x${count}`;
+                      }
+                      return String(info ?? '?');
+                    }).join(',') : '';
+                    return `${card}${seats ? `(${seats})` : ''}`;
+                  }).join('；');
+                  if (dupText) issues.push(`重复 ${dupText}`);
+                }
+                const prefix = ok ? '✅' : '⚠️';
+                const summary = `${prefix} 发牌校验：${baseParts.filter(Boolean).join('，')}`;
+                const detail = issues.length ? `${summary}，${issues.join('，')}` : summary;
+                nextLog = [...nextLog, detail];
+                continue;
+              }
+              if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
                   lastReasonRef.current[m.seat] = null;
