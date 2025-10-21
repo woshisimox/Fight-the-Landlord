@@ -381,7 +381,10 @@ function traceWrap(
           console.error('[human-hint] failed', e);
         }
       }
-      const timeoutSeconds = Math.max(1, Math.round(turnTimeoutMs / 1000));
+      const humanTimeoutMs = phase === 'bid'
+        ? Math.min(turnTimeoutMs, 10_000)
+        : turnTimeoutMs;
+      const timeoutSeconds = Math.max(1, Math.round(humanTimeoutMs / 1000));
       const isEmptyHand = phase === 'play'
         && ((Array.isArray(ctxWithSeen?.hands) && ctxWithSeen.hands.length === 0)
           || (Array.isArray(ctxWithSeen?.handsCount) && (ctxWithSeen.handsCount[seatIndex] ?? 0) === 0));
@@ -394,9 +397,9 @@ function traceWrap(
           if (phase === 'double') return { phase: 'double', double: false, reason: `timeout@${timeoutSeconds}s` };
           return { phase: 'play', move: 'pass', reason: `timeout@${timeoutSeconds}s` };
         })();
-        const reg = registerHumanRequest({ seat: seatIndex, phase, sessionId, timeoutMs: turnTimeoutMs, defaultMove });
+        const reg = registerHumanRequest({ seat: seatIndex, phase, sessionId, timeoutMs: humanTimeoutMs, defaultMove });
         requestId = reg.id;
-        try { writeLine(res, { type:'event', kind:'human-request', seat: seatIndex, phase, requestId, sessionId, ctx: safeCtx, timeoutMs: turnTimeoutMs }); } catch {}
+        try { writeLine(res, { type:'event', kind:'human-request', seat: seatIndex, phase, requestId, sessionId, ctx: safeCtx, timeoutMs: humanTimeoutMs }); } catch {}
         result = await reg.promise;
       }
     } else {
