@@ -2658,7 +2658,8 @@ nextTotals     = [
     setKnockoutStage(0);
     resetHumanState();
 
-    const baseSeats = buildBaseActiveSeats().map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }));
+    const cloneSeat = (seat: ActiveSeat): ActiveSeat => ({ ...seat, keys: cloneProviderKeys(seat.keys) });
+    const baseSeats = buildBaseActiveSeats().map(cloneSeat);
     const rosterSeats = (props.knockoutRoster || [])
       .filter(entry => entry && entry.choice)
       .map((entry, idx) => ({
@@ -2676,8 +2677,8 @@ nextTotals     = [
         await runWithSeats(baseSeats, '常规赛');
       } else {
         let stage = 1;
-        let active = rosterSeats.map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }));
-        while (active.length >= 3) {
+        let active = rosterSeats.map(cloneSeat);
+        while (active.length > 3) {
           if (controllerRef.current?.signal.aborted) break;
           const pool = active.slice();
           for (let i = pool.length - 1; i > 0; i--) {
@@ -2692,28 +2693,62 @@ nextTotals     = [
             setLog(l => [...l, `【淘汰赛】第 ${stage} 轮：${byeNames.join('、')} 轮空晋级。`]);
             setKnockoutRecords(prev => [...prev, { stage, group: 0, label: `第${stage}轮 轮空`, totals: [0,0,0], participants: [], eliminated: null, byes: byeNames }]);
           }
-          const next: ActiveSeat[] = [...byes.map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }))];
+          const next: ActiveSeat[] = [...byes.map(cloneSeat)];
           for (let g = 0; g < groups.length; g++) {
             if (controllerRef.current?.signal.aborted) break;
-            const matchSeats = groups[g].map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }));
+            const matchSeats = groups[g].map(cloneSeat);
             const label = `第${stage}轮 第${g+1}组`;
             const totals = await runWithSeats(matchSeats, label);
             const combined = matchSeats.map((seat, idx) => ({ seat, total: totals[idx] ?? props.startScore }));
             combined.sort((a,b) => (Number(a.total) || 0) - (Number(b.total) || 0));
             const eliminated = combined[0]?.seat || null;
-            const survivors = combined.slice(1).map(x => ({ ...x.seat, keys: cloneProviderKeys(x.seat.keys) }));
+            const survivors = combined.slice(1).map(x => cloneSeat(x.seat));
             next.push(...survivors);
-            setKnockoutRecords(prev => [...prev, { stage, group: g+1, label, totals: totals as [number,number,number], participants: matchSeats.map(s => ({ ...s, keys: cloneProviderKeys(s.keys) })), eliminated }]);
+            setKnockoutRecords(prev => [...prev, { stage, group: g+1, label, totals: totals as [number,number,number], participants: matchSeats.map(cloneSeat), eliminated }]);
             const scoreLine = combined.map(({ seat, total }) => `${seat.name || choiceLabel(seat.choice)}=${total}`).join('，');
             setLog(l => [...l, `【淘汰赛】${label} 积分：${scoreLine} → 淘汰 ${eliminated?.name || choiceLabel((eliminated?.choice || 'built-in:random-legal') as BotChoice)}`]);
             if (controllerRef.current?.signal.aborted) break;
           }
-          active = next.map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }));
+          active = next.map(cloneSeat);
           stage++;
           setKnockoutStage(stage - 1);
           setKnockoutSurvivors(active.map(s => s.name || choiceLabel(s.choice)));
         }
-        if (active.length > 0) {
+        if (!controllerRef.current?.signal.aborted && active.length === 3) {
+          const finalSeats = active.map(cloneSeat);
+          const finalLabel = stage <= 1 ? '决赛' : `第${stage}轮 决赛`;
+          const totals = await runWithSeats(finalSeats, finalLabel);
+          const normalizeTotal = (value: any) => {
+            const num = Number(value);
+            return Number.isFinite(num) ? num : 0;
+          };
+          const scoreboard = finalSeats.map((seat, idx) => ({
+            seat,
+            total: normalizeTotal(totals[idx]),
+          }));
+          scoreboard.sort((a,b) => (Number(b.total) || 0) - (Number(a.total) || 0));
+          const champion = scoreboard[0]?.seat || null;
+          const runnerUp = scoreboard[1]?.seat || null;
+          const third = scoreboard[2]?.seat || null;
+          const nameOf = (seat: ActiveSeat | null | undefined) => seat ? (seat.name || choiceLabel(seat.choice)) : '';
+          const scoreLine = finalSeats
+            .map((seat, idx) => `${seat.name || choiceLabel(seat.choice)}=${normalizeTotal(totals[idx])}`)
+            .join('，');
+          setKnockoutRecords(prev => [...prev, {
+            stage,
+            group: 1,
+            label: finalLabel,
+            totals: totals as [number, number, number],
+            participants: finalSeats.map(cloneSeat),
+            eliminated: third || null,
+          }]);
+          setKnockoutStage(stage);
+          setKnockoutSurvivors(scoreboard.map(item => nameOf(item.seat)));
+          setLog(l => [
+            ...l,
+            `【淘汰赛】${finalLabel} 积分：${scoreLine}｜冠军：${nameOf(champion)}${runnerUp ? `｜亚军：${nameOf(runnerUp)}` : ''}${third ? `｜季军：${nameOf(third)}` : ''}`,
+          ]);
+        } else if (active.length > 0) {
           setLog(l => [...l, `【淘汰赛】结束：剩余选手 ${active.map(s => s.name || choiceLabel(s.choice)).join('、')}`]);
         }
       }
