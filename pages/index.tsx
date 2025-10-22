@@ -349,6 +349,30 @@ const readStore = (): TsStore => {
 const writeStore = (s: TsStore) => { try { s.updatedAt=new Date().toISOString(); localStorage.setItem(TS_STORE_KEY, JSON.stringify(s)); } catch {} };
 
 /* ====== 其它 UI/逻辑 ====== */
+type ProviderKeys = {
+  openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; deepseek?: string;
+  httpBase?: string; httpToken?: string;
+};
+
+type KnockoutEntrantConfig = {
+  id: string;
+  name: string;
+  choice: BotChoice;
+  model?: string;
+  keys?: ProviderKeys;
+};
+
+const PROVIDER_KEY_FIELDS: (keyof ProviderKeys)[] = ['openai','gemini','grok','kimi','qwen','deepseek','httpBase','httpToken'];
+const cloneProviderKeys = (src?: ProviderKeys): ProviderKeys => {
+  const out: ProviderKeys = {};
+  if (!src) return out;
+  for (const key of PROVIDER_KEY_FIELDS) {
+    const val = src[key];
+    if (val) out[key] = val;
+  }
+  return out;
+};
+
 type LiveProps = {
   rounds: number;
   startScore: number;
@@ -359,20 +383,21 @@ type LiveProps = {
   four2: Four2Policy;
   seats: BotChoice[];
   seatModels: string[];
-  seatKeys: {
-    openai?: string; gemini?: string; grok?: string; kimi?: string; qwen?: string; deepseek?: string;
-    httpBase?: string; httpToken?: string;
-  }[];
+  seatKeys: ProviderKeys[];
   farmerCoop: boolean;
   knockout: boolean;
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
   turnTimeoutSecs?: number[];
+  knockoutRoster?: KnockoutEntrantConfig[];
 };
 
 function SeatTitle({ i }: { i:number }) {
   const { lang } = useI18n();
-  return <span style={{ fontWeight:700 }}>{seatLabel(i, lang)}</span>;
+  const names = useContext(ActiveSeatNameContext);
+  const label = seatLabel(i, lang);
+  const extra = names?.[i];
+  return <span style={{ fontWeight:700 }}>{extra ? `${label}（${extra}）` : label}</span>;
 }
 
 
@@ -380,6 +405,8 @@ type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
 type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[]; visibleToAll:boolean };
+const ActiveSeatNameContext = createContext<string[]>(['','','']);
+type ActiveSeat = { id: string; name: string; choice: BotChoice; model: string; keys: ProviderKeys };
 
 const rankOf = (l: string) => {
   if (!l) return '';
@@ -875,7 +902,27 @@ function LivePanel(props: LiveProps) {
   const pauseRef = useRef(false);
   const pauseResolversRef = useRef<Array<() => void>>([]);
 
-  const seatChoices = (props.seats || []).slice(0, 3);
+  const buildBaseActiveSeats = () => [0,1,2].map((idx) => {
+    const choice = (props.seats[idx] || 'built-in:random-legal') as BotChoice;
+    const name = choiceLabel(choice);
+    const model = props.seatModels?.[idx] || '';
+    return {
+      id: `base-${idx}`,
+      name,
+      choice,
+      model,
+      keys: cloneProviderKeys(props.seatKeys?.[idx]),
+    } as ActiveSeat;
+  });
+  const [activeSeats, setActiveSeats] = useState<ActiveSeat[]>(buildBaseActiveSeats);
+  useEffect(() => {
+    if (running) return;
+    setActiveSeats(buildBaseActiveSeats());
+  }, [props.seats, props.seatModels, props.seatKeys, running]);
+  const activeSeatsRef = useRef<ActiveSeat[]>(activeSeats);
+  useEffect(() => { activeSeatsRef.current = activeSeats; }, [activeSeats]);
+
+  const seatChoices = activeSeats.map(seat => seat.choice);
   const seatIsHuman = seatChoices.map(choice => choice === 'human');
   const anyHumanSeat = seatIsHuman.some(Boolean);
 
@@ -1038,6 +1085,10 @@ function LivePanel(props: LiveProps) {
     { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
   ]);
   const [scoreDists, setScoreDists] = useState<number[][]>([[],[],[]]);
+  type KnockoutRecord = { stage:number; group:number; label:string; totals:[number,number,number]; participants: ActiveSeat[]; eliminated: ActiveSeat | null; byes?: string[] };
+  const [knockoutRecords, setKnockoutRecords] = useState<KnockoutRecord[]>([]);
+  const [knockoutSurvivors, setKnockoutSurvivors] = useState<string[]>([]);
+  const [knockoutStage, setKnockoutStage] = useState<number>(0);
   const statsFileRef = useRef<HTMLInputElement|null>(null);
   const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
   const bottomRef = useRef(bottomInfo); useEffect(()=>{ bottomRef.current = bottomInfo; }, [bottomInfo]);
@@ -1104,10 +1155,12 @@ function LivePanel(props: LiveProps) {
   const fileRef = useRef<HTMLInputElement|null>(null);
 
   const seatIdentity = (i:number) => {
-    const choice = props.seats[i];
-    const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
-    const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
-    return `${choice}|${model}|${base}`; // 身份锚定
+    const seat = activeSeatsRef.current[i];
+    const choice = seat?.choice ?? ((props.seats[i] || 'built-in:random-legal') as BotChoice);
+    const model = normalizeModelForProvider(choice, seat?.model || '') || defaultModelFor(choice);
+    const base = choice === 'http' ? (seat?.keys?.httpBase || '') : '';
+    const prefix = seat?.id || `seat-${i}`;
+    return `${prefix}|${choice}|${model}|${base}`; // 身份锚定
   };
 
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
@@ -1151,10 +1204,16 @@ function LivePanel(props: LiveProps) {
       const role: TsRole = (i===landlordIndex) ? 'landlord' : 'farmer';
       entry.roles = entry.roles || {};
       entry.roles[role] = { ...updated[i] };
-      const choice = props.seats[i];
-      const model  = (props.seatModels[i] || '').trim();
-      const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
-      entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
+      const seat = activeSeatsRef.current[i];
+      const choice = seat?.choice ?? ((props.seats[i] || 'built-in:random-legal') as BotChoice);
+      const modelNorm = normalizeModelForProvider(choice, seat?.model || '') || defaultModelFor(choice);
+      const base   = choice==='http' ? (seat?.keys?.httpBase || '') : '';
+      entry.meta = {
+        choice,
+        ...(modelNorm ? { model: modelNorm } : {}),
+        ...(base ? { httpBase: base } : {}),
+        ...(seat?.name ? { name: seat.name } : {}),
+      };
       tsStoreRef.current.players[id] = entry;
     }
     writeStore(tsStoreRef.current);
@@ -1375,10 +1434,16 @@ function LivePanel(props: LiveProps) {
         entry.roles = entry.roles || {};
         entry.roles[role] = mergeRadarAgg(entry.roles[role], s3[i]);
       }
-      const choice = props.seats[i];
-      const model  = (props.seatModels[i] || '').trim();
-      const base   = choice==='http' ? (props.seatKeys[i]?.httpBase || '') : '';
-      entry.meta = { choice, ...(model ? { model } : {}), ...(base ? { httpBase: base } : {}) };
+      const seat = activeSeatsRef.current[i];
+      const choice = seat?.choice ?? ((props.seats[i] || 'built-in:random-legal') as BotChoice);
+      const modelNorm  = normalizeModelForProvider(choice, seat?.model || '') || defaultModelFor(choice);
+      const base   = choice==='http' ? (seat?.keys?.httpBase || '') : '';
+      entry.meta = {
+        choice,
+        ...(modelNorm ? { model: modelNorm } : {}),
+        ...(base ? { httpBase: base } : {}),
+        ...(seat?.name ? { name: seat.name } : {}),
+      };
       radarStoreRef.current.players[id] = entry;
     }
     // writeRadarStore disabled (no radar persistence)
@@ -1472,10 +1537,11 @@ function LivePanel(props: LiveProps) {
   const scoreFileRef = useRef<HTMLInputElement|null>(null);
 
   const agentIdForIndex = (i:number) => {
-    const choice = props.seats[i] as BotChoice;
-    const label = choiceLabel(choice);
-    if ((choice as string).startsWith('built-in')) return label;
-    const model = (props.seatModels?.[i]) || defaultModelFor(choice);
+    const seat = activeSeatsRef.current[i];
+    if (!seat) return seatName(i);
+    const label = seat.name || choiceLabel(seat.choice);
+    if ((seat.choice as string).startsWith('built-in') || seat.choice === 'human') return label;
+    const model = normalizeModelForProvider(seat.choice, seat.model || '') || defaultModelFor(seat.choice);
     return `${label}:${model}`;
   };
 
@@ -1560,12 +1626,9 @@ const handleScoreRefresh = () => {
 const [allLogs, setAllLogs] = useState<string[]>([]);
 const allLogsRef = useRef(allLogs);
 useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
-  const start = async () => {
-    if (running) return;
-    if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
-
-    exitPause();
-    setRunning(true);
+  const runWithSeats = async (seatSet: ActiveSeat[], label: string): Promise<[number, number, number]> => {
+    activeSeatsRef.current = seatSet.map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }));
+    setActiveSeats(activeSeatsRef.current);
     setAllLogs([]);
     setLandlord(null); setHands([[], [], []]); setPlays([]);
     setWinner(null); setDelta(null); setMultiplier(1);
@@ -1583,10 +1646,11 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     controllerRef.current = new AbortController();
 
     const buildSeatSpecs = (): any[] => {
-      return props.seats.slice(0,3).map((choice, i) => {
-        const normalized = normalizeModelForProvider(choice, props.seatModels[i] || '');
+      return seatSet.map((seat, i) => {
+        const choice = seat.choice;
+        const normalized = normalizeModelForProvider(choice, seat.model || '');
         const model = normalized || defaultModelFor(choice);
-        const keys = props.seatKeys[i] || {};
+        const keys = seat.keys || {};
         switch (choice) {
           case 'ai:openai':   return { choice, model, apiKey: keys.openai || '' };
           case 'ai:gemini':   return { choice, model, apiKey: keys.gemini || '' };
@@ -1602,7 +1666,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
 
     const seatSummaryText = (specs: any[]) =>
       specs.map((s, i) => {
-        const nm = seatName(i);
+        const nm = seatSet[i]?.name || seatName(i);
         if (s.choice.startsWith('built-in')) return `${nm}=${choiceLabel(s.choice as BotChoice)}`;
         if (s.choice === 'http') return `${nm}=HTTP(${s.baseUrl ? 'custom' : 'default'})`;
         return `${nm}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
@@ -1650,7 +1714,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
       const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
       traceIdRef.current = traceId;
-      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
+      setLog(l => [...l, `【前端】${label}｜第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
@@ -2562,6 +2626,94 @@ nextTotals     = [
       if (e?.name === 'AbortError') setLog(l => [...l, '已手动停止。']);
       else setLog(l => [...l, `错误：${e?.message || e}`]);
     } finally {
+      traceIdRef.current = '';
+    }
+
+    const fallback = typeof props.startScore === 'number'
+      ? props.startScore
+      : Number(props.startScore ?? 0) || 0;
+    const snapshot = (Array.isArray(totalsRef.current) && totalsRef.current.length === 3)
+      ? (totalsRef.current.map(v => (Number(v) || 0)) as [number, number, number])
+      : [fallback, fallback, fallback] as [number, number, number];
+    return snapshot;
+  };
+
+
+  const start = async () => {
+    if (running) return;
+    if (!props.enabled) { setLog(l => [...l, '【前端】未启用对局：请在设置中勾选“启用对局”。']); return; }
+
+    exitPause();
+    setRunning(true);
+    setAllLogs([]);
+    setKnockoutRecords([]);
+    setKnockoutSurvivors([]);
+    setKnockoutStage(0);
+    resetHumanState();
+
+    const baseSeats = buildBaseActiveSeats().map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }));
+    const rosterSeats = (props.knockoutRoster || [])
+      .filter(entry => entry && entry.choice)
+      .map((entry, idx) => ({
+        id: entry.id || `roster-${idx}`,
+        name: entry.name || choiceLabel(entry.choice),
+        choice: entry.choice,
+        model: entry.model || '',
+        keys: cloneProviderKeys(entry.keys),
+      } as ActiveSeat));
+
+    const isKnockout = props.knockout && rosterSeats.length >= 3;
+
+    try {
+      if (!isKnockout) {
+        await runWithSeats(baseSeats, '常规赛');
+      } else {
+        let stage = 1;
+        let active = rosterSeats.map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }));
+        while (active.length >= 3) {
+          if (controllerRef.current?.signal.aborted) break;
+          const pool = active.slice();
+          for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+          }
+          const groups: ActiveSeat[][] = [];
+          while (pool.length >= 3) groups.push(pool.splice(0,3));
+          const byes = pool.splice(0);
+          if (byes.length) {
+            const byeNames = byes.map(s => s.name || choiceLabel(s.choice));
+            setLog(l => [...l, `【淘汰赛】第 ${stage} 轮：${byeNames.join('、')} 轮空晋级。`]);
+            setKnockoutRecords(prev => [...prev, { stage, group: 0, label: `第${stage}轮 轮空`, totals: [0,0,0], participants: [], eliminated: null, byes: byeNames }]);
+          }
+          const next: ActiveSeat[] = [...byes.map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }))];
+          for (let g = 0; g < groups.length; g++) {
+            if (controllerRef.current?.signal.aborted) break;
+            const matchSeats = groups[g].map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }));
+            const label = `第${stage}轮 第${g+1}组`;
+            const totals = await runWithSeats(matchSeats, label);
+            const combined = matchSeats.map((seat, idx) => ({ seat, total: totals[idx] ?? props.startScore }));
+            combined.sort((a,b) => (Number(a.total) || 0) - (Number(b.total) || 0));
+            const eliminated = combined[0]?.seat || null;
+            const survivors = combined.slice(1).map(x => ({ ...x.seat, keys: cloneProviderKeys(x.seat.keys) }));
+            next.push(...survivors);
+            setKnockoutRecords(prev => [...prev, { stage, group: g+1, label, totals: totals as [number,number,number], participants: matchSeats.map(s => ({ ...s, keys: cloneProviderKeys(s.keys) })), eliminated }]);
+            const scoreLine = combined.map(({ seat, total }) => `${seat.name || choiceLabel(seat.choice)}=${total}`).join('，');
+            setLog(l => [...l, `【淘汰赛】${label} 积分：${scoreLine} → 淘汰 ${eliminated?.name || choiceLabel((eliminated?.choice || 'built-in:random-legal') as BotChoice)}`]);
+            if (controllerRef.current?.signal.aborted) break;
+          }
+          active = next.map(seat => ({ ...seat, keys: cloneProviderKeys(seat.keys) }));
+          stage++;
+          setKnockoutStage(stage - 1);
+          setKnockoutSurvivors(active.map(s => s.name || choiceLabel(s.choice)));
+        }
+        if (active.length > 0) {
+          setLog(l => [...l, `【淘汰赛】结束：剩余选手 ${active.map(s => s.name || choiceLabel(s.choice)).join('、')}`]);
+        }
+      }
+    } catch (e: any) {
+      if (e?.name === 'AbortError') setLog(l => [...l, '已手动停止。']);
+      else setLog(l => [...l, `错误：${e?.message || e}`]);
+    } finally {
       exitPause();
       setRunning(false);
       resetHumanState();
@@ -2690,6 +2842,38 @@ const handleAllSaveInner = () => {
         </span>
       </div>
 
+      {props.knockout && (
+        <Section title="淘汰赛进度">
+          <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>
+            已完成轮次：{knockoutStage}
+          </div>
+          {knockoutSurvivors.length > 0 && (
+            <div style={{ fontSize:12, marginBottom:6 }}>
+              当前晋级选手：{knockoutSurvivors.join('、')}
+            </div>
+          )}
+          <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+            {knockoutRecords.length === 0 ? (
+              <div style={{ fontSize:12, color:'#9ca3af' }}>暂无淘汰信息。</div>
+            ) : (
+              knockoutRecords.slice(-6).map((rec, idx) => (
+                <div key={`${rec.stage}-${rec.group}-${idx}`} style={{ fontSize:12, border:'1px dashed #e5e7eb', borderRadius:6, padding:'6px 8px', background:'#f9fafb' }}>
+                  <div style={{ fontWeight:600 }}>{rec.label}</div>
+                  {rec.byes && rec.byes.length > 0 ? (
+                    <div style={{ color:'#6b7280' }}>轮空：{rec.byes.join('、')}</div>
+                  ) : (
+                    <div style={{ color:'#374151' }}>
+                      积分：{rec.totals.join(' / ')}
+                      {rec.eliminated ? `｜淘汰：${rec.eliminated.name || choiceLabel(rec.eliminated.choice)}` : ''}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </Section>
+      )}
+
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
         {/* 上传 / 存档 / 刷新 */}
@@ -2732,10 +2916,187 @@ const handleAllSaveInner = () => {
                     <div>
                       <div style={{ fontWeight:600, opacity:0.8 }}>农民</div>
                       <div>{muSig(stored.farmer)}</div>
+          </div>
+        </div>
+
+        {knockout && (
+          <div style={{ marginTop:12 }}>
+            <div style={{ fontWeight:700, marginBottom:6 }}>淘汰赛参赛选手</div>
+            <div style={{ fontSize:12, color:'#6b7280', marginBottom:8 }}>
+              至少 3 名选手。每轮将随机抽取三人一组对局，积分最低者淘汰，其余选手晋级下一轮（人数不足三人时会轮空晋级）。
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              {knockoutRoster.map((entry, idx) => {
+                const choice = entry.choice as BotChoice;
+                const keys = entry.keys || {};
+                return (
+                  <div key={entry.id} style={{ border:'1px dashed #d1d5db', borderRadius:8, padding:12, background:'#f9fafb' }}>
+                    <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
+                      <span style={{ fontWeight:700 }}>#{idx + 1}</span>
+                      <input
+                        type="text"
+                        value={entry.name}
+                        placeholder={`参赛者${idx + 1}`}
+                        onChange={e=>updateRosterName(idx, e.target.value)}
+                        style={{ flex:'1 1 auto', minWidth:0, padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                      />
+                      <button
+                        onClick={()=>removeRosterEntry(idx)}
+                        style={{ padding:'4px 8px', borderRadius:6, border:'1px solid #fca5a5', background:'#fee2e2', color:'#b91c1c' }}
+                      >删除</button>
                     </div>
+
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:12 }}>
+                      <label style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                        <span>选择</span>
+                        <select
+                          value={choice}
+                          onChange={e=>updateRosterChoice(idx, e.target.value as BotChoice)}
+                          style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                        >
+                          <optgroup label="人类">
+                            <option value="human">Human</option>
+                          </optgroup>
+                          <optgroup label="内置">
+                            <option value="built-in:greedy-max">Greedy Max</option>
+                            <option value="built-in:greedy-min">Greedy Min</option>
+                            <option value="built-in:random-legal">Random Legal</option>
+                            <option value="built-in:mininet">MiniNet</option>
+                            <option value="built-in:ally-support">AllySupport</option>
+                            <option value="built-in:endgame-rush">EndgameRush</option>
+                          </optgroup>
+                          <optgroup label="AI">
+                            <option value="ai:openai">OpenAI</option>
+                            <option value="ai:gemini">Gemini</option>
+                            <option value="ai:grok">Grok</option>
+                            <option value="ai:kimi">Kimi</option>
+                            <option value="ai:qwen">Qwen</option>
+                            <option value="ai:deepseek">DeepSeek</option>
+                            <option value="http">HTTP</option>
+                          </optgroup>
+                        </select>
+                      </label>
+
+                      {choice.startsWith('ai:') && (
+                        <label style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <span>模型（可选）</span>
+                          <input
+                            type="text"
+                            value={entry.model}
+                            placeholder={defaultModelFor(choice)}
+                            onChange={e=>updateRosterModel(idx, e.target.value)}
+                            style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                          />
+                          <div style={{ fontSize:12, color:'#6b7280' }}>留空则使用推荐：{defaultModelFor(choice)}</div>
+                        </label>
+                      )}
+                    </div>
+
+                    {choice === 'ai:openai' && (
+                      <label style={{ display:'block', marginTop:8 }}>
+                        OpenAI API Key
+                        <input
+                          type="password"
+                          value={keys.openai || ''}
+                          onChange={e=>updateRosterKey(idx, 'openai', e.target.value)}
+                          style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                        />
+                      </label>
+                    )}
+                    {choice === 'ai:gemini' && (
+                      <label style={{ display:'block', marginTop:8 }}>
+                        Gemini API Key
+                        <input
+                          type="password"
+                          value={keys.gemini || ''}
+                          onChange={e=>updateRosterKey(idx, 'gemini', e.target.value)}
+                          style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                        />
+                      </label>
+                    )}
+                    {choice === 'ai:grok' && (
+                      <label style={{ display:'block', marginTop:8 }}>
+                        xAI (Grok) API Key
+                        <input
+                          type="password"
+                          value={keys.grok || ''}
+                          onChange={e=>updateRosterKey(idx, 'grok', e.target.value)}
+                          style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                        />
+                      </label>
+                    )}
+                    {choice === 'ai:kimi' && (
+                      <label style={{ display:'block', marginTop:8 }}>
+                        Kimi API Key
+                        <input
+                          type="password"
+                          value={keys.kimi || ''}
+                          onChange={e=>updateRosterKey(idx, 'kimi', e.target.value)}
+                          style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                        />
+                      </label>
+                    )}
+                    {choice === 'ai:qwen' && (
+                      <label style={{ display:'block', marginTop:8 }}>
+                        Qwen API Key
+                        <input
+                          type="password"
+                          value={keys.qwen || ''}
+                          onChange={e=>updateRosterKey(idx, 'qwen', e.target.value)}
+                          style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                        />
+                      </label>
+                    )}
+                    {choice === 'ai:deepseek' && (
+                      <label style={{ display:'block', marginTop:8 }}>
+                        DeepSeek API Key
+                        <input
+                          type="password"
+                          value={keys.deepseek || ''}
+                          onChange={e=>updateRosterKey(idx, 'deepseek', e.target.value)}
+                          style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                        />
+                      </label>
+                    )}
+                    {choice === 'http' && (
+                      <div style={{ display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:12, marginTop:8 }}>
+                        <label style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          HTTP Base / URL
+                          <input
+                            type="text"
+                            value={keys.httpBase || ''}
+                            onChange={e=>updateRosterKey(idx, 'httpBase', e.target.value)}
+                            style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                          />
+                        </label>
+                        <label style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          HTTP Token（可选）
+                          <input
+                            type="password"
+                            value={keys.httpToken || ''}
+                            onChange={e=>updateRosterKey(idx, 'httpToken', e.target.value)}
+                            style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+                          />
+                        </label>
+                      </div>
+                    )}
                   </div>
-                </div>
+                );
+              })}
+            </div>
+            <div style={{ display:'flex', gap:8, marginTop:10 }}>
+              <button
+                onClick={addRosterEntry}
+                style={{ padding:'6px 12px', border:'1px dashed #d1d5db', borderRadius:8, background:'#fff' }}
+              >添加选手</button>
+              <div style={{ fontSize:12, color:'#6b7280', alignSelf:'center' }}>
+                当前共 {knockoutRoster.length} 名选手。
               </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
             );
           })}
         </div>
@@ -3070,7 +3431,8 @@ type HomeDefaults = {
   seatDelayMs: number[];
   seats: BotChoice[];
   seatModels: string[];
-  seatKeys: any[];
+  seatKeys: ProviderKeys[];
+  knockoutRoster: KnockoutEntrantConfig[];
 };
 
 const BASE_DEFAULTS: HomeDefaults = {
@@ -3085,7 +3447,8 @@ const BASE_DEFAULTS: HomeDefaults = {
   // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
   seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
   seatModels: ['', '', ''],
-  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
+  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }],
+  knockoutRoster: [],
 };
 
 type HomeConfig = {
@@ -3151,7 +3514,71 @@ export function createHome(config: HomeConfig = {}) {
 
     const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
     const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
-    const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
+    const [seatKeys, setSeatKeys] = useState<ProviderKeys[]>(DEFAULTS.seatKeys.map(x => ({ ...(x||{}) })));
+
+    const rosterId = () => `entrant-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36)}`;
+    const normalizeRosterEntry = (entry: KnockoutEntrantConfig | null | undefined, idx: number): KnockoutEntrantConfig => {
+      const fallbackChoice = (DEFAULTS.seats[idx] || 'built-in:random-legal') as BotChoice;
+      const choice = (entry?.choice || fallbackChoice) as BotChoice;
+      return {
+        id: entry?.id || rosterId(),
+        name: entry?.name || seatName(idx),
+        choice,
+        model: entry?.model || '',
+        keys: cloneProviderKeys(entry?.keys),
+      };
+    };
+    const makeDefaultRoster = () => {
+      if (Array.isArray(DEFAULTS.knockoutRoster) && DEFAULTS.knockoutRoster.length) {
+        return DEFAULTS.knockoutRoster.map((entry, idx) => normalizeRosterEntry(entry, idx));
+      }
+      return [0,1,2].map(idx => normalizeRosterEntry(null, idx));
+    };
+    const [knockoutRoster, setKnockoutRoster] = useState<KnockoutEntrantConfig[]>(makeDefaultRoster);
+    const updateRosterName = (idx: number, name: string) => {
+      setKnockoutRoster(prev => prev.map((entry, i) => i === idx ? { ...entry, name } : entry));
+    };
+    const updateRosterChoice = (idx: number, choice: BotChoice) => {
+      setKnockoutRoster(prev => prev.map((entry, i) => {
+        if (i !== idx) return entry;
+        return {
+          ...entry,
+          choice,
+          model: defaultModelFor(choice),
+        };
+      }));
+    };
+    const updateRosterModel = (idx: number, model: string) => {
+      setKnockoutRoster(prev => prev.map((entry, i) => i === idx ? { ...entry, model } : entry));
+    };
+    const updateRosterKey = (idx: number, key: keyof ProviderKeys, value: string) => {
+      setKnockoutRoster(prev => prev.map((entry, i) => {
+        if (i !== idx) return entry;
+        const nextKeys: ProviderKeys = { ...(entry.keys || {}) };
+        if (value) nextKeys[key] = value;
+        else delete nextKeys[key];
+        return { ...entry, keys: nextKeys };
+      }));
+    };
+    const removeRosterEntry = (idx: number) => {
+      setKnockoutRoster(prev => prev.filter((_, i) => i !== idx));
+    };
+    const addRosterEntry = () => {
+      setKnockoutRoster(prev => {
+        const nextIdx = prev.length;
+        const fallbackChoice = (DEFAULTS.seats[nextIdx % 3] || 'built-in:random-legal') as BotChoice;
+        return [
+          ...prev,
+          {
+            id: rosterId(),
+            name: `参赛者${nextIdx + 1}`,
+            choice: fallbackChoice,
+            model: defaultModelFor(fallbackChoice),
+            keys: {},
+          },
+        ];
+      });
+    };
 
     const [liveLog, setLiveLog] = useState<string[]>([]);
 
@@ -3166,7 +3593,8 @@ export function createHome(config: HomeConfig = {}) {
       setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
       setBid(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop); setKnockout(DEFAULTS.knockout);
       setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
-      setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
+      setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map(x=>({ ...(x||{}) })));
+      setKnockoutRoster(makeDefaultRoster());
       setLiveLog([]); setResetKey(k => k + 1);
       try { localStorage.removeItem('ddz_ladder_store_v1'); } catch {}
       try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
@@ -3581,6 +4009,7 @@ export function createHome(config: HomeConfig = {}) {
           onLog={setLiveLog}
 
           turnTimeoutSecs={turnTimeoutSecs}
+          knockoutRoster={knockoutRoster}
         />
       </div>
     </div>
