@@ -390,6 +390,12 @@ type LiveProps = {
   onLog?: (lines: string[]) => void;
   turnTimeoutSecs?: number[];
   knockoutRoster?: KnockoutEntrantConfig[];
+  onRosterNameChange?: (idx: number, name: string) => void;
+  onRosterChoiceChange?: (idx: number, choice: BotChoice) => void;
+  onRosterModelChange?: (idx: number, model: string) => void;
+  onRosterKeyChange?: (idx: number, key: keyof ProviderKeys, value: string) => void;
+  onRosterRemove?: (idx: number) => void;
+  onRosterAdd?: () => void;
 };
 
 function SeatTitle({ i }: { i:number }) {
@@ -925,6 +931,7 @@ function LivePanel(props: LiveProps) {
   const seatChoices = activeSeats.map(seat => seat.choice);
   const seatIsHuman = seatChoices.map(choice => choice === 'human');
   const anyHumanSeat = seatIsHuman.some(Boolean);
+  const roster = props.knockoutRoster ?? [];
 
   const flushPauseResolvers = () => {
     const list = pauseResolversRef.current.slice();
@@ -2919,16 +2926,16 @@ const handleAllSaveInner = () => {
           </div>
         </div>
 
-        {knockout && (
+        {props.knockout && (
           <div style={{ marginTop:12 }}>
             <div style={{ fontWeight:700, marginBottom:6 }}>淘汰赛参赛选手</div>
             <div style={{ fontSize:12, color:'#6b7280', marginBottom:8 }}>
               至少 3 名选手。每轮将随机抽取三人一组对局，积分最低者淘汰，其余选手晋级下一轮（人数不足三人时会轮空晋级）。
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-              {knockoutRoster.map((entry, idx) => {
-                const choice = entry.choice as BotChoice;
-                const keys = entry.keys || {};
+              {roster.map((entry, idx) => {
+                const choice = (entry?.choice || 'built-in:random-legal') as BotChoice;
+                const keys = entry?.keys || {};
                 return (
                   <div key={entry.id} style={{ border:'1px dashed #d1d5db', borderRadius:8, padding:12, background:'#f9fafb' }}>
                     <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
@@ -2937,11 +2944,11 @@ const handleAllSaveInner = () => {
                         type="text"
                         value={entry.name}
                         placeholder={`参赛者${idx + 1}`}
-                        onChange={e=>updateRosterName(idx, e.target.value)}
+                        onChange={e=>props.onRosterNameChange?.(idx, e.target.value)}
                         style={{ flex:'1 1 auto', minWidth:0, padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                       />
                       <button
-                        onClick={()=>removeRosterEntry(idx)}
+                        onClick={()=>props.onRosterRemove?.(idx)}
                         style={{ padding:'4px 8px', borderRadius:6, border:'1px solid #fca5a5', background:'#fee2e2', color:'#b91c1c' }}
                       >删除</button>
                     </div>
@@ -2951,7 +2958,7 @@ const handleAllSaveInner = () => {
                         <span>选择</span>
                         <select
                           value={choice}
-                          onChange={e=>updateRosterChoice(idx, e.target.value as BotChoice)}
+                          onChange={e=>props.onRosterChoiceChange?.(idx, e.target.value as BotChoice)}
                           style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                         >
                           <optgroup label="人类">
@@ -2984,7 +2991,7 @@ const handleAllSaveInner = () => {
                             type="text"
                             value={entry.model}
                             placeholder={defaultModelFor(choice)}
-                            onChange={e=>updateRosterModel(idx, e.target.value)}
+                            onChange={e=>props.onRosterModelChange?.(idx, e.target.value)}
                             style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                           />
                           <div style={{ fontSize:12, color:'#6b7280' }}>留空则使用推荐：{defaultModelFor(choice)}</div>
@@ -2998,7 +3005,7 @@ const handleAllSaveInner = () => {
                         <input
                           type="password"
                           value={keys.openai || ''}
-                          onChange={e=>updateRosterKey(idx, 'openai', e.target.value)}
+                          onChange={e=>props.onRosterKeyChange?.(idx, 'openai', e.target.value)}
                           style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                         />
                       </label>
@@ -3009,7 +3016,7 @@ const handleAllSaveInner = () => {
                         <input
                           type="password"
                           value={keys.gemini || ''}
-                          onChange={e=>updateRosterKey(idx, 'gemini', e.target.value)}
+                          onChange={e=>props.onRosterKeyChange?.(idx, 'gemini', e.target.value)}
                           style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                         />
                       </label>
@@ -3020,7 +3027,7 @@ const handleAllSaveInner = () => {
                         <input
                           type="password"
                           value={keys.grok || ''}
-                          onChange={e=>updateRosterKey(idx, 'grok', e.target.value)}
+                          onChange={e=>props.onRosterKeyChange?.(idx, 'grok', e.target.value)}
                           style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                         />
                       </label>
@@ -3031,7 +3038,7 @@ const handleAllSaveInner = () => {
                         <input
                           type="password"
                           value={keys.kimi || ''}
-                          onChange={e=>updateRosterKey(idx, 'kimi', e.target.value)}
+                          onChange={e=>props.onRosterKeyChange?.(idx, 'kimi', e.target.value)}
                           style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                         />
                       </label>
@@ -3042,7 +3049,7 @@ const handleAllSaveInner = () => {
                         <input
                           type="password"
                           value={keys.qwen || ''}
-                          onChange={e=>updateRosterKey(idx, 'qwen', e.target.value)}
+                          onChange={e=>props.onRosterKeyChange?.(idx, 'qwen', e.target.value)}
                           style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                         />
                       </label>
@@ -3053,7 +3060,7 @@ const handleAllSaveInner = () => {
                         <input
                           type="password"
                           value={keys.deepseek || ''}
-                          onChange={e=>updateRosterKey(idx, 'deepseek', e.target.value)}
+                          onChange={e=>props.onRosterKeyChange?.(idx, 'deepseek', e.target.value)}
                           style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                         />
                       </label>
@@ -3065,7 +3072,7 @@ const handleAllSaveInner = () => {
                           <input
                             type="text"
                             value={keys.httpBase || ''}
-                            onChange={e=>updateRosterKey(idx, 'httpBase', e.target.value)}
+                            onChange={e=>props.onRosterKeyChange?.(idx, 'httpBase', e.target.value)}
                             style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                           />
                         </label>
@@ -3074,7 +3081,7 @@ const handleAllSaveInner = () => {
                           <input
                             type="password"
                             value={keys.httpToken || ''}
-                            onChange={e=>updateRosterKey(idx, 'httpToken', e.target.value)}
+                            onChange={e=>props.onRosterKeyChange?.(idx, 'httpToken', e.target.value)}
                             style={{ width:'100%', padding:'4px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
                           />
                         </label>
@@ -3086,11 +3093,11 @@ const handleAllSaveInner = () => {
             </div>
             <div style={{ display:'flex', gap:8, marginTop:10 }}>
               <button
-                onClick={addRosterEntry}
+                onClick={()=>props.onRosterAdd?.()}
                 style={{ padding:'6px 12px', border:'1px dashed #d1d5db', borderRadius:8, background:'#fff' }}
               >添加选手</button>
               <div style={{ fontSize:12, color:'#6b7280', alignSelf:'center' }}>
-                当前共 {knockoutRoster.length} 名选手。
+                当前共 {roster.length} 名选手。
               </div>
             </div>
           </div>
@@ -4010,6 +4017,12 @@ export function createHome(config: HomeConfig = {}) {
 
           turnTimeoutSecs={turnTimeoutSecs}
           knockoutRoster={knockoutRoster}
+          onRosterNameChange={updateRosterName}
+          onRosterChoiceChange={updateRosterChoice}
+          onRosterModelChange={updateRosterModel}
+          onRosterKeyChange={updateRosterKey}
+          onRosterRemove={removeRosterEntry}
+          onRosterAdd={addRosterEntry}
         />
       </div>
     </div>
