@@ -74,6 +74,7 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '淘汰赛', en: 'Knockout' },
   { zh: '任一选手低于0分则终止系列赛', en: 'End the series when any seat drops below 0.' },
   { zh: '【前端】淘汰赛规则生效：检测到总分 < 0，停止连打。', en: '[Frontend] Knockout rule triggered: detected total < 0, ending the series.' },
+  { zh: '【后端】淘汰赛规则生效：检测到总分 < 0，提前终止系列赛。', en: '[Backend] Knockout rule triggered: detected total < 0, ending the series early.' },
   { zh: '开始', en: 'Start' },
   { zh: '暂停', en: 'Pause' },
   { zh: '继续', en: 'Resume' },

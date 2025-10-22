@@ -299,6 +299,15 @@ type RunBody = {
   turnTimeoutSec?: number | number[];
   rob?: boolean;
   debug?: any;
+  clientTraceId?: string;
+};
+
+type RoundOutcome = {
+  result?: any;
+  deltaLandlord?: [number, number, number] | null;
+  deltaSeat?: [number, number, number] | null;
+  landlord?: number | null;
+  winner?: number | null;
 };
 
 /* ========== Bot 工厂 ========== */
@@ -484,7 +493,7 @@ async function runOneRoundWithGuard(
   { seats: ((ctx:any)=>Promise<any>)[]; four2: 'both'|'2singles'|'2pairs'; rule: any; ruleId: string; lastReason: (string|null)[]; lastScore: (number|null)[] },
   res: NextApiResponse,
   round: number
-){
+): Promise<RoundOutcome | null> {
   const iter = runOneGame({ seats, four2, rule, ruleId } as any);
   let sentInit = false;
 
@@ -822,13 +831,65 @@ continue;
 
       // 再写 result（展开 & 带 lastReason）
       const baseResult = (ev?.type==='result') ? ev : { type:'result', ...(ev||{}) };
-      writeLine(res, { ...(baseResult||{}), lastReason: [...lastReason] });
-      break;
+      const resultPayload: any = { ...(baseResult || {}) };
+      resultPayload.lastReason = [...lastReason];
+      writeLine(res, resultPayload);
+
+      const landlordFromResult = (() => {
+        if (typeof resultPayload.landlordIdx === 'number') return resultPayload.landlordIdx as number;
+        if (typeof resultPayload.landlord === 'number') return resultPayload.landlord as number;
+        if (typeof resultPayload.payload?.landlord === 'number') return resultPayload.payload.landlord as number;
+        if (typeof resultPayload.state?.landlord === 'number') return resultPayload.state.landlord as number;
+        return landlordIdx >= 0 ? landlordIdx : null;
+      })();
+
+      const deltaRaw = (() => {
+        if (Array.isArray(resultPayload.deltaScores)) return resultPayload.deltaScores as any[];
+        if (Array.isArray(resultPayload.delta)) return resultPayload.delta as any[];
+        if (Array.isArray(resultPayload.payload?.deltaScores)) return resultPayload.payload.deltaScores as any[];
+        if (Array.isArray(resultPayload.payload?.delta)) return resultPayload.payload.delta as any[];
+        if (Array.isArray((ev as any)?.deltaScores)) return (ev as any).deltaScores as any[];
+        if (Array.isArray((ev as any)?.delta)) return (ev as any).delta as any[];
+        return null;
+      })();
+
+      let deltaLandlord: [number, number, number] | null = null;
+      let deltaSeat: [number, number, number] | null = null;
+      if (Array.isArray(deltaRaw) && deltaRaw.length >= 3) {
+        const parsed = deltaRaw.slice(0, 3).map((v: any) => {
+          const num = Number(v);
+          return Number.isFinite(num) ? num : 0;
+        }) as [number, number, number];
+        deltaLandlord = parsed;
+        if (typeof landlordFromResult === 'number' && landlordFromResult >= 0) {
+          deltaSeat = [
+            parsed[(0 - landlordFromResult + 3) % 3] ?? 0,
+            parsed[(1 - landlordFromResult + 3) % 3] ?? 0,
+            parsed[(2 - landlordFromResult + 3) % 3] ?? 0,
+          ] as [number, number, number];
+        }
+      }
+
+      const winnerFromResult = (() => {
+        if (typeof resultPayload.winner === 'number') return resultPayload.winner as number;
+        if (typeof (ev as any)?.winner === 'number') return (ev as any).winner as number;
+        return null;
+      })();
+
+      return {
+        result: resultPayload,
+        deltaLandlord,
+        deltaSeat,
+        landlord: typeof landlordFromResult === 'number' ? landlordFromResult : null,
+        winner: winnerFromResult,
+      };
     }
 
     // 其它事件透传
     if (ev && ev.type) writeLine(res, ev);
   }
+
+  return null;
 }
 
 /* ========== HTTP 处理 ========== */
@@ -861,6 +922,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
     const four2  = (body.four2 || 'both') as 'both'|'2singles'|'2pairs';
+    const startScoreRaw = Number(body.startScore);
+    const startScore = Number.isFinite(startScoreRaw) ? startScoreRaw : 0;
+    const stopBelowZero = body.stopBelowZero !== false;
+    let totals: [number, number, number] = [startScore, startScore, startScore];
+    let knockoutTriggered = false;
 
 
     const rule = (body as any).rule ?? { four2, rob: body.rob !== false, farmerCoop: !!body.farmerCoop };
@@ -894,10 +960,52 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   sessionId)
       );
 
-      await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
+      const outcome = await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
 
       writeLine(res, { type:'event', kind:'round-end', round });
-      if (round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
+      if (outcome) {
+        const landlordIdx = typeof outcome.landlord === 'number' ? outcome.landlord : null;
+        let applied: [number, number, number] | null = null;
+        if (Array.isArray(outcome.deltaSeat) && outcome.deltaSeat.length === 3) {
+          applied = outcome.deltaSeat.map(v => {
+            const num = Number(v);
+            return Number.isFinite(num) ? num : 0;
+          }) as [number, number, number];
+        } else if (Array.isArray(outcome.deltaLandlord) && outcome.deltaLandlord.length === 3 && typeof landlordIdx === 'number') {
+          const parsed = outcome.deltaLandlord.map(v => {
+            const num = Number(v);
+            return Number.isFinite(num) ? num : 0;
+          }) as [number, number, number];
+          const L = ((landlordIdx % 3) + 3) % 3;
+          applied = [
+            parsed[(0 - L + 3) % 3] ?? 0,
+            parsed[(1 - L + 3) % 3] ?? 0,
+            parsed[(2 - L + 3) % 3] ?? 0,
+          ] as [number, number, number];
+        }
+        if (applied) {
+          totals = [
+            (totals[0] ?? 0) + applied[0],
+            (totals[1] ?? 0) + applied[1],
+            (totals[2] ?? 0) + applied[2],
+          ] as [number, number, number];
+          try {
+            writeLine(res, { type: 'log', message: `当前总分：${totals.join(' / ')}` });
+          } catch {}
+          try {
+            writeLine(res, { type: 'event', kind: 'round-totals', round, totals: [...totals], delta: applied });
+          } catch {}
+        }
+      }
+
+      if (stopBelowZero && totals.some(v => Number(v) < 0)) {
+        knockoutTriggered = true;
+        try { writeLine(res, { type: 'log', message: '【后端】淘汰赛规则生效：检测到总分 < 0，提前终止系列赛。' }); } catch {}
+        try { writeLine(res, { type: 'event', kind: 'series-stop', reason: 'knockout', round, totals: [...totals] }); } catch {}
+        break;
+      }
+
+      if (!knockoutTriggered && round < rounds) writeLine(res, { type:'log', message:`—— 第 ${round} 局结束 ——` });
     }
   } catch (e:any) {
     try { writeLine(res, { type:'log', message:`后端错误：${e?.message || String(e)}` }); } catch {}
