@@ -1,4 +1,6 @@
 // pages/index.tsx
+import Head from 'next/head';
+import Link from 'next/link';
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
@@ -3202,33 +3204,52 @@ export function createHome(config: HomeConfig = {}) {
       ? 'Knockout mode is always on for this page.'
       : '本页已锁定启用淘汰赛模式。';
 
+    const navButton = (
+      <Link
+        href={navLinkHref}
+        style={{
+          padding: '6px 14px',
+          border: '1px solid #e5e7eb',
+          borderRadius: 8,
+          background: '#fff',
+          color: '#111827',
+          textDecoration: 'none',
+          fontWeight: 600,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: 32,
+        }}
+      >{navLinkLabel}</Link>
+    );
+
     return (<>
+      <Head>
+        <title>{pageHeading}</title>
+      </Head>
       <LangContext.Provider value={lang}>
       <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
+        <div
+          style={{
+            display:'flex',
+            justifyContent:'space-between',
+            alignItems:'center',
+            flexWrap:'wrap',
+            gap:12,
+            rowGap:8,
+          }}
+        >
           <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0' }}>{pageHeading}</h1>
-          <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
-            <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
-            <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-            </select>
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginLeft:'auto' }} data-i18n-ignore>
+            {navButton}
+            <label style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
+              <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
+              <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+            </label>
           </div>
-        </div>
-
-        <div style={{ margin:'12px 0 20px', display:'flex', justifyContent:'flex-end' }}>
-          <a
-            href={navLinkHref}
-            style={{
-              padding:'6px 14px',
-              border:'1px solid #e5e7eb',
-              borderRadius:8,
-              background:'#fff',
-              color:'#111827',
-              textDecoration:'none',
-              fontWeight:600
-            }}
-          >{navLinkLabel}</a>
         </div>
 
         <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
