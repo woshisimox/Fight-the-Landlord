@@ -72,6 +72,11 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '农民', en: 'Farmer' },
   { zh: '农民配合', en: 'Farmer cooperation' },
   { zh: '淘汰赛', en: 'Knockout' },
+  { zh: '斗地主 · 淘汰赛', en: 'Fight the Landlord · Knockout' },
+  { zh: '淘汰赛设置', en: 'Knockout settings' },
+  { zh: '淘汰赛设置 →', en: 'Knockout settings →' },
+  { zh: '← 返回常规赛', en: '← Back to regular mode' },
+  { zh: '本页已锁定启用淘汰赛模式。', en: 'Knockout mode is always on for this page.' },
   { zh: '任一选手低于0分则终止系列赛', en: 'End the series when any seat drops below 0.' },
   { zh: '【前端】淘汰赛规则生效：检测到总分 < 0，停止连打。', en: '[Frontend] Knockout rule triggered: detected total < 0, ending the series.' },
   { zh: '【后端】淘汰赛规则生效：检测到总分 < 0，提前终止系列赛。', en: '[Backend] Knockout rule triggered: detected total < 0, ending the series early.' },
@@ -3052,7 +3057,21 @@ function RadarPanel({
 }
 
 /* ========= 默认值（含“清空”按钮的重置） ========= */
-const DEFAULTS = {
+type HomeDefaults = {
+  enabled: boolean;
+  bid: boolean;
+  rounds: number;
+  startScore: number;
+  four2: Four2Policy;
+  farmerCoop: boolean;
+  knockout: boolean;
+  seatDelayMs: number[];
+  seats: BotChoice[];
+  seatModels: string[];
+  seatKeys: any[];
+};
+
+const BASE_DEFAULTS: HomeDefaults = {
   enabled: true,
   bid: true,
   rounds: 10,
@@ -3061,71 +3080,95 @@ const DEFAULTS = {
   farmerCoop: true,
   knockout: true,
   seatDelayMs: [1000,1000,1000] as number[],
-  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
   // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
+  seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
   seatModels: ['', '', ''],
   seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
 };
 
-function Home() {
-  // Ensure language applies before paint on refresh
-  useLayoutEffect(() => {
-    try {
-      if (typeof window !== 'undefined') {
-        const v = localStorage.getItem('ddz_lang');
-        if (v === 'en' || v === 'zh') {
-          if (v !== lang) setLang(v as Lang);
-          if (typeof document !== 'undefined') document.documentElement.lang = v;
+type HomeConfig = {
+  defaults?: Partial<HomeDefaults>;
+  knockoutLocked?: boolean;
+  variant?: 'regular' | 'knockout';
+  heading?: string;
+};
+
+export function createHome(config: HomeConfig = {}) {
+  const {
+    defaults: overrides = {},
+    knockoutLocked = false,
+    variant = 'regular',
+    heading,
+  } = config;
+  const DEFAULTS: HomeDefaults = { ...BASE_DEFAULTS, ...overrides };
+
+  function Home() {
+    const [lang, setLang] = useState<Lang>(() => {
+      if (typeof window === 'undefined') return 'zh';
+      const v = localStorage.getItem('ddz_lang');
+      return (v === 'en' || v === 'zh') ? (v as Lang) : 'zh';
+    });
+
+    // Ensure language applies before paint on refresh
+    useLayoutEffect(() => {
+      try {
+        if (typeof window !== 'undefined') {
+          const v = localStorage.getItem('ddz_lang');
+          if (v === 'en' || v === 'zh') {
+            if (typeof document !== 'undefined') document.documentElement.lang = v;
+            setLang(prev => (prev === v ? prev : (v as Lang)));
+          }
         }
+      } catch {}
+    }, []);
+
+    useEffect(()=>{
+      try {
+        localStorage.setItem('ddz_lang', lang);
+        if (typeof document !== 'undefined') document.documentElement.lang = lang;
+      } catch {}
+    }, [lang]);
+    const mainRef = useRef<HTMLDivElement | null>(null);
+    useEffect(()=>{ try { if (typeof document !== 'undefined') autoTranslateContainer(mainRef.current, lang); } catch {} }, [lang]);
+
+
+    const [resetKey, setResetKey] = useState<number>(0);
+    const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
+    const [rounds, setRounds] = useState<number>(DEFAULTS.rounds);
+    const [startScore, setStartScore] = useState<number>(DEFAULTS.startScore);
+    const [turnTimeoutSecs, setTurnTimeoutSecs] = useState<number[]>([30,30,30]);
+
+    const [turnTimeoutSec, setTurnTimeoutSec] = useState<number>(30);
+
+    const [bid, setBid] = useState<boolean>(DEFAULTS.bid);
+    const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
+    const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
+    const [knockout, setKnockout] = useState<boolean>(DEFAULTS.knockout);
+    const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
+    const setSeatDelay = (i:number, v:number|string) => setSeatDelayMs(arr => { const n=[...arr]; n[i]=Math.max(0, Math.floor(Number(v)||0)); return n; });
+
+    const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
+    const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
+    const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
+
+    const [liveLog, setLiveLog] = useState<string[]>([]);
+
+    const defaultKnockout = DEFAULTS.knockout;
+    useEffect(() => {
+      if (knockoutLocked && knockout !== defaultKnockout) {
+        setKnockout(defaultKnockout);
       }
-    } catch {}
-  }, []);
+    }, [knockoutLocked, knockout, defaultKnockout]);
 
-const [lang, setLang] = useState<Lang>(() => {
-    if (typeof window === 'undefined') return 'zh';
-    const v = localStorage.getItem('ddz_lang');
-    return (v === 'en' || v === 'zh') ? (v as Lang) : 'zh';
-  });
-  useEffect(()=>{
-    try {
-      localStorage.setItem('ddz_lang', lang);
-      if (typeof document !== 'undefined') document.documentElement.lang = lang;
-    } catch {}
-  }, [lang]);
-  const mainRef = useRef<HTMLDivElement | null>(null);
-  useEffect(()=>{ try { if (typeof document !== 'undefined') autoTranslateContainer(mainRef.current, lang); } catch {} }, [lang]);
-
-
-  const [resetKey, setResetKey] = useState<number>(0);
-  const [enabled, setEnabled] = useState<boolean>(DEFAULTS.enabled);
-  const [rounds, setRounds] = useState<number>(DEFAULTS.rounds);
-  const [startScore, setStartScore] = useState<number>(DEFAULTS.startScore);
-  const [turnTimeoutSecs, setTurnTimeoutSecs] = useState<number[]>([30,30,30]);
-
-  const [turnTimeoutSec, setTurnTimeoutSec] = useState<number>(30);
-
-  const [bid, setBid] = useState<boolean>(DEFAULTS.bid);
-  const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
-  const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
-  const [knockout, setKnockout] = useState<boolean>(DEFAULTS.knockout);
-  const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
-  const setSeatDelay = (i:number, v:number|string) => setSeatDelayMs(arr => { const n=[...arr]; n[i]=Math.max(0, Math.floor(Number(v)||0)); return n; });
-
-  const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
-  const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
-  const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
-
-  const [liveLog, setLiveLog] = useState<string[]>([]);
-
-  const doResetAll = () => {
-    setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
-    setBid(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop); setKnockout(DEFAULTS.knockout);
-    setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
-    setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
-    setLiveLog([]); setResetKey(k => k + 1);
-    try { localStorage.removeItem('ddz_ladder_store_v1'); } catch {}
-    try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
-  };
+    const doResetAll = () => {
+      setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
+      setBid(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop); setKnockout(DEFAULTS.knockout);
+      setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
+      setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
+      setLiveLog([]); setResetKey(k => k + 1);
+      try { localStorage.removeItem('ddz_ladder_store_v1'); } catch {}
+      try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
+    };
   // —— 统一统计（TS + Radar + 出牌评分 + 评分统计）外层上传入口 ——
   const allFileRef = useRef<HTMLInputElement|null>(null);
   const handleAllFileUploadHome = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3143,20 +3186,52 @@ const [lang, setLang] = useState<Lang>(() => {
     };
     rd.readAsText(f);
   };
-  return (<>
-    <LangContext.Provider value={lang}>
-    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
-      <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
-<div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
-  <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
-  <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
-    <option value="zh">中文</option>
-    <option value="en">English</option>
-  </select>
-</div>
+    const isKnockoutPage = variant === 'knockout';
+    const navLinkHref = isKnockoutPage ? '/' : '/knockout';
+    const navLinkLabel = isKnockoutPage
+      ? (lang === 'en' ? '← Back to regular mode' : '← 返回常规赛')
+      : (lang === 'en' ? 'Knockout settings →' : '淘汰赛设置 →');
+    const pageHeading = heading ?? (isKnockoutPage
+      ? (lang === 'en' ? 'Fight the Landlord · Knockout' : '斗地主 · 淘汰赛')
+      : '斗地主 · Fight the Landlord');
+    const knockoutLabel = lang === 'en' ? 'Knockout' : '淘汰赛';
+    const knockoutHint = lang === 'en'
+      ? 'End the series when any seat drops below 0.'
+      : '任一选手低于0分则终止系列赛';
+    const knockoutPinnedNote = lang === 'en'
+      ? 'Knockout mode is always on for this page.'
+      : '本页已锁定启用淘汰赛模式。';
 
+    return (<>
+      <LangContext.Provider value={lang}>
+      <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
+          <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0' }}>{pageHeading}</h1>
+          <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
+            <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
+            <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+        </div>
 
-      <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+        <div style={{ margin:'12px 0 20px', display:'flex', justifyContent:'flex-end' }}>
+          <a
+            href={navLinkHref}
+            style={{
+              padding:'6px 14px',
+              border:'1px solid #e5e7eb',
+              borderRadius:8,
+              background:'#fff',
+              color:'#111827',
+              textDecoration:'none',
+              fontWeight:600
+            }}
+          >{navLinkLabel}</a>
+        </div>
+
+        <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
         <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
         <div style={{
           display:'grid',
@@ -3199,13 +3274,21 @@ const [lang, setLang] = useState<Lang>(() => {
                 农民配合
                 <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
               </label>
-              <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
-                <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  淘汰赛
-                  <input type="checkbox" checked={knockout} onChange={e=>setKnockout(e.target.checked)} />
-                </label>
-                <div style={{ fontSize:12, color:'#6b7280' }}>任一选手低于0分则终止系列赛</div>
-              </div>
+              {knockoutLocked ? (
+                <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                  <div style={{ fontWeight:600 }}>{knockoutLabel}</div>
+                  <div style={{ fontSize:12, color:'#6b7280' }}>{knockoutHint}</div>
+                  <div style={{ fontSize:12, color:'#6b7280' }}>{knockoutPinnedNote}</div>
+                </div>
+              ) : (
+                <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                  <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    {knockoutLabel}
+                    <input type="checkbox" checked={knockout} onChange={e=>setKnockout(e.target.checked)} />
+                  </label>
+                  <div style={{ fontSize:12, color:'#6b7280' }}>{knockoutHint}</div>
+                </div>
+              )}
             </div>
           </div>
           <div style={{ gridColumn:'2 / 3' }}>
@@ -3482,7 +3565,12 @@ const [lang, setLang] = useState<Lang>(() => {
     </div>
     </LangContext.Provider>
   </>);
+  }
+
+  return Home;
 }
+
+const Home = createHome({ defaults: { knockout: false }, variant: 'regular' });
 
 export default Home;
 
