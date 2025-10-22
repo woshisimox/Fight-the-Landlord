@@ -294,6 +294,7 @@ type RunBody = {
   seatDelayMs?: number[];
   farmerCoop?: boolean;
   startScore?: number;
+  stopBelowZero?: boolean;
   turnTimeoutSecs?: number[];  // [s0,s1,s2]
   turnTimeoutSec?: number | number[];
   rob?: boolean;

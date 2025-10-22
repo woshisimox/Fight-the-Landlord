@@ -71,6 +71,9 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '地主', en: 'Landlord' },
   { zh: '农民', en: 'Farmer' },
   { zh: '农民配合', en: 'Farmer cooperation' },
+  { zh: '淘汰赛', en: 'Knockout' },
+  { zh: '任一选手低于0分则终止系列赛', en: 'End the series when any seat drops below 0.' },
+  { zh: '【前端】淘汰赛规则生效：检测到总分 < 0，停止连打。', en: '[Frontend] Knockout rule triggered: detected total < 0, ending the series.' },
   { zh: '开始', en: 'Start' },
   { zh: '暂停', en: 'Pause' },
   { zh: '继续', en: 'Resume' },
@@ -341,7 +344,7 @@ const writeStore = (s: TsStore) => { try { s.updatedAt=new Date().toISOString();
 type LiveProps = {
   rounds: number;
   startScore: number;
-  
+
   seatDelayMs?: number[];
   enabled: boolean;
   bid: boolean;
@@ -353,9 +356,11 @@ type LiveProps = {
     httpBase?: string; httpToken?: string;
   }[];
   farmerCoop: boolean;
+  knockout: boolean;
   onTotals?: (totals:[number,number,number]) => void;
   onLog?: (lines: string[]) => void;
-  turnTimeoutSecs?: number[];};
+  turnTimeoutSecs?: number[];
+};
 
 function SeatTitle({ i }: { i:number }) {
   const { lang } = useI18n();
@@ -1654,9 +1659,9 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
           four2: props.four2,
           seats: specs,
           clientTraceId: traceId,
-          stopBelowZero: true,
+          stopBelowZero: props.knockout,
           farmerCoop: props.farmerCoop,
-        turnTimeoutSec: (props.turnTimeoutSecs ?? [30,30,30])
+          turnTimeoutSec: (props.turnTimeoutSecs ?? [30,30,30]),
         }),
         signal: controllerRef.current!.signal,
       });
@@ -2539,13 +2544,21 @@ nextTotals     = [
         if (controllerRef.current?.signal.aborted) break;
         if (pauseRef.current) await waitWhilePaused();
         const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
-        if (hasNegative) { setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']); break; }
+        if (props.knockout && hasNegative) {
+          setLog(l => [...l, '【前端】淘汰赛规则生效：检测到总分 < 0，停止连打。']);
+          break;
+        }
         await restBetweenRounds();
       }
     } catch (e: any) {
       if (e?.name === 'AbortError') setLog(l => [...l, '已手动停止。']);
       else setLog(l => [...l, `错误：${e?.message || e}`]);
-    } finally { exitPause(); setRunning(false); }
+    } finally {
+      exitPause();
+      setRunning(false);
+      resetHumanState();
+      traceIdRef.current = '';
+    }
   };
 
   const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); resetHumanState(); traceIdRef.current = ''; };
@@ -3045,11 +3058,13 @@ const DEFAULTS = {
   startScore: 100,
   four2: 'both' as Four2Policy,
   farmerCoop: true,
+  knockout: true,
   seatDelayMs: [1000,1000,1000] as number[],
   seats: ['built-in:greedy-max','built-in:greedy-min','built-in:random-legal'] as BotChoice[],
   // 让选择提供商时自动写入推荐模型；避免初始就带上 OpenAI 的模型名
   seatModels: ['', '', ''],
-  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],};
+  seatKeys: [{ openai:'' }, { gemini:'' }, { httpBase:'', httpToken:'' }] as any[],
+};
 
 function Home() {
   // Ensure language applies before paint on refresh
@@ -3091,6 +3106,7 @@ const [lang, setLang] = useState<Lang>(() => {
   const [bid, setBid] = useState<boolean>(DEFAULTS.bid);
   const [four2, setFour2] = useState<Four2Policy>(DEFAULTS.four2);
   const [farmerCoop, setFarmerCoop] = useState<boolean>(DEFAULTS.farmerCoop);
+  const [knockout, setKnockout] = useState<boolean>(DEFAULTS.knockout);
   const [seatDelayMs, setSeatDelayMs] = useState<number[]>(DEFAULTS.seatDelayMs);
   const setSeatDelay = (i:number, v:number|string) => setSeatDelayMs(arr => { const n=[...arr]; n[i]=Math.max(0, Math.floor(Number(v)||0)); return n; });
 
@@ -3102,7 +3118,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
-    setBid(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop);
+    setBid(DEFAULTS.bid); setFour2(DEFAULTS.four2); setFarmerCoop(DEFAULTS.farmerCoop); setKnockout(DEFAULTS.knockout);
     setSeatDelayMs([...DEFAULTS.seatDelayMs]); setSeats([...DEFAULTS.seats]);
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
@@ -3182,6 +3198,13 @@ const [lang, setLang] = useState<Lang>(() => {
                 农民配合
                 <input type="checkbox" checked={farmerCoop} onChange={e=>setFarmerCoop(e.target.checked)} />
               </label>
+              <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  淘汰赛
+                  <input type="checkbox" checked={knockout} onChange={e=>setKnockout(e.target.checked)} />
+                </label>
+                <div style={{ fontSize:12, color:'#6b7280' }}>任一选手低于0分则终止系列赛</div>
+              </div>
             </div>
           </div>
           <div style={{ gridColumn:'2 / 3' }}>
@@ -3449,8 +3472,9 @@ const [lang, setLang] = useState<Lang>(() => {
           seatModels={seatModels}
           seatKeys={seatKeys}
           farmerCoop={farmerCoop}
+          knockout={knockout}
           onLog={setLiveLog}
-        
+
           turnTimeoutSecs={turnTimeoutSecs}
         />
       </div>
