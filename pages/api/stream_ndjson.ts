@@ -287,12 +287,45 @@ function traceWrap(
 
     let result:any;
     const t0 = Date.now();
+<<<<<<< Updated upstream
     try {
       const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
       try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
       result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
     } catch (e:any) {
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
+=======
+
+    if (isHuman) {
+      const safeCtx = (() => { try { return JSON.parse(JSON.stringify(ctxWithSeen)); } catch { return ctxWithSeen; } })();
+      const timeoutSeconds = Math.max(1, Math.round(turnTimeoutMs / 1000));
+      const isEmptyHand = phase === 'play'
+        && ((Array.isArray(ctxWithSeen?.hands) && ctxWithSeen.hands.length === 0)
+          || (Array.isArray(ctxWithSeen?.handsCount) && (ctxWithSeen.handsCount[seatIndex] ?? 0) === 0));
+
+      if (isEmptyHand) {
+        result = { phase: 'play', move: 'pass', reason: 'auto:empty-hand' };
+      } else {
+        const defaultMove = (() => {
+          if (phase === 'bid') return { phase: 'bid', bid: false, reason: `timeout@${timeoutSeconds}s` };
+          if (phase === 'double') return { phase: 'double', double: false, reason: `timeout@${timeoutSeconds}s` };
+          return { phase: 'play', move: 'pass', reason: `timeout@${timeoutSeconds}s` };
+        })();
+        const reg = registerHumanRequest({ seat: seatIndex, phase, sessionId, timeoutMs: turnTimeoutMs, defaultMove });
+        requestId = reg.id;
+        try { writeLine(res, { type:'event', kind:'human-request', seat: seatIndex, phase, requestId, sessionId, ctx: safeCtx, timeoutMs: turnTimeoutMs }); } catch {}
+        result = await reg.promise;
+      }
+    } else {
+      const timeout = new Promise((resolve)=> {
+        setTimeout(()=> resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` }), Math.max(1000, turnTimeoutMs));
+      });
+      try {
+        result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
+      } catch (e:any) {
+        result = { move:'pass', reason:`error:${e?.message||String(e)}` };
+      }
+>>>>>>> Stashed changes
     }
 
     const resPhase = (result && typeof result.phase === 'string') ? result.phase : phase;

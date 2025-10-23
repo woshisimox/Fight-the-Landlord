@@ -1544,6 +1544,10 @@ export async function* runOneGame(opts: {
         for (let i=0;i<17;i++) for (let s=0;s<3;s++) hands[s].push(deck[i*3+s]);
         bottom = deck.slice(17*3);
         for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
+<<<<<<< Updated upstream
+=======
+        try { yield { type:'state', kind:'hands', hands: hands.map(h => [...h]) }; } catch {}
+>>>>>>> Stashed changes
         continue;
       }
 

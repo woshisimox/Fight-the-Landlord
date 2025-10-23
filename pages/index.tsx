@@ -365,7 +365,11 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
+<<<<<<< Updated upstream
 type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[] };
+=======
+type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[]; visibleToAll:boolean };
+>>>>>>> Stashed changes
 
 const rankOf = (l: string) => {
   if (!l) return '';
@@ -415,7 +419,11 @@ function resolveBottomDecorations(raw: string[], landlord: number | null, hands:
   });
 }
 
+<<<<<<< Updated upstream
 function Card({ label, dimmed = false, compact = false }: { label:string; dimmed?:boolean; compact?:boolean }) {
+=======
+function Card({ label, dimmed = false, compact = false, selectable = false, selected = false, onToggle, faceDown = false }: { label:string; dimmed?:boolean; compact?:boolean; selectable?:boolean; selected?:boolean; onToggle?:()=>void; faceDown?:boolean }) {
+>>>>>>> Stashed changes
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
@@ -426,6 +434,7 @@ function Card({ label, dimmed = false, compact = false }: { label:string; dimmed
   const rankStyle = dimmed
     ? { color: '#9ca3af' }
     : (rankColor ? { color: rankColor } : {});
+<<<<<<< Updated upstream
   return (
     <span style={{
       display:'inline-flex', alignItems:'center', gap:6,
@@ -436,6 +445,50 @@ function Card({ label, dimmed = false, compact = false }: { label:string; dimmed
       opacity: dimmed ? 0.65 : 1,
       borderColor: dimmed ? '#d1d5db' : '#ddd'
     }}>
+=======
+  const handleClick = () => { if (!faceDown && selectable && onToggle) onToggle(); };
+  if (faceDown) {
+    return (
+      <span
+        style={{
+          display:'inline-flex',
+          alignItems:'center',
+          justifyContent:'center',
+          border:'1px solid #1e3a8a',
+          borderRadius:8,
+          padding: pad,
+          marginRight:6,
+          marginBottom:6,
+          fontWeight:800,
+          color:'#bfdbfe',
+          background:'linear-gradient(135deg, #1e40af, #2563eb)',
+          boxShadow:'inset 0 0 0 1px rgba(255,255,255,0.25)',
+          cursor:'default',
+          userSelect:'none',
+        }}
+      >
+        <span style={{ fontSize }}>{'🂠'}</span>
+      </span>
+    );
+  }
+  return (
+    <span
+      onClick={handleClick}
+      style={{
+        display:'inline-flex', alignItems:'center', gap:6,
+        border:'1px solid #ddd', borderRadius:8, padding: pad,
+        marginRight:6, marginBottom:6, fontWeight:800,
+        color: suitColor,
+        background: dimmed ? '#f3f4f6' : (selected ? '#e0f2fe' : '#fff'),
+        opacity: dimmed ? 0.65 : 1,
+        borderColor: selected ? '#2563eb' : dimmed ? '#d1d5db' : '#ddd',
+        boxShadow: selected ? '0 0 0 2px rgba(37, 99, 235, 0.25)' : 'none',
+        cursor: selectable ? 'pointer' : 'default',
+        transform: selectable && selected ? 'translateY(-4px)' : undefined,
+        transition: 'transform 120ms ease, box-shadow 120ms ease, background 120ms ease',
+      }}
+    >
+>>>>>>> Stashed changes
       <span style={{ fontSize }}>{suit}</span>
       <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
     </span>
@@ -649,6 +702,13 @@ function LivePanel(props: LiveProps) {
   const pauseRef = useRef(false);
   const pauseResolversRef = useRef<Array<() => void>>([]);
 
+<<<<<<< Updated upstream
+=======
+  const seatChoices = (props.seats || []).slice(0, 3);
+  const seatIsHuman = seatChoices.map(choice => choice === 'human');
+  const anyHumanSeat = seatIsHuman.some(Boolean);
+
+>>>>>>> Stashed changes
   const flushPauseResolvers = () => {
     const list = pauseResolversRef.current.slice();
     pauseResolversRef.current.length = 0;
@@ -696,6 +756,90 @@ function LivePanel(props: LiveProps) {
 
   const [roundLords, setRoundLords] = useState<number[]>([]);
 
+<<<<<<< Updated upstream
+=======
+  type HumanPrompt = { requestId: string; phase: string; ctx: any; timeoutMs?: number; sessionId?: string; startedAt: number };
+  const [humanPrompts, setHumanPrompts] = useState<(HumanPrompt|null)[]>([null,null,null]);
+  const humanPromptsRef = useRef<(HumanPrompt|null)[]>([null,null,null]);
+  useEffect(()=>{ humanPromptsRef.current = humanPrompts; }, [humanPrompts]);
+  const [humanSelections, setHumanSelections] = useState<string[][]>([[],[],[]]);
+  const humanSelectionsRef = useRef<string[][]>(humanSelections);
+  useEffect(()=>{ humanSelectionsRef.current = humanSelections; }, [humanSelections]);
+  const [humanSubmitting, setHumanSubmitting] = useState<boolean[]>([false,false,false]);
+
+  const resetHumanState = () => {
+    setHumanPrompts([null,null,null]);
+    setHumanSelections([[],[],[]]);
+    setHumanSubmitting([false,false,false]);
+  };
+
+  const toggleHumanCard = (seat:number, card:string) => {
+    setHumanSelections(prev => {
+      const next = prev.map(arr => [...arr]) as string[][];
+      const arr = next[seat] || [];
+      const idx = arr.indexOf(card);
+      if (idx >= 0) arr.splice(idx,1);
+      else arr.push(card);
+      next[seat] = arr;
+      return next;
+    });
+  };
+
+  const clearHumanSelection = (seat:number) => {
+    setHumanSelections(prev => {
+      const next = prev.map((arr, idx) => (idx === seat ? [] : [...arr])) as string[][];
+      return next;
+    });
+  };
+
+  const submitHumanAction = async (seat:number, action:any) => {
+    const prompt = humanPromptsRef.current[seat];
+    if (!prompt) return;
+    setHumanSubmitting(prev => { const next=[...prev]; next[seat] = true; return next; });
+    try {
+      const res = await fetch('/api/human_action', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ requestId: prompt.requestId, sessionId: prompt.sessionId || traceIdRef.current, action }),
+      });
+      if (!res.ok) {
+        let errMsg = res.statusText;
+        try { const j = await res.json(); if (j?.error) errMsg = j.error; } catch {}
+        setLog(l => [...l, `【人类】提交失败：${errMsg}`]);
+        setHumanSubmitting(prev => { const next=[...prev]; next[seat] = false; return next; });
+      }
+    } catch (err:any) {
+      setLog(l => [...l, `【人类】提交异常：${err?.message || err}`]);
+      setHumanSubmitting(prev => { const next=[...prev]; next[seat] = false; return next; });
+    }
+  };
+
+  const handleHumanPlay = (seat:number) => {
+    const prompt = humanPromptsRef.current[seat];
+    if (!prompt) return;
+    const cards = (humanSelectionsRef.current[seat] || []).slice();
+    if ((!cards || cards.length === 0) && prompt.ctx && prompt.ctx.canPass === false) {
+      setLog(l => [...l, `【人类】${seatName(seat)} 需选择至少一张牌。`]);
+      return;
+    }
+    submitHumanAction(seat, { phase:'play', move: cards.length ? 'play' : 'pass', cards });
+  };
+
+  const handleHumanPass = (seat:number) => {
+    submitHumanAction(seat, { phase:'play', move:'pass' });
+  };
+
+  const handleHumanBid = (seat:number, doBid:boolean) => {
+    submitHumanAction(seat, { phase:'bid', bid: !!doBid });
+  };
+
+  const handleHumanDouble = (seat:number, doDouble:boolean) => {
+    submitHumanAction(seat, { phase:'double', double: !!doDouble });
+  };
+
+  const humanPhaseLabel = (phase:string) => phase === 'bid' ? '叫抢' : phase === 'double' ? '加倍' : '出牌';
+
+>>>>>>> Stashed changes
   /* ====== 评分统计（每局） ====== */
   type SeatStat = { rounds:number; overallAvg:number; lastAvg:number; best:number; worst:number; mean:number; sigma:number };
   const [scoreStats, setScoreStats] = useState<SeatStat[]>([
@@ -1313,6 +1457,10 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
       const toUiSeat = (j:number) => (j + startShift) % 3;
       const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
+<<<<<<< Updated upstream
+=======
+      traceIdRef.current = traceId;
+>>>>>>> Stashed changes
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       roundFinishedRef.current = false;
@@ -1472,7 +1620,11 @@ for (const raw of batch) {
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
+<<<<<<< Updated upstream
                   nextBottom = { landlord: lord ?? null, cards: [] };
+=======
+                  nextBottom = { landlord: lord ?? null, cards: [], visibleToAll: false };
+>>>>>>> Stashed changes
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
@@ -1496,6 +1648,47 @@ for (const raw of batch) {
                 continue;
               }
 
+<<<<<<< Updated upstream
+=======
+              if (m.type === 'event' && m.kind === 'human-request') {
+                const seat = (typeof m.seat === 'number' && m.seat >=0 && m.seat <3) ? m.seat : -1;
+                if (seat >= 0) {
+                  const prompt: HumanPrompt = {
+                    requestId: String(m.requestId || `${Date.now()}-${Math.random().toString(36).slice(2,6)}`),
+                    phase: typeof m.phase === 'string' ? m.phase : 'play',
+                    ctx: m.ctx ?? {},
+                    timeoutMs: typeof m.timeoutMs === 'number' ? m.timeoutMs : undefined,
+                    sessionId: typeof m.sessionId === 'string' ? m.sessionId : undefined,
+                    startedAt: Date.now(),
+                  };
+                  setHumanPrompts(prev => { const next=[...prev] as (HumanPrompt|null)[]; next[seat] = prompt; return next; });
+                  setHumanSelections(prev => { const next = prev.map((arr, idx) => (idx === seat ? [] : [...arr])) as string[][]; return next; });
+                  setHumanSubmitting(prev => { const next=[...prev]; next[seat] = false; return next; });
+                  const phaseTxt = prompt.phase === 'bid' ? '叫抢' : prompt.phase === 'double' ? '加倍' : '出牌';
+                  nextLog = [...nextLog, `【人类】等待 ${seatName(seat)} 操作（${phaseTxt}）`];
+                }
+                continue;
+              }
+
+              if (m.type === 'event' && m.kind === 'human-resolved') {
+                const seat = (typeof m.seat === 'number' && m.seat >=0 && m.seat <3) ? m.seat : -1;
+                if (seat >= 0) {
+                  setHumanPrompts(prev => {
+                    const next = [...prev] as (HumanPrompt|null)[];
+                    if (!m.requestId || next[seat]?.requestId === m.requestId) next[seat] = null;
+                    return next;
+                  });
+                  setHumanSelections(prev => { const next = prev.map((arr, idx) => (idx === seat ? [] : [...arr])) as string[][]; return next; });
+                  setHumanSubmitting(prev => { const next=[...prev]; next[seat] = false; return next; });
+                  const phaseRaw = typeof m.phase === 'string' ? m.phase : 'play';
+                  const phaseTxt = phaseRaw === 'bid' ? '叫抢' : phaseRaw === 'double' ? '加倍' : '出牌';
+                  const reasonTxt = typeof m.reason === 'string' && m.reason ? `：${m.reason}` : '';
+                  nextLog = [...nextLog, `【人类】${seatName(seat)} 完成（${phaseTxt}）${reasonTxt}`];
+                }
+                continue;
+              }
+
+>>>>>>> Stashed changes
               
               // -------- 首次手牌兜底注入（若没有 init 帧但消息里带了 hands） --------
               {
@@ -1581,6 +1774,7 @@ else if (m.type === 'event' && m.kind === 'bid-eval') {
               // -------- 明牌后额外加倍 --------
 // -------- 倍数校准（兜底） --------
 
+<<<<<<< Updated upstream
 // ------ 明牌（显示底牌） ------
 if (m.type === 'event' && m.kind === 'reveal') {
   const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
@@ -1606,6 +1800,48 @@ if (m.type === 'event' && m.kind === 'reveal') {
   nextBottom = {
     landlord: landlordSeat ?? nextBottom.landlord ?? null,
     cards: mapped.map(label => ({ label, used: false })),
+=======
+              // ------ 底牌预览（人类参与叫抢时提前显示） ------
+              if (m.type === 'event' && m.kind === 'bottom-preview') {
+                const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
+                const mapped = resolveBottomDecorations(btm, null, nextHands as string[][]);
+                nextBottom = {
+                  landlord: nextBottom.landlord ?? null,
+                  cards: mapped.map(label => ({ label, used: false })),
+                  visibleToAll: true,
+                };
+                const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
+                nextLog = [...nextLog, `底牌预览：${pretty.join(' ')}`];
+                continue;
+              }
+
+              // ------ 明牌（显示底牌） ------
+              if (m.type === 'event' && m.kind === 'reveal') {
+  const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
+  const seatIdxRaw = (typeof (m.landlordIdx ?? m.landlord) === 'number')
+    ? (m.landlordIdx ?? m.landlord) as number
+    : nextLandlord;
+  const landlordSeat = (typeof seatIdxRaw === 'number') ? seatIdxRaw : (nextLandlord ?? nextBottom.landlord ?? null);
+  const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][]);
+
+  if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
+    let seatHand = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
+    const prevBottom = bottomRef.current;
+    if (prevBottom && prevBottom.landlord === landlordSeat && Array.isArray(prevBottom.cards)) {
+      for (const prevCard of prevBottom.cards) {
+        const idxPrev = seatHand.indexOf(prevCard.label);
+        if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
+      }
+    }
+    seatHand = [...seatHand, ...mapped];
+    nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
+  }
+
+  nextBottom = {
+    landlord: landlordSeat ?? nextBottom.landlord ?? null,
+    cards: mapped.map(label => ({ label, used: false })),
+    visibleToAll: false,
+>>>>>>> Stashed changes
   };
   const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
   nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
@@ -1955,7 +2191,11 @@ nextTotals     = [
     } finally { exitPause(); setRunning(false); }
   };
 
+<<<<<<< Updated upstream
   const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); };
+=======
+  const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); resetHumanState(); traceIdRef.current = ''; };
+>>>>>>> Stashed changes
 
   const togglePause = () => {
     if (!running) return;
@@ -2236,6 +2476,7 @@ const handleAllSaveInner = () => {
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
           {[0,1,2].map(i=>{
+<<<<<<< Updated upstream
             const isLandlord = bottomInfo.landlord === i;
             const cards = isLandlord ? bottomInfo.cards : [];
             return (
@@ -2255,6 +2496,104 @@ const handleAllSaveInner = () => {
               >
                 <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌</div>
                 {isLandlord ? (
+                  cards.length ? (
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:4, justifyContent:'center' }}>
+                      {cards.map((c, idx) => (
+                        <Card key={`${c.label}-${idx}`} label={c.label} dimmed={c.used} compact />
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:12, color:'#9ca3af' }}>（待明牌）</div>
+                  )
+                ) : (
+                  <div style={{ fontSize:12, color:'#d1d5db' }}>—</div>
+=======
+            const prompt = humanPrompts[i];
+            const phase = prompt?.phase || 'play';
+            const canInteract = !!prompt && phase === 'play';
+            const selection = humanSelections[i] || [];
+            const submitting = humanSubmitting[i];
+            const requireLabel = prompt?.ctx?.require?.label || prompt?.ctx?.require?.description || '';
+            const canPass = prompt?.ctx?.canPass !== false;
+            const defaultBid = prompt?.ctx?.bid?.default;
+            const defaultDouble = prompt?.ctx?.double?.default;
+            const hideFaces = anyHumanSeat && !seatIsHuman[i];
+            return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
+                <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}</div>
+                <div style={{ marginBottom:6 }}>
+                  <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
+                  {prompt && <span style={{ marginLeft:8, fontSize:12, color:'#2563eb' }}>（人类）</span>}
+                </div>
+                <Hand
+                  cards={hands[i]}
+                  interactive={canInteract && !hideFaces}
+                  selected={selection}
+                  onToggle={card => toggleHumanCard(i, card)}
+                  hideFaces={hideFaces}
+                />
+
+                {prompt && (
+                  <div style={{ marginTop:8, borderTop:'1px dashed #e5e7eb', paddingTop:8, fontSize:12, color:'#1f2937', display:'flex', flexDirection:'column', gap:6 }}>
+                    <div style={{ fontWeight:700 }}>人类操作 · {humanPhaseLabel(phase)}</div>
+                    {phase === 'play' && (
+                      <>
+                        {requireLabel && <div style={{ opacity:0.75 }}>需求：{requireLabel}</div>}
+                        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                          <button onClick={()=>handleHumanPlay(i)} disabled={submitting} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #2563eb', background:'#dbeafe', color:'#1d4ed8' }}>出牌</button>
+                          {canPass && <button onClick={()=>handleHumanPass(i)} disabled={submitting} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #d1d5db', background:'#fff' }}>过</button>}
+                          <button onClick={()=>clearHumanSelection(i)} disabled={submitting || selection.length===0} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #d1d5db', background:'#fff' }}>重选</button>
+                        </div>
+                        {selection.length > 0 && <div style={{ opacity:0.75 }}>已选：{selection.join(' ')}</div>}
+                      </>
+                    )}
+                    {phase === 'bid' && (
+                      <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+                        <button onClick={()=>handleHumanBid(i, true)} disabled={submitting} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #f97316', background:'#ffedd5', color:'#c2410c' }}>抢地主</button>
+                        <button onClick={()=>handleHumanBid(i, false)} disabled={submitting} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #d1d5db', background:'#fff' }}>不抢</button>
+                        {defaultBid !== undefined && <span style={{ opacity:0.65 }}>建议：{defaultBid ? '抢' : '不抢'}</span>}
+                      </div>
+                    )}
+                    {phase === 'double' && (
+                      <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+                        <button onClick={()=>handleHumanDouble(i, true)} disabled={submitting} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #16a34a', background:'#dcfce7', color:'#166534' }}>加倍</button>
+                        <button onClick={()=>handleHumanDouble(i, false)} disabled={submitting} style={{ padding:'4px 10px', borderRadius:6, border:'1px solid #d1d5db', background:'#fff' }}>不加倍</button>
+                        {defaultDouble !== undefined && <span style={{ opacity:0.65 }}>建议：{defaultDouble ? '加倍' : '不加倍'}</span>}
+                      </div>
+                    )}
+                    {submitting && <div style={{ color:'#2563eb' }}>已提交，等待后端确认…</div>}
+                  </div>
+>>>>>>> Stashed changes
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
+          {[0,1,2].map(i=>{
+            const isLandlord = bottomInfo.landlord === i;
+            const showForSeat = bottomInfo.visibleToAll || isLandlord;
+            const bottomLabelSuffix = isLandlord
+              ? '（地主）'
+              : (bottomInfo.visibleToAll ? '（待确认）' : '');
+            const cards = showForSeat ? bottomInfo.cards : [];
+            return (
+              <div
+                key={`bottom-${i}`}
+                style={{
+                  border:'1px dashed #d1d5db',
+                  borderRadius:8,
+                  padding:'6px 8px',
+                  minHeight:64,
+                  display:'flex',
+                  flexDirection:'column',
+                  justifyContent:'center',
+                  alignItems:'center',
+                  background:isLandlord ? '#f0fdf4' : '#f9fafb'
+                }}
+              >
+                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌{bottomLabelSuffix}</div>
+                {showForSeat ? (
                   cards.length ? (
                     <div style={{ display:'flex', flexWrap:'wrap', gap:4, justifyContent:'center' }}>
                       {cards.map((c, idx) => (
@@ -2468,7 +2807,11 @@ const [lang, setLang] = useState<Lang>(() => {
     <LangContext.Provider value={lang}>
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
+<<<<<<< Updated upstream
 <div style={{ marginLeft:'auto', marginBottom:16, display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
+=======
+<div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
+>>>>>>> Stashed changes
   <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
   <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
     <option value="zh">中文</option>
