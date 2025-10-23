@@ -271,7 +271,8 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
-  | 'http';
+  | 'http'
+  | 'human';
 
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
 type Rating = { mu:number; sigma:number };
@@ -365,11 +366,7 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
-<<<<<<< Updated upstream
-type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[] };
-=======
 type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[]; visibleToAll:boolean };
->>>>>>> Stashed changes
 
 const rankOf = (l: string) => {
   if (!l) return '';
@@ -419,11 +416,7 @@ function resolveBottomDecorations(raw: string[], landlord: number | null, hands:
   });
 }
 
-<<<<<<< Updated upstream
-function Card({ label, dimmed = false, compact = false }: { label:string; dimmed?:boolean; compact?:boolean }) {
-=======
 function Card({ label, dimmed = false, compact = false, selectable = false, selected = false, onToggle, faceDown = false }: { label:string; dimmed?:boolean; compact?:boolean; selectable?:boolean; selected?:boolean; onToggle?:()=>void; faceDown?:boolean }) {
->>>>>>> Stashed changes
   const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
@@ -434,18 +427,6 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
   const rankStyle = dimmed
     ? { color: '#9ca3af' }
     : (rankColor ? { color: rankColor } : {});
-<<<<<<< Updated upstream
-  return (
-    <span style={{
-      display:'inline-flex', alignItems:'center', gap:6,
-      border:'1px solid #ddd', borderRadius:8, padding: pad,
-      marginRight:6, marginBottom:6, fontWeight:800,
-      color: suitColor,
-      background: dimmed ? '#f3f4f6' : '#fff',
-      opacity: dimmed ? 0.65 : 1,
-      borderColor: dimmed ? '#d1d5db' : '#ddd'
-    }}>
-=======
   const handleClick = () => { if (!faceDown && selectable && onToggle) onToggle(); };
   if (faceDown) {
     return (
@@ -475,31 +456,47 @@ function Card({ label, dimmed = false, compact = false, selectable = false, sele
     <span
       onClick={handleClick}
       style={{
-        display:'inline-flex', alignItems:'center', gap:6,
-        border:'1px solid #ddd', borderRadius:8, padding: pad,
-        marginRight:6, marginBottom:6, fontWeight:800,
+        display:'inline-flex',
+        alignItems:'center',
+        justifyContent:'center',
+        gap:6,
+        border:'1px solid #ddd',
+        borderRadius:8,
+        padding: pad,
+        marginRight:6,
+        marginBottom:6,
+        fontWeight:800,
         color: suitColor,
         background: dimmed ? '#f3f4f6' : (selected ? '#e0f2fe' : '#fff'),
         opacity: dimmed ? 0.65 : 1,
-        borderColor: selected ? '#2563eb' : dimmed ? '#d1d5db' : '#ddd',
+        borderColor: selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd'),
         boxShadow: selected ? '0 0 0 2px rgba(37, 99, 235, 0.25)' : 'none',
         cursor: selectable ? 'pointer' : 'default',
         transform: selectable && selected ? 'translateY(-4px)' : undefined,
         transition: 'transform 120ms ease, box-shadow 120ms ease, background 120ms ease',
+        userSelect:'none',
       }}
     >
->>>>>>> Stashed changes
-      <span style={{ fontSize }}>{suit}</span>
-      <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+      <span style={{ fontSize, fontWeight:900, ...rankStyle }}>{rank}</span>
+      <span style={{ fontSize: compact ? 20 : 22 }}>{suit}</span>
     </span>
   );
 }
-function Hand({ cards }: { cards: string[] }) {
+function Hand({ cards, interactive = false, selected = [], onToggle, hideFaces = false }: { cards: string[]; interactive?:boolean; selected?:string[]; onToggle?:(card:string)=>void; hideFaces?:boolean }) {
   const { t } = useI18n();
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>{t('Empty')}</span>;
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-      {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
+    <div style={{ display:'flex', flexWrap:'wrap' }}>
+      {cards.map((c, idx) => (
+        <Card
+          key={`${c}-${idx}`}
+          label={c}
+          selectable={interactive}
+          selected={interactive && selected.includes(c)}
+          onToggle={interactive ? () => onToggle?.(c) : undefined}
+          faceDown={hideFaces}
+        />
+      ))}
     </div>
   );
 }
@@ -529,14 +526,14 @@ function LogLine({ text }: { text:string }) {
 function LadderPanel() {
   const { t } = useI18n();
   const [tick, setTick] = useState(0);
-  useEffect(()=>{
+useEffect(()=>{
     const onAny = () => setTick(k=>k+1);
     if (typeof window !== 'undefined') {
       window.addEventListener('ddz-all-refresh', onAny as any);
     }
     const t = setInterval(onAny, 2000);
     return ()=> { if (typeof window!=='undefined') window.removeEventListener('ddz-all-refresh', onAny as any); clearInterval(t); };
-  }, []);
+}, []);
 
   let store:any = { players:{} };
   try {
@@ -656,6 +653,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':               return 'Qwen';
     case 'ai:deepseek':           return 'DeepSeek';
     case 'http':                  return 'HTTP';
+    case 'human':                 return 'Human';
     default: return String(choice);
   }
 }
@@ -670,7 +668,7 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
       cons: (prev.cons*c + curr.cons)/(c+1),
       eff:  (prev.eff *c + curr.eff )/(c+1),
       bid: (prev.bid *c + curr.bid )/(c+1),
-    };
+  };
   }
   const a = Math.min(0.95, Math.max(0.05, alpha || 0.35));
   return {
@@ -699,16 +697,12 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 function LivePanel(props: LiveProps) {
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
-  const pauseRef = useRef(false);
-  const pauseResolversRef = useRef<Array<() => void>>([]);
-
-<<<<<<< Updated upstream
-=======
-  const seatChoices = (props.seats || []).slice(0, 3);
-  const seatIsHuman = seatChoices.map(choice => choice === 'human');
-  const anyHumanSeat = seatIsHuman.some(Boolean);
-
->>>>>>> Stashed changes
+    const pauseRef = useRef(false);
+    const pauseResolversRef = useRef<Array<() => void>>([]);
+    const seatChoices = (props.seats || []).slice(0, 3);
+    const seatIsHuman = seatChoices.map(choice => choice === 'human');
+    const anyHumanSeat = seatIsHuman.some(Boolean);
+    const traceIdRef = useRef('');
   const flushPauseResolvers = () => {
     const list = pauseResolversRef.current.slice();
     pauseResolversRef.current.length = 0;
@@ -742,7 +736,7 @@ function LivePanel(props: LiveProps) {
   const [bidMultiplier, setBidMultiplier] = useState(1);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
-  const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [] });
+    const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [], visibleToAll: false });
   const [log, setLog] = useState<string[]>([]);
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
@@ -756,15 +750,13 @@ function LivePanel(props: LiveProps) {
 
   const [roundLords, setRoundLords] = useState<number[]>([]);
 
-<<<<<<< Updated upstream
-=======
-  type HumanPrompt = { requestId: string; phase: string; ctx: any; timeoutMs?: number; sessionId?: string; startedAt: number };
+    type HumanPrompt = { requestId: string; phase: string; ctx: any; timeoutMs?: number; sessionId?: string; startedAt: number };
   const [humanPrompts, setHumanPrompts] = useState<(HumanPrompt|null)[]>([null,null,null]);
   const humanPromptsRef = useRef<(HumanPrompt|null)[]>([null,null,null]);
-  useEffect(()=>{ humanPromptsRef.current = humanPrompts; }, [humanPrompts]);
+useEffect(()=>{ humanPromptsRef.current = humanPrompts; }, [humanPrompts]);
   const [humanSelections, setHumanSelections] = useState<string[][]>([[],[],[]]);
   const humanSelectionsRef = useRef<string[][]>(humanSelections);
-  useEffect(()=>{ humanSelectionsRef.current = humanSelections; }, [humanSelections]);
+useEffect(()=>{ humanSelectionsRef.current = humanSelections; }, [humanSelections]);
   const [humanSubmitting, setHumanSubmitting] = useState<boolean[]>([false,false,false]);
 
   const resetHumanState = () => {
@@ -839,7 +831,6 @@ function LivePanel(props: LiveProps) {
 
   const humanPhaseLabel = (phase:string) => phase === 'bid' ? '叫抢' : phase === 'double' ? '加倍' : '出牌';
 
->>>>>>> Stashed changes
   /* ====== 评分统计（每局） ====== */
   type SeatStat = { rounds:number; overallAvg:number; lastAvg:number; best:number; worst:number; mean:number; sigma:number };
   const [scoreStats, setScoreStats] = useState<SeatStat[]>([
@@ -895,13 +886,13 @@ function LivePanel(props: LiveProps) {
     } catch (e) { console.error('[stats] recompute error', e); }
   }
   // 每局结束或数据变化时刷新统计
-  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
+useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
 
   // 每局结束或数据变化时刷新统计
-  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
+useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
 
   // 每局结束或数据变化时刷新统计
-  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
+useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
 ;
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -910,7 +901,7 @@ function LivePanel(props: LiveProps) {
 
   // ===== 新增：TS 存档（读/写/应用） =====
   const tsStoreRef = useRef<TsStore>(emptyStore());
-  useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
+useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
 
   const seatIdentity = (i:number) => {
@@ -1020,7 +1011,7 @@ function LivePanel(props: LiveProps) {
     });
     writeStore(tsStoreRef.current);
     const blob = new Blob([JSON.stringify(tsStoreRef.current, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = makeArchiveName('_trueskill.json'); a.click();
     setTimeout(()=>URL.revokeObjectURL(url), 1200);
     setLog(l => [...l, '【TS】已导出当前存档。']);
@@ -1036,7 +1027,7 @@ function LivePanel(props: LiveProps) {
       overall: p?.overall ? ensureRating(p.overall) : null,
       landlord: p?.roles?.landlord ? ensureRating(p.roles.landlord) : null,
       farmer: p?.roles?.farmer ? ensureRating(p.roles.farmer) : null,
-    };
+  };
   };
   /* ===== Radar（战术画像）本地存档（新增） ===== */
   type RadarAgg = { scores: Score5; count: number };
@@ -1093,12 +1084,12 @@ function LivePanel(props: LiveProps) {
         bid : mean(prev.scores.bid, inc.bid),
       },
       count: c + 1,
-    };
+  };
   }
 
   // —— Radar 存档：读写/应用/上传/导出 —— //
   const radarStoreRef = useRef<RadarStore>(emptyRadarStore());
-  useEffect(()=>{ try { radarStoreRef.current = readRadarStore(); } catch {} }, []);
+useEffect(()=>{ try { radarStoreRef.current = readRadarStore(); } catch {} }, []);
   const radarFileRef = useRef<HTMLInputElement|null>(null);
 
   /** 取指定座位的（按角色可选）Radar 累计 */
@@ -1299,9 +1290,9 @@ function LivePanel(props: LiveProps) {
       rounds: roundCutsRef.current,
       n,
       seriesBySeat: scoreSeriesRef.current,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'score_series.json'; a.click();
     setTimeout(()=>URL.revokeObjectURL(url), 1500);
   };
@@ -1363,9 +1354,9 @@ function LivePanel(props: LiveProps) {
   };
   const handleStatsRefresh = () => { setRoundCuts(prev => [...prev]); };
 const handleScoreRefresh = () => {
-    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
-    setRoundCuts(prev => [...prev]);
-    setRoundLords(prev => [...prev]);
+  setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+  setRoundCuts(prev => [...prev]);
+  setRoundLords(prev => [...prev]);
   };
 const [allLogs, setAllLogs] = useState<string[]>([]);
 const allLogsRef = useRef(allLogs);
@@ -1406,7 +1397,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
           default:            return { choice };
         }
       });
-    };
+  };
 
     const seatSummaryText = (specs: any[]) =>
       specs.map((s, i) => {
@@ -1438,7 +1429,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
         nextFinished = nextFinished + 1;
       }
       return { nextFinished, nextAggStats, nextAggCount };
-    };
+  };
 
     const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
     let lastEventTs = Date.now();
@@ -1457,10 +1448,8 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
       const toUiSeat = (j:number) => (j + startShift) % 3;
       const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
-<<<<<<< Updated upstream
-=======
-      traceIdRef.current = traceId;
->>>>>>> Stashed changes
+        traceIdRef.current = traceId;
+        traceIdRef.current = traceId;
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       roundFinishedRef.current = false;
@@ -1620,11 +1609,7 @@ for (const raw of batch) {
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
-<<<<<<< Updated upstream
-                  nextBottom = { landlord: lord ?? null, cards: [] };
-=======
-                  nextBottom = { landlord: lord ?? null, cards: [], visibleToAll: false };
->>>>>>> Stashed changes
+                    nextBottom = { landlord: lord ?? null, cards: [], visibleToAll: false };
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
@@ -1648,8 +1633,6 @@ for (const raw of batch) {
                 continue;
               }
 
-<<<<<<< Updated upstream
-=======
               if (m.type === 'event' && m.kind === 'human-request') {
                 const seat = (typeof m.seat === 'number' && m.seat >=0 && m.seat <3) ? m.seat : -1;
                 if (seat >= 0) {
@@ -1687,8 +1670,6 @@ for (const raw of batch) {
                 }
                 continue;
               }
-
->>>>>>> Stashed changes
               
               // -------- 首次手牌兜底注入（若没有 init 帧但消息里带了 hands） --------
               {
@@ -1774,33 +1755,6 @@ else if (m.type === 'event' && m.kind === 'bid-eval') {
               // -------- 明牌后额外加倍 --------
 // -------- 倍数校准（兜底） --------
 
-<<<<<<< Updated upstream
-// ------ 明牌（显示底牌） ------
-if (m.type === 'event' && m.kind === 'reveal') {
-  const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
-  const seatIdxRaw = (typeof (m.landlordIdx ?? m.landlord) === 'number')
-    ? (m.landlordIdx ?? m.landlord) as number
-    : nextLandlord;
-  const landlordSeat = (typeof seatIdxRaw === 'number') ? seatIdxRaw : (nextLandlord ?? nextBottom.landlord ?? null);
-  const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][]);
-
-  if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
-    let seatHand = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
-    const prevBottom = bottomRef.current;
-    if (prevBottom && prevBottom.landlord === landlordSeat && Array.isArray(prevBottom.cards)) {
-      for (const prevCard of prevBottom.cards) {
-        const idxPrev = seatHand.indexOf(prevCard.label);
-        if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
-      }
-    }
-    seatHand = [...seatHand, ...mapped];
-    nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
-  }
-
-  nextBottom = {
-    landlord: landlordSeat ?? nextBottom.landlord ?? null,
-    cards: mapped.map(label => ({ label, used: false })),
-=======
               // ------ 底牌预览（人类参与叫抢时提前显示） ------
               if (m.type === 'event' && m.kind === 'bottom-preview') {
                 const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
@@ -1817,37 +1771,36 @@ if (m.type === 'event' && m.kind === 'reveal') {
 
               // ------ 明牌（显示底牌） ------
               if (m.type === 'event' && m.kind === 'reveal') {
-  const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
-  const seatIdxRaw = (typeof (m.landlordIdx ?? m.landlord) === 'number')
-    ? (m.landlordIdx ?? m.landlord) as number
-    : nextLandlord;
-  const landlordSeat = (typeof seatIdxRaw === 'number') ? seatIdxRaw : (nextLandlord ?? nextBottom.landlord ?? null);
-  const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][]);
+                const btm = Array.isArray((m as any).bottom) ? (m as any).bottom : [];
+                const seatIdxRaw = (typeof (m.landlordIdx ?? m.landlord) === 'number')
+                  ? (m.landlordIdx ?? m.landlord) as number
+                  : nextLandlord;
+                const landlordSeat = (typeof seatIdxRaw === 'number') ? seatIdxRaw : (nextLandlord ?? nextBottom.landlord ?? null);
+                const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][]);
 
-  if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
-    let seatHand = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
-    const prevBottom = bottomRef.current;
-    if (prevBottom && prevBottom.landlord === landlordSeat && Array.isArray(prevBottom.cards)) {
-      for (const prevCard of prevBottom.cards) {
-        const idxPrev = seatHand.indexOf(prevCard.label);
-        if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
-      }
-    }
-    seatHand = [...seatHand, ...mapped];
-    nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
-  }
+                if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
+                  let seatHand = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
+                  const prevBottom = bottomRef.current;
+                  if (prevBottom && prevBottom.landlord === landlordSeat && Array.isArray(prevBottom.cards)) {
+                    for (const prevCard of prevBottom.cards) {
+                      const idxPrev = seatHand.indexOf(prevCard.label);
+                      if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
+                    }
+                  }
+                  seatHand = [...seatHand, ...mapped];
+                  nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
+                }
 
-  nextBottom = {
-    landlord: landlordSeat ?? nextBottom.landlord ?? null,
-    cards: mapped.map(label => ({ label, used: false })),
-    visibleToAll: false,
->>>>>>> Stashed changes
-  };
-  const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
-  nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
-  // 不改变 nextMultiplier，仅展示
-  continue;
-}
+                nextBottom = {
+                  landlord: landlordSeat ?? nextBottom.landlord ?? null,
+                  cards: mapped.map(label => ({ label, used: false })),
+                  visibleToAll: false,
+                };
+                const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
+                nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
+                // 不改变 nextMultiplier，仅展示
+                continue;
+              }
 if (m.type === 'event' && m.kind === 'multiplier-sync') {
   const cur = Math.max(1, (nextMultiplier || 1));
   const mlt = Math.max(1, Number((m as any).multiplier || 1));
@@ -2171,7 +2124,7 @@ nextTotals     = [
       if (!controllerRef.current?.signal.aborted) {
         await waitWhilePaused();
       }
-    };
+  };
 
     try {
       for (let i = 0; i < props.rounds; i++) {
@@ -2191,11 +2144,7 @@ nextTotals     = [
     } finally { exitPause(); setRunning(false); }
   };
 
-<<<<<<< Updated upstream
-  const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); };
-=======
-  const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); resetHumanState(); traceIdRef.current = ''; };
->>>>>>> Stashed changes
+    const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); resetHumanState(); traceIdRef.current = ''; };
 
   const togglePause = () => {
     if (!running) return;
@@ -2249,41 +2198,39 @@ const applyAllBundleInner = (obj:any) => {
   }
 };
 const handleAllSaveInner = () => {
-    const payload = buildAllBundle();
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = makeArchiveName('.json'); a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 1000);
-    setLog(l => [...l, '【ALL】已导出统一统计文件。']);
+  const payload = buildAllBundle();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = makeArchiveName('.json'); a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  setLog(l => [...l, '【ALL】已导出统一统计文件。']);
+};
+
+const handleAllRefreshInner = () => {
+  applyTsFromStoreByRole(landlordRef.current, '手动刷新');
+  applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
+  setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+  setRoundCuts(prev => [...prev]);
+  setRoundLords(prev => [...prev]);
+  setLog(l => [...l, '【ALL】已刷新面板数据。']);
+};
+
+useEffect(()=>{
+  const onSave = () => handleAllSaveInner();
+  const onRefresh = () => handleAllRefreshInner();
+  const onUpload = (e: Event) => {
+    const ce = e as CustomEvent<any>;
+    applyAllBundleInner(ce.detail);
   };
-
-  
-
-  const handleAllRefreshInner = () => {
-    applyTsFromStoreByRole(landlordRef.current, '手动刷新');
-    applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
-    setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
-    setRoundCuts(prev => [...prev]);
-    setRoundLords(prev => [...prev]);
-    setLog(l => [...l, '【ALL】已刷新面板数据。']);
+  window.addEventListener('ddz-all-save', onSave as any);
+  window.addEventListener('ddz-all-refresh', onRefresh as any);
+  window.addEventListener('ddz-all-upload', onUpload as any);
+  return () => {
+    window.removeEventListener('ddz-all-save', onSave as any);
+    window.removeEventListener('ddz-all-refresh', onRefresh as any);
+    window.removeEventListener('ddz-all-upload', onUpload as any);
   };
-
-  useEffect(()=>{
-    const onSave = () => handleAllSaveInner();
-    const onRefresh = () => handleAllRefreshInner();
-    const onUpload = (e: Event) => {
-      const ce = e as CustomEvent<any>;
-      applyAllBundleInner(ce.detail);
-    };
-    window.addEventListener('ddz-all-save', onSave as any);
-    window.addEventListener('ddz-all-refresh', onRefresh as any);
-    window.addEventListener('ddz-all-upload', onUpload as any);
-    return () => {
-      window.removeEventListener('ddz-all-save', onSave as any);
-      window.removeEventListener('ddz-all-refresh', onRefresh as any);
-      window.removeEventListener('ddz-all-upload', onUpload as any);
-    };
-  }, []);
+}, []);
 
   return (
     <div>
@@ -2464,50 +2411,7 @@ const handleAllSaveInner = () => {
 
       <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
-          {[0,1,2].map(i=>(
-            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
-                            <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}</div>
-<div style={{ marginBottom:6 }}>
-                <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
-              </div>
-              <Hand cards={hands[i]} />
-            </div>
-          ))}
-        </div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
           {[0,1,2].map(i=>{
-<<<<<<< Updated upstream
-            const isLandlord = bottomInfo.landlord === i;
-            const cards = isLandlord ? bottomInfo.cards : [];
-            return (
-              <div
-                key={`bottom-${i}`}
-                style={{
-                  border:'1px dashed #d1d5db',
-                  borderRadius:8,
-                  padding:'6px 8px',
-                  minHeight:64,
-                  display:'flex',
-                  flexDirection:'column',
-                  justifyContent:'center',
-                  alignItems:'center',
-                  background:isLandlord ? '#f0fdf4' : '#f9fafb'
-                }}
-              >
-                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌</div>
-                {isLandlord ? (
-                  cards.length ? (
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:4, justifyContent:'center' }}>
-                      {cards.map((c, idx) => (
-                        <Card key={`${c.label}-${idx}`} label={c.label} dimmed={c.used} compact />
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize:12, color:'#9ca3af' }}>（待明牌）</div>
-                  )
-                ) : (
-                  <div style={{ fontSize:12, color:'#d1d5db' }}>—</div>
-=======
             const prompt = humanPrompts[i];
             const phase = prompt?.phase || 'play';
             const canInteract = !!prompt && phase === 'play';
@@ -2563,7 +2467,6 @@ const handleAllSaveInner = () => {
                     )}
                     {submitting && <div style={{ color:'#2563eb' }}>已提交，等待后端确认…</div>}
                   </div>
->>>>>>> Stashed changes
                 )}
               </div>
             );
@@ -2611,6 +2514,7 @@ const handleAllSaveInner = () => {
           })}
         </div>
       </Section>
+
 
       <Section title="出牌">
         <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
@@ -2669,8 +2573,8 @@ function RadarPanel({
   const [mode, setMode] = useState<'mean'|'ewma'>(aggMode);
   const [a, setA] = useState<number>(alpha);
 
-  useEffect(()=>{ setMode(aggMode); }, [aggMode]);
-  useEffect(()=>{ setA(alpha); }, [alpha]);
+useEffect(()=>{ setMode(aggMode); }, [aggMode]);
+useEffect(()=>{ setA(alpha); }, [alpha]);
 
   return (
     <>
@@ -2740,21 +2644,21 @@ function Home() {
         }
       }
     } catch {}
-  }, []);
+}, []);
 
 const [lang, setLang] = useState<Lang>(() => {
     if (typeof window === 'undefined') return 'zh';
     const v = localStorage.getItem('ddz_lang');
     return (v === 'en' || v === 'zh') ? (v as Lang) : 'zh';
   });
-  useEffect(()=>{
+useEffect(()=>{
     try {
       localStorage.setItem('ddz_lang', lang);
       if (typeof document !== 'undefined') document.documentElement.lang = lang;
     } catch {}
   }, [lang]);
   const mainRef = useRef<HTMLDivElement | null>(null);
-  useEffect(()=>{ try { if (typeof document !== 'undefined') autoTranslateContainer(mainRef.current, lang); } catch {} }, [lang]);
+useEffect(()=>{ try { if (typeof document !== 'undefined') autoTranslateContainer(mainRef.current, lang); } catch {} }, [lang]);
 
 
   const [resetKey, setResetKey] = useState<number>(0);
@@ -2800,18 +2704,15 @@ const [lang, setLang] = useState<Lang>(() => {
       } finally {
         if (allFileRef.current) allFileRef.current.value = '';
       }
-    };
+  };
     rd.readAsText(f);
   };
   return (<>
     <LangContext.Provider value={lang}>
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
-<<<<<<< Updated upstream
-<div style={{ marginLeft:'auto', marginBottom:16, display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
-=======
 <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }} data-i18n-ignore>
->>>>>>> Stashed changes
+
   <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
   <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
     <option value="zh">中文</option>
@@ -3148,12 +3049,12 @@ function ScoreTimeline(
   const [w, setW] = useState(600);
   const [hover, setHover] = useState<null | { si:number; idx:number; x:number; y:number; v:number }>(null);
 
-  useEffect(()=>{
+useEffect(()=>{
     const el = ref.current; if(!el) return;
     const ro = new ResizeObserver(()=> setW(el.clientWidth || 600));
     ro.observe(el);
     return ()=> ro.disconnect();
-  }, []);
+}, []);
 
   const data = series || [[],[],[]];
   const n = Math.max(data[0]?.length||0, data[1]?.length||0, data[2]?.length||0);
