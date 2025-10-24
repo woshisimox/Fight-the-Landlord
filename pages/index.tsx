@@ -830,24 +830,28 @@ function Card({ label, dimmed = false, compact = false }: { label:string; dimmed
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
   const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
-  const pad = compact ? '4px 6px' : '6px 10px';
   const fontSize = compact ? 14 : 16;
+  const rankFontSize = compact ? 16 : 18;
+  const cardDims = compact
+    ? { width: 34, height: 48, borderRadius: 6, padding: '6px 0' }
+    : { width: 42, height: 62, borderRadius: 8, padding: '8px 0' };
   const suitColor = dimmed ? '#9ca3af' : baseColor;
   const rankStyle = dimmed
     ? { color: '#9ca3af' }
     : (rankColor ? { color: rankColor } : {});
   return (
     <span style={{
-      display:'inline-flex', alignItems:'center', gap:6,
-      border:'1px solid #ddd', borderRadius:8, padding: pad,
+      display:'inline-flex', flexDirection:'column', alignItems:'center', justifyContent:'space-between',
+      border:'1px solid #ddd',
       marginRight:6, marginBottom:6, fontWeight:800,
       color: suitColor,
       background: dimmed ? '#f3f4f6' : '#fff',
       opacity: dimmed ? 0.65 : 1,
-      borderColor: dimmed ? '#d1d5db' : '#ddd'
+      borderColor: dimmed ? '#d1d5db' : '#ddd',
+      ...cardDims
     }}>
-      <span style={{ fontSize }}>{suit}</span>
-      <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+      <span style={{ fontSize: rankFontSize, lineHeight: 1, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+      <span style={{ fontSize, lineHeight: 1 }}>{suit}</span>
     </span>
   );
 }
