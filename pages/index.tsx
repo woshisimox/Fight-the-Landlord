@@ -1,6 +1,6 @@
 // pages/index.tsx
-import { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent } from 'react';
+import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -272,7 +272,8 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
-  | 'http';
+  | 'http'
+  | 'human';
 
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
 type Rating = { mu:number; sigma:number };
@@ -374,6 +375,7 @@ const KO_ALL_CHOICES: BotChoice[] = [
   'ai:qwen',
   'ai:deepseek',
   'http',
+  'human',
 ];
 
 const KO_DEFAULT_SETTINGS: KnockoutSettings = {
@@ -766,6 +768,26 @@ type LivePanelFinishPayload = {
   endedEarlyForNegative?: boolean;
 };
 
+type HumanHint = {
+  move: 'play' | 'pass';
+  cards?: string[];
+  score?: number;
+  reason?: string;
+  label?: string;
+  by?: string;
+};
+
+type HumanPrompt = {
+  seat: number;
+  requestId: string;
+  phase: string;
+  ctx: any;
+  timeoutMs?: number;
+  delayMs?: number;
+  by?: string;
+  hint?: HumanHint;
+};
+
 function SeatTitle({ i }: { i:number }) {
   const { lang } = useI18n();
   return <span style={{ fontWeight:700 }}>{seatLabel(i, lang)}</span>;
@@ -775,7 +797,11 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
-type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[] };
+type BottomInfo = {
+  landlord: number | null;
+  cards: { label: string; used: boolean }[];
+  revealed: boolean;
+};
 
 const rankOf = (l: string) => {
   if (!l) return '';
@@ -807,6 +833,41 @@ function decorateHandCycle(raw: string[]): string[] {
   });
 }
 
+const RANK_ORDER = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const;
+const RANK_POS: Record<string, number> = Object.fromEntries(RANK_ORDER.map((r, i) => [r, i])) as Record<string, number>;
+
+function rankKeyForDisplay(label: string): string {
+  if (!label) return '';
+  if (label.startsWith('🃏')) {
+    const tail = label.slice(2).toUpperCase();
+    if (tail === 'X') return 'x';
+    if (tail === 'Y') return 'X';
+    return tail;
+  }
+  if (label === 'x' || label === 'X') return label;
+  const rk = rankOf(label);
+  if (rk === 'Y') return 'X';
+  return rk;
+}
+
+function sortDisplayHand(cards: string[]): string[] {
+  return [...cards].sort((a, b) => {
+    const va = RANK_POS[rankKeyForDisplay(a)] ?? -1;
+    const vb = RANK_POS[rankKeyForDisplay(b)] ?? -1;
+    if (va !== vb) return va - vb;
+    return a.localeCompare(b);
+  });
+}
+
+function displayLabelFromRaw(label: string): string {
+  if (!label) return label;
+  if (label.startsWith('🃏')) return label;
+  if (label === 'x') return '🃏X';
+  if (label === 'X') return '🃏Y';
+  if ('♠♥♦♣'.includes(label[0])) return label;
+  return decorateHandCycle([label])[0];
+}
+
 function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
   if (!Array.isArray(raw)) return [];
   const seat = (typeof landlord === 'number' && landlord >= 0 && landlord < 3) ? landlord : null;
@@ -825,38 +886,126 @@ function resolveBottomDecorations(raw: string[], landlord: number | null, hands:
   });
 }
 
-function Card({ label, dimmed = false, compact = false }: { label:string; dimmed?:boolean; compact?:boolean }) {
-  const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
-  const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
-  const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-  const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
-  const pad = compact ? '4px 6px' : '6px 10px';
-  const fontSize = compact ? 14 : 16;
-  const suitColor = dimmed ? '#9ca3af' : baseColor;
-  const rankStyle = dimmed
-    ? { color: '#9ca3af' }
-    : (rankColor ? { color: rankColor } : {});
+type CardProps = {
+  label: string;
+  dimmed?: boolean;
+  compact?: boolean;
+  interactive?: boolean;
+  selected?: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+  hidden?: boolean;
+};
+
+function Card({ label, dimmed = false, compact = false, interactive = false, selected = false, onClick, disabled = false, hidden = false }: CardProps) {
+  const dims = compact
+    ? { width: 28, height: 44, gap: 2, backSize: 18, suitSize: 16, rankSize: 12, paddingShown: '6px 4px', paddingHidden: '4px' }
+    : { width: 38, height: 58, gap: 4, backSize: 24, suitSize: 22, rankSize: 16, paddingShown: '8px 6px', paddingHidden: '6px' };
+
+  let background = '#fff';
+  let borderColor = '#ddd';
+  let color = '#1f2937';
+  let opacity = 1;
+  let inner: ReactNode;
+
+  if (hidden) {
+    background = selected ? '#bfdbfe' : '#1f2937';
+    borderColor = selected ? '#2563eb' : '#111827';
+    color = '#f9fafb';
+    inner = <span style={{ fontSize: dims.backSize, lineHeight: 1 }}>🂠</span>;
+  } else {
+    const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
+    const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
+    const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
+    const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
+    const suitColor = dimmed ? '#9ca3af' : baseColor;
+    const rankStyle = dimmed
+      ? { color: '#9ca3af' }
+      : (rankColor ? { color: rankColor } : {});
+    background = selected ? '#dbeafe' : (dimmed ? '#f3f4f6' : '#fff');
+    borderColor = selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd');
+    color = suitColor;
+    opacity = dimmed ? 0.65 : 1;
+    inner = (
+      <>
+        <span style={{ fontSize: dims.suitSize, lineHeight: 1 }}>{suit}</span>
+        <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+      </>
+    );
+  }
+
+  const style: React.CSSProperties = {
+    display: 'inline-flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: hidden ? 0 : dims.gap,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderRadius: 8,
+    padding: hidden ? dims.paddingHidden : dims.paddingShown,
+    marginRight: compact ? 4 : 6,
+    marginBottom: compact ? 4 : 6,
+    fontWeight: 800,
+    cursor: interactive ? (disabled ? 'not-allowed' : 'pointer') : 'default',
+    outline: selected ? '2px solid #2563eb' : 'none',
+    userSelect: 'none',
+    width: dims.width,
+    minWidth: dims.width,
+    height: dims.height,
+    boxSizing: 'border-box',
+    background,
+    borderColor,
+    color,
+    opacity,
+  };
+
+  if (interactive) {
+    return (
+      <button
+        type="button"
+        onClick={disabled ? undefined : onClick}
+        disabled={disabled}
+        style={style}
+        title={hidden ? label : undefined}
+      >
+        {inner}
+      </button>
+    );
+  }
+
   return (
-    <span style={{
-      display:'inline-flex', alignItems:'center', gap:6,
-      border:'1px solid #ddd', borderRadius:8, padding: pad,
-      marginRight:6, marginBottom:6, fontWeight:800,
-      color: suitColor,
-      background: dimmed ? '#f3f4f6' : '#fff',
-      opacity: dimmed ? 0.65 : 1,
-      borderColor: dimmed ? '#d1d5db' : '#ddd'
-    }}>
-      <span style={{ fontSize }}>{suit}</span>
-      <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+    <span style={style} title={hidden ? label : undefined}>
+      {inner}
     </span>
   );
 }
-function Hand({ cards }: { cards: string[] }) {
+type HandProps = {
+  cards: string[];
+  interactive?: boolean;
+  selectedIndices?: Set<number>;
+  onToggle?: (index: number) => void;
+  disabled?: boolean;
+  faceDown?: boolean;
+};
+
+function Hand({ cards, interactive = false, selectedIndices, onToggle, disabled = false, faceDown = false }: HandProps) {
   const { t } = useI18n();
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>{t('Empty')}</span>;
+  const selected = selectedIndices ?? new Set<number>();
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-      {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
+      {cards.map((c, idx) => (
+        <Card
+          key={`${c}-${idx}`}
+          label={c}
+          interactive={interactive}
+          selected={selected.has(idx)}
+          onClick={interactive && onToggle ? () => onToggle(idx) : undefined}
+          disabled={disabled}
+          hidden={faceDown && !interactive}
+        />
+      ))}
     </div>
   );
 }
@@ -905,7 +1054,7 @@ function LadderPanel() {
 
   const CATALOG = [
     'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
-    'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http'
+    'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http','human'
   ];
   const catalogIds = CATALOG.map((choice)=>{
     const model = defaultModelFor(choice as any) || '';
@@ -967,6 +1116,8 @@ function LadderPanel() {
 
 function KnockoutPanel() {
   const { lang } = useI18n();
+  const humanOptionLabel = lang === 'en' ? 'Human' : '人类选手';
+  const humanProviderLabel = lang === 'en' ? 'Human player' : '人类选手';
   const [settings, setSettings] = useState<KnockoutSettings>(() => {
     if (typeof window === 'undefined') return defaultKnockoutSettings();
     try {
@@ -1264,12 +1415,15 @@ function KnockoutPanel() {
           const rawChoice = typeof parsed.choice === 'string' ? parsed.choice : '';
           const provider = KO_ALL_CHOICES.includes(rawChoice as BotChoice) ? choiceLabel(rawChoice as BotChoice) : '';
           let providerLabel = provider;
-          if (typeof rawChoice === 'string' && rawChoice.startsWith('ai:')) {
-            const model = typeof parsed.model === 'string' ? parsed.model.trim() : '';
-            if (provider && model) providerLabel = `${provider}:${model}`;
-          } else if (rawChoice === 'http') {
-            const base = typeof parsed.httpBase === 'string' ? parsed.httpBase.trim() : '';
-            if (provider && base) providerLabel = `${provider}:${base}`;
+          if (KO_ALL_CHOICES.includes(rawChoice as BotChoice)) {
+            const normalized = rawChoice as BotChoice;
+            if (normalized === 'human') {
+              providerLabel = humanProviderLabel;
+            } else {
+              const model = typeof parsed.model === 'string' ? parsed.model : '';
+              const base = typeof parsed.httpBase === 'string' ? parsed.httpBase : '';
+              providerLabel = providerSummary(normalized, model, base, lang);
+            }
           }
           if (alias && providerLabel) return `${alias} · ${providerLabel}`;
           if (alias) return alias;
@@ -1290,7 +1444,9 @@ function KnockoutPanel() {
       if (entry) {
         return {
           label,
-          provider: providerSummary(entry.choice, entry.model, entry.keys?.httpBase),
+          provider: entry.choice === 'human'
+            ? humanProviderLabel
+            : providerSummary(entry.choice, entry.model, entry.keys?.httpBase, lang),
         };
       }
       const rawChoice = typeof parsed?.choice === 'string' ? parsed.choice : '';
@@ -1299,7 +1455,9 @@ function KnockoutPanel() {
         const httpBase = typeof parsed?.httpBase === 'string' ? parsed.httpBase : '';
         return {
           label,
-          provider: providerSummary(rawChoice as BotChoice, model, httpBase),
+          provider: rawChoice === 'human'
+            ? humanProviderLabel
+            : providerSummary(rawChoice as BotChoice, model, httpBase, lang),
         };
       }
     } catch {}
@@ -1740,8 +1898,8 @@ function KnockoutPanel() {
 
   const participantsTitle = lang === 'en' ? 'Participants' : '参赛选手';
   const participantsHint = lang === 'en'
-    ? 'Pick bots or AIs just like regular matches.'
-    : '从常规对局使用的内置 / 外置 AI 中选择参赛选手。';
+    ? 'Pick bots, AIs, or a human player just like regular matches.'
+    : '从常规赛使用的内置 / 外置 AI 或人类选手中选择参赛选手。';
 
   const intervalTitle = lang === 'en' ? 'Min play interval (ms)' : '最小间隔 (ms)';
   const timeoutTitle = lang === 'en' ? 'Think timeout (s)' : '弃牌时间（秒）';
@@ -1929,6 +2087,9 @@ function KnockoutPanel() {
                       <option value="ai:qwen">Qwen</option>
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
+                    </optgroup>
+                    <optgroup label={lang === 'en' ? 'Human' : '人类选手'}>
+                      <option value="human">{humanOptionLabel}</option>
                     </optgroup>
                   </select>
                 </label>
@@ -2385,7 +2546,9 @@ function KnockoutPanel() {
                     const httpBase = typeof currentMatch.seatKeys[idx]?.httpBase === 'string'
                       ? currentMatch.seatKeys[idx]!.httpBase!.trim()
                       : '';
-                    const providerText = providerSummary(seatChoice, model, httpBase);
+                    const providerText = seatChoice === 'human'
+                      ? humanProviderLabel
+                      : providerSummary(seatChoice, model, httpBase, lang);
                     return (
                       <div key={`${token}-score`} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:10, background:'#fff' }}>
                         <div style={{ fontWeight:700, marginBottom:4 }}>{label}</div>
@@ -2536,15 +2699,18 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':               return 'Qwen';
     case 'ai:deepseek':           return 'DeepSeek';
     case 'http':                  return 'HTTP';
+    case 'human':                 return 'Human';
     default: return String(choice);
   }
 }
 
-function providerSummary(choice: BotChoice, model?: string, httpBase?: string): string {
+function providerSummary(choice: BotChoice, model: string | undefined, httpBase: string | undefined, lang: Lang = 'zh'): string {
   const provider = choiceLabel(choice);
   if (choice === 'http') {
     const base = (httpBase || '').trim();
-    return base ? `${provider} · ${base}` : provider;
+    if (!base) return provider;
+    const customLabel = lang === 'en' ? 'custom' : '自定义';
+    return `${provider} · ${customLabel}`;
   }
   if (choice.startsWith('ai:')) {
     const trimmedModel = (model || '').trim();
@@ -2677,6 +2843,7 @@ const sanitizeTotalsArray = (
 
 /* ==================== LivePanel（对局） ==================== */
 const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(props, ref) {
+  const { t, lang } = useI18n();
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const pauseRef = useRef(false);
@@ -2720,8 +2887,182 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const [bidMultiplier, setBidMultiplier] = useState(1);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
-  const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [] });
+  const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [], revealed: false });
   const [log, setLog] = useState<string[]>([]);
+  const humanTraceRef = useRef<string>('');
+  const [humanRequest, setHumanRequest] = useState<HumanPrompt | null>(null);
+  const [humanSelectedIdx, setHumanSelectedIdx] = useState<number[]>([]);
+  const [humanSubmitting, setHumanSubmitting] = useState(false);
+  const [humanError, setHumanError] = useState<string | null>(null);
+  const humanSelectedSet = useMemo(() => new Set(humanSelectedIdx), [humanSelectedIdx]);
+  const humanHint = humanRequest?.hint ?? null;
+  const humanHintDecorated = useMemo(() => {
+    if (!humanRequest || humanRequest.phase !== 'play') return [] as string[];
+    if (!humanHint || humanHint.move !== 'play' || !Array.isArray(humanHint.cards)) return [] as string[];
+    const seat = humanRequest.seat;
+    if (seat == null || seat < 0 || seat >= hands.length) return [] as string[];
+    const seatHand = hands[seat] || [];
+    const desired = humanHint.cards.map(displayLabelFromRaw);
+    const used = new Set<number>();
+    const out: string[] = [];
+    for (const label of desired) {
+      const idx = seatHand.findIndex((card, i) => !used.has(i) && card === label);
+      if (idx >= 0) {
+        used.add(idx);
+        out.push(seatHand[idx]);
+      } else {
+        out.push(label);
+      }
+    }
+    return out;
+  }, [humanRequest, humanHint, hands]);
+  const humanHintMeta = useMemo(() => {
+    if (!humanHint) return [] as string[];
+    const items: string[] = [];
+    if (humanHint.by) items.push(lang === 'en' ? `Source: ${humanHint.by}` : `来自：${humanHint.by}`);
+    if (typeof humanHint.score === 'number' && Number.isFinite(humanHint.score)) {
+      const scoreText = humanHint.score.toFixed(2);
+      items.push(lang === 'en' ? `Estimated score ${scoreText}` : `估分：${scoreText}`);
+    }
+    if (humanHint.label && humanHint.move === 'play') {
+      items.push(lang === 'en' ? `Pattern: ${humanHint.label}` : `牌型：${humanHint.label}`);
+    }
+    if (humanHint.reason) items.push(humanHint.reason);
+    return items;
+  }, [humanHint, lang]);
+
+  const resetHumanState = useCallback(() => {
+    setHumanRequest(null);
+    setHumanSelectedIdx([]);
+    setHumanSubmitting(false);
+    setHumanError(null);
+  }, []);
+
+  const toggleHumanCard = useCallback((idx: number) => {
+    setHumanSelectedIdx(prev => {
+      if (prev.includes(idx)) return prev.filter(i => i !== idx);
+      return [...prev, idx];
+    });
+  }, []);
+
+  const hasHumanSeat = useMemo(() => {
+    if (!Array.isArray(props.seats)) return false;
+    return props.seats.some(choice => choice === 'human');
+  }, [props.seats]);
+
+  const isHumanSeat = useCallback((seat: number) => props.seats?.[seat] === 'human', [props.seats]);
+
+  const submitHumanAction = useCallback(async (payload: any) => {
+    if (!humanRequest || humanSubmitting) return;
+    const trace = humanTraceRef.current;
+    if (!trace) {
+      setHumanError(lang === 'en' ? 'Client trace missing' : '缺少客户端标识');
+      return;
+    }
+    setHumanSubmitting(true);
+    setHumanError(null);
+    try {
+      const resp = await fetch('/api/human_action', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clientTraceId: trace,
+          requestId: humanRequest.requestId,
+          payload,
+        }),
+      });
+      if (!resp.ok) {
+        let msg = `HTTP ${resp.status}`;
+        try {
+          const data = await resp.json();
+          if (data?.error) msg = data.error;
+        } catch {}
+        throw new Error(msg);
+      }
+    } catch (err:any) {
+      setHumanSubmitting(false);
+      setHumanError(err?.message || String(err));
+    }
+  }, [humanRequest, humanSubmitting, lang]);
+
+  const handleHumanPlay = useCallback(async () => {
+    if (!humanRequest || humanRequest.phase !== 'play') return;
+    const seat = humanRequest.seat;
+    const hand = hands[seat] || [];
+    const cards = humanSelectedIdx
+      .slice()
+      .sort((a,b) => a - b)
+      .map(idx => hand[idx])
+      .filter((c): c is string => typeof c === 'string' && c.length > 0);
+    if (cards.length === 0) {
+      setHumanError(lang === 'en' ? 'Select at least one card.' : '请先选择要出的牌');
+      return;
+    }
+    await submitHumanAction({ phase:'play', move:'play', cards });
+  }, [humanRequest, humanSelectedIdx, submitHumanAction, hands, lang]);
+
+  const handleHumanPass = useCallback(async () => {
+    if (!humanRequest || humanRequest.phase !== 'play') return;
+    await submitHumanAction({ phase:'play', move:'pass' });
+  }, [humanRequest, submitHumanAction]);
+
+  const handleHumanBid = useCallback(async (decision: boolean) => {
+    if (!humanRequest || humanRequest.phase !== 'bid') return;
+    await submitHumanAction({ phase:'bid', bid: decision });
+  }, [humanRequest, submitHumanAction]);
+
+  const handleHumanDouble = useCallback(async (decision: boolean) => {
+    if (!humanRequest || humanRequest.phase !== 'double') return;
+    await submitHumanAction({ phase:'double', double: decision });
+  }, [humanRequest, submitHumanAction]);
+
+  const handleHumanClear = useCallback(() => {
+    setHumanSelectedIdx([]);
+    setHumanError(null);
+  }, []);
+
+  const applyHumanHint = useCallback(() => {
+    if (!humanRequest || humanRequest.phase !== 'play') return;
+    const hint = humanRequest.hint;
+    if (!hint || hint.move !== 'play' || !Array.isArray(hint.cards)) return;
+    const seat = humanRequest.seat;
+    if (seat == null || seat < 0 || seat >= hands.length) return;
+    const seatHand = hands[seat] || [];
+    const desired = hint.cards.map(displayLabelFromRaw);
+    const used = new Set<number>();
+    const indices: number[] = [];
+    for (const label of desired) {
+      const idx = seatHand.findIndex((card, i) => !used.has(i) && card === label);
+      if (idx >= 0) {
+        used.add(idx);
+        indices.push(idx);
+      }
+    }
+    if (indices.length > 0) {
+      setHumanSelectedIdx(indices.sort((a, b) => a - b));
+      setHumanError(null);
+    }
+  }, [humanRequest, hands, setHumanError, setHumanSelectedIdx]);
+
+  const currentHumanSeat = humanRequest?.seat ?? null;
+  const humanPhase = humanRequest?.phase ?? 'play';
+  const humanSeatLabel = currentHumanSeat != null ? seatName(currentHumanSeat) : '';
+  const humanPhaseText = humanPhase === 'bid'
+    ? (lang === 'en' ? 'Bidding' : '抢地主')
+    : humanPhase === 'double'
+      ? (lang === 'en' ? 'Double' : '加倍')
+      : (lang === 'en' ? 'Play cards' : '出牌');
+  const humanRequireText = (() => {
+    if (humanPhase !== 'play') return '';
+    const req = humanRequest?.ctx?.require;
+    if (!req) return lang === 'en' ? 'Any legal play' : '任意合法牌型';
+    if (typeof req === 'string') return req;
+    if (typeof req?.type === 'string') return req.type;
+    return lang === 'en' ? 'Follow previous play' : '跟牌';
+  })();
+  const humanCanPass = humanPhase === 'play' ? humanRequest?.ctx?.canPass !== false : true;
+  const humanSelectedCount = humanSelectedIdx.length;
+  const canAdoptHint = humanPhase === 'play' && humanHint?.move === 'play' && humanHintDecorated.length > 0;
   const initialTotals = useMemo(
     () => sanitizeTotalsArray(props.initialTotals, props.startScore || 0),
     [props.initialTotals, props.startScore],
@@ -3208,7 +3549,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const agentIdForIndex = (i:number) => {
     const choice = props.seats[i] as BotChoice;
     const label = choiceLabel(choice);
-    if ((choice as string).startsWith('built-in')) return label;
+    if ((choice as string).startsWith('built-in') || choice === 'human') return label;
     const model = (props.seatModels?.[i]) || defaultModelFor(choice);
     return `${label}:${model}`;
   };
@@ -3302,12 +3643,15 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setRunning(true);
     setAllLogs([]);
     setLandlord(null); setHands([[], [], []]); setPlays([]);
+    setBottomInfo({ landlord: null, cards: [], revealed: false });
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
     const base = initialTotalsRef.current;
     setTotals([base[0], base[1], base[2]] as [number, number, number]);
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
+    resetHumanState();
+    humanTraceRef.current = '';
 
     // TrueSkill：开始时先应用 overall（未知地主）
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -3382,6 +3726,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
       const toUiSeat = (j:number) => (j + startShift) % 3;
       const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
+      humanTraceRef.current = traceId;
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       roundFinishedRef.current = false;
@@ -3459,6 +3804,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
             return {
               landlord: cur?.landlord ?? null,
               cards: (cur?.cards || []).map(c => ({ ...c })),
+              revealed: !!cur?.revealed,
             } as BottomInfo;
           })();
 for (const raw of batch) {
@@ -3517,7 +3863,8 @@ for (const raw of batch) {
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
-                nextBottom = { landlord: null, cards: [] };
+                nextBottom = { landlord: null, cards: [], revealed: false };
+                resetHumanState();
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -3526,6 +3873,7 @@ for (const raw of batch) {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
                 const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
+                resetHumanState();
                 continue;
               }
 
@@ -3539,9 +3887,18 @@ for (const raw of batch) {
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
                   nextHands = (rh as string[][]).map(decorateHandCycle);
 
-                  const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
+                  const rawLord = m.landlordIdx ?? m.landlord;
+                  const lord = (typeof rawLord === 'number' && rawLord >= 0 && rawLord < 3)
+                    ? rawLord
+                    : null;
                   nextLandlord = lord;
-                  nextBottom = { landlord: lord ?? null, cards: [] };
+                  const bottomRaw = Array.isArray(m.bottom) ? (m.bottom as string[]) : [];
+                  const decoratedBottom = bottomRaw.length ? decorateHandCycle(bottomRaw) : [];
+                  nextBottom = {
+                    landlord: lord ?? null,
+                    cards: decoratedBottom.map(label => ({ label, used: false })),
+                    revealed: false,
+                  };
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
@@ -3571,15 +3928,27 @@ for (const raw of batch) {
                 const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
                 if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
                   nextHands = (rh0 as string[][]).map(decorateHandCycle);
-                  const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
+                  const rawLord2 = m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+                  const lord2 = (typeof rawLord2 === 'number' && rawLord2 >= 0 && rawLord2 < 3)
+                    ? rawLord2
+                    : null;
                   if (lord2 != null) {
                     nextLandlord = lord2;
                     if (nextBottom.landlord !== lord2) {
                       const keep = Array.isArray(nextBottom.cards)
                         ? nextBottom.cards.map(c => ({ ...c }))
                         : [];
-                      nextBottom = { landlord: lord2, cards: keep };
+                      nextBottom = { landlord: lord2, cards: keep, revealed: !!nextBottom.revealed };
                     }
+                  }
+                  const bottom0 = m.bottom ?? m.payload?.bottom ?? m.state?.bottom ?? m.init?.bottom;
+                  if (Array.isArray(bottom0)) {
+                    const decoratedBottom0 = decorateHandCycle(bottom0 as string[]);
+                    nextBottom = {
+                      landlord: nextLandlord ?? nextBottom.landlord ?? null,
+                      cards: decoratedBottom0.map(label => ({ label, used: false })),
+                      revealed: false,
+                    };
                   }
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
@@ -3609,17 +3978,60 @@ for (const raw of batch) {
                 }
               }
 
-// -------- AI 过程日志 --------
+              if (m.type === 'human-request') {
+                const seat = typeof m.seat === 'number' ? m.seat : -1;
+                if (seat >= 0 && seat < 3) {
+                  const requestId = typeof m.requestId === 'string' ? m.requestId : `${Date.now()}-${Math.random()}`;
+                  const rawHint = (m as any).hint ?? (m as any).suggestion;
+                  let hint: HumanHint | undefined;
+                  if (rawHint && typeof rawHint === 'object') {
+                    const move = rawHint.move === 'play' ? 'play' : 'pass';
+                    const cards = Array.isArray(rawHint.cards) ? rawHint.cards.map((c: any) => String(c)) : undefined;
+                    const scoreVal = Number((rawHint as any).score);
+                    const score = Number.isFinite(scoreVal) ? scoreVal : undefined;
+                    const reason = typeof rawHint.reason === 'string' ? rawHint.reason : undefined;
+                    const label = typeof rawHint.label === 'string' ? rawHint.label : undefined;
+                    const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
+                    hint = { move, cards, score, reason, label, by: byHint };
+                  }
+                  setHumanRequest({
+                    seat,
+                    requestId,
+                    phase: typeof m.phase === 'string' ? m.phase : 'play',
+                    ctx: m.ctx ?? {},
+                    timeoutMs: typeof m.timeoutMs === 'number' ? m.timeoutMs : undefined,
+                    delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
+                    by: typeof m.by === 'string' ? m.by : undefined,
+                    hint,
+                  });
+                  setHumanSelectedIdx([]);
+                  setHumanSubmitting(false);
+                  setHumanError(null);
+                  const label = seatName(seat);
+                  const phaseLabel = typeof m.phase === 'string' ? m.phase : 'play';
+                  nextLog = [...nextLog, `【Human】${label} 等待操作｜phase=${phaseLabel}`];
+                }
+                continue;
+              }
+
+              // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
-                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
+                const prefix = isHumanSeat(m.seat) ? 'Human' : 'AI';
+                nextLog = [...nextLog, `${prefix}调用｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
+                const prefix = isHumanSeat(m.seat) ? 'Human' : 'AI';
                 nextLog = [
                   ...nextLog,
-                  `AI完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
-                  ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
+                  `${prefix}完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
+                  ...(m.reason ? [`${prefix}理由｜${seatName(m.seat)}：${m.reason}`] : []),
                 ];
+                if (isHumanSeat(m.seat)) {
+                  setHumanSubmitting(false);
+                  setHumanRequest(prev => (prev && prev.seat === m.seat ? null : prev));
+                  setHumanSelectedIdx([]);
+                }
                 lastReasonRef.current[m.seat] = m.reason || null;
                 continue;
               }
@@ -3668,13 +4080,14 @@ if (m.type === 'event' && m.kind === 'reveal') {
         if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
       }
     }
-    seatHand = [...seatHand, ...mapped];
+    seatHand = sortDisplayHand([...seatHand, ...mapped]);
     nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
   }
 
   nextBottom = {
     landlord: landlordSeat ?? nextBottom.landlord ?? null,
     cards: mapped.map(label => ({ label, used: false })),
+    revealed: true,
   };
   const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
   nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
@@ -3964,7 +4377,7 @@ nextTotals     = [
             const keep = Array.isArray(nextBottom.cards)
               ? nextBottom.cards.map(c => ({ ...c }))
               : [];
-            nextBottom = { landlord: nextLandlord, cards: keep };
+            nextBottom = { landlord: nextLandlord, cards: keep, revealed: !!nextBottom.revealed };
           }
 
           setRoundLords(nextLords);
@@ -4030,6 +4443,8 @@ nextTotals     = [
     } finally {
       exitPause();
       setRunning(false);
+      resetHumanState();
+      humanTraceRef.current = '';
       const totalsSnap = (() => {
         const value = totalsRef.current;
         if (value && Array.isArray(value) && value.length === 3) {
@@ -4050,7 +4465,13 @@ nextTotals     = [
     }
   };
 
-  const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); };
+  const stop = () => {
+    exitPause();
+    controllerRef.current?.abort();
+    setRunning(false);
+    resetHumanState();
+    humanTraceRef.current = '';
+  };
 
   const togglePause = () => {
     if (!running) return;
@@ -4351,14 +4772,33 @@ const handleAllSaveInner = () => {
 <div style={{ marginBottom:6 }}>
                 <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
               </div>
-              <Hand cards={hands[i]} />
+              <Hand
+                cards={hands[i]}
+                interactive={!!(humanRequest && humanRequest.seat === i && humanRequest.phase === 'play')}
+                selectedIndices={humanRequest && humanRequest.seat === i ? humanSelectedSet : undefined}
+                onToggle={humanRequest && humanRequest.seat === i && humanRequest.phase === 'play' ? toggleHumanCard : undefined}
+                disabled={humanSubmitting}
+                faceDown={hasHumanSeat ? !isHumanSeat(i) : false}
+              />
             </div>
           ))}
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
           {[0,1,2].map(i=>{
+            const showAllBottom = !bottomInfo.revealed && bottomInfo.cards.length > 0;
             const isLandlord = bottomInfo.landlord === i;
-            const cards = isLandlord ? bottomInfo.cards : [];
+            const showCards = showAllBottom
+              ? true
+              : bottomInfo.revealed
+                ? isLandlord
+                : (!hasHumanSeat);
+            const cards = showCards ? bottomInfo.cards : [];
+            const labelText = lang === 'en'
+              ? `Bottom${showAllBottom ? ' (pre-bid)' : ''}`
+              : `底牌${showAllBottom ? '（待抢地主）' : ''}`;
+            const background = showAllBottom
+              ? '#fef3c7'
+              : (isLandlord ? '#f0fdf4' : '#f9fafb');
             return (
               <div
                 key={`bottom-${i}`}
@@ -4371,11 +4811,11 @@ const handleAllSaveInner = () => {
                   flexDirection:'column',
                   justifyContent:'center',
                   alignItems:'center',
-                  background:isLandlord ? '#f0fdf4' : '#f9fafb'
+                  background
                 }}
               >
-                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌</div>
-                {isLandlord ? (
+                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>{labelText}</div>
+                {showCards ? (
                   cards.length ? (
                     <div style={{ display:'flex', flexWrap:'wrap', gap:4, justifyContent:'center' }}>
                       {cards.map((c, idx) => (
@@ -4383,7 +4823,9 @@ const handleAllSaveInner = () => {
                       ))}
                     </div>
                   ) : (
-                    <div style={{ fontSize:12, color:'#9ca3af' }}>（待明牌）</div>
+                    <div style={{ fontSize:12, color:'#9ca3af' }}>
+                      {lang === 'en' ? '(awaiting reveal)' : '（待明牌）'}
+                    </div>
                   )
                 ) : (
                   <div style={{ fontSize:12, color:'#d1d5db' }}>—</div>
@@ -4393,6 +4835,142 @@ const handleAllSaveInner = () => {
           })}
         </div>
       </Section>
+
+      {humanRequest && (
+        <Section title={lang === 'en' ? 'Human control' : '人类操作'}>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <div style={{ fontWeight:700 }}>
+              {lang === 'en'
+                ? `Seat ${humanSeatLabel} · ${humanPhaseText}`
+                : `${humanSeatLabel} ｜ ${humanPhaseText}`}
+            </div>
+            {humanPhase === 'play' && (
+              <>
+                <div style={{ fontSize:12, color:'#6b7280' }}>
+                  {lang === 'en'
+                    ? `Requirement: ${humanRequireText} · Can pass: ${humanCanPass ? 'Yes' : 'No'} · Selected: ${humanSelectedCount}`
+                    : `需求：${humanRequireText} ｜ 可过：${humanCanPass ? '是' : '否'} ｜ 已选：${humanSelectedCount}`}
+                </div>
+                {humanHint && (
+                  <div
+                    style={{
+                      border:'1px solid #bfdbfe',
+                      background:'#eff6ff',
+                      borderRadius:8,
+                      padding:'8px 10px',
+                      display:'flex',
+                      flexDirection:'column',
+                      gap:6,
+                    }}
+                  >
+                    <div style={{ fontWeight:600, color:'#1d4ed8' }}>
+                      {lang === 'en'
+                        ? (humanHint.move === 'play' ? 'Suggestion: play these cards' : 'Suggestion: pass this turn')
+                        : (humanHint.move === 'play' ? '提示：建议出牌' : '提示：建议过牌')}
+                    </div>
+                    {humanHint.move === 'play' ? (
+                      humanHintDecorated.length > 0 ? (
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                          {humanHintDecorated.map((card, idx) => (
+                            <Card key={`hint-${card}-${idx}`} label={card} compact />
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize:12, color:'#4b5563' }}>
+                          {lang === 'en'
+                            ? 'No specific combination suggested; choose any legal play.'
+                            : '暂无具体牌型建议，可根据规则自由选择。'}
+                        </div>
+                      )
+                    ) : (
+                      <div style={{ fontSize:12, color:'#4b5563' }}>
+                        {lang === 'en'
+                          ? 'Hint: passing keeps stronger responses for later.'
+                          : '提示：建议过牌以保留更强的牌型。'}
+                      </div>
+                    )}
+                    {humanHintMeta.length > 0 && (
+                      <div style={{ fontSize:12, color:'#4b5563' }}>
+                        {humanHintMeta.join(lang === 'en' ? ' · ' : ' ｜ ')}
+                      </div>
+                    )}
+                    {canAdoptHint && (
+                      <div>
+                        <button
+                          onClick={applyHumanHint}
+                          disabled={humanSubmitting}
+                          style={{
+                            padding:'4px 10px',
+                            border:'1px solid #3b82f6',
+                            borderRadius:6,
+                            background: humanSubmitting ? '#dbeafe' : '#3b82f6',
+                            color: humanSubmitting ? '#6b7280' : '#fff',
+                          }}
+                        >
+                          {lang === 'en' ? 'Adopt suggestion' : '采纳建议'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                  <button
+                    onClick={handleHumanPlay}
+                    disabled={humanSubmitting || humanSelectedCount === 0}
+                    style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting || humanSelectedCount === 0 ? '#e5e7eb' : '#2563eb', color: humanSubmitting || humanSelectedCount === 0 ? '#6b7280' : '#fff' }}
+                  >{lang === 'en' ? 'Play selected' : '出牌'}</button>
+                  <button
+                    onClick={handleHumanPass}
+                    disabled={humanSubmitting || !humanCanPass}
+                    style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background: humanSubmitting || !humanCanPass ? '#f3f4f6' : '#fff', color:'#1f2937' }}
+                  >{lang === 'en' ? 'Pass' : '过'}</button>
+                  <button
+                    onClick={handleHumanClear}
+                    disabled={humanSubmitting || humanSelectedCount === 0}
+                    style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                  >{lang === 'en' ? 'Clear selection' : '清空选择'}</button>
+                </div>
+              </>
+            )}
+            {humanPhase === 'bid' && (
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                <button
+                  onClick={() => handleHumanBid(true)}
+                  disabled={humanSubmitting}
+                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting ? '#e5e7eb' : '#2563eb', color: humanSubmitting ? '#6b7280' : '#fff' }}
+                >{lang === 'en' ? 'Bid' : '抢地主'}</button>
+                <button
+                  onClick={() => handleHumanBid(false)}
+                  disabled={humanSubmitting}
+                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                >{lang === 'en' ? 'Pass' : '不抢'}</button>
+              </div>
+            )}
+            {humanPhase === 'double' && (
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                <button
+                  onClick={() => handleHumanDouble(true)}
+                  disabled={humanSubmitting}
+                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting ? '#e5e7eb' : '#2563eb', color: humanSubmitting ? '#6b7280' : '#fff' }}
+                >{lang === 'en' ? 'Double' : '加倍'}</button>
+                <button
+                  onClick={() => handleHumanDouble(false)}
+                  disabled={humanSubmitting}
+                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                >{lang === 'en' ? 'No double' : '不加倍'}</button>
+              </div>
+            )}
+            {humanError && (
+              <div style={{ color:'#dc2626', fontSize:12 }}>{humanError}</div>
+            )}
+            {humanSubmitting && (
+              <div style={{ color:'#2563eb', fontSize:12 }}>
+                {lang === 'en' ? 'Submitted. Waiting for engine...' : '已提交，等待引擎响应…'}
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
 
       <Section title="出牌">
         <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
@@ -4481,6 +5059,7 @@ const [lang, setLang] = useState<Lang>(() => {
     const v = localStorage.getItem('ddz_match_mode');
     return v === 'knockout' ? 'knockout' : 'regular';
   });
+  const humanOptionLabel = lang === 'en' ? 'Human' : '人类选手';
   useEffect(()=>{
     try {
       localStorage.setItem('ddz_lang', lang);
@@ -4541,7 +5120,7 @@ const [lang, setLang] = useState<Lang>(() => {
     rd.readAsText(f);
   };
   const isRegularMode = matchMode === 'regular';
-  const regularLabel = lang === 'en' ? 'Regular match' : '常规对局';
+  const regularLabel = lang === 'en' ? 'Regular match' : '常规赛';
   const knockoutLabel = lang === 'en' ? 'Knockout' : '淘汰赛';
   return (<> 
     <LangContext.Provider value={lang}>
@@ -4697,7 +5276,7 @@ const [lang, setLang] = useState<Lang>(() => {
                     }}
                     style={{ width:'100%' }}
                   >
-                    <optgroup label="内置">
+                    <optgroup label={lang === 'en' ? 'Built-in' : '内置'}>
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
@@ -4705,7 +5284,7 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
                     </optgroup>
-                    <optgroup label="AI">
+                    <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
                       <option value="ai:gemini">Gemini</option>
                       <option value="ai:grok">Grok</option>
@@ -4713,6 +5292,9 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="ai:qwen">Qwen</option>
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
+                    </optgroup>
+                    <optgroup label={lang === 'en' ? 'Human' : '人类选手'}>
+                      <option value="human">{humanOptionLabel}</option>
                     </optgroup>
                   </select>
                 </label>

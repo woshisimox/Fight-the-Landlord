@@ -9,6 +9,12 @@ import { KimiBot } from '../../lib/bots/kimi_bot';
 import { QwenBot } from '../../lib/bots/qwen_bot';
 // 如果你的仓库没有 DeepseekBot，可以删除本行和 asBot 里的分支
 import { DeepseekBot } from '../../lib/bots/deepseek_bot';
+import {
+  registerHumanRequest,
+  fulfillHumanRequest,
+  expireHumanRequest,
+  resetSession as resetHumanSession,
+} from '../../lib/humanStore';
 
 // ---- stable hash for ruleId ----
 function stableHash(s: string): string { let h=5381; for (let i=0;i<s.length;i++){ h=((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); }
@@ -146,7 +152,38 @@ function unifiedScore(ctx:any, mv:string[]): number {
 }
 /* ========== 小工具 ========== */
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
-const writeLine = (res: NextApiResponse, obj: any) => { (res as any).write(JSON.stringify(obj) + '\n'); };
+const SECRET_KEYS = new Set([
+  'apikey', 'api_key', 'api-key',
+  'token', 'httptoken', 'http_token', 'http-token',
+  'secret', 'password',
+  'authorization', 'authorizationbearer',
+  'x-api-key', 'x_api_key', 'xapikey',
+]);
+
+const isPlainObject = (value: any): value is Record<string, any> => {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
+
+const redactSecrets = (input: any): any => {
+  if (Array.isArray(input)) {
+    return input.map(item => redactSecrets(item));
+  }
+  if (!isPlainObject(input)) return input;
+  const clone: Record<string, any> = {};
+  for (const [rawKey, value] of Object.entries(input)) {
+    const key = rawKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (SECRET_KEYS.has(key)) continue;
+    clone[rawKey] = redactSecrets(value);
+  }
+  return clone;
+};
+
+const writeLine = (res: NextApiResponse, obj: any) => {
+  const payload = (obj && typeof obj === 'object') ? redactSecrets(obj) : obj;
+  (res as any).write(JSON.stringify(payload) + '\n');
+};
 
 function stringifyMove(m:any){
   if (!m || m.move==='pass') return 'pass';
@@ -198,7 +235,8 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
-  | 'http';
+  | 'http'
+  | 'human';
 
 type SeatSpec = {
   choice: BotChoice;
@@ -217,6 +255,7 @@ type RunBody = {
   startScore?: number;
   turnTimeoutSecs?: number[];  // [s0,s1,s2]
   turnTimeoutSec?: number | number[];
+  clientTraceId?: string;
   rob?: boolean;
   debug?: any;
 };
@@ -229,6 +268,7 @@ function providerLabel(choice: BotChoice) {
     case 'built-in:random-legal': return 'RandomLegal';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'human': return 'Human';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
     case 'ai:grok': return 'Grok';
@@ -246,6 +286,12 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
     case 'built-in:random-legal': return RandomLegal;
     case 'built-in:ally-support': return AllySupport;
     case 'built-in:endgame-rush': return EndgameRush;
+    case 'human': {
+      const stub = async () => ({ move: 'pass', reason: 'human-stub' });
+      (stub as any).phaseAware = true;
+      (stub as any).choice = 'human';
+      return stub;
+    }
     case 'ai:openai':  return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
     case 'ai:gemini':  return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-pro' });
     case 'ai:grok':    return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
@@ -267,30 +313,127 @@ function traceWrap(
   onScore: (seat:number, sc?:number)=>void,
   turnTimeoutMs: number,
   startDelayMs: number,
-  seatIndex: number
+  seatIndex: number,
+  sessionId?: string,
 ){
+  const isHuman = choice === 'human';
   const label = providerLabel(choice);
   const supportsPhase = typeof choice === 'string'
-    ? (choice.startsWith('ai:') || choice === 'http')
+    ? (choice.startsWith('ai:') || choice === 'http' || isHuman)
     : false;
+  const sessionKey = (sessionId && sessionId.trim()) ? sessionId.trim() : '__human__';
+
+  const sanitizeCtx = (ctx:any) => {
+    try { return JSON.parse(JSON.stringify(ctx)); } catch { return ctx; }
+  };
+
+  const buildHumanHint = async (ctx: any) => {
+    const handCards: string[] = Array.isArray(ctx?.hands) ? ctx.hands.slice() : [];
+    const hasAllCards = (need: string[], have: string[]) => {
+      if (!need.length) return true;
+      if (!have.length) return false;
+      const pool = new Map<string, number>();
+      for (const card of have) {
+        pool.set(card, (pool.get(card) || 0) + 1);
+      }
+      for (const card of need) {
+        const remain = pool.get(card) || 0;
+        if (remain <= 0) return false;
+        pool.set(card, remain - 1);
+      }
+      return true;
+    };
+    try {
+      const rec = await Promise.resolve(GreedyMax(ctx));
+      if (rec && typeof rec === 'object') {
+        if (rec.move === 'play' && Array.isArray(rec.cards) && rec.cards.length > 0) {
+          if (!hasAllCards(rec.cards, handCards)) {
+            console.debug('[HINT]', 'discarding hint without matching cards', rec.cards);
+            return null;
+          }
+          const sc = unifiedScore(ctx, rec.cards);
+          return {
+            move: 'play' as const,
+            cards: rec.cards.slice(),
+            score: Number.isFinite(sc) ? Number(sc) : undefined,
+            reason: typeof rec.reason === 'string' ? rec.reason : undefined,
+            label: stringifyMove(rec),
+            by: 'GreedyMax',
+          };
+        }
+        if (rec.move === 'pass') {
+          return {
+            move: 'pass' as const,
+            reason: typeof rec.reason === 'string' ? rec.reason : undefined,
+            by: 'GreedyMax',
+          };
+        }
+      }
+    } catch (err) {
+      console.debug('[HINT]', 'failed to build human hint', err);
+    }
+    return null;
+  };
+
+  const makeTimeout = (onTimeout?: () => void) => new Promise((resolve) => {
+    setTimeout(() => {
+      try { onTimeout?.(); } catch {}
+      resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` });
+    }, Math.max(1000, turnTimeoutMs));
+  });
 
   const wrapped = async (ctx:any) => {
     if (startDelayMs && startDelayMs>0) {
       await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
     }
     const phase = ctx?.phase || 'play';
-    try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch {}
-
-    const timeout = new Promise((resolve)=> {
-      setTimeout(()=> resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` }), Math.max(1000, turnTimeoutMs));
-    });
+    try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch{}
 
     let result:any;
     const t0 = Date.now();
     try {
       const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
       try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
-      result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
+
+      if (isHuman) {
+        const requestId = `${sessionKey}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
+        const hintPayload = phase === 'play' ? await buildHumanHint(ctxWithSeen) : null;
+        const payloadCtx = sanitizeCtx(ctxWithSeen);
+        const humanPromise = new Promise((resolve, reject) => {
+          registerHumanRequest(
+            sessionKey,
+            requestId,
+            seatIndex,
+            (value) => resolve(value),
+            (err) => reject(err),
+          );
+        });
+        try {
+          writeLine(res, {
+            type: 'human-request',
+            seat: seatIndex,
+            by: label,
+            requestId,
+            phase,
+            ctx: payloadCtx,
+            timeoutMs: turnTimeoutMs,
+            delayMs: startDelayMs,
+            sessionId: sessionKey,
+            hint: hintPayload || undefined,
+          });
+        } catch {}
+        const timeout = makeTimeout(() => {
+          expireHumanRequest(sessionKey, requestId, new Error('timeout'));
+        });
+        try {
+          result = await Promise.race([humanPromise, timeout]);
+        } catch (err:any) {
+          result = { move:'pass', reason:`error:${err?.message||String(err)}` };
+        }
+      } else {
+        const timeout = makeTimeout();
+        result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
+      }
     } catch (e:any) {
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
     }
@@ -386,19 +529,22 @@ for await (const ev of (iter as any)) {
     // 初始发牌/地主
     if (!sentInit && ev?.type==='init') {
       sentInit = true;
-      landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
+      const rawLandlord = (typeof ev.landlordIdx === 'number')
+        ? ev.landlordIdx
+        : (typeof ev.landlord === 'number' ? ev.landlord : null);
+      landlordIdx = (typeof rawLandlord === 'number' && rawLandlord >= 0) ? rawLandlord : -1;
       // 修复：添加 landlord 字段确保前端能正确识别地主
-      writeLine(res, { 
-        type:'init', 
-        landlordIdx, 
-        landlord: landlordIdx,  // 添加 landlord 字段
-        bottom: ev.bottom, 
-        hands: ev.hands 
+      writeLine(res, {
+        type:'init',
+        landlordIdx: rawLandlord,
+        landlord: rawLandlord,
+        bottom: ev.bottom,
+        hands: ev.hands
       });
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
       // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
-try {
+if (landlordIdx >= 0) try {
   const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
   const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
   const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
@@ -447,7 +593,7 @@ continue;
         totals 
       });
       // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
-try {
+if (landlordIdx >= 0) try {
   const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
   const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
   const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
@@ -524,6 +670,13 @@ continue;
     }
 
     // 其它事件透传
+    if (ev?.type === 'event' && ev.kind === 'reveal') {
+      const raw = (typeof ev.landlordIdx === 'number')
+        ? ev.landlordIdx
+        : (typeof ev.landlord === 'number' ? ev.landlord : null);
+      if (typeof raw === 'number' && raw >= 0) landlordIdx = raw;
+    }
+
     if (ev && ev.type) writeLine(res, ev);
   }
 }
@@ -543,6 +696,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const keepAlive = setInterval(() => { try { (res as any).write('\n'); } catch {} }, 15000);
 
+  let sessionKey = '';
+
   try {
     const body: RunBody = (req as any).body as any;
     const rounds = Math.max(1, Math.floor(Number(body.rounds || 1)));
@@ -551,6 +706,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const rule = (body as any).rule ?? { four2, rob: body.rob !== false, farmerCoop: !!body.farmerCoop };
     const ruleId = (body as any).ruleId ?? stableHash(JSON.stringify(rule));
+
+    sessionKey = (typeof body.clientTraceId === 'string' && body.clientTraceId.trim())
+      ? body.clientTraceId.trim()
+      : `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+    try { resetHumanSession(sessionKey); } catch {}
 
     const turnTimeoutMsArr = parseTurnTimeoutMsArr(req);
     const seatSpecs = (body.seats || []).slice(0,3) as SeatSpec[];
@@ -576,7 +736,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot as any, res, onReason, onScore,
                   turnTimeoutMsArr[i] ?? turnTimeoutMsArr[0],
                   Math.max(0, Math.floor(delays[i] ?? 0)),
-                  i)
+                  i,
+                  sessionKey)
       );
 
       await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
@@ -589,5 +750,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } finally {
     try{ clearInterval(keepAlive as any);}catch{};
     try{ (res as any).end(); }catch{}
+    if (sessionKey) {
+      try { resetHumanSession(sessionKey); } catch {}
+    }
   }
 }

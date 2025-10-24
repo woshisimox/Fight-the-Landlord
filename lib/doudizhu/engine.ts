@@ -1401,7 +1401,7 @@ export async function* runOneGame(opts: {
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
 
   // 抢地主流程（简单实现）
-  let landlord = 0;
+  let landlord = -1;
   let multiplier = 1;
   let bidMultiplier = 1;
   const seatMeta = bots.map((bot:any)=>({
@@ -1411,6 +1411,19 @@ export async function* runOneGame(opts: {
   }));
 
   const MAX_BID_ATTEMPTS = 5;
+
+  // —— 在进入叫抢流程前，把初始手牌与底牌推送出去，便于前端立即展示 ——
+  try {
+    yield {
+      type: 'state',
+      kind: 'init',
+      landlord: null,
+      landlordIdx: null,
+      hands: hands.map(h => [...h]),
+      bottom: bottom.slice(),
+    };
+  } catch {}
+
   if (opts.bid !== false) {
     let last = -1;
 
@@ -1438,6 +1451,7 @@ export async function* runOneGame(opts: {
           'built-in:endgame-rush': 2.1,
           'built-in:mininet':      2.2,
           'built-in:greedy-min':   2.4,
+          'human':                 2.2,
           'external':              2.2,
           'external:ai':           2.2,
           'external:http':         2.2,
@@ -1553,8 +1567,9 @@ export async function* runOneGame(opts: {
       break;
     }
   }
+  if (landlord < 0) landlord = 0;
   // 亮底 & 地主收底
-  yield { type:'event', kind:'reveal', bottom: bottom.slice() };
+  yield { type:'event', kind:'reveal', landlord, landlordIdx: landlord, bottom: bottom.slice() };
   hands[landlord].push(...bottom);
   hands[landlord] = sorted(hands[landlord]);
 
@@ -1765,8 +1780,6 @@ __doubleMulB = Math.min(__DOUBLE_CFG.cap, __doubleMulB * multiplier) / Math.max(
 try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bing:Bseat, mulY: __doubleMulY, mulB: __doubleMulB, base: multiplier }; } catch{}
 
 
-  // 初始化（带上地主）
-  yield { type:'state', kind:'init', landlord, hands: hands.map(h => [...h]) };
   // 历史与记牌数据
   let trick = 0;                          // 轮次（从 0 开始）
   const history: PlayEvent[] = [];        // 全部出牌/过牌历史
@@ -1944,7 +1957,8 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
       removeLabels(hands[turn], pick);
       playedCount[turn]++;
 
-      if (cc.type === 'bomb' || cc.type === 'rocket') bombTimes++;
+      const isBomb = (cc.type === 'bomb' || cc.type === 'rocket');
+      if (isBomb) bombTimes++;
 
       yield {
         type:'event', kind:'play', seat: turn, move:'play',
@@ -1952,6 +1966,24 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
       };
       history.push({ seat: turn, move:'play', cards: clone(pick), comboType: cc.type, trick });
       seen.push(...pick);
+
+      if (isBomb) {
+        const bombScale = Math.pow(2, bombTimes);
+        const multBase = Math.max(1, multiplier * bombScale);
+        const multYi   = Math.max(1, multiplier * __doubleMulY * bombScale);
+        const multBing = Math.max(1, multiplier * __doubleMulB * bombScale);
+        try {
+          yield {
+            type:'event',
+            kind:'multiplier-sync',
+            multiplier: multBase,
+            multiplierYi: multYi,
+            multiplierBing: multBing,
+            bombTimes,
+            source: cc.type
+          };
+        } catch {}
+      }
 
 
       require = cc;
