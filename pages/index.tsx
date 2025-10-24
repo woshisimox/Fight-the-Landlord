@@ -4929,8 +4929,21 @@ function ScoreTimeline(
 
   const data = series || [[],[],[]];
   const n = Math.max(data[0]?.length||0, data[1]?.length||0, data[2]?.length||0);
+  const seatByIndex: number[] = [];
+  for (let i=0; i<n; i++) {
+    let owner = -1;
+    for (let s=0; s<data.length; s++) {
+      const v = data[s]?.[i];
+      if (typeof v === 'number' && Number.isFinite(v)) { owner = s; break; }
+    }
+    seatByIndex.push(owner);
+  }
   const values:number[] = [];
-  for (const arr of data) for (const v of (arr||[])) if (typeof v==='number') values.push(v);
+  for (const arr of data) {
+    for (const v of (arr || [])) {
+      if (typeof v === 'number' && Number.isFinite(v)) values.push(v);
+    }
+  }
   const vmin = values.length ? Math.min(...values) : -5;
   const vmax = values.length ? Math.max(...values) : 5;
   const pad = (vmax - vmin) * 0.15 + 1e-6;
@@ -4970,16 +4983,28 @@ function ScoreTimeline(
     if (k >= 0) { for (let j=0; j<k; j++) landlordsFilled[j] = landlordsFilled[k]; }
   }
 
-  const makePath = (arr:(number|null)[])=>{
-    let d=''; let open=false;
+  const makePath = (arr:(number|null)[], seatIndex:number)=>{
+    let d=''; let open=false; let lastIdx = -1;
     const cutSet = new Set(cuts);
     for (let i=0;i<n;i++){
-      if (cutSet.has(i) && i!==0) { open = false; }
+      if (cutSet.has(i) && i!==0) { open = false; lastIdx = -1; }
       const v = arr[i];
-      if (typeof v !== 'number') { open=false; continue; }
+      if (!(typeof v === 'number' && Number.isFinite(v))) { open=false; continue; }
       const px = x(i), py = y(v);
-      d += (open? ` L ${px} ${py}` : `M ${px} ${py}`);
+      let startNew = !open;
+      if (!startNew && lastIdx >= 0) {
+        let hasOther = false;
+        for (let k=lastIdx+1; k<i; k++) {
+          const owner = seatByIndex[k];
+          if (owner !== seatIndex && owner !== -1) { hasOther = true; break; }
+        }
+        if (!hasOther && seatByIndex[lastIdx] === seatIndex && seatByIndex[i] === seatIndex) {
+          startNew = true;
+        }
+      }
+      d += (startNew ? `M ${px} ${py}` : ` L ${px} ${py}`);
       open = true;
+      lastIdx = i;
     }
     return d;
   };
@@ -5042,8 +5067,8 @@ function ScoreTimeline(
           {/* 三条曲线 + 数据点 */}
           {data.map((arr, si)=>(
             <g key={'g'+si}>
-              <path d={makePath(arr)} fill="none" stroke={colors[si]} strokeWidth={2} />
-              {arr.map((v,i)=> (typeof v==='number') && (
+              <path d={makePath(arr, si)} fill="none" stroke={colors[si]} strokeWidth={2} />
+              {arr.map((v,i)=> (typeof v==='number' && Number.isFinite(v)) && (
                 <circle
                   key={'c'+si+'-'+i}
                   cx={x(i)} cy={y(v)} r={2.5} fill={colors[si]}
