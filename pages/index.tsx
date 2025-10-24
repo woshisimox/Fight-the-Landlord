@@ -1,6 +1,6 @@
 // pages/index.tsx
 import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, CSSProperties } from 'react';
+import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -787,7 +787,11 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
-type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[] };
+type BottomInfo = {
+  landlord: number | null;
+  cards: { label: string; used: boolean }[];
+  revealed: boolean;
+};
 
 const rankOf = (l: string) => {
   if (!l) return '';
@@ -845,39 +849,67 @@ type CardProps = {
   selected?: boolean;
   onClick?: () => void;
   disabled?: boolean;
+  hidden?: boolean;
 };
 
-function Card({ label, dimmed = false, compact = false, interactive = false, selected = false, onClick, disabled = false }: CardProps) {
-  const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
-  const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
-  const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-  const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
+function Card({ label, dimmed = false, compact = false, interactive = false, selected = false, onClick, disabled = false, hidden = false }: CardProps) {
   const pad = compact ? '4px 6px' : '6px 10px';
   const fontSize = compact ? 14 : 16;
-  const suitColor = dimmed ? '#9ca3af' : baseColor;
-  const rankStyle = dimmed
-    ? { color: '#9ca3af' }
-    : (rankColor ? { color: rankColor } : {});
-  const background = selected ? '#dbeafe' : (dimmed ? '#f3f4f6' : '#fff');
-  const borderColor = selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd');
-  const commonStyle: React.CSSProperties = {
-    display:'inline-flex', alignItems:'center', gap:6,
-    border:'1px solid', borderRadius:8, padding: pad,
-    marginRight:6, marginBottom:6, fontWeight:800,
-    color: suitColor,
-    background,
-    opacity: dimmed ? 0.65 : 1,
-    borderColor,
+  const baseStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: hidden ? 0 : 6,
+    justifyContent: hidden ? 'center' : 'flex-start',
+    border: '1px solid',
+    borderRadius: 8,
+    padding: pad,
+    marginRight: 6,
+    marginBottom: 6,
+    fontWeight: 800,
     cursor: interactive ? (disabled ? 'not-allowed' : 'pointer') : 'default',
     outline: selected ? '2px solid #2563eb' : 'none',
+    userSelect: 'none',
   };
 
-  const inner = (
-    <>
-      <span style={{ fontSize }}>{suit}</span>
-      <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
-    </>
-  );
+  let background = '#fff';
+  let borderColor = '#ddd';
+  let color = '#1f2937';
+  let opacity = 1;
+  let inner: ReactNode;
+
+  if (hidden) {
+    background = selected ? '#bfdbfe' : '#1f2937';
+    borderColor = selected ? '#2563eb' : '#111827';
+    color = '#f9fafb';
+    inner = <span style={{ fontSize }}>🂠</span>;
+  } else {
+    const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
+    const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
+    const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
+    const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
+    const suitColor = dimmed ? '#9ca3af' : baseColor;
+    const rankStyle = dimmed
+      ? { color: '#9ca3af' }
+      : (rankColor ? { color: rankColor } : {});
+    background = selected ? '#dbeafe' : (dimmed ? '#f3f4f6' : '#fff');
+    borderColor = selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd');
+    color = suitColor;
+    opacity = dimmed ? 0.65 : 1;
+    inner = (
+      <>
+        <span style={{ fontSize }}>{suit}</span>
+        <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+      </>
+    );
+  }
+
+  const style: React.CSSProperties = {
+    ...baseStyle,
+    background,
+    borderColor,
+    color,
+    opacity,
+  };
 
   if (interactive) {
     return (
@@ -885,7 +917,8 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
         type="button"
         onClick={disabled ? undefined : onClick}
         disabled={disabled}
-        style={{ ...commonStyle, borderWidth:1, userSelect:'none' }}
+        style={{ ...style, borderWidth: 1 }}
+        title={hidden ? label : undefined}
       >
         {inner}
       </button>
@@ -893,7 +926,7 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
   }
 
   return (
-    <span style={{ ...commonStyle, borderWidth:1 }}>
+    <span style={{ ...style, borderWidth: 1 }} title={hidden ? label : undefined}>
       {inner}
     </span>
   );
@@ -904,9 +937,10 @@ type HandProps = {
   selectedIndices?: Set<number>;
   onToggle?: (index: number) => void;
   disabled?: boolean;
+  faceDown?: boolean;
 };
 
-function Hand({ cards, interactive = false, selectedIndices, onToggle, disabled = false }: HandProps) {
+function Hand({ cards, interactive = false, selectedIndices, onToggle, disabled = false, faceDown = false }: HandProps) {
   const { t } = useI18n();
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>{t('Empty')}</span>;
   const selected = selectedIndices ?? new Set<number>();
@@ -920,6 +954,7 @@ function Hand({ cards, interactive = false, selectedIndices, onToggle, disabled 
           selected={selected.has(idx)}
           onClick={interactive && onToggle ? () => onToggle(idx) : undefined}
           disabled={disabled}
+          hidden={faceDown && !interactive}
         />
       ))}
     </div>
@@ -2787,7 +2822,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const [bidMultiplier, setBidMultiplier] = useState(1);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
-  const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [] });
+  const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [], revealed: false });
   const [log, setLog] = useState<string[]>([]);
   const humanTraceRef = useRef<string>('');
   const [humanRequest, setHumanRequest] = useState<HumanPrompt | null>(null);
@@ -3479,6 +3514,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setRunning(true);
     setAllLogs([]);
     setLandlord(null); setHands([[], [], []]); setPlays([]);
+    setBottomInfo({ landlord: null, cards: [], revealed: false });
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
     const base = initialTotalsRef.current;
@@ -3639,6 +3675,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
             return {
               landlord: cur?.landlord ?? null,
               cards: (cur?.cards || []).map(c => ({ ...c })),
+              revealed: !!cur?.revealed,
             } as BottomInfo;
           })();
 for (const raw of batch) {
@@ -3697,7 +3734,7 @@ for (const raw of batch) {
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
-                nextBottom = { landlord: null, cards: [] };
+                nextBottom = { landlord: null, cards: [], revealed: false };
                 resetHumanState();
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
@@ -3723,7 +3760,13 @@ for (const raw of batch) {
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
-                  nextBottom = { landlord: lord ?? null, cards: [] };
+                  const bottomRaw = Array.isArray(m.bottom) ? (m.bottom as string[]) : [];
+                  const decoratedBottom = bottomRaw.length ? decorateHandCycle(bottomRaw) : [];
+                  nextBottom = {
+                    landlord: lord ?? null,
+                    cards: decoratedBottom.map(label => ({ label, used: false })),
+                    revealed: false,
+                  };
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
@@ -3760,8 +3803,17 @@ for (const raw of batch) {
                       const keep = Array.isArray(nextBottom.cards)
                         ? nextBottom.cards.map(c => ({ ...c }))
                         : [];
-                      nextBottom = { landlord: lord2, cards: keep };
+                      nextBottom = { landlord: lord2, cards: keep, revealed: !!nextBottom.revealed };
                     }
+                  }
+                  const bottom0 = m.bottom ?? m.payload?.bottom ?? m.state?.bottom ?? m.init?.bottom;
+                  if (Array.isArray(bottom0)) {
+                    const decoratedBottom0 = decorateHandCycle(bottom0 as string[]);
+                    nextBottom = {
+                      landlord: nextLandlord ?? nextBottom.landlord ?? null,
+                      cards: decoratedBottom0.map(label => ({ label, used: false })),
+                      revealed: false,
+                    };
                   }
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
@@ -3887,6 +3939,7 @@ if (m.type === 'event' && m.kind === 'reveal') {
   nextBottom = {
     landlord: landlordSeat ?? nextBottom.landlord ?? null,
     cards: mapped.map(label => ({ label, used: false })),
+    revealed: true,
   };
   const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
   nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
@@ -4176,7 +4229,7 @@ nextTotals     = [
             const keep = Array.isArray(nextBottom.cards)
               ? nextBottom.cards.map(c => ({ ...c }))
               : [];
-            nextBottom = { landlord: nextLandlord, cards: keep };
+            nextBottom = { landlord: nextLandlord, cards: keep, revealed: !!nextBottom.revealed };
           }
 
           setRoundLords(nextLords);
@@ -4577,14 +4630,23 @@ const handleAllSaveInner = () => {
                 selectedIndices={humanRequest && humanRequest.seat === i ? humanSelectedSet : undefined}
                 onToggle={humanRequest && humanRequest.seat === i && humanRequest.phase === 'play' ? toggleHumanCard : undefined}
                 disabled={humanSubmitting}
+                faceDown={!isHumanSeat(i)}
               />
             </div>
           ))}
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
           {[0,1,2].map(i=>{
+            const showAllBottom = !bottomInfo.revealed && bottomInfo.cards.length > 0;
             const isLandlord = bottomInfo.landlord === i;
-            const cards = isLandlord ? bottomInfo.cards : [];
+            const showCards = showAllBottom || isLandlord;
+            const cards = showCards ? bottomInfo.cards : [];
+            const labelText = lang === 'en'
+              ? `Bottom${showAllBottom ? ' (pre-bid)' : ''}`
+              : `底牌${showAllBottom ? '（待抢地主）' : ''}`;
+            const background = showAllBottom
+              ? '#fef3c7'
+              : (isLandlord ? '#f0fdf4' : '#f9fafb');
             return (
               <div
                 key={`bottom-${i}`}
@@ -4597,11 +4659,11 @@ const handleAllSaveInner = () => {
                   flexDirection:'column',
                   justifyContent:'center',
                   alignItems:'center',
-                  background:isLandlord ? '#f0fdf4' : '#f9fafb'
+                  background
                 }}
               >
-                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌</div>
-                {isLandlord ? (
+                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>{labelText}</div>
+                {showCards ? (
                   cards.length ? (
                     <div style={{ display:'flex', flexWrap:'wrap', gap:4, justifyContent:'center' }}>
                       {cards.map((c, idx) => (
@@ -4609,7 +4671,9 @@ const handleAllSaveInner = () => {
                       ))}
                     </div>
                   ) : (
-                    <div style={{ fontSize:12, color:'#9ca3af' }}>（待明牌）</div>
+                    <div style={{ fontSize:12, color:'#9ca3af' }}>
+                      {lang === 'en' ? '(awaiting reveal)' : '（待明牌）'}
+                    </div>
                   )
                 ) : (
                   <div style={{ fontSize:12, color:'#d1d5db' }}>—</div>
