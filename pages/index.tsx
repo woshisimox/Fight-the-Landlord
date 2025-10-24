@@ -5559,12 +5559,30 @@ function ScoreTimeline(
   cuts.sort((a,b)=>a-b);
   if (cuts[0] !== 0) cuts.unshift(0);
   if (cuts[cuts.length-1] !== n) cuts.push(n);
+  const cutSet = new Set(cuts);
 
-  const breakSet = new Set(
-    Array.isArray(breaks)
-      ? breaks.filter((v) => typeof v === 'number' && Number.isFinite(v)).map(v => Math.max(0, Math.floor(v)))
-      : []
-  );
+  const explicitBreaks = Array.isArray(breaks)
+    ? breaks
+        .filter((v) => typeof v === 'number' && Number.isFinite(v))
+        .map((v) => Math.max(0, Math.floor(v)))
+        .sort((a, b) => a - b)
+    : [];
+  const breakSet = new Set(explicitBreaks);
+  {
+    let lastSeatWithValue = -1;
+    for (let idx = 0; idx < n; idx++) {
+      let seat = -1;
+      for (let si = 0; si < data.length; si++) {
+        const val = data[si]?.[idx];
+        if (typeof val === 'number' && Number.isFinite(val)) { seat = si; break; }
+      }
+      if (seat < 0) continue;
+      if (idx !== 0 && seat === lastSeatWithValue && !cutSet.has(idx) && !breakSet.has(idx)) {
+        breakSet.add(idx);
+      }
+      lastSeatWithValue = seat;
+    }
+  }
 
   const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
   while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
@@ -5584,7 +5602,6 @@ function ScoreTimeline(
 
   const makePath = (arr:(number|null)[])=>{
     let d=''; let open=false;
-    const cutSet = new Set(cuts);
     for (let i=0;i<n;i++){
       if ((cutSet.has(i) || breakSet.has(i)) && i!==0) { open = false; }
       const v = arr[i];
