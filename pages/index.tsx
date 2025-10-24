@@ -4787,7 +4787,11 @@ const handleAllSaveInner = () => {
           {[0,1,2].map(i=>{
             const showAllBottom = !bottomInfo.revealed && bottomInfo.cards.length > 0;
             const isLandlord = bottomInfo.landlord === i;
-            const showCards = (!hasHumanSeat) || showAllBottom || isLandlord;
+            const showCards = showAllBottom
+              ? true
+              : bottomInfo.revealed
+                ? isLandlord
+                : (!hasHumanSeat);
             const cards = showCards ? bottomInfo.cards : [];
             const labelText = lang === 'en'
               ? `Bottom${showAllBottom ? ' (pre-bid)' : ''}`
