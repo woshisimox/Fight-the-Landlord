@@ -5050,6 +5050,7 @@ const [lang, setLang] = useState<Lang>(() => {
     const v = localStorage.getItem('ddz_match_mode');
     return v === 'knockout' ? 'knockout' : 'regular';
   });
+  const humanOptionLabel = lang === 'en' ? 'Human' : '人类选手';
   useEffect(()=>{
     try {
       localStorage.setItem('ddz_lang', lang);
