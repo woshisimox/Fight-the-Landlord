@@ -3758,7 +3758,10 @@ for (const raw of batch) {
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
                   nextHands = (rh as string[][]).map(decorateHandCycle);
 
-                  const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
+                  const rawLord = m.landlordIdx ?? m.landlord;
+                  const lord = (typeof rawLord === 'number' && rawLord >= 0 && rawLord < 3)
+                    ? rawLord
+                    : null;
                   nextLandlord = lord;
                   const bottomRaw = Array.isArray(m.bottom) ? (m.bottom as string[]) : [];
                   const decoratedBottom = bottomRaw.length ? decorateHandCycle(bottomRaw) : [];
@@ -3796,7 +3799,10 @@ for (const raw of batch) {
                 const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
                 if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
                   nextHands = (rh0 as string[][]).map(decorateHandCycle);
-                  const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
+                  const rawLord2 = m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+                  const lord2 = (typeof rawLord2 === 'number' && rawLord2 >= 0 && rawLord2 < 3)
+                    ? rawLord2
+                    : null;
                   if (lord2 != null) {
                     nextLandlord = lord2;
                     if (nextBottom.landlord !== lord2) {

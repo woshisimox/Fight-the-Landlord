@@ -1401,7 +1401,7 @@ export async function* runOneGame(opts: {
   for (let s=0;s<3;s++) hands[s] = sorted(hands[s]);
 
   // 抢地主流程（简单实现）
-  let landlord = 0;
+  let landlord = -1;
   let multiplier = 1;
   let bidMultiplier = 1;
   const seatMeta = bots.map((bot:any)=>({
@@ -1411,6 +1411,19 @@ export async function* runOneGame(opts: {
   }));
 
   const MAX_BID_ATTEMPTS = 5;
+
+  // —— 在进入叫抢流程前，把初始手牌与底牌推送出去，便于前端立即展示 ——
+  try {
+    yield {
+      type: 'state',
+      kind: 'init',
+      landlord: null,
+      landlordIdx: null,
+      hands: hands.map(h => [...h]),
+      bottom: bottom.slice(),
+    };
+  } catch {}
+
   if (opts.bid !== false) {
     let last = -1;
 
@@ -1554,8 +1567,9 @@ export async function* runOneGame(opts: {
       break;
     }
   }
+  if (landlord < 0) landlord = 0;
   // 亮底 & 地主收底
-  yield { type:'event', kind:'reveal', bottom: bottom.slice() };
+  yield { type:'event', kind:'reveal', landlord, landlordIdx: landlord, bottom: bottom.slice() };
   hands[landlord].push(...bottom);
   hands[landlord] = sorted(hands[landlord]);
 
@@ -1766,8 +1780,6 @@ __doubleMulB = Math.min(__DOUBLE_CFG.cap, __doubleMulB * multiplier) / Math.max(
 try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bing:Bseat, mulY: __doubleMulY, mulB: __doubleMulB, base: multiplier }; } catch{}
 
 
-  // 初始化（带上地主）
-  yield { type:'state', kind:'init', landlord, hands: hands.map(h => [...h]) };
   // 历史与记牌数据
   let trick = 0;                          // 轮次（从 0 开始）
   const history: PlayEvent[] = [];        // 全部出牌/过牌历史

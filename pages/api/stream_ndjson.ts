@@ -448,19 +448,22 @@ for await (const ev of (iter as any)) {
     // 初始发牌/地主
     if (!sentInit && ev?.type==='init') {
       sentInit = true;
-      landlordIdx = (ev.landlordIdx ?? ev.landlord ?? -1);
+      const rawLandlord = (typeof ev.landlordIdx === 'number')
+        ? ev.landlordIdx
+        : (typeof ev.landlord === 'number' ? ev.landlord : null);
+      landlordIdx = (typeof rawLandlord === 'number' && rawLandlord >= 0) ? rawLandlord : -1;
       // 修复：添加 landlord 字段确保前端能正确识别地主
-      writeLine(res, { 
-        type:'init', 
-        landlordIdx, 
-        landlord: landlordIdx,  // 添加 landlord 字段
-        bottom: ev.bottom, 
-        hands: ev.hands 
+      writeLine(res, {
+        type:'init',
+        landlordIdx: rawLandlord,
+        landlord: rawLandlord,
+        bottom: ev.bottom,
+        hands: ev.hands
       });
       (globalThis as any).__DDZ_SEEN.length = 0;
       (globalThis as any).__DDZ_SEEN_BY_SEAT = [[],[],[]];
       // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
-try {
+if (landlordIdx >= 0) try {
   const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
   const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
   const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
@@ -509,7 +512,7 @@ continue;
         totals 
       });
       // —— 明牌后额外加倍阶段：从地主开始依次决定是否加倍 ——
-try {
+if (landlordIdx >= 0) try {
   const __rank = (c:string)=>(c==='x'||c==='X')?c:c.slice(-1);
   const __count = (cs:string[])=>{ const m=new Map<string,number>(); for(const c of cs){const r=__rank(c); m.set(r,(m.get(r)||0)+1);} return m; };
   const bottom: string[] = Array.isArray(ev.bottom) ? ev.bottom as string[] : [];
@@ -586,6 +589,13 @@ continue;
     }
 
     // 其它事件透传
+    if (ev?.type === 'event' && ev.kind === 'reveal') {
+      const raw = (typeof ev.landlordIdx === 'number')
+        ? ev.landlordIdx
+        : (typeof ev.landlord === 'number' ? ev.landlord : null);
+      if (typeof raw === 'number' && raw >= 0) landlordIdx = raw;
+    }
+
     if (ev && ev.type) writeLine(res, ev);
   }
 }
