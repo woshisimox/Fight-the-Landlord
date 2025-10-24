@@ -297,10 +297,29 @@ function traceWrap(
   };
 
   const buildHumanHint = async (ctx: any) => {
+    const handCards: string[] = Array.isArray(ctx?.hands) ? ctx.hands.slice() : [];
+    const hasAllCards = (need: string[], have: string[]) => {
+      if (!need.length) return true;
+      if (!have.length) return false;
+      const pool = new Map<string, number>();
+      for (const card of have) {
+        pool.set(card, (pool.get(card) || 0) + 1);
+      }
+      for (const card of need) {
+        const remain = pool.get(card) || 0;
+        if (remain <= 0) return false;
+        pool.set(card, remain - 1);
+      }
+      return true;
+    };
     try {
       const rec = await Promise.resolve(GreedyMax(ctx));
       if (rec && typeof rec === 'object') {
         if (rec.move === 'play' && Array.isArray(rec.cards) && rec.cards.length > 0) {
+          if (!hasAllCards(rec.cards, handCards)) {
+            console.debug('[HINT]', 'discarding hint without matching cards', rec.cards);
+            return null;
+          }
           const sc = unifiedScore(ctx, rec.cards);
           return {
             move: 'play' as const,
