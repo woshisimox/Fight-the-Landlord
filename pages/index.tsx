@@ -1116,6 +1116,8 @@ function LadderPanel() {
 
 function KnockoutPanel() {
   const { lang } = useI18n();
+  const humanOptionLabel = lang === 'en' ? 'Human' : '人类选手';
+  const humanProviderLabel = lang === 'en' ? 'Human player' : '人类选手';
   const [settings, setSettings] = useState<KnockoutSettings>(() => {
     if (typeof window === 'undefined') return defaultKnockoutSettings();
     try {
@@ -1439,7 +1441,9 @@ function KnockoutPanel() {
       if (entry) {
         return {
           label,
-          provider: providerSummary(entry.choice, entry.model, entry.keys?.httpBase),
+          provider: entry.choice === 'human'
+            ? humanProviderLabel
+            : providerSummary(entry.choice, entry.model, entry.keys?.httpBase),
         };
       }
       const rawChoice = typeof parsed?.choice === 'string' ? parsed.choice : '';
@@ -1448,7 +1452,9 @@ function KnockoutPanel() {
         const httpBase = typeof parsed?.httpBase === 'string' ? parsed.httpBase : '';
         return {
           label,
-          provider: providerSummary(rawChoice as BotChoice, model, httpBase),
+          provider: rawChoice === 'human'
+            ? humanProviderLabel
+            : providerSummary(rawChoice as BotChoice, model, httpBase),
         };
       }
     } catch {}
@@ -1889,8 +1895,8 @@ function KnockoutPanel() {
 
   const participantsTitle = lang === 'en' ? 'Participants' : '参赛选手';
   const participantsHint = lang === 'en'
-    ? 'Pick bots or AIs just like regular matches.'
-    : '从常规对局使用的内置 / 外置 AI 中选择参赛选手。';
+    ? 'Pick bots, AIs, or a human player just like regular matches.'
+    : '从常规对局使用的内置 / 外置 AI 或人类选手中选择参赛选手。';
 
   const intervalTitle = lang === 'en' ? 'Min play interval (ms)' : '最小间隔 (ms)';
   const timeoutTitle = lang === 'en' ? 'Think timeout (s)' : '弃牌时间（秒）';
@@ -2078,6 +2084,9 @@ function KnockoutPanel() {
                       <option value="ai:qwen">Qwen</option>
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
+                    </optgroup>
+                    <optgroup label={lang === 'en' ? 'Human' : '人类选手'}>
+                      <option value="human">{humanOptionLabel}</option>
                     </optgroup>
                   </select>
                 </label>
@@ -2534,7 +2543,9 @@ function KnockoutPanel() {
                     const httpBase = typeof currentMatch.seatKeys[idx]?.httpBase === 'string'
                       ? currentMatch.seatKeys[idx]!.httpBase!.trim()
                       : '';
-                    const providerText = providerSummary(seatChoice, model, httpBase);
+                    const providerText = seatChoice === 'human'
+                      ? humanProviderLabel
+                      : providerSummary(seatChoice, model, httpBase);
                     return (
                       <div key={`${token}-score`} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:10, background:'#fff' }}>
                         <div style={{ fontWeight:700, marginBottom:4 }}>{label}</div>
