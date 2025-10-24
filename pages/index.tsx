@@ -1,5 +1,10 @@
 // pages/index.tsx
+<<<<<<< Updated upstream
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+=======
+import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
+>>>>>>> Stashed changes
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -271,7 +276,8 @@ type BotChoice =
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
-  | 'http';
+  | 'http'
+  | 'human';
 
 /* ========= TrueSkill（前端轻量实现，1v2：地主 vs 两农民） ========= */
 type Rating = { mu:number; sigma:number };
@@ -303,6 +309,398 @@ function tsUpdateTwoTeams(r:Rating[], teamA:number[], teamB:number[]){
   }
 }
 
+<<<<<<< Updated upstream
+=======
+const KO_BYE = '__KO_BYE__';
+type KnockoutPlayer = string | null;
+type KnockoutMatch = { id: string; players: KnockoutPlayer[]; eliminated: KnockoutPlayer | null; };
+type KnockoutRound = { matches: KnockoutMatch[] };
+type KnockoutFinalStandings = { placements: { token: KnockoutPlayer; total: number }[] };
+
+type KnockoutMatchContext = {
+  roundIdx: number;
+  matchIdx: number;
+  tokens: string[];
+  seats: BotChoice[];
+  seatModels: string[];
+  seatKeys: BotCredentials[];
+  delays: number[];
+  timeouts: number[];
+  labels: string[];
+};
+type BotCredentials = {
+  openai?: string;
+  gemini?: string;
+  grok?: string;
+  kimi?: string;
+  qwen?: string;
+  deepseek?: string;
+  httpBase?: string;
+  httpToken?: string;
+};
+type KnockoutEntry = {
+  id: string;
+  choice: BotChoice;
+  name: string;
+  model: string;
+  keys: BotCredentials;
+  delayMs: number;
+  timeoutSecs: number;
+};
+
+type KnockoutSettings = {
+  enabled: boolean;
+  roundsPerGroup: number;
+  startScore: number;
+  bid: boolean;
+  four2: Four2Policy;
+  farmerCoop: boolean;
+};
+
+const KO_ENTRY_STORAGE = 'ddz_knockout_entries';
+const KO_SETTINGS_STORAGE = 'ddz_knockout_settings';
+const KO_DEFAULT_DELAY = 1000;
+const KO_DEFAULT_TIMEOUT = 30;
+const KO_DEFAULT_CHOICES: BotChoice[] = [
+  'built-in:greedy-max',
+  'built-in:greedy-min',
+  'built-in:random-legal',
+  'built-in:mininet',
+];
+const KO_ALL_CHOICES: BotChoice[] = [
+  'built-in:greedy-max',
+  'built-in:greedy-min',
+  'built-in:random-legal',
+  'built-in:mininet',
+  'built-in:ally-support',
+  'built-in:endgame-rush',
+  'ai:openai',
+  'ai:gemini',
+  'ai:grok',
+  'ai:kimi',
+  'ai:qwen',
+  'ai:deepseek',
+  'http',
+  'human',
+];
+
+const KO_DEFAULT_SETTINGS: KnockoutSettings = {
+  enabled: true,
+  roundsPerGroup: 10,
+  startScore: 100,
+  bid: true,
+  four2: 'both',
+  farmerCoop: true,
+};
+
+function defaultKnockoutSettings(): KnockoutSettings {
+  return { ...KO_DEFAULT_SETTINGS };
+}
+
+function sanitizeKnockoutSettings(raw: any): KnockoutSettings {
+  const base = typeof raw === 'object' && raw ? raw : {};
+  const next = defaultKnockoutSettings();
+  if (typeof base.enabled === 'boolean') next.enabled = base.enabled;
+  const rounds = Math.max(1, Math.floor(Number(base.roundsPerGroup) || 0));
+  if (Number.isFinite(rounds) && rounds > 0) next.roundsPerGroup = rounds;
+  const start = Number(base.startScore);
+  if (Number.isFinite(start)) next.startScore = start;
+  if (typeof base.bid === 'boolean') next.bid = base.bid;
+  if (typeof base.farmerCoop === 'boolean') next.farmerCoop = base.farmerCoop;
+  if (base.four2 === 'both' || base.four2 === '2singles' || base.four2 === '2pairs') {
+    next.four2 = base.four2;
+  }
+  return next;
+}
+
+function makeKnockoutEntryId() {
+  return `ko-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
+
+function defaultAliasForChoice(choice: BotChoice, existing: KnockoutEntry[]): string {
+  const base = choiceLabel(choice);
+  const taken = new Set(existing.map(e => e.name.trim()));
+  if (!taken.has(base)) return base;
+  let suffix = 2;
+  while (taken.has(`${base} #${suffix}`)) suffix += 1;
+  return `${base} #${suffix}`;
+}
+
+function deriveAutoAliasSuffix(alias: string, choice: BotChoice): string | undefined {
+  const base = choiceLabel(choice);
+  const trimmed = alias.trim();
+  if (!trimmed) return '';
+  if (trimmed === base) return '';
+  const prefix = `${base} #`;
+  if (trimmed.startsWith(prefix)) {
+    const rest = trimmed.slice(prefix.length);
+    if (/^\d+$/.test(rest)) return ` #${rest}`;
+  }
+  return undefined;
+}
+
+function createDefaultKnockoutEntry(choice: BotChoice, existing: KnockoutEntry[]): KnockoutEntry {
+  return {
+    id: makeKnockoutEntryId(),
+    choice,
+    name: defaultAliasForChoice(choice, existing),
+    model: '',
+    keys: {},
+    delayMs: KO_DEFAULT_DELAY,
+    timeoutSecs: KO_DEFAULT_TIMEOUT,
+  };
+}
+
+function makeDefaultKnockoutEntries(): KnockoutEntry[] {
+  const entries: KnockoutEntry[] = [];
+  for (const choice of KO_DEFAULT_CHOICES) {
+    entries.push(createDefaultKnockoutEntry(choice, entries));
+  }
+  return entries;
+}
+
+function sanitizeKnockoutKeys(choice: BotChoice, raw: any): BotCredentials {
+  const base: BotCredentials = typeof raw === 'object' && raw ? raw : {};
+  const out: BotCredentials = {};
+  if (typeof base.openai === 'string') out.openai = base.openai;
+  if (typeof base.gemini === 'string') out.gemini = base.gemini;
+  if (typeof base.grok === 'string') out.grok = base.grok;
+  if (typeof base.kimi === 'string') out.kimi = base.kimi;
+  if (typeof base.qwen === 'string') out.qwen = base.qwen;
+  if (typeof base.deepseek === 'string') out.deepseek = base.deepseek;
+  if (typeof base.httpBase === 'string') out.httpBase = base.httpBase;
+  if (typeof base.httpToken === 'string') out.httpToken = base.httpToken;
+  if (choice === 'http') {
+    if (out.httpBase === undefined) out.httpBase = '';
+    if (out.httpToken === undefined) out.httpToken = '';
+  }
+  return out;
+}
+
+function reviveStoredKnockoutKeys(choice: BotChoice, raw: any): BotCredentials {
+  if (choice === 'http') {
+    const base = typeof raw?.httpBase === 'string' ? raw.httpBase : '';
+    return base ? { httpBase: base } : {};
+  }
+  return {};
+}
+
+function persistableKnockoutEntry(entry: KnockoutEntry) {
+  const { keys, ...rest } = entry;
+  if (entry.choice === 'http') {
+    const base = typeof keys?.httpBase === 'string' ? keys.httpBase.trim() : '';
+    const safe: BotCredentials = {};
+    if (base) safe.httpBase = base;
+    if (Object.keys(safe).length) return { ...rest, keys: safe };
+    return rest;
+  }
+  return rest;
+}
+
+function normalizeKnockoutEntries(raw: any): KnockoutEntry[] {
+  if (!Array.isArray(raw)) return makeDefaultKnockoutEntries();
+  const entries: KnockoutEntry[] = [];
+  for (const item of raw) {
+    const choice = KO_ALL_CHOICES.includes(item?.choice) ? (item.choice as BotChoice) : 'built-in:greedy-max';
+    const name = typeof item?.name === 'string' && item.name.trim()
+      ? item.name.trim()
+      : defaultAliasForChoice(choice, entries);
+    const id = typeof item?.id === 'string' && item.id
+      ? item.id
+      : makeKnockoutEntryId();
+    const model = choice.startsWith('ai:') && typeof item?.model === 'string'
+      ? item.model
+      : '';
+    const keys = reviveStoredKnockoutKeys(choice, item?.keys);
+    const delayMs = Number.isFinite(Number(item?.delayMs)) ? Math.max(0, Math.floor(Number(item.delayMs))) : KO_DEFAULT_DELAY;
+    const timeoutSecs = Number.isFinite(Number(item?.timeoutSecs))
+      ? Math.max(5, Math.floor(Number(item.timeoutSecs)))
+      : KO_DEFAULT_TIMEOUT;
+    entries.push({ id, choice, name, model, keys, delayMs, timeoutSecs });
+  }
+  if (entries.length < 2) return makeDefaultKnockoutEntries();
+  return entries;
+}
+
+function cloneKnockoutRounds(rounds: KnockoutRound[]): KnockoutRound[] {
+  return rounds
+    .map((round, ridx) => ({
+      matches: (round?.matches || [])
+        .map((match, midx) => {
+          const rawPlayers = Array.isArray(match?.players) ? match.players : [];
+          const players = rawPlayers
+            .filter((p, idx) => idx < 3 && typeof p === 'string' && p)
+            .map(p => (p === KO_BYE ? KO_BYE : (p as KnockoutPlayer)));
+          if (!players.length) return null;
+          const eliminated = typeof match?.eliminated === 'string' && players.includes(match.eliminated as KnockoutPlayer)
+            ? match.eliminated
+            : typeof (match as any)?.winner === 'string' && players.includes((match as any).winner as KnockoutPlayer)
+              ? (match as any).winner
+              : null;
+          return {
+            id: typeof match?.id === 'string' && match.id ? match.id : `R${ridx}-M${midx}`,
+            players: players as KnockoutPlayer[],
+            eliminated,
+          };
+        })
+        .filter((match): match is KnockoutMatch => !!match),
+    }))
+    .filter(round => round.matches.length);
+}
+
+function distributeKnockoutPlayers(pool: KnockoutPlayer[]): KnockoutPlayer[][] {
+  const players = pool.filter(p => !!p);
+  if (!players.length) return [];
+  const padded: KnockoutPlayer[] = [...players];
+  while (padded.length % 3 !== 0) {
+    padded.push(KO_BYE);
+  }
+  const groups: KnockoutPlayer[][] = [];
+  for (let idx = 0; idx < padded.length; idx += 3) {
+    groups.push(padded.slice(idx, idx + 3));
+  }
+  return groups;
+}
+
+function buildMatchesFromPool(
+  pool: KnockoutPlayer[],
+  roundIdx: number,
+  template?: KnockoutRound,
+): KnockoutMatch[] {
+  const templateMatches = template ? cloneKnockoutRounds([template])[0]?.matches ?? [] : [];
+  const groups = distributeKnockoutPlayers(pool);
+  return groups.map((players, midx) => {
+    const templateMatch = templateMatches[midx];
+    const samePlayers =
+      templateMatch?.players?.length === players.length &&
+      templateMatch.players.every((p, i) => p === players[i]);
+    const eliminated = samePlayers && templateMatch?.eliminated && players.includes(templateMatch.eliminated)
+      ? templateMatch.eliminated
+      : null;
+    return {
+      id: templateMatch?.id ?? `R${roundIdx}-M${midx}`,
+      players,
+      eliminated,
+    };
+  });
+}
+
+function isRoundComplete(round: KnockoutRound): boolean {
+  return round.matches.every(match => {
+    const active = match.players.filter(p => !!p && p !== KO_BYE);
+    if (active.length <= 1) return true;
+    const hasBye = match.players.some(p => p === KO_BYE);
+    if (hasBye && match.eliminated === KO_BYE) return true;
+    return !!match.eliminated && active.includes(match.eliminated);
+  });
+}
+
+function collectSurvivors(round: KnockoutRound): KnockoutPlayer[] {
+  const survivors: KnockoutPlayer[] = [];
+  for (const match of round.matches) {
+    for (const player of match.players) {
+      if (player && player !== match.eliminated && player !== KO_BYE) {
+        survivors.push(player);
+      }
+    }
+  }
+  return survivors;
+}
+
+function isFinalRoundStructure(round: KnockoutRound | null | undefined): boolean {
+  if (!round || !Array.isArray(round.matches) || round.matches.length !== 1) return false;
+  const match = round.matches[0];
+  if (!match) return false;
+  const active = match.players.filter(p => p && p !== KO_BYE);
+  return active.length === 3;
+}
+
+function isFinalRoundMatch(rounds: KnockoutRound[], roundIdx: number, matchIdx: number): boolean {
+  if (!rounds.length) return false;
+  if (roundIdx !== rounds.length - 1) return false;
+  const round = rounds[roundIdx];
+  if (!isFinalRoundStructure(round)) return false;
+  const match = round.matches[matchIdx];
+  if (!match) return false;
+  const active = match.players.filter(p => p && p !== KO_BYE);
+  return active.length === 3;
+}
+
+function shuffleArray<T>(input: T[]): T[] {
+  const arr = [...input];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function normalizeKnockoutRounds(base: KnockoutRound[]): KnockoutRound[] {
+  const sanitized = cloneKnockoutRounds(base);
+  if (!sanitized.length) return [];
+  const rounds: KnockoutRound[] = [];
+  const first = sanitized[0];
+  if (!first.matches.length) return [];
+  rounds.push({ matches: first.matches });
+  if (!isRoundComplete(first)) return rounds;
+
+  let survivors = collectSurvivors(first);
+  let roundIndex = 1;
+  while (survivors.length > 1) {
+    const template = sanitized[roundIndex];
+    const nextMatches = buildMatchesFromPool(survivors, roundIndex, template);
+    if (!nextMatches.length) break;
+    const nextRound: KnockoutRound = { matches: nextMatches };
+    rounds.push(nextRound);
+    if (!isRoundComplete(nextRound)) break;
+    survivors = collectSurvivors(nextRound);
+    roundIndex += 1;
+  }
+  return rounds;
+}
+
+function applyEliminationToDraft(
+  draft: KnockoutRound[],
+  roundIdx: number,
+  matchIdx: number,
+  eliminated: KnockoutPlayer | null,
+) {
+  const match = draft[roundIdx]?.matches?.[matchIdx];
+  if (!match) return;
+  match.eliminated = eliminated;
+  draft.length = roundIdx + 1;
+  const current = draft[roundIdx];
+  if (!current || !isRoundComplete(current)) return;
+  const survivors = collectSurvivors(current);
+  if (isFinalRoundStructure(current)) return;
+  if (survivors.length <= 1) return;
+  const shuffled = shuffleArray(survivors);
+  const nextMatches = buildMatchesFromPool(shuffled, roundIdx + 1);
+  if (nextMatches.length) {
+    draft.push({ matches: nextMatches });
+  }
+}
+
+function findNextPlayableMatch(rounds: KnockoutRound[]): { roundIdx: number; matchIdx: number } | null {
+  for (let ridx = 0; ridx < rounds.length; ridx++) {
+    const round = rounds[ridx];
+    if (!round?.matches?.length) continue;
+    for (let midx = 0; midx < round.matches.length; midx++) {
+      const match = round.matches[midx];
+      if (!match) continue;
+      const active = match.players.filter(p => p && p !== KO_BYE);
+      if (active.length >= 3 && !match.eliminated) {
+        return { roundIdx: ridx, matchIdx: midx };
+      }
+      if (active.length < 3 && !match.eliminated) {
+        return { roundIdx: ridx, matchIdx: midx };
+      }
+    }
+  }
+  return null;
+}
+
+>>>>>>> Stashed changes
 /* ===== TrueSkill 本地存档（新增） ===== */
 type TsRole = 'landlord'|'farmer';
 type TsStoreEntry = {
@@ -356,6 +754,45 @@ type LiveProps = {
   onLog?: (lines: string[]) => void;
   turnTimeoutSecs?: number[];};
 
+<<<<<<< Updated upstream
+=======
+type LivePanelHandle = {
+  start: () => Promise<void>;
+  stop: () => void;
+  togglePause: () => void;
+  isRunning: () => boolean;
+  isPaused: () => boolean;
+};
+
+type LivePanelFinishPayload = {
+  aborted: boolean;
+  finishedCount: number;
+  totals: [number, number, number];
+  completedAll: boolean;
+  endedEarlyForNegative?: boolean;
+};
+
+type HumanHint = {
+  move: 'play' | 'pass';
+  cards?: string[];
+  score?: number;
+  reason?: string;
+  label?: string;
+  by?: string;
+};
+
+type HumanPrompt = {
+  seat: number;
+  requestId: string;
+  phase: string;
+  ctx: any;
+  timeoutMs?: number;
+  delayMs?: number;
+  by?: string;
+  hint?: HumanHint;
+};
+
+>>>>>>> Stashed changes
 function SeatTitle({ i }: { i:number }) {
   const { lang } = useI18n();
   return <span style={{ fontWeight:700 }}>{seatLabel(i, lang)}</span>;
@@ -365,7 +802,11 @@ function SeatTitle({ i }: { i:number }) {
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
-type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[] };
+type BottomInfo = {
+  landlord: number | null;
+  cards: { label: string; used: boolean }[];
+  revealed: boolean;
+};
 
 const rankOf = (l: string) => {
   if (!l) return '';
@@ -397,6 +838,41 @@ function decorateHandCycle(raw: string[]): string[] {
   });
 }
 
+const RANK_ORDER = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const;
+const RANK_POS: Record<string, number> = Object.fromEntries(RANK_ORDER.map((r, i) => [r, i])) as Record<string, number>;
+
+function rankKeyForDisplay(label: string): string {
+  if (!label) return '';
+  if (label.startsWith('🃏')) {
+    const tail = label.slice(2).toUpperCase();
+    if (tail === 'X') return 'x';
+    if (tail === 'Y') return 'X';
+    return tail;
+  }
+  if (label === 'x' || label === 'X') return label;
+  const rk = rankOf(label);
+  if (rk === 'Y') return 'X';
+  return rk;
+}
+
+function sortDisplayHand(cards: string[]): string[] {
+  return [...cards].sort((a, b) => {
+    const va = RANK_POS[rankKeyForDisplay(a)] ?? -1;
+    const vb = RANK_POS[rankKeyForDisplay(b)] ?? -1;
+    if (va !== vb) return va - vb;
+    return a.localeCompare(b);
+  });
+}
+
+function displayLabelFromRaw(label: string): string {
+  if (!label) return label;
+  if (label.startsWith('🃏')) return label;
+  if (label === 'x') return '🃏X';
+  if (label === 'X') return '🃏Y';
+  if ('♠♥♦♣'.includes(label[0])) return label;
+  return decorateHandCycle([label])[0];
+}
+
 function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
   if (!Array.isArray(raw)) return [];
   const seat = (typeof landlord === 'number' && landlord >= 0 && landlord < 3) ? landlord : null;
@@ -415,38 +891,126 @@ function resolveBottomDecorations(raw: string[], landlord: number | null, hands:
   });
 }
 
-function Card({ label, dimmed = false, compact = false }: { label:string; dimmed?:boolean; compact?:boolean }) {
-  const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
-  const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
-  const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-  const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
-  const pad = compact ? '4px 6px' : '6px 10px';
-  const fontSize = compact ? 14 : 16;
-  const suitColor = dimmed ? '#9ca3af' : baseColor;
-  const rankStyle = dimmed
-    ? { color: '#9ca3af' }
-    : (rankColor ? { color: rankColor } : {});
+type CardProps = {
+  label: string;
+  dimmed?: boolean;
+  compact?: boolean;
+  interactive?: boolean;
+  selected?: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+  hidden?: boolean;
+};
+
+function Card({ label, dimmed = false, compact = false, interactive = false, selected = false, onClick, disabled = false, hidden = false }: CardProps) {
+  const dims = compact
+    ? { width: 28, height: 44, gap: 2, backSize: 18, suitSize: 16, rankSize: 12, paddingShown: '6px 4px', paddingHidden: '4px' }
+    : { width: 38, height: 58, gap: 4, backSize: 24, suitSize: 22, rankSize: 16, paddingShown: '8px 6px', paddingHidden: '6px' };
+
+  let background = '#fff';
+  let borderColor = '#ddd';
+  let color = '#1f2937';
+  let opacity = 1;
+  let inner: ReactNode;
+
+  if (hidden) {
+    background = selected ? '#bfdbfe' : '#1f2937';
+    borderColor = selected ? '#2563eb' : '#111827';
+    color = '#f9fafb';
+    inner = <span style={{ fontSize: dims.backSize, lineHeight: 1 }}>🂠</span>;
+  } else {
+    const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
+    const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
+    const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
+    const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
+    const suitColor = dimmed ? '#9ca3af' : baseColor;
+    const rankStyle = dimmed
+      ? { color: '#9ca3af' }
+      : (rankColor ? { color: rankColor } : {});
+    background = selected ? '#dbeafe' : (dimmed ? '#f3f4f6' : '#fff');
+    borderColor = selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd');
+    color = suitColor;
+    opacity = dimmed ? 0.65 : 1;
+    inner = (
+      <>
+        <span style={{ fontSize: dims.suitSize, lineHeight: 1 }}>{suit}</span>
+        <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+      </>
+    );
+  }
+
+  const style: React.CSSProperties = {
+    display: 'inline-flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: hidden ? 0 : dims.gap,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderRadius: 8,
+    padding: hidden ? dims.paddingHidden : dims.paddingShown,
+    marginRight: compact ? 4 : 6,
+    marginBottom: compact ? 4 : 6,
+    fontWeight: 800,
+    cursor: interactive ? (disabled ? 'not-allowed' : 'pointer') : 'default',
+    outline: selected ? '2px solid #2563eb' : 'none',
+    userSelect: 'none',
+    width: dims.width,
+    minWidth: dims.width,
+    height: dims.height,
+    boxSizing: 'border-box',
+    background,
+    borderColor,
+    color,
+    opacity,
+  };
+
+  if (interactive) {
+    return (
+      <button
+        type="button"
+        onClick={disabled ? undefined : onClick}
+        disabled={disabled}
+        style={style}
+        title={hidden ? label : undefined}
+      >
+        {inner}
+      </button>
+    );
+  }
+
   return (
-    <span style={{
-      display:'inline-flex', alignItems:'center', gap:6,
-      border:'1px solid #ddd', borderRadius:8, padding: pad,
-      marginRight:6, marginBottom:6, fontWeight:800,
-      color: suitColor,
-      background: dimmed ? '#f3f4f6' : '#fff',
-      opacity: dimmed ? 0.65 : 1,
-      borderColor: dimmed ? '#d1d5db' : '#ddd'
-    }}>
-      <span style={{ fontSize }}>{suit}</span>
-      <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+    <span style={style} title={hidden ? label : undefined}>
+      {inner}
     </span>
   );
 }
-function Hand({ cards }: { cards: string[] }) {
+type HandProps = {
+  cards: string[];
+  interactive?: boolean;
+  selectedIndices?: Set<number>;
+  onToggle?: (index: number) => void;
+  disabled?: boolean;
+  faceDown?: boolean;
+};
+
+function Hand({ cards, interactive = false, selectedIndices, onToggle, disabled = false, faceDown = false }: HandProps) {
   const { t } = useI18n();
   if (!cards || cards.length === 0) return <span style={{ opacity: 0.6 }}>{t('Empty')}</span>;
+  const selected = selectedIndices ?? new Set<number>();
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-      {cards.map((c, idx) => <Card key={`${c}-${idx}`} label={c} />)}
+      {cards.map((c, idx) => (
+        <Card
+          key={`${c}-${idx}`}
+          label={c}
+          interactive={interactive}
+          selected={selected.has(idx)}
+          onClick={interactive && onToggle ? () => onToggle(idx) : undefined}
+          disabled={disabled}
+          hidden={faceDown && !interactive}
+        />
+      ))}
     </div>
   );
 }
@@ -495,7 +1059,7 @@ function LadderPanel() {
 
   const CATALOG = [
     'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
-    'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http'
+    'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http','human'
   ];
   const catalogIds = CATALOG.map((choice)=>{
     const model = defaultModelFor(choice as any) || '';
@@ -554,6 +1118,1546 @@ function LadderPanel() {
     </div>
   );
 }
+<<<<<<< Updated upstream
+=======
+
+function KnockoutPanel() {
+  const { lang } = useI18n();
+  const humanOptionLabel = lang === 'en' ? 'Human' : '人类选手';
+  const humanProviderLabel = lang === 'en' ? 'Human player' : '人类选手';
+  const [settings, setSettings] = useState<KnockoutSettings>(() => {
+    if (typeof window === 'undefined') return defaultKnockoutSettings();
+    try {
+      const stored = localStorage.getItem(KO_SETTINGS_STORAGE);
+      if (stored) {
+        return sanitizeKnockoutSettings(JSON.parse(stored));
+      }
+    } catch {}
+    return defaultKnockoutSettings();
+  });
+  const [entries, setEntries] = useState<KnockoutEntry[]>(() => {
+    if (typeof window === 'undefined') return makeDefaultKnockoutEntries();
+    try {
+      const stored = localStorage.getItem(KO_ENTRY_STORAGE);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const normalized = normalizeKnockoutEntries(parsed);
+        if (normalized?.length) return normalized;
+      }
+      const legacySeed = localStorage.getItem('ddz_knockout_seed');
+      if (legacySeed) {
+        const names = legacySeed.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        if (names.length >= 2) {
+          const provisional = names.map((name, idx) => ({
+            id: makeKnockoutEntryId(),
+            choice: KO_DEFAULT_CHOICES[idx % KO_DEFAULT_CHOICES.length] ?? 'built-in:greedy-max',
+            name,
+          }));
+          const normalized = normalizeKnockoutEntries(provisional);
+          if (normalized.length) return normalized;
+        }
+      }
+    } catch {}
+    return makeDefaultKnockoutEntries();
+  });
+  const [rounds, setRounds] = useState<KnockoutRound[]>([]);
+  const [currentMatch, setCurrentMatch] = useState<KnockoutMatchContext | null>(null);
+  const currentMatchRef = useRef<KnockoutMatchContext | null>(null);
+  useEffect(() => { currentMatchRef.current = currentMatch; }, [currentMatch]);
+  const [matchKey, setMatchKey] = useState(0);
+  const [liveTotals, setLiveTotals] = useState<[number, number, number] | null>(null);
+  const liveTotalsRef = useRef<[number, number, number] | null>(null);
+  useEffect(() => { liveTotalsRef.current = liveTotals; }, [liveTotals]);
+  const [seriesTotals, setSeriesTotals] = useState<[number, number, number] | null>(null);
+  const seriesTotalsRef = useRef<[number, number, number] | null>(seriesTotals);
+  useEffect(() => { seriesTotalsRef.current = seriesTotals; }, [seriesTotals]);
+  const [seriesRounds, setSeriesRounds] = useState<number>(() => settings.roundsPerGroup);
+  const [overtimeCount, setOvertimeCount] = useState(0);
+  const [overtimeReason, setOvertimeReason] = useState<'lowest' | 'final'>('lowest');
+  const overtimeCountRef = useRef(overtimeCount);
+  useEffect(() => { overtimeCountRef.current = overtimeCount; }, [overtimeCount]);
+  const [liveRunning, setLiveRunning] = useState(false);
+  const [livePaused, setLivePaused] = useState(false);
+  const [automationActive, setAutomationActive] = useState(false);
+  const [finalStandings, setFinalStandings] = useState<KnockoutFinalStandings | null>(null);
+  const livePanelRef = useRef<LivePanelHandle | null>(null);
+  const roundsRef = useRef<KnockoutRound[]>(rounds);
+  useEffect(() => { roundsRef.current = rounds; }, [rounds]);
+  const entriesRef = useRef<KnockoutEntry[]>(entries);
+  useEffect(() => { entriesRef.current = entries; }, [entries]);
+  const autoRunRef = useRef(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const allFileRef = useRef<HTMLInputElement|null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try { localStorage.setItem(KO_SETTINGS_STORAGE, JSON.stringify(settings)); } catch {}
+  }, [settings]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const storedRounds = localStorage.getItem('ddz_knockout_rounds');
+      if (storedRounds) {
+        const parsed = JSON.parse(storedRounds);
+        if (Array.isArray(parsed)) {
+          setRounds(normalizeKnockoutRounds(parsed as KnockoutRound[]));
+        }
+      }
+      localStorage.removeItem('ddz_knockout_seed');
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const payload = entries.map(persistableKnockoutEntry);
+      localStorage.setItem(KO_ENTRY_STORAGE, JSON.stringify(payload));
+    } catch {}
+  }, [entries]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try { localStorage.setItem('ddz_knockout_rounds', JSON.stringify(rounds)); } catch {}
+  }, [rounds]);
+
+  useEffect(() => {
+    if (rounds.length) return;
+    autoRunRef.current = false;
+    setAutomationActive(false);
+    setCurrentMatch(null);
+    setLiveTotals(null);
+    setSeriesTotals(null);
+    setSeriesRounds(settings.roundsPerGroup);
+    setOvertimeCount(0);
+    setLiveRunning(false);
+    setLivePaused(false);
+    setFinalStandings(null);
+  }, [rounds.length]);
+
+  const participantLabel = (idx: number) => (lang === 'en' ? `Player ${idx + 1}` : `选手${idx + 1}`);
+  const updateSettings = (patch: Partial<KnockoutSettings>) => {
+    setSettings(prev => sanitizeKnockoutSettings({ ...prev, ...patch }));
+  };
+  const { enabled, roundsPerGroup, startScore, bid, four2, farmerCoop } = settings;
+
+  const setAutomation = (active: boolean) => {
+    autoRunRef.current = active;
+    setAutomationActive(active);
+  };
+
+  const handleAllFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const obj = JSON.parse(String(reader.result || '{}'));
+        window.dispatchEvent(new CustomEvent('ddz-all-upload', { detail: obj }));
+      } catch (err) {
+        console.error('[ALL-UPLOAD] parse error', err);
+      } finally {
+        if (allFileRef.current) allFileRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const entryIdentity = (entry: KnockoutEntry) => {
+    const payload: Record<string, string> = {
+      name: entry.name.trim(),
+      choice: entry.choice,
+    };
+    if (entry.choice.startsWith('ai:')) {
+      payload.model = entry.model.trim();
+    }
+    if (entry.choice === 'http') {
+      payload.httpBase = (entry.keys?.httpBase || '').trim();
+    }
+    return JSON.stringify(payload);
+  };
+
+  const entryToken = (entry: KnockoutEntry, slot: number) => {
+    const payload: Record<string, string | number> = {
+      id: entry.id,
+      slot,
+      name: entry.name.trim(),
+      choice: entry.choice,
+    };
+    if (entry.choice.startsWith('ai:')) {
+      const model = entry.model.trim();
+      if (model) payload.model = model;
+    }
+    if (entry.choice === 'http') {
+      const base = (entry.keys?.httpBase || '').trim();
+      if (base) payload.httpBase = base;
+    }
+    return JSON.stringify(payload);
+  };
+
+  const handleGenerate = () => {
+    if (!enabled) {
+      setError(lang === 'en' ? 'Enable the tournament before generating a bracket.' : '请先启用淘汰赛。');
+      setNotice(null);
+      return;
+    }
+    setAutomation(false);
+    if (livePanelRef.current?.isRunning()) livePanelRef.current.stop();
+    setLiveRunning(false);
+    setLivePaused(false);
+    setCurrentMatch(null);
+    setLiveTotals(null);
+    setFinalStandings(null);
+    const roster = entries.map((entry, idx) => ({
+      token: entryToken(entry, idx + 1),
+      identity: entryIdentity(entry),
+    })).filter(item => item.identity);
+    if (roster.length < 3) {
+      setError(lang === 'en' ? 'Add at least three participants.' : '请至少添加三名参赛选手。');
+      setNotice(null);
+      setRounds([]);
+      if (typeof window !== 'undefined') {
+        try { localStorage.removeItem('ddz_knockout_rounds'); } catch {}
+      }
+      return;
+    }
+    const uniqueTokens = new Set(roster.map(item => item.identity));
+    if (uniqueTokens.size < roster.length) {
+      setError(lang === 'en' ? 'Participant configurations must be unique.' : '参赛选手配置需要唯一，请调整选择。');
+      setNotice(null);
+      return;
+    }
+    const shuffled = shuffleArray(roster.map(item => item.token));
+    const firstRoundMatches = buildMatchesFromPool(shuffled, 0);
+    if (!firstRoundMatches.length) {
+      setError(lang === 'en' ? 'Unable to build initial groups.' : '无法生成首轮对阵，请重试。');
+      setRounds([]);
+      return;
+    }
+    const firstRound: KnockoutRound = { matches: firstRoundMatches };
+    setRounds([firstRound]);
+    setError(null);
+    setNotice(lang === 'en'
+      ? `Participants shuffled into groups of three where possible. Each trio plays ${roundsPerGroup} game(s).`
+      : `已尽量按每组三人随机分组。每组三人对局 ${roundsPerGroup} 局。`);
+  };
+
+  const handleReset = () => {
+    setAutomation(false);
+    if (livePanelRef.current?.isRunning()) livePanelRef.current.stop();
+    setLiveRunning(false);
+    setLivePaused(false);
+    setCurrentMatch(null);
+    setLiveTotals(null);
+    setSeriesTotals(null);
+    setSeriesRounds(settings.roundsPerGroup);
+    setOvertimeCount(0);
+    setFinalStandings(null);
+    setRounds([]);
+    setError(null);
+    setNotice(null);
+    if (typeof window !== 'undefined') {
+      try { localStorage.removeItem('ddz_knockout_rounds'); } catch {}
+    }
+  };
+
+  const handleResetAll = () => {
+    setAutomation(false);
+    if (livePanelRef.current?.isRunning()) livePanelRef.current.stop();
+    setLiveRunning(false);
+    setLivePaused(false);
+    setCurrentMatch(null);
+    setLiveTotals(null);
+    setSeriesTotals(null);
+    setSeriesRounds(KO_DEFAULT_SETTINGS.roundsPerGroup);
+    setOvertimeCount(0);
+    setOvertimeReason('lowest');
+    setSettings(defaultKnockoutSettings());
+    setEntries(makeDefaultKnockoutEntries());
+    setFinalStandings(null);
+    setRounds([]);
+    setError(null);
+    setNotice(null);
+    if (typeof window !== 'undefined') {
+      try { localStorage.removeItem(KO_SETTINGS_STORAGE); } catch {}
+      try { localStorage.removeItem(KO_ENTRY_STORAGE); } catch {}
+      try { localStorage.removeItem('ddz_knockout_rounds'); } catch {}
+    }
+  };
+
+  const handleToggleEliminated = (roundIdx: number, matchIdx: number, player: string) => {
+    if (!enabled) {
+      setError(lang === 'en' ? 'Enable the tournament to record eliminations.' : '请先启用淘汰赛以记录淘汰结果。');
+      setNotice(null);
+      return;
+    }
+    setFinalStandings(null);
+    setRounds(prev => {
+      const draft = cloneKnockoutRounds(prev);
+      const match = draft[roundIdx]?.matches?.[matchIdx];
+      if (!match) return prev;
+      const nextElimination = match.eliminated === player ? null : player;
+      applyEliminationToDraft(draft, roundIdx, matchIdx, nextElimination);
+      return draft;
+    });
+  };
+
+  const displayName = (value: KnockoutPlayer | null) => {
+    if (value === KO_BYE) return lang === 'en' ? 'BYE' : '轮空';
+    if (!value) return lang === 'en' ? 'TBD' : '待定';
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        if (parsed && typeof parsed === 'object') {
+          const slotNumber = Number((parsed as any).slot);
+          if (Number.isFinite(slotNumber) && slotNumber >= 1) {
+            return participantLabel(slotNumber - 1);
+          }
+          if (typeof (parsed as any).id === 'string') {
+            const idx = entries.findIndex(entry => entry.id === (parsed as any).id);
+            if (idx >= 0) return participantLabel(idx);
+          }
+          const alias = typeof parsed.name === 'string' ? parsed.name.trim() : '';
+          const rawChoice = typeof parsed.choice === 'string' ? parsed.choice : '';
+          const provider = KO_ALL_CHOICES.includes(rawChoice as BotChoice) ? choiceLabel(rawChoice as BotChoice) : '';
+          let providerLabel = provider;
+          if (KO_ALL_CHOICES.includes(rawChoice as BotChoice)) {
+            const normalized = rawChoice as BotChoice;
+            if (normalized === 'human') {
+              providerLabel = humanProviderLabel;
+            } else {
+              const model = typeof parsed.model === 'string' ? parsed.model : '';
+              const base = typeof parsed.httpBase === 'string' ? parsed.httpBase : '';
+              providerLabel = providerSummary(normalized, model, base, lang);
+            }
+          }
+          if (alias && providerLabel) return `${alias} · ${providerLabel}`;
+          if (alias) return alias;
+          if (providerLabel) return providerLabel;
+        }
+      } catch {}
+    }
+    return value;
+  };
+
+  const playerMeta = (value: KnockoutPlayer | null): { label: string; provider: string } => {
+    const label = displayName(value);
+    if (!value || value === KO_BYE) return { label, provider: '' };
+    try {
+      const parsed = JSON.parse(String(value));
+      const entryId = typeof parsed?.id === 'string' ? parsed.id : '';
+      const entry = entryId ? entries.find(item => item.id === entryId) : null;
+      if (entry) {
+        return {
+          label,
+          provider: entry.choice === 'human'
+            ? humanProviderLabel
+            : providerSummary(entry.choice, entry.model, entry.keys?.httpBase, lang),
+        };
+      }
+      const rawChoice = typeof parsed?.choice === 'string' ? parsed.choice : '';
+      if (KO_ALL_CHOICES.includes(rawChoice as BotChoice)) {
+        const model = typeof parsed?.model === 'string' ? parsed.model : '';
+        const httpBase = typeof parsed?.httpBase === 'string' ? parsed.httpBase : '';
+        return {
+          label,
+          provider: rawChoice === 'human'
+            ? humanProviderLabel
+            : providerSummary(rawChoice as BotChoice, model, httpBase, lang),
+        };
+      }
+    } catch {}
+    return { label, provider: '' };
+  };
+
+  const fallbackLive = useMemo(() => ({
+    seats: KO_DEFAULT_CHOICES.slice(0, 3),
+    seatModels: ['', '', ''],
+    seatKeys: [{}, {}, {}] as BotCredentials[],
+    delays: [KO_DEFAULT_DELAY, KO_DEFAULT_DELAY, KO_DEFAULT_DELAY],
+    timeouts: [KO_DEFAULT_TIMEOUT, KO_DEFAULT_TIMEOUT, KO_DEFAULT_TIMEOUT],
+  }), []);
+
+  const buildMatchContext = (roundIdx: number, matchIdx: number): KnockoutMatchContext | null => {
+    const round = roundsRef.current?.[roundIdx];
+    const match = round?.matches?.[matchIdx];
+    if (!match) return null;
+    const tokens = match.players.filter(p => p && p !== KO_BYE) as string[];
+    if (tokens.length !== 3) return null;
+    const details = tokens.map(token => {
+      try {
+        const parsed = JSON.parse(String(token));
+        const id = parsed?.id;
+        if (!id) return null;
+        const entry = entriesRef.current.find(item => item.id === id);
+        if (!entry) return null;
+        const rawSlot = Number(parsed?.slot);
+        const slot = Number.isFinite(rawSlot) ? rawSlot : null;
+        return { token, entry, slot };
+      } catch {
+        return null;
+      }
+    });
+    if (details.some(detail => !detail)) return null;
+    return {
+      roundIdx,
+      matchIdx,
+      tokens: details.map(detail => detail!.token),
+      seats: details.map(detail => detail!.entry.choice),
+      seatModels: details.map(detail => detail!.entry.model || ''),
+      seatKeys: details.map(detail => ({ ...(detail!.entry.keys || {}) })),
+      delays: details.map(detail => {
+        const raw = Number(detail!.entry.delayMs);
+        return Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : KO_DEFAULT_DELAY;
+      }),
+      timeouts: details.map(detail => {
+        const raw = Number(detail!.entry.timeoutSecs);
+        return Number.isFinite(raw) ? Math.max(5, Math.floor(raw)) : KO_DEFAULT_TIMEOUT;
+      }),
+      labels: details.map(detail => {
+        const slot = detail!.slot;
+        if (typeof slot === 'number' && Number.isFinite(slot) && slot > 0) {
+          return participantLabel(slot - 1);
+        }
+        return displayName(detail!.token);
+      }),
+    };
+  };
+
+  const launchMatch = (roundIdx: number, matchIdx: number) => {
+    const context = buildMatchContext(roundIdx, matchIdx);
+    if (!context) {
+      setAutomation(false);
+      setNotice(lang === 'en'
+        ? 'Unable to launch the next trio. Please verify participant settings.'
+        : '无法启动下一组三人对局，请检查参赛设置。');
+      return false;
+    }
+    setCurrentMatch(context);
+    const baseScore = Number.isFinite(startScore) ? startScore : 0;
+    const baseTotals = [baseScore, baseScore, baseScore] as [number, number, number];
+    setSeriesRounds(roundsPerGroup);
+    setSeriesTotals(baseTotals);
+    setOvertimeCount(0);
+    setOvertimeReason('lowest');
+    setLiveTotals(baseTotals);
+    setMatchKey(key => key + 1);
+    setTimeout(() => { livePanelRef.current?.start(); }, 0);
+    return true;
+  };
+
+  const scheduleNextMatch = () => {
+    if (!autoRunRef.current) return;
+    if (livePanelRef.current?.isRunning()) return;
+    const pendingContext = currentMatchRef.current;
+    if (overtimeCountRef.current > 0 && pendingContext) {
+      const round = roundsRef.current?.[pendingContext.roundIdx];
+      const match = round?.matches?.[pendingContext.matchIdx];
+      if (match && !match.eliminated) {
+        const active = match.players.filter(p => p && p !== KO_BYE);
+        if (active.length >= 3) {
+          if (seriesTotalsRef.current) setLiveTotals(seriesTotalsRef.current);
+          setSeriesRounds(3);
+          setMatchKey(key => key + 1);
+          setTimeout(() => { livePanelRef.current?.start(); }, 0);
+          return;
+        }
+      }
+    }
+    const next = findNextPlayableMatch(roundsRef.current || []);
+    if (!next) {
+      setAutomation(false);
+      setNotice(lang === 'en' ? 'All scheduled rounds are complete.' : '当前所有轮次的对局均已完成。');
+      return;
+    }
+    const round = roundsRef.current?.[next.roundIdx];
+    const match = round?.matches?.[next.matchIdx];
+    if (!match) {
+      setAutomation(false);
+      return;
+    }
+    const active = match.players.filter(p => p && p !== KO_BYE);
+    if (active.length < 3) {
+      const byeToken = match.players.find(p => p === KO_BYE || !p) ?? KO_BYE;
+      setSeriesTotals(null);
+      setLiveTotals(null);
+      setSeriesRounds(roundsPerGroup);
+      setOvertimeCount(0);
+      setOvertimeReason('lowest');
+      setRounds(prev => {
+        const draft = cloneKnockoutRounds(prev);
+        applyEliminationToDraft(draft, next.roundIdx, next.matchIdx, byeToken);
+        return draft;
+      });
+      setTimeout(() => { if (autoRunRef.current) scheduleNextMatch(); }, 0);
+      return;
+    }
+    const launched = launchMatch(next.roundIdx, next.matchIdx);
+    if (!launched) {
+      setAutomation(false);
+    }
+  };
+
+  const handleLiveFinished = (result: LivePanelFinishPayload) => {
+    if (result.aborted) {
+      setAutomation(false);
+      return;
+    }
+    const endedEarly = !!result.endedEarlyForNegative;
+    if (!result.completedAll && !endedEarly) {
+      setAutomation(false);
+      setNotice(lang === 'en'
+        ? 'The trio stopped before finishing all games; automation has been paused.'
+        : '该组三人未跑完全部局数，已暂停自动流程。');
+      return;
+    }
+    const ctx = currentMatchRef.current;
+    if (!ctx) return;
+    const wasFinalMatch = isFinalRoundMatch(roundsRef.current || [], ctx.roundIdx, ctx.matchIdx);
+    const totals = result.totals || liveTotalsRef.current;
+    if (!totals) return;
+    const baseScore = Number.isFinite(startScore) ? startScore : 0;
+    const totalsTuple = [0, 0, 0] as [number, number, number];
+    for (let i = 0; i < 3; i++) {
+      const raw = Number((totals as number[])[i]);
+      totalsTuple[i] = Number.isFinite(raw) ? raw : baseScore;
+    }
+    setLiveTotals(totalsTuple);
+    setSeriesTotals(totalsTuple);
+    const scored = ctx.tokens.map((token, idx) => {
+      const val = Number(totals[idx]);
+      return {
+        token,
+        total: Number.isFinite(val) ? val : Number.POSITIVE_INFINITY,
+      };
+    });
+    const ranked = scored
+      .filter(entry => !!entry.token)
+      .sort((a, b) => a.total - b.total);
+    const placementsDesc = wasFinalMatch
+      ? ctx.tokens
+          .map((token, idx) => ({ token, total: totalsTuple[idx] }))
+          .filter(entry => !!entry.token && entry.token !== KO_BYE)
+          .sort((a, b) => b.total - a.total)
+      : null;
+    const epsilon = 1e-6;
+    if (wasFinalMatch) {
+      const trioTotals = ctx.tokens.map((token, idx) => ({ token, total: totalsTuple[idx] }))
+        .filter(entry => !!entry.token && entry.token !== KO_BYE);
+      const tiedFinalTokens = new Set<string>();
+      for (let i = 0; i < trioTotals.length; i++) {
+        for (let j = i + 1; j < trioTotals.length; j++) {
+          const a = trioTotals[i];
+          const b = trioTotals[j];
+          if (Math.abs(a.total - b.total) <= epsilon) {
+            tiedFinalTokens.add(String(a.token));
+            tiedFinalTokens.add(String(b.token));
+          }
+        }
+      }
+      if (tiedFinalTokens.size > 0) {
+        const tiedLabels = ctx.tokens
+          .filter(token => tiedFinalTokens.has(String(token)))
+          .map(token => displayName(token))
+          .join(lang === 'en' ? ', ' : '、');
+        const nextAttempt = overtimeCountRef.current + 1;
+        setOvertimeCount(nextAttempt);
+        setOvertimeReason('final');
+        setSeriesRounds(3);
+        setFinalStandings(null);
+        setNotice(lang === 'en'
+          ? `Final round tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
+          : `决赛积分出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
+        setMatchKey(key => key + 1);
+        setTimeout(() => { livePanelRef.current?.start(); }, 0);
+        return;
+      }
+    }
+    const lowest = ranked[0];
+    if (!lowest) {
+      setAutomation(false);
+      return;
+    }
+    if (!Number.isFinite(lowest.total)) {
+      setAutomation(false);
+      setNotice(lang === 'en'
+        ? 'The trio did not record valid scores. Please review the results and mark the eliminated player manually.'
+        : '该组三人未产生有效积分，请核对结果并手动标记淘汰选手。');
+      return;
+    }
+    const tiedLowest = ranked.filter(entry => Math.abs(entry.total - lowest.total) <= epsilon);
+    if (tiedLowest.length !== 1) {
+      const tiedLabels = tiedLowest
+        .map(entry => displayName(entry.token))
+        .join(lang === 'en' ? ', ' : '、');
+      const nextAttempt = overtimeCountRef.current + 1;
+      setOvertimeCount(nextAttempt);
+      setOvertimeReason('lowest');
+      setSeriesRounds(3);
+      setNotice(lang === 'en'
+        ? `Round ${ctx.roundIdx + 1}${endedEarly ? ' ended early after a negative score;' : ''} lowest score tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
+        : `第 ${ctx.roundIdx + 1} 轮${endedEarly ? '出现负分提前结束，' : ''}积分最低出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
+      setMatchKey(key => key + 1);
+      setTimeout(() => { livePanelRef.current?.start(); }, 0);
+      return;
+    }
+    const eliminatedToken = tiedLowest[0]?.token;
+    if (!eliminatedToken) {
+      setAutomation(false);
+      return;
+    }
+    const label = displayName(eliminatedToken);
+    setRounds(prev => {
+      const draft = cloneKnockoutRounds(prev);
+      applyEliminationToDraft(draft, ctx.roundIdx, ctx.matchIdx, eliminatedToken);
+      return draft;
+    });
+    setSeriesRounds(roundsPerGroup);
+    setOvertimeCount(0);
+    setOvertimeReason('lowest');
+    if (wasFinalMatch) {
+      const ordered = (placementsDesc && placementsDesc.length
+        ? placementsDesc
+        : ranked.slice().reverse())
+        .slice(0, 3);
+      if (ordered.length) {
+        setFinalStandings({ placements: ordered });
+      } else {
+        setFinalStandings(null);
+      }
+      if (ordered.length >= 3) {
+        const championLabel = displayName(ordered[0].token);
+        const runnerUpLabel = displayName(ordered[1].token);
+        const thirdLabel = displayName(ordered[2].token);
+        setNotice(lang === 'en'
+          ? `Final standings — Champion: ${championLabel}, Runner-up: ${runnerUpLabel}, Third: ${thirdLabel}.`
+          : `最终排名：冠军 ${championLabel}，亚军 ${runnerUpLabel}，季军 ${thirdLabel}。`);
+      } else {
+        setNotice(lang === 'en'
+          ? `Final round complete. Eliminated ${label}${endedEarly ? ' after an early finish caused by a negative score.' : '.'}`
+          : `决赛结束：淘汰 ${label}${endedEarly ? '（因出现负分提前结束）' : ''}`);
+      }
+      setAutomation(false);
+      return;
+    }
+    setFinalStandings(null);
+    setNotice(lang === 'en'
+      ? `Round ${ctx.roundIdx + 1}: eliminated ${label}${endedEarly ? ' after an early finish caused by a negative score.' : '.'}`
+      : `第 ${ctx.roundIdx + 1} 轮淘汰：${label}${endedEarly ? '（因出现负分提前结束）' : ''}`);
+    setTimeout(() => { if (autoRunRef.current) scheduleNextMatch(); else setAutomation(false); }, 0);
+  };
+
+  const handleStartRound = () => {
+    if (livePanelRef.current?.isRunning() || liveRunning) return;
+    if (!enabled) {
+      setError(lang === 'en' ? 'Enable the tournament before starting.' : '请先启用淘汰赛再开始运行。');
+      setNotice(null);
+      return;
+    }
+    if (!rounds.length) {
+      setError(lang === 'en' ? 'Generate the bracket before starting.' : '请先生成淘汰赛对阵。');
+      setNotice(null);
+      return;
+    }
+    if (!findNextPlayableMatch(rounds)) {
+      setNotice(lang === 'en' ? 'All rounds are already complete.' : '所有轮次已经完成。');
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setAutomation(true);
+    scheduleNextMatch();
+  };
+
+  const handlePauseRound = () => {
+    if (!livePanelRef.current) return;
+    if (!livePanelRef.current.isRunning()) return;
+    livePanelRef.current.togglePause();
+  };
+
+  const handleStopRound = () => {
+    setAutomation(false);
+    setLivePaused(false);
+    if (livePanelRef.current?.isRunning()) {
+      livePanelRef.current.stop();
+    }
+  };
+
+  const hasPendingMatch = useMemo(() => !!findNextPlayableMatch(rounds), [rounds]);
+  const currentRoundNumber = useMemo(() => {
+    if (!rounds.length) return null;
+    for (let ridx = 0; ridx < rounds.length; ridx++) {
+      const round = rounds[ridx];
+      if (!round?.matches?.length) continue;
+      const pending = round.matches.some(match => {
+        const active = match.players.filter(p => p && p !== KO_BYE);
+        if (!active.length) return false;
+        if (active.length < 3) return !match.eliminated;
+        return !match.eliminated;
+      });
+      if (pending) return ridx + 1;
+    }
+    return rounds.length;
+  }, [rounds]);
+  const podiumPlacements = useMemo(() => {
+    if (!finalStandings?.placements?.length) return [] as { token: KnockoutPlayer; total: number | null }[];
+    return finalStandings.placements
+      .filter(entry => entry?.token && entry.token !== KO_BYE)
+      .slice(0, 3)
+      .map(entry => {
+        const numericTotal = Number(entry.total);
+        return {
+          token: entry.token,
+          total: Number.isFinite(numericTotal) ? numericTotal : null,
+        };
+      })
+      .sort((a, b) => {
+        const aScore = typeof a.total === 'number' ? a.total : Number.NEGATIVE_INFINITY;
+        const bScore = typeof b.total === 'number' ? b.total : Number.NEGATIVE_INFINITY;
+        return bScore - aScore;
+      });
+  }, [finalStandings]);
+
+  const finalPlacementLookup = useMemo(() => {
+    const map = new Map<string, { rank: number; total: number | null }>();
+    podiumPlacements.forEach((placement, idx) => {
+      const token = typeof placement.token === 'string' ? placement.token : null;
+      if (!token) return;
+      map.set(token, {
+        rank: idx,
+        total: typeof placement.total === 'number' ? placement.total : null,
+      });
+    });
+    return map;
+  }, [podiumPlacements]);
+
+  const scoreboardTotals = useMemo(() => {
+    if (liveTotals) return liveTotals;
+    if (seriesTotals) return seriesTotals;
+    if (!currentMatch) return null;
+    const base = Number.isFinite(startScore) ? startScore : 0;
+    return [base, base, base] as [number, number, number];
+  }, [liveTotals, seriesTotals, currentMatch, startScore]);
+
+  const seatsForLive = currentMatch ? currentMatch.seats : fallbackLive.seats;
+  const modelsForLive = currentMatch ? currentMatch.seatModels : fallbackLive.seatModels;
+  const keysForLive = currentMatch ? currentMatch.seatKeys : fallbackLive.seatKeys;
+  const delaysForLive = currentMatch ? currentMatch.delays : fallbackLive.delays;
+  const timeoutsForLive = currentMatch ? currentMatch.timeouts : fallbackLive.timeouts;
+
+  const handleAddEntry = () => {
+    setEntries(prev => {
+      const choice = KO_ALL_CHOICES[prev.length % KO_ALL_CHOICES.length] ?? 'built-in:greedy-max';
+      return [...prev, createDefaultKnockoutEntry(choice, prev)];
+    });
+  };
+
+  const handleRemoveEntry = (id: string) => {
+    setEntries(prev => prev.filter(entry => entry.id !== id));
+  };
+
+  const handleEntryChoiceChange = (id: string, choice: BotChoice) => {
+    setEntries(prev => prev.map(entry => {
+      if (entry.id !== id) return entry;
+      const others = prev.filter(e => e.id !== id);
+      const suffix = deriveAutoAliasSuffix(entry.name, entry.choice);
+      let nextName = entry.name;
+      if (suffix !== undefined) {
+        if (suffix) {
+          const candidate = `${choiceLabel(choice)}${suffix}`;
+          nextName = others.some(o => o.name.trim() === candidate)
+            ? defaultAliasForChoice(choice, others)
+            : candidate;
+        } else {
+          nextName = defaultAliasForChoice(choice, others);
+        }
+      }
+      const nextKeys = sanitizeKnockoutKeys(choice, entry.keys);
+      const nextModel = choice.startsWith('ai:')
+        ? (choice === entry.choice ? entry.model : '')
+        : '';
+      return { ...entry, choice, name: nextName, keys: nextKeys, model: nextModel };
+    }));
+  };
+
+  const updateEntry = (id: string, mutator: (entry: KnockoutEntry) => KnockoutEntry) => {
+    setEntries(prev => prev.map(entry => entry.id === id ? mutator(entry) : entry));
+  };
+
+  const handleEntryModelChange = (id: string, model: string) => {
+    updateEntry(id, entry => ({ ...entry, model }));
+  };
+
+  const handleEntryKeyChange = (id: string, key: keyof BotCredentials, value: string) => {
+    updateEntry(id, entry => ({ ...entry, keys: { ...(entry.keys || {}), [key]: value } }));
+  };
+
+  const handleEntryDelayChange = (id: string, value: string) => {
+    const num = Math.max(0, Math.floor(Number(value) || 0));
+    updateEntry(id, entry => ({ ...entry, delayMs: num }));
+  };
+
+  const handleEntryTimeoutChange = (id: string, value: string) => {
+    const num = Math.max(5, Math.floor(Number(value) || 0));
+    updateEntry(id, entry => ({ ...entry, timeoutSecs: num }));
+  };
+
+  const participantsTitle = lang === 'en' ? 'Participants' : '参赛选手';
+  const participantsHint = lang === 'en'
+    ? 'Pick bots, AIs, or a human player just like regular matches.'
+    : '从常规赛使用的内置 / 外置 AI 或人类选手中选择参赛选手。';
+
+  const intervalTitle = lang === 'en' ? 'Min play interval (ms)' : '最小间隔 (ms)';
+  const timeoutTitle = lang === 'en' ? 'Think timeout (s)' : '弃牌时间（秒）';
+
+  return (
+    <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
+      <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>{lang === 'en' ? 'Knockout tournament' : '淘汰赛'}</div>
+      <div style={{ fontSize:14, color:'#4b5563', marginBottom:12 }}>
+        {lang === 'en'
+          ? 'Generate a single-elimination bracket. Add participants below; byes are inserted automatically when required.'
+          : '快速生成单败淘汰赛对阵。先在下方选择参赛选手，不足时会自动补齐轮空。'}
+      </div>
+      <div style={{ border:'1px solid #e5e7eb', borderRadius:12, padding:14, marginBottom:16 }}>
+        <div style={{ fontSize:16, fontWeight:700, marginBottom:10 }}>{lang === 'en' ? 'Match settings' : '对局设置'}</div>
+        <div
+          style={{
+            display:'grid',
+            gridTemplateColumns:'repeat(2, minmax(0, 1fr))',
+            gap:12,
+            gridAutoFlow:'row dense',
+            alignItems:'center',
+          }}
+        >
+          <div>
+            <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {lang === 'en' ? 'Enable match' : '启用对局'}
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={e => updateSettings({ enabled: e.target.checked })}
+                />
+              </label>
+              <button
+                onClick={handleResetAll}
+                style={{ padding:'4px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >{lang === 'en' ? 'Reset' : '清空'}</button>
+            </div>
+          </div>
+          <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+            {lang === 'en' ? 'Games per trio' : '每组三人局数'}
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={roundsPerGroup}
+              onChange={e => updateSettings({ roundsPerGroup: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+              style={{ flex:'1 1 120px', minWidth:0 }}
+            />
+          </label>
+          <div style={{ gridColumn:'1 / 2' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:24, flexWrap:'wrap' }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {lang === 'en' ? 'Outbid landlord' : '可抢地主'}
+                <input
+                  type="checkbox"
+                  checked={bid}
+                  onChange={e => updateSettings({ bid: e.target.checked })}
+                />
+              </label>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {lang === 'en' ? 'Farmer cooperation' : '农民配合'}
+                <input
+                  type="checkbox"
+                  checked={farmerCoop}
+                  onChange={e => updateSettings({ farmerCoop: e.target.checked })}
+                />
+              </label>
+            </div>
+          </div>
+          <div style={{ gridColumn:'2 / 3' }}>
+            <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+              {lang === 'en' ? 'Initial score' : '初始分'}
+              <input
+                type="number"
+                step={10}
+                value={startScore}
+                onChange={e => updateSettings({ startScore: Number(e.target.value) || 0 })}
+                style={{ flex:'1 1 120px', minWidth:0 }}
+              />
+            </label>
+          </div>
+          <div style={{ gridColumn:'1 / 2' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {lang === 'en' ? 'Ladder / TrueSkill' : '天梯  /  TrueSkill'}
+                <input
+                  ref={allFileRef}
+                  type="file"
+                  accept="application/json"
+                  style={{ display:'none' }}
+                  onChange={handleAllFileUpload}
+                />
+                <button
+                  onClick={() => allFileRef.current?.click()}
+                  style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+                >{lang === 'en' ? 'Upload' : '上传'}</button>
+              </label>
+              <button
+                onClick={() => window.dispatchEvent(new Event('ddz-all-save'))}
+                style={{ padding:'3px 10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}
+              >{lang === 'en' ? 'Save' : '存档'}</button>
+            </div>
+          </div>
+          <label style={{ gridColumn:'2 / 3', display:'flex', alignItems:'center', gap:8 }}>
+            {lang === 'en' ? '4-with-2 rule' : '4带2 规则'}
+            <select
+              value={four2}
+              onChange={e => updateSettings({ four2: e.target.value as Four2Policy })}
+              style={{ flex:'1 1 160px', minWidth:0 }}
+            >
+              <option value="both">{lang === 'en' ? 'Allowed' : '都可'}</option>
+              <option value="2singles">{lang === 'en' ? 'Two singles' : '两张单牌'}</option>
+              <option value="2pairs">{lang === 'en' ? 'Two pairs' : '两对'}</option>
+            </select>
+          </label>
+          <div style={{ gridColumn:'1 / -1', fontSize:12, color:'#6b7280' }}>
+            {lang === 'en'
+              ? 'Applies to each elimination trio per round.'
+              : '用于本轮每组三名选手的对局局数。'}
+          </div>
+        </div>
+      </div>
+      <div style={{ border:'1px dashed #d1d5db', borderRadius:10, padding:12, marginBottom:12 }}>
+        <div style={{ fontWeight:700, marginBottom:4 }}>{participantsTitle}</div>
+        <div style={{ fontSize:13, color:'#4b5563', marginBottom:12 }}>{participantsHint}</div>
+        <div
+          style={{
+              display:'grid',
+              gap:12,
+              gridTemplateColumns:'repeat(auto-fit, minmax(260px, 1fr))',
+              alignItems:'stretch',
+            }}
+          >
+            {entries.map((entry, idx) => {
+              const canRemove = entries.length > 3;
+              return (
+              <div
+                key={entry.id}
+                style={{
+                  border:'1px solid #e5e7eb',
+                  borderRadius:8,
+                  padding:10,
+                  display:'flex',
+                  flexDirection:'column',
+                  gap:8,
+                  height:'100%',
+                }}
+              >
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
+                  <div style={{ fontWeight:600 }}>{participantLabel(idx)}</div>
+                  <button
+                    onClick={() => handleRemoveEntry(entry.id)}
+                    disabled={!canRemove}
+                    style={{
+                      padding:'4px 8px',
+                      borderRadius:6,
+                      border:'1px solid #d1d5db',
+                      background: canRemove ? '#fff' : '#f3f4f6',
+                      color:'#1f2937',
+                      cursor: canRemove ? 'pointer' : 'not-allowed',
+                    }}
+                  >{lang === 'en' ? 'Remove' : '移除'}</button>
+                </div>
+                <label style={{ display:'block' }}>
+                  {lang === 'en' ? 'Select' : '选择'}
+                  <select
+                    value={entry.choice}
+                    onChange={e => handleEntryChoiceChange(entry.id, e.target.value as BotChoice)}
+                    style={{ width:'100%', marginTop:4 }}
+                  >
+                    <optgroup label={lang === 'en' ? 'Built-in' : '内置'}>
+                      <option value="built-in:greedy-max">Greedy Max</option>
+                      <option value="built-in:greedy-min">Greedy Min</option>
+                      <option value="built-in:random-legal">Random Legal</option>
+                      <option value="built-in:mininet">MiniNet</option>
+                      <option value="built-in:ally-support">AllySupport</option>
+                      <option value="built-in:endgame-rush">EndgameRush</option>
+                    </optgroup>
+                    <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
+                      <option value="ai:openai">OpenAI</option>
+                      <option value="ai:gemini">Gemini</option>
+                      <option value="ai:grok">Grok</option>
+                      <option value="ai:kimi">Kimi</option>
+                      <option value="ai:qwen">Qwen</option>
+                      <option value="ai:deepseek">DeepSeek</option>
+                      <option value="http">HTTP</option>
+                    </optgroup>
+                    <optgroup label={lang === 'en' ? 'Human' : '人类选手'}>
+                      <option value="human">{humanOptionLabel}</option>
+                    </optgroup>
+                  </select>
+                </label>
+                {entry.choice.startsWith('ai:') && (
+                  <label style={{ display:'block' }}>
+                    {lang === 'en' ? 'Model (optional)' : '模型（可选）'}
+                    <input
+                      type="text"
+                      value={entry.model}
+                      placeholder={defaultModelFor(entry.choice)}
+                      onChange={e => handleEntryModelChange(entry.id, e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                    <div style={{ fontSize:12, color:'#777', marginTop:4 }}>
+                      {lang === 'en'
+                        ? `Leave blank to use ${defaultModelFor(entry.choice)}.`
+                        : `留空则使用推荐：${defaultModelFor(entry.choice)}`}
+                    </div>
+                  </label>
+                )}
+
+                {entry.choice === 'ai:openai' && (
+                  <label style={{ display:'block' }}>
+                    OpenAI API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.openai || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'openai', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'ai:gemini' && (
+                  <label style={{ display:'block' }}>
+                    Gemini API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.gemini || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'gemini', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'ai:grok' && (
+                  <label style={{ display:'block' }}>
+                    xAI (Grok) API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.grok || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'grok', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'ai:kimi' && (
+                  <label style={{ display:'block' }}>
+                    Kimi API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.kimi || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'kimi', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'ai:qwen' && (
+                  <label style={{ display:'block' }}>
+                    Qwen API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.qwen || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'qwen', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'ai:deepseek' && (
+                  <label style={{ display:'block' }}>
+                    DeepSeek API Key
+                    <input
+                      type="password"
+                      value={entry.keys?.deepseek || ''}
+                      onChange={e => handleEntryKeyChange(entry.id, 'deepseek', e.target.value)}
+                      style={{ width:'100%', marginTop:4 }}
+                    />
+                  </label>
+                )}
+
+                {entry.choice === 'http' && (
+                  <>
+                    <label style={{ display:'block' }}>
+                      HTTP Base / URL
+                      <input
+                        type="text"
+                        value={entry.keys?.httpBase || ''}
+                        onChange={e => handleEntryKeyChange(entry.id, 'httpBase', e.target.value)}
+                        style={{ width:'100%', marginTop:4 }}
+                      />
+                    </label>
+                    <label style={{ display:'block' }}>
+                      HTTP Token（可选）
+                      <input
+                        type="password"
+                        value={entry.keys?.httpToken || ''}
+                        onChange={e => handleEntryKeyChange(entry.id, 'httpToken', e.target.value)}
+                        style={{ width:'100%', marginTop:4 }}
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <button
+          onClick={handleAddEntry}
+          style={{ marginTop:12, padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#f9fafb', cursor:'pointer' }}
+        >{lang === 'en' ? 'Add participant' : '新增参赛者'}</button>
+      </div>
+
+      <div style={{ marginTop:12 }}>
+        <div style={{ fontWeight:700, marginBottom:6 }}>{lang === 'en' ? 'Min play interval per participant (ms)' : '每位参赛者出牌最小间隔 (ms)'}</div>
+        <div
+          style={{
+            display:'grid',
+            gap:12,
+            gridTemplateColumns:'repeat(3, minmax(0, 1fr))',
+            alignItems:'stretch',
+          }}
+        >
+          {entries.map((entry, idx) => (
+            <div key={`${entry.id}-delay`} style={{ border:'1px dashed #e5e7eb', borderRadius:6, padding:10 }}>
+              <div style={{ fontWeight:700, marginBottom:8 }}>{participantLabel(idx)}</div>
+              <label style={{ display:'block' }}>
+                {intervalTitle}
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={entry.delayMs}
+                  onChange={e => handleEntryDelayChange(entry.id, e.target.value)}
+                  style={{ width:'100%', marginTop:4 }}
+                />
+              </label>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginTop:12 }}>
+        <div style={{ fontWeight:700, marginBottom:6 }}>{lang === 'en' ? 'Think timeout per participant (s)' : '每位参赛者思考超时（秒）'}</div>
+        <div
+          style={{
+            display:'grid',
+            gap:12,
+            gridTemplateColumns:'repeat(3, minmax(0, 1fr))',
+            alignItems:'stretch',
+          }}
+        >
+          {entries.map((entry, idx) => (
+            <div key={`${entry.id}-timeout`} style={{ border:'1px dashed #e5e7eb', borderRadius:6, padding:10 }}>
+              <div style={{ fontWeight:700, marginBottom:8 }}>{participantLabel(idx)}</div>
+              <label style={{ display:'block' }}>
+                {timeoutTitle}
+                <input
+                  type="number"
+                  min={5}
+                  step={1}
+                  value={entry.timeoutSecs}
+                  onChange={e => handleEntryTimeoutChange(entry.id, e.target.value)}
+                  style={{ width:'100%', marginTop:4 }}
+                />
+              </label>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:16 }}>
+        <button
+          onClick={handleGenerate}
+          disabled={!enabled}
+          style={{
+            padding:'6px 12px',
+            borderRadius:8,
+            border:'1px solid #d1d5db',
+            background: enabled ? '#2563eb' : '#9ca3af',
+            color:'#fff',
+            cursor: enabled ? 'pointer' : 'not-allowed',
+          }}
+        >{lang === 'en' ? 'Generate bracket' : '生成对阵'}</button>
+        <button
+          onClick={handleReset}
+          disabled={!enabled || !rounds.length}
+          style={{
+            padding:'6px 12px',
+            borderRadius:8,
+            border:'1px solid #d1d5db',
+            background: rounds.length && enabled ? '#fff' : '#f3f4f6',
+            color:'#1f2937',
+            cursor: rounds.length && enabled ? 'pointer' : 'not-allowed',
+          }}
+        >{lang === 'en' ? 'Reset bracket' : '重置对阵'}</button>
+      </div>
+      {error && (
+        <div style={{ marginTop:8, color:'#dc2626', fontSize:13 }}>{error}</div>
+      )}
+      {notice && !error && (
+        <div style={{ marginTop:8, color:'#2563eb', fontSize:13 }}>{notice}</div>
+      )}
+
+      <div style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:12, marginTop:16 }}>
+        <LadderPanel />
+      </div>
+
+      {rounds.length > 0 && (
+        <div style={{ marginTop:16, display:'flex', flexDirection:'column', gap:16 }}>
+          <div style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:12 }}>
+            <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+              <div style={{ fontWeight:700 }}>
+                {currentRoundNumber
+                  ? (lang === 'en' ? `Current round: Round ${currentRoundNumber}` : `当前轮次：第 ${currentRoundNumber} 轮`)
+                  : (lang === 'en' ? 'No pending rounds.' : '暂无待运行轮次。')}
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                {(() => {
+                  const startDisabled = !enabled || liveRunning || automationActive || !hasPendingMatch;
+                  return (
+                    <button
+                      onClick={handleStartRound}
+                      disabled={startDisabled}
+                      style={{
+                        padding:'6px 12px',
+                        borderRadius:8,
+                        border:'1px solid #d1d5db',
+                        background: startDisabled ? '#f3f4f6' : '#2563eb',
+                        color: startDisabled ? '#9ca3af' : '#fff',
+                        cursor: startDisabled ? 'not-allowed' : 'pointer',
+                        fontWeight:600,
+                      }}
+                    >{lang === 'en' ? 'Start' : '开始'}</button>
+                  );
+                })()}
+                {(() => {
+                  const pauseDisabled = !liveRunning;
+                  return (
+                    <button
+                      onClick={handlePauseRound}
+                      disabled={pauseDisabled}
+                      style={{
+                        padding:'6px 12px',
+                        borderRadius:8,
+                        border:'1px solid #d1d5db',
+                        background: pauseDisabled ? '#f3f4f6' : (livePaused ? '#bfdbfe' : '#fde68a'),
+                        color: pauseDisabled ? '#9ca3af' : (livePaused ? '#1e3a8a' : '#92400e'),
+                        cursor: pauseDisabled ? 'not-allowed' : 'pointer',
+                        fontWeight:600,
+                      }}
+                    >{livePaused ? (lang === 'en' ? 'Resume' : '继续') : (lang === 'en' ? 'Pause' : '暂停')}</button>
+                  );
+                })()}
+                {(() => {
+                  const stopDisabled = !liveRunning && !automationActive;
+                  return (
+                    <button
+                      onClick={handleStopRound}
+                      disabled={stopDisabled}
+                      style={{
+                        padding:'6px 12px',
+                        borderRadius:8,
+                        border:'1px solid #d1d5db',
+                        background: stopDisabled ? '#f3f4f6' : '#fee2e2',
+                        color: stopDisabled ? '#9ca3af' : '#b91c1c',
+                        cursor: stopDisabled ? 'not-allowed' : 'pointer',
+                        fontWeight:600,
+                      }}
+                    >{lang === 'en' ? 'Stop' : '停止'}</button>
+                  );
+                })()}
+              </div>
+            </div>
+            <div style={{ marginTop:12, display:'grid', gap:12 }}>
+              {rounds.map((round, ridx) => (
+                <div key={`round-${ridx}`} style={{ border:'1px dashed #d1d5db', borderRadius:10, padding:12 }}>
+                  <div style={{ fontWeight:700, marginBottom:6 }}>
+                    {lang === 'en' ? `Round ${ridx + 1}` : `第 ${ridx + 1} 轮`}
+                  </div>
+                  <div style={{ fontSize:13, color:'#4b5563', marginBottom:8 }}>
+                    {lang === 'en'
+                      ? `Each trio plays ${roundsPerGroup} game(s) this round.`
+                      : `本轮每组三人进行 ${roundsPerGroup} 局。`}
+                  </div>
+                  <div style={{ display:'grid', gap:10 }}>
+                    {round.matches.map((match, midx) => {
+                      const actionable = match.players.filter(p => p && p !== KO_BYE) as string[];
+                      const eliminatedLabel = match.eliminated ? displayName(match.eliminated) : null;
+                      const survivors = match.eliminated
+                        ? match.players.filter(p => p && p !== match.eliminated && p !== KO_BYE)
+                        : [];
+                      const isActiveMatch = currentMatch?.roundIdx === ridx && currentMatch?.matchIdx === midx;
+                      const cardBorder = isActiveMatch ? '#2563eb' : '#e5e7eb';
+                      const cardBackground = isActiveMatch ? '#f0f9ff' : '#fff';
+                      const manualDisabled = automationActive || liveRunning;
+                      const isFinalMatchCard = isFinalRoundMatch(rounds, ridx, midx);
+                      const finalStatusNodes = isFinalMatchCard
+                        ? (() => {
+                            const placements = match.players
+                              .filter((playerToken): playerToken is string => typeof playerToken === 'string')
+                              .map(playerToken => {
+                                const placement = finalPlacementLookup.get(playerToken);
+                                return placement ? { playerToken, placement } : null;
+                              })
+                              .filter((entry): entry is { playerToken: string; placement: { rank: number; total: number | null } } => !!entry)
+                              .sort((a, b) => a.placement.rank - b.placement.rank);
+                            return placements.map(({ playerToken, placement }) => {
+                              const labelText = placement.rank === 0
+                                ? (lang === 'en' ? 'Champion' : '冠军')
+                                : placement.rank === 1
+                                  ? (lang === 'en' ? 'Runner-up' : '亚军')
+                                  : (lang === 'en' ? 'Third place' : '季军');
+                              const baseText = lang === 'en'
+                                ? `${labelText}: ${displayName(playerToken)}`
+                                : `${labelText}：${displayName(playerToken)}`;
+                              const scoreText = placement.total != null
+                                ? (lang === 'en'
+                                  ? ` (Points: ${placement.total})`
+                                  : `（积分：${placement.total}）`)
+                                : '';
+                              return (
+                                <span
+                                  key={`${match.id || `match-${midx}`}-final-${playerToken}`}
+                                  style={{ fontSize:12, color:'#047857', fontWeight:600 }}
+                                >
+                                  {baseText}{scoreText}
+                                </span>
+                              );
+                            });
+                          })()
+                        : [];
+                      return (
+                        <div
+                          key={match.id || `round-${ridx}-match-${midx}`}
+                          style={{
+                            border:`1px solid ${cardBorder}`,
+                            borderRadius:8,
+                            padding:10,
+                            background: cardBackground,
+                          }}
+                        >
+                          <div style={{ display:'flex', flexWrap:'wrap', justifyContent:'space-between', alignItems:'center', gap:8, marginBottom:8 }}>
+                            <div style={{ display:'flex', flexWrap:'wrap', gap:6, alignItems:'center' }}>
+                              {match.players.map((playerToken, pidx) => {
+                                const meta = playerMeta(playerToken);
+                                const eliminated = match.eliminated === playerToken || playerToken === KO_BYE;
+                                const labelColor = eliminated ? '#9ca3af' : '#1f2937';
+                                const detailColor = eliminated ? '#9ca3af' : '#6b7280';
+                                return (
+                                  <div key={`${match.id || `match-${midx}`}-player-${pidx}`} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                                    <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-start', gap:2 }}>
+                                      <span style={{ fontWeight:700, fontSize:16, color: labelColor, opacity: eliminated ? 0.7 : 1 }}>
+                                        {meta.label}
+                                      </span>
+                                      {meta.provider && (
+                                        <span style={{ fontSize:12, color: detailColor, opacity: eliminated ? 0.65 : 1 }}>
+                                          {meta.provider}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {pidx < match.players.length - 1 && <span style={{ color:'#6b7280', fontSize:14 }}>vs</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
+                              {finalStatusNodes.length > 0 ? (
+                                finalStatusNodes
+                              ) : (
+                                <>
+                                  {eliminatedLabel && (
+                                    <span style={{ fontSize:12, color:'#b91c1c' }}>
+                                      {lang === 'en' ? `Eliminated: ${eliminatedLabel}` : `淘汰：${eliminatedLabel}`}
+                                    </span>
+                                  )}
+                                  {match.eliminated && survivors.length > 0 && (
+                                    <span style={{ fontSize:12, color:'#047857' }}>
+                                      {lang === 'en'
+                                        ? `Advancing: ${survivors.map(p => displayName(p)).join(', ')}`
+                                        : `晋级：${survivors.map(p => displayName(p)).join('，')}`}
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          {actionable.length ? (
+                            <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                              {actionable.map(player => {
+                                const isActive = match.eliminated === player;
+                                const disabled = manualDisabled;
+                                return (
+                                  <button
+                                    key={player}
+                                    onClick={() => handleToggleEliminated(ridx, midx, player)}
+                                    disabled={disabled}
+                                    style={{
+                                      padding:'4px 10px',
+                                      borderRadius:8,
+                                      border:'1px solid #d1d5db',
+                                      background: isActive ? '#dc2626' : disabled ? '#f3f4f6' : '#fff',
+                                      color: isActive ? '#fff' : disabled ? '#9ca3af' : '#1f2937',
+                                      cursor: disabled ? 'not-allowed' : 'pointer',
+                                    }}
+                                  >{lang === 'en' ? `Eliminate ${displayName(player)}` : `淘汰 ${displayName(player)}`}</button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize:12, color:'#6b7280' }}>
+                              {lang === 'en' ? 'Waiting for previous results.' : '等待上一轮结果。'}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:14 }}>
+            <div style={{ fontSize:16, fontWeight:700, marginBottom:8 }}>
+              {lang === 'en' ? 'Live trio monitor' : '实时对局面板'}
+            </div>
+            {currentMatch ? (
+              <>
+                <div style={{ fontSize:13, color:'#4b5563', marginBottom:8 }}>
+                  {currentMatch.tokens.map((token, idx) => (
+                    <span key={`${token}-label`}>
+                      {displayName(token)}{idx < currentMatch.tokens.length - 1 ? ' vs ' : ''}
+                    </span>
+                  ))}
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:12, marginBottom:12 }}>
+                  {currentMatch.tokens.map((token, idx) => {
+                    const label = currentMatch.labels[idx] || displayName(token);
+                    const total = scoreboardTotals ? scoreboardTotals[idx] : null;
+                    const seatChoice = currentMatch.seats[idx];
+                    const model = (currentMatch.seatModels[idx] || '').trim();
+                    const httpBase = typeof currentMatch.seatKeys[idx]?.httpBase === 'string'
+                      ? currentMatch.seatKeys[idx]!.httpBase!.trim()
+                      : '';
+                    const providerText = seatChoice === 'human'
+                      ? humanProviderLabel
+                      : providerSummary(seatChoice, model, httpBase, lang);
+                    return (
+                      <div key={`${token}-score`} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:10, background:'#fff' }}>
+                        <div style={{ fontWeight:700, marginBottom:4 }}>{label}</div>
+                        <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>{providerText}</div>
+                        <div style={{ fontSize:24, fontWeight:800, color:'#111827' }}>{total != null ? total : '—'}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {overtimeCount > 0 && (
+                  <div style={{ fontSize:12, color:'#b91c1c', marginBottom:12 }}>
+                    {overtimeReason === 'final'
+                      ? (lang === 'en'
+                        ? `Final round overtime #${overtimeCount} (3 games) is running to break the tie.`
+                        : `决赛积分出现平局，正在进行第 ${overtimeCount} 次加时赛（每次 3 局）。`)
+                      : (lang === 'en'
+                        ? `Overtime playoff #${overtimeCount} (3 games) is running because of a lowest-score tie.`
+                        : `由于积分最低出现平局，正在进行第 ${overtimeCount} 次加时赛（每次 3 局）。`)}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize:13, color:'#6b7280', marginBottom:12 }}>
+                {lang === 'en' ? 'Click “Start” to run the next trio.' : '点击“开始”运行下一组三人对局。'}
+              </div>
+            )}
+            <div>
+              <LivePanel
+                key={matchKey}
+                ref={livePanelRef}
+                rounds={seriesRounds}
+                startScore={startScore}
+                seatDelayMs={delaysForLive}
+                enabled={enabled && !!currentMatch}
+                bid={bid}
+                four2={four2}
+                seats={seatsForLive}
+                seatModels={modelsForLive}
+                seatKeys={keysForLive}
+                farmerCoop={farmerCoop}
+                onTotals={setLiveTotals}
+                onRunningChange={setLiveRunning}
+                onPauseChange={setLivePaused}
+                onFinished={handleLiveFinished}
+                controlsHidden
+                initialTotals={seriesTotals}
+                turnTimeoutSecs={timeoutsForLive}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {podiumPlacements.length ? (
+        <div style={{
+          marginTop:16,
+          padding:12,
+          border:'1px solid #bbf7d0',
+          background:'#ecfdf5',
+          borderRadius:10,
+          color:'#047857',
+        }}>
+          <div style={{ fontWeight:700, marginBottom:6 }}>
+            {lang === 'en' ? 'Final standings' : '最终排名'}
+          </div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:16 }}>
+            {podiumPlacements.map((placement, idx) => {
+              const label = idx === 0
+                ? (lang === 'en' ? 'Champion' : '冠军')
+                : idx === 1
+                  ? (lang === 'en' ? 'Runner-up' : '亚军')
+                  : (lang === 'en' ? 'Third place' : '季军');
+              const score = typeof placement.total === 'number'
+                ? placement.total
+                : '';
+              return (
+                <div
+                  key={`${placement.token || 'placement'}-${idx}`}
+                  style={{
+                    display:'flex',
+                    flexWrap:'wrap',
+                    gap:8,
+                    fontWeight:700,
+                    fontSize:24,
+                  }}
+                >
+                  <span>{`${label}：${displayName(placement.token)}`}</span>
+                  {score !== '' && (
+                    <span style={{ fontSize:22, color:'#047857cc' }}>
+                      {lang === 'en' ? `(Points: ${score})` : `（积分：${score}）`}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+>>>>>>> Stashed changes
 function Section({ title, children }:{title:string; children:React.ReactNode}) {
   return (
     <div style={{ marginBottom:16 }}>
@@ -603,9 +2707,28 @@ function choiceLabel(choice: BotChoice): string {
     case 'ai:qwen':               return 'Qwen';
     case 'ai:deepseek':           return 'DeepSeek';
     case 'http':                  return 'HTTP';
+    case 'human':                 return 'Human';
     default: return String(choice);
   }
 }
+<<<<<<< Updated upstream
+=======
+
+function providerSummary(choice: BotChoice, model: string | undefined, httpBase: string | undefined, lang: Lang = 'zh'): string {
+  const provider = choiceLabel(choice);
+  if (choice === 'http') {
+    const base = (httpBase || '').trim();
+    if (!base) return provider;
+    const customLabel = lang === 'en' ? 'custom' : '自定义';
+    return `${provider} · ${customLabel}`;
+  }
+  if (choice.startsWith('ai:')) {
+    const trimmedModel = (model || '').trim();
+    return trimmedModel ? `${provider} · ${trimmedModel}` : provider;
+  }
+  return provider;
+}
+>>>>>>> Stashed changes
 /* ====== 雷达图累计（0~5） ====== */
 type Score5 = { coop:number; agg:number; cons:number; eff:number; bid:number };
 function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:number, alpha:number): Score5 {
@@ -643,7 +2766,12 @@ const makeRewriteRoundLabel = (n: number) => (msg: string) => {
 };
 
 /* ==================== LivePanel（对局） ==================== */
+<<<<<<< Updated upstream
 function LivePanel(props: LiveProps) {
+=======
+const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(props, ref) {
+  const { t, lang } = useI18n();
+>>>>>>> Stashed changes
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const pauseRef = useRef(false);
@@ -682,11 +2810,211 @@ function LivePanel(props: LiveProps) {
   const [bidMultiplier, setBidMultiplier] = useState(1);
   const [winner, setWinner] = useState<number|null>(null);
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
-  const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [] });
+  const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [], revealed: false });
   const [log, setLog] = useState<string[]>([]);
+<<<<<<< Updated upstream
   const [totals, setTotals] = useState<[number,number,number]>([
     props.startScore || 0, props.startScore || 0, props.startScore || 0,
   ]);
+=======
+  const humanTraceRef = useRef<string>('');
+  const [humanRequest, setHumanRequest] = useState<HumanPrompt | null>(null);
+  const [humanSelectedIdx, setHumanSelectedIdx] = useState<number[]>([]);
+  const [humanSubmitting, setHumanSubmitting] = useState(false);
+  const [humanError, setHumanError] = useState<string | null>(null);
+  const humanSelectedSet = useMemo(() => new Set(humanSelectedIdx), [humanSelectedIdx]);
+  const humanHint = humanRequest?.hint ?? null;
+  const humanHintDecorated = useMemo(() => {
+    if (!humanRequest || humanRequest.phase !== 'play') return [] as string[];
+    if (!humanHint || humanHint.move !== 'play' || !Array.isArray(humanHint.cards)) return [] as string[];
+    const seat = humanRequest.seat;
+    if (seat == null || seat < 0 || seat >= hands.length) return [] as string[];
+    const seatHand = hands[seat] || [];
+    const desired = humanHint.cards.map(displayLabelFromRaw);
+    const used = new Set<number>();
+    const out: string[] = [];
+    for (const label of desired) {
+      const idx = seatHand.findIndex((card, i) => !used.has(i) && card === label);
+      if (idx >= 0) {
+        used.add(idx);
+        out.push(seatHand[idx]);
+      } else {
+        out.push(label);
+      }
+    }
+    return out;
+  }, [humanRequest, humanHint, hands]);
+  const humanHintMeta = useMemo(() => {
+    if (!humanHint) return [] as string[];
+    const items: string[] = [];
+    if (humanHint.by) items.push(lang === 'en' ? `Source: ${humanHint.by}` : `来自：${humanHint.by}`);
+    if (typeof humanHint.score === 'number' && Number.isFinite(humanHint.score)) {
+      const scoreText = humanHint.score.toFixed(2);
+      items.push(lang === 'en' ? `Estimated score ${scoreText}` : `估分：${scoreText}`);
+    }
+    if (humanHint.label && humanHint.move === 'play') {
+      items.push(lang === 'en' ? `Pattern: ${humanHint.label}` : `牌型：${humanHint.label}`);
+    }
+    if (humanHint.reason) items.push(humanHint.reason);
+    return items;
+  }, [humanHint, lang]);
+
+  const resetHumanState = useCallback(() => {
+    setHumanRequest(null);
+    setHumanSelectedIdx([]);
+    setHumanSubmitting(false);
+    setHumanError(null);
+  }, []);
+
+  const toggleHumanCard = useCallback((idx: number) => {
+    setHumanSelectedIdx(prev => {
+      if (prev.includes(idx)) return prev.filter(i => i !== idx);
+      return [...prev, idx];
+    });
+  }, []);
+
+  const hasHumanSeat = useMemo(() => {
+    if (!Array.isArray(props.seats)) return false;
+    return props.seats.some(choice => choice === 'human');
+  }, [props.seats]);
+
+  const isHumanSeat = useCallback((seat: number) => props.seats?.[seat] === 'human', [props.seats]);
+
+  const submitHumanAction = useCallback(async (payload: any) => {
+    if (!humanRequest || humanSubmitting) return;
+    const trace = humanTraceRef.current;
+    if (!trace) {
+      setHumanError(lang === 'en' ? 'Client trace missing' : '缺少客户端标识');
+      return;
+    }
+    setHumanSubmitting(true);
+    setHumanError(null);
+    try {
+      const resp = await fetch('/api/human_action', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clientTraceId: trace,
+          requestId: humanRequest.requestId,
+          payload,
+        }),
+      });
+      if (!resp.ok) {
+        let msg = `HTTP ${resp.status}`;
+        try {
+          const data = await resp.json();
+          if (data?.error) msg = data.error;
+        } catch {}
+        throw new Error(msg);
+      }
+    } catch (err:any) {
+      setHumanSubmitting(false);
+      setHumanError(err?.message || String(err));
+    }
+  }, [humanRequest, humanSubmitting, lang]);
+
+  const handleHumanPlay = useCallback(async () => {
+    if (!humanRequest || humanRequest.phase !== 'play') return;
+    const seat = humanRequest.seat;
+    const hand = hands[seat] || [];
+    const cards = humanSelectedIdx
+      .slice()
+      .sort((a,b) => a - b)
+      .map(idx => hand[idx])
+      .filter((c): c is string => typeof c === 'string' && c.length > 0);
+    if (cards.length === 0) {
+      setHumanError(lang === 'en' ? 'Select at least one card.' : '请先选择要出的牌');
+      return;
+    }
+    await submitHumanAction({ phase:'play', move:'play', cards });
+  }, [humanRequest, humanSelectedIdx, submitHumanAction, hands, lang]);
+
+  const handleHumanPass = useCallback(async () => {
+    if (!humanRequest || humanRequest.phase !== 'play') return;
+    await submitHumanAction({ phase:'play', move:'pass' });
+  }, [humanRequest, submitHumanAction]);
+
+  const handleHumanBid = useCallback(async (decision: boolean) => {
+    if (!humanRequest || humanRequest.phase !== 'bid') return;
+    await submitHumanAction({ phase:'bid', bid: decision });
+  }, [humanRequest, submitHumanAction]);
+
+  const handleHumanDouble = useCallback(async (decision: boolean) => {
+    if (!humanRequest || humanRequest.phase !== 'double') return;
+    await submitHumanAction({ phase:'double', double: decision });
+  }, [humanRequest, submitHumanAction]);
+
+  const handleHumanClear = useCallback(() => {
+    setHumanSelectedIdx([]);
+    setHumanError(null);
+  }, []);
+
+  const applyHumanHint = useCallback(() => {
+    if (!humanRequest || humanRequest.phase !== 'play') return;
+    const hint = humanRequest.hint;
+    if (!hint || hint.move !== 'play' || !Array.isArray(hint.cards)) return;
+    const seat = humanRequest.seat;
+    if (seat == null || seat < 0 || seat >= hands.length) return;
+    const seatHand = hands[seat] || [];
+    const desired = hint.cards.map(displayLabelFromRaw);
+    const used = new Set<number>();
+    const indices: number[] = [];
+    for (const label of desired) {
+      const idx = seatHand.findIndex((card, i) => !used.has(i) && card === label);
+      if (idx >= 0) {
+        used.add(idx);
+        indices.push(idx);
+      }
+    }
+    if (indices.length > 0) {
+      setHumanSelectedIdx(indices.sort((a, b) => a - b));
+      setHumanError(null);
+    }
+  }, [humanRequest, hands, setHumanError, setHumanSelectedIdx]);
+
+  const currentHumanSeat = humanRequest?.seat ?? null;
+  const humanPhase = humanRequest?.phase ?? 'play';
+  const humanSeatLabel = currentHumanSeat != null ? seatName(currentHumanSeat) : '';
+  const humanPhaseText = humanPhase === 'bid'
+    ? (lang === 'en' ? 'Bidding' : '抢地主')
+    : humanPhase === 'double'
+      ? (lang === 'en' ? 'Double' : '加倍')
+      : (lang === 'en' ? 'Play cards' : '出牌');
+  const humanRequireText = (() => {
+    if (humanPhase !== 'play') return '';
+    const req = humanRequest?.ctx?.require;
+    if (!req) return lang === 'en' ? 'Any legal play' : '任意合法牌型';
+    if (typeof req === 'string') return req;
+    if (typeof req?.type === 'string') return req.type;
+    return lang === 'en' ? 'Follow previous play' : '跟牌';
+  })();
+  const humanCanPass = humanPhase === 'play' ? humanRequest?.ctx?.canPass !== false : true;
+  const humanSelectedCount = humanSelectedIdx.length;
+  const canAdoptHint = humanPhase === 'play' && humanHint?.move === 'play' && humanHintDecorated.length > 0;
+  const initialTotals = useMemo(
+    () => sanitizeTotalsArray(props.initialTotals, props.startScore || 0),
+    [props.initialTotals, props.startScore],
+  );
+  const [totals, setTotals] = useState<[number, number, number]>(() => (
+    [initialTotals[0], initialTotals[1], initialTotals[2]]
+  ));
+  const initialTotalsRef = useRef<[number, number, number]>(initialTotals);
+  useEffect(() => {
+    initialTotalsRef.current = initialTotals;
+    if (!runningRef.current) {
+      setTotals(prev => {
+        if (
+          prev[0] === initialTotals[0] &&
+          prev[1] === initialTotals[1] &&
+          prev[2] === initialTotals[2]
+        ) {
+          return prev;
+        }
+        return [initialTotals[0], initialTotals[1], initialTotals[2]] as [number, number, number];
+      });
+    }
+  }, [initialTotals]);
+>>>>>>> Stashed changes
   const [finishedCount, setFinishedCount] = useState(0);
   // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
@@ -1140,7 +3468,7 @@ function LivePanel(props: LiveProps) {
   const agentIdForIndex = (i:number) => {
     const choice = props.seats[i] as BotChoice;
     const label = choiceLabel(choice);
-    if ((choice as string).startsWith('built-in')) return label;
+    if ((choice as string).startsWith('built-in') || choice === 'human') return label;
     const model = (props.seatModels?.[i]) || defaultModelFor(choice);
     return `${label}:${model}`;
   };
@@ -1234,11 +3562,14 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setRunning(true);
     setAllLogs([]);
     setLandlord(null); setHands([[], [], []]); setPlays([]);
+    setBottomInfo({ landlord: null, cards: [], revealed: false });
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
     setTotals([props.startScore || 0, props.startScore || 0, props.startScore || 0]);
     lastReasonRef.current = [null, null, null];
     setAggStats(null); setAggCount(0);
+    resetHumanState();
+    humanTraceRef.current = '';
 
     // TrueSkill：开始时先应用 overall（未知地主）
     setTsArr([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -1313,6 +3644,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
       const toUiSeat = (j:number) => (j + startShift) % 3;
       const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
       const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
+      humanTraceRef.current = traceId;
       setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
       roundFinishedRef.current = false;
@@ -1390,6 +3722,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
             return {
               landlord: cur?.landlord ?? null,
               cards: (cur?.cards || []).map(c => ({ ...c })),
+              revealed: !!cur?.revealed,
             } as BottomInfo;
           })();
 for (const raw of batch) {
@@ -1448,7 +3781,8 @@ for (const raw of batch) {
                 nextPlays = [];
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
-                nextBottom = { landlord: null, cards: [] };
+                nextBottom = { landlord: null, cards: [], revealed: false };
+                resetHumanState();
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -1457,6 +3791,7 @@ for (const raw of batch) {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
                 const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                 nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
+                resetHumanState();
                 continue;
               }
 
@@ -1470,9 +3805,18 @@ for (const raw of batch) {
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
                   nextHands = (rh as string[][]).map(decorateHandCycle);
 
-                  const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
+                  const rawLord = m.landlordIdx ?? m.landlord;
+                  const lord = (typeof rawLord === 'number' && rawLord >= 0 && rawLord < 3)
+                    ? rawLord
+                    : null;
                   nextLandlord = lord;
-                  nextBottom = { landlord: lord ?? null, cards: [] };
+                  const bottomRaw = Array.isArray(m.bottom) ? (m.bottom as string[]) : [];
+                  const decoratedBottom = bottomRaw.length ? decorateHandCycle(bottomRaw) : [];
+                  nextBottom = {
+                    landlord: lord ?? null,
+                    cards: decoratedBottom.map(label => ({ label, used: false })),
+                    revealed: false,
+                  };
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
@@ -1502,15 +3846,27 @@ for (const raw of batch) {
                 const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
                 if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
                   nextHands = (rh0 as string[][]).map(decorateHandCycle);
-                  const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
+                  const rawLord2 = m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
+                  const lord2 = (typeof rawLord2 === 'number' && rawLord2 >= 0 && rawLord2 < 3)
+                    ? rawLord2
+                    : null;
                   if (lord2 != null) {
                     nextLandlord = lord2;
                     if (nextBottom.landlord !== lord2) {
                       const keep = Array.isArray(nextBottom.cards)
                         ? nextBottom.cards.map(c => ({ ...c }))
                         : [];
-                      nextBottom = { landlord: lord2, cards: keep };
+                      nextBottom = { landlord: lord2, cards: keep, revealed: !!nextBottom.revealed };
                     }
+                  }
+                  const bottom0 = m.bottom ?? m.payload?.bottom ?? m.state?.bottom ?? m.init?.bottom;
+                  if (Array.isArray(bottom0)) {
+                    const decoratedBottom0 = decorateHandCycle(bottom0 as string[]);
+                    nextBottom = {
+                      landlord: nextLandlord ?? nextBottom.landlord ?? null,
+                      cards: decoratedBottom0.map(label => ({ label, used: false })),
+                      revealed: false,
+                    };
                   }
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
@@ -1540,17 +3896,60 @@ for (const raw of batch) {
                 }
               }
 
-// -------- AI 过程日志 --------
+              if (m.type === 'human-request') {
+                const seat = typeof m.seat === 'number' ? m.seat : -1;
+                if (seat >= 0 && seat < 3) {
+                  const requestId = typeof m.requestId === 'string' ? m.requestId : `${Date.now()}-${Math.random()}`;
+                  const rawHint = (m as any).hint ?? (m as any).suggestion;
+                  let hint: HumanHint | undefined;
+                  if (rawHint && typeof rawHint === 'object') {
+                    const move = rawHint.move === 'play' ? 'play' : 'pass';
+                    const cards = Array.isArray(rawHint.cards) ? rawHint.cards.map((c: any) => String(c)) : undefined;
+                    const scoreVal = Number((rawHint as any).score);
+                    const score = Number.isFinite(scoreVal) ? scoreVal : undefined;
+                    const reason = typeof rawHint.reason === 'string' ? rawHint.reason : undefined;
+                    const label = typeof rawHint.label === 'string' ? rawHint.label : undefined;
+                    const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
+                    hint = { move, cards, score, reason, label, by: byHint };
+                  }
+                  setHumanRequest({
+                    seat,
+                    requestId,
+                    phase: typeof m.phase === 'string' ? m.phase : 'play',
+                    ctx: m.ctx ?? {},
+                    timeoutMs: typeof m.timeoutMs === 'number' ? m.timeoutMs : undefined,
+                    delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
+                    by: typeof m.by === 'string' ? m.by : undefined,
+                    hint,
+                  });
+                  setHumanSelectedIdx([]);
+                  setHumanSubmitting(false);
+                  setHumanError(null);
+                  const label = seatName(seat);
+                  const phaseLabel = typeof m.phase === 'string' ? m.phase : 'play';
+                  nextLog = [...nextLog, `【Human】${label} 等待操作｜phase=${phaseLabel}`];
+                }
+                continue;
+              }
+
+              // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
-                nextLog = [...nextLog, `AI调用｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
+                const prefix = isHumanSeat(m.seat) ? 'Human' : 'AI';
+                nextLog = [...nextLog, `${prefix}调用｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
+                const prefix = isHumanSeat(m.seat) ? 'Human' : 'AI';
                 nextLog = [
                   ...nextLog,
-                  `AI完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
-                  ...(m.reason ? [`AI理由｜${seatName(m.seat)}：${m.reason}`] : []),
+                  `${prefix}完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
+                  ...(m.reason ? [`${prefix}理由｜${seatName(m.seat)}：${m.reason}`] : []),
                 ];
+                if (isHumanSeat(m.seat)) {
+                  setHumanSubmitting(false);
+                  setHumanRequest(prev => (prev && prev.seat === m.seat ? null : prev));
+                  setHumanSelectedIdx([]);
+                }
                 lastReasonRef.current[m.seat] = m.reason || null;
                 continue;
               }
@@ -1599,13 +3998,14 @@ if (m.type === 'event' && m.kind === 'reveal') {
         if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
       }
     }
-    seatHand = [...seatHand, ...mapped];
+    seatHand = sortDisplayHand([...seatHand, ...mapped]);
     nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
   }
 
   nextBottom = {
     landlord: landlordSeat ?? nextBottom.landlord ?? null,
     cards: mapped.map(label => ({ label, used: false })),
+    revealed: true,
   };
   const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
   nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
@@ -1895,7 +4295,7 @@ nextTotals     = [
             const keep = Array.isArray(nextBottom.cards)
               ? nextBottom.cards.map(c => ({ ...c }))
               : [];
-            nextBottom = { landlord: nextLandlord, cards: keep };
+            nextBottom = { landlord: nextLandlord, cards: keep, revealed: !!nextBottom.revealed };
           }
 
           setRoundLords(nextLords);
@@ -1952,10 +4352,42 @@ nextTotals     = [
     } catch (e: any) {
       if (e?.name === 'AbortError') setLog(l => [...l, '已手动停止。']);
       else setLog(l => [...l, `错误：${e?.message || e}`]);
+<<<<<<< Updated upstream
     } finally { exitPause(); setRunning(false); }
+=======
+    } finally {
+      exitPause();
+      setRunning(false);
+      resetHumanState();
+      humanTraceRef.current = '';
+      const totalsSnap = (() => {
+        const value = totalsRef.current;
+        if (value && Array.isArray(value) && value.length === 3) {
+          return [value[0], value[1], value[2]] as [number, number, number];
+        }
+        const base = initialTotalsRef.current;
+        return [base[0], base[1], base[2]] as [number, number, number];
+      })();
+      const finishedGames = finishedRef.current || 0;
+      const targetRounds = Math.max(1, Number(props.rounds) || 1);
+      props.onFinished?.({
+        aborted,
+        finishedCount: finishedGames,
+        totals: totalsSnap,
+        completedAll: !aborted && (finishedGames >= targetRounds || endedEarlyForNegative),
+        endedEarlyForNegative,
+      });
+    }
+>>>>>>> Stashed changes
   };
 
-  const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); };
+  const stop = () => {
+    exitPause();
+    controllerRef.current?.abort();
+    setRunning(false);
+    resetHumanState();
+    humanTraceRef.current = '';
+  };
 
   const togglePause = () => {
     if (!running) return;
@@ -2230,14 +4662,33 @@ const handleAllSaveInner = () => {
 <div style={{ marginBottom:6 }}>
                 <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
               </div>
-              <Hand cards={hands[i]} />
+              <Hand
+                cards={hands[i]}
+                interactive={!!(humanRequest && humanRequest.seat === i && humanRequest.phase === 'play')}
+                selectedIndices={humanRequest && humanRequest.seat === i ? humanSelectedSet : undefined}
+                onToggle={humanRequest && humanRequest.seat === i && humanRequest.phase === 'play' ? toggleHumanCard : undefined}
+                disabled={humanSubmitting}
+                faceDown={hasHumanSeat ? !isHumanSeat(i) : false}
+              />
             </div>
           ))}
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
           {[0,1,2].map(i=>{
+            const showAllBottom = !bottomInfo.revealed && bottomInfo.cards.length > 0;
             const isLandlord = bottomInfo.landlord === i;
-            const cards = isLandlord ? bottomInfo.cards : [];
+            const showCards = showAllBottom
+              ? true
+              : bottomInfo.revealed
+                ? isLandlord
+                : (!hasHumanSeat);
+            const cards = showCards ? bottomInfo.cards : [];
+            const labelText = lang === 'en'
+              ? `Bottom${showAllBottom ? ' (pre-bid)' : ''}`
+              : `底牌${showAllBottom ? '（待抢地主）' : ''}`;
+            const background = showAllBottom
+              ? '#fef3c7'
+              : (isLandlord ? '#f0fdf4' : '#f9fafb');
             return (
               <div
                 key={`bottom-${i}`}
@@ -2250,11 +4701,11 @@ const handleAllSaveInner = () => {
                   flexDirection:'column',
                   justifyContent:'center',
                   alignItems:'center',
-                  background:isLandlord ? '#f0fdf4' : '#f9fafb'
+                  background
                 }}
               >
-                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>底牌</div>
-                {isLandlord ? (
+                <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>{labelText}</div>
+                {showCards ? (
                   cards.length ? (
                     <div style={{ display:'flex', flexWrap:'wrap', gap:4, justifyContent:'center' }}>
                       {cards.map((c, idx) => (
@@ -2262,7 +4713,9 @@ const handleAllSaveInner = () => {
                       ))}
                     </div>
                   ) : (
-                    <div style={{ fontSize:12, color:'#9ca3af' }}>（待明牌）</div>
+                    <div style={{ fontSize:12, color:'#9ca3af' }}>
+                      {lang === 'en' ? '(awaiting reveal)' : '（待明牌）'}
+                    </div>
                   )
                 ) : (
                   <div style={{ fontSize:12, color:'#d1d5db' }}>—</div>
@@ -2272,6 +4725,142 @@ const handleAllSaveInner = () => {
           })}
         </div>
       </Section>
+
+      {humanRequest && (
+        <Section title={lang === 'en' ? 'Human control' : '人类操作'}>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <div style={{ fontWeight:700 }}>
+              {lang === 'en'
+                ? `Seat ${humanSeatLabel} · ${humanPhaseText}`
+                : `${humanSeatLabel} ｜ ${humanPhaseText}`}
+            </div>
+            {humanPhase === 'play' && (
+              <>
+                <div style={{ fontSize:12, color:'#6b7280' }}>
+                  {lang === 'en'
+                    ? `Requirement: ${humanRequireText} · Can pass: ${humanCanPass ? 'Yes' : 'No'} · Selected: ${humanSelectedCount}`
+                    : `需求：${humanRequireText} ｜ 可过：${humanCanPass ? '是' : '否'} ｜ 已选：${humanSelectedCount}`}
+                </div>
+                {humanHint && (
+                  <div
+                    style={{
+                      border:'1px solid #bfdbfe',
+                      background:'#eff6ff',
+                      borderRadius:8,
+                      padding:'8px 10px',
+                      display:'flex',
+                      flexDirection:'column',
+                      gap:6,
+                    }}
+                  >
+                    <div style={{ fontWeight:600, color:'#1d4ed8' }}>
+                      {lang === 'en'
+                        ? (humanHint.move === 'play' ? 'Suggestion: play these cards' : 'Suggestion: pass this turn')
+                        : (humanHint.move === 'play' ? '提示：建议出牌' : '提示：建议过牌')}
+                    </div>
+                    {humanHint.move === 'play' ? (
+                      humanHintDecorated.length > 0 ? (
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                          {humanHintDecorated.map((card, idx) => (
+                            <Card key={`hint-${card}-${idx}`} label={card} compact />
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize:12, color:'#4b5563' }}>
+                          {lang === 'en'
+                            ? 'No specific combination suggested; choose any legal play.'
+                            : '暂无具体牌型建议，可根据规则自由选择。'}
+                        </div>
+                      )
+                    ) : (
+                      <div style={{ fontSize:12, color:'#4b5563' }}>
+                        {lang === 'en'
+                          ? 'Hint: passing keeps stronger responses for later.'
+                          : '提示：建议过牌以保留更强的牌型。'}
+                      </div>
+                    )}
+                    {humanHintMeta.length > 0 && (
+                      <div style={{ fontSize:12, color:'#4b5563' }}>
+                        {humanHintMeta.join(lang === 'en' ? ' · ' : ' ｜ ')}
+                      </div>
+                    )}
+                    {canAdoptHint && (
+                      <div>
+                        <button
+                          onClick={applyHumanHint}
+                          disabled={humanSubmitting}
+                          style={{
+                            padding:'4px 10px',
+                            border:'1px solid #3b82f6',
+                            borderRadius:6,
+                            background: humanSubmitting ? '#dbeafe' : '#3b82f6',
+                            color: humanSubmitting ? '#6b7280' : '#fff',
+                          }}
+                        >
+                          {lang === 'en' ? 'Adopt suggestion' : '采纳建议'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                  <button
+                    onClick={handleHumanPlay}
+                    disabled={humanSubmitting || humanSelectedCount === 0}
+                    style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting || humanSelectedCount === 0 ? '#e5e7eb' : '#2563eb', color: humanSubmitting || humanSelectedCount === 0 ? '#6b7280' : '#fff' }}
+                  >{lang === 'en' ? 'Play selected' : '出牌'}</button>
+                  <button
+                    onClick={handleHumanPass}
+                    disabled={humanSubmitting || !humanCanPass}
+                    style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background: humanSubmitting || !humanCanPass ? '#f3f4f6' : '#fff', color:'#1f2937' }}
+                  >{lang === 'en' ? 'Pass' : '过'}</button>
+                  <button
+                    onClick={handleHumanClear}
+                    disabled={humanSubmitting || humanSelectedCount === 0}
+                    style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                  >{lang === 'en' ? 'Clear selection' : '清空选择'}</button>
+                </div>
+              </>
+            )}
+            {humanPhase === 'bid' && (
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                <button
+                  onClick={() => handleHumanBid(true)}
+                  disabled={humanSubmitting}
+                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting ? '#e5e7eb' : '#2563eb', color: humanSubmitting ? '#6b7280' : '#fff' }}
+                >{lang === 'en' ? 'Bid' : '抢地主'}</button>
+                <button
+                  onClick={() => handleHumanBid(false)}
+                  disabled={humanSubmitting}
+                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                >{lang === 'en' ? 'Pass' : '不抢'}</button>
+              </div>
+            )}
+            {humanPhase === 'double' && (
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                <button
+                  onClick={() => handleHumanDouble(true)}
+                  disabled={humanSubmitting}
+                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting ? '#e5e7eb' : '#2563eb', color: humanSubmitting ? '#6b7280' : '#fff' }}
+                >{lang === 'en' ? 'Double' : '加倍'}</button>
+                <button
+                  onClick={() => handleHumanDouble(false)}
+                  disabled={humanSubmitting}
+                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                >{lang === 'en' ? 'No double' : '不加倍'}</button>
+              </div>
+            )}
+            {humanError && (
+              <div style={{ color:'#dc2626', fontSize:12 }}>{humanError}</div>
+            )}
+            {humanSubmitting && (
+              <div style={{ color:'#2563eb', fontSize:12 }}>
+                {lang === 'en' ? 'Submitted. Waiting for engine...' : '已提交，等待引擎响应…'}
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
 
       <Section title="出牌">
         <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
@@ -2408,6 +4997,15 @@ const [lang, setLang] = useState<Lang>(() => {
     const v = localStorage.getItem('ddz_lang');
     return (v === 'en' || v === 'zh') ? (v as Lang) : 'zh';
   });
+<<<<<<< Updated upstream
+=======
+  const [matchMode, setMatchMode] = useState<'regular'|'knockout'>(() => {
+    if (typeof window === 'undefined') return 'regular';
+    const v = localStorage.getItem('ddz_match_mode');
+    return v === 'knockout' ? 'knockout' : 'regular';
+  });
+  const humanOptionLabel = lang === 'en' ? 'Human' : '人类选手';
+>>>>>>> Stashed changes
   useEffect(()=>{
     try {
       localStorage.setItem('ddz_lang', lang);
@@ -2464,7 +5062,14 @@ const [lang, setLang] = useState<Lang>(() => {
     };
     rd.readAsText(f);
   };
+<<<<<<< Updated upstream
   return (<>
+=======
+  const isRegularMode = matchMode === 'regular';
+  const regularLabel = lang === 'en' ? 'Regular match' : '常规赛';
+  const knockoutLabel = lang === 'en' ? 'Knockout' : '淘汰赛';
+  return (<> 
+>>>>>>> Stashed changes
     <LangContext.Provider value={lang}>
     <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
       <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
@@ -2586,7 +5191,7 @@ const [lang, setLang] = useState<Lang>(() => {
                     }}
                     style={{ width:'100%' }}
                   >
-                    <optgroup label="内置">
+                    <optgroup label={lang === 'en' ? 'Built-in' : '内置'}>
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
@@ -2594,7 +5199,7 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
                     </optgroup>
-                    <optgroup label="AI">
+                    <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
                       <option value="ai:gemini">Gemini</option>
                       <option value="ai:grok">Grok</option>
@@ -2602,6 +5207,9 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="ai:qwen">Qwen</option>
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
+                    </optgroup>
+                    <optgroup label={lang === 'en' ? 'Human' : '人类选手'}>
+                      <option value="human">{humanOptionLabel}</option>
                     </optgroup>
                   </select>
                 </label>
