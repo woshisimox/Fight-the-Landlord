@@ -1415,12 +1415,15 @@ function KnockoutPanel() {
           const rawChoice = typeof parsed.choice === 'string' ? parsed.choice : '';
           const provider = KO_ALL_CHOICES.includes(rawChoice as BotChoice) ? choiceLabel(rawChoice as BotChoice) : '';
           let providerLabel = provider;
-          if (typeof rawChoice === 'string' && rawChoice.startsWith('ai:')) {
-            const model = typeof parsed.model === 'string' ? parsed.model.trim() : '';
-            if (provider && model) providerLabel = `${provider}:${model}`;
-          } else if (rawChoice === 'http') {
-            const base = typeof parsed.httpBase === 'string' ? parsed.httpBase.trim() : '';
-            if (provider && base) providerLabel = `${provider}:${base}`;
+          if (KO_ALL_CHOICES.includes(rawChoice as BotChoice)) {
+            const normalized = rawChoice as BotChoice;
+            if (normalized === 'human') {
+              providerLabel = humanProviderLabel;
+            } else {
+              const model = typeof parsed.model === 'string' ? parsed.model : '';
+              const base = typeof parsed.httpBase === 'string' ? parsed.httpBase : '';
+              providerLabel = providerSummary(normalized, model, base, lang);
+            }
           }
           if (alias && providerLabel) return `${alias} · ${providerLabel}`;
           if (alias) return alias;
@@ -1443,7 +1446,7 @@ function KnockoutPanel() {
           label,
           provider: entry.choice === 'human'
             ? humanProviderLabel
-            : providerSummary(entry.choice, entry.model, entry.keys?.httpBase),
+            : providerSummary(entry.choice, entry.model, entry.keys?.httpBase, lang),
         };
       }
       const rawChoice = typeof parsed?.choice === 'string' ? parsed.choice : '';
@@ -1454,7 +1457,7 @@ function KnockoutPanel() {
           label,
           provider: rawChoice === 'human'
             ? humanProviderLabel
-            : providerSummary(rawChoice as BotChoice, model, httpBase),
+            : providerSummary(rawChoice as BotChoice, model, httpBase, lang),
         };
       }
     } catch {}
@@ -2545,7 +2548,7 @@ function KnockoutPanel() {
                       : '';
                     const providerText = seatChoice === 'human'
                       ? humanProviderLabel
-                      : providerSummary(seatChoice, model, httpBase);
+                      : providerSummary(seatChoice, model, httpBase, lang);
                     return (
                       <div key={`${token}-score`} style={{ border:'1px solid #e5e7eb', borderRadius:8, padding:10, background:'#fff' }}>
                         <div style={{ fontWeight:700, marginBottom:4 }}>{label}</div>
@@ -2701,11 +2704,13 @@ function choiceLabel(choice: BotChoice): string {
   }
 }
 
-function providerSummary(choice: BotChoice, model?: string, httpBase?: string): string {
+function providerSummary(choice: BotChoice, model: string | undefined, httpBase: string | undefined, lang: Lang = 'zh'): string {
   const provider = choiceLabel(choice);
   if (choice === 'http') {
     const base = (httpBase || '').trim();
-    return base ? `${provider} · ${base}` : provider;
+    if (!base) return provider;
+    const customLabel = lang === 'en' ? 'custom' : '自定义';
+    return `${provider} · ${customLabel}`;
   }
   if (choice.startsWith('ai:')) {
     const trimmedModel = (model || '').trim();

@@ -152,7 +152,38 @@ function unifiedScore(ctx:any, mv:string[]): number {
 }
 /* ========== 小工具 ========== */
 const clamp = (v:number, lo=0, hi=5)=> Math.max(lo, Math.min(hi, v));
-const writeLine = (res: NextApiResponse, obj: any) => { (res as any).write(JSON.stringify(obj) + '\n'); };
+const SECRET_KEYS = new Set([
+  'apikey', 'api_key', 'api-key',
+  'token', 'httptoken', 'http_token', 'http-token',
+  'secret', 'password',
+  'authorization', 'authorizationbearer',
+  'x-api-key', 'x_api_key', 'xapikey',
+]);
+
+const isPlainObject = (value: any): value is Record<string, any> => {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
+
+const redactSecrets = (input: any): any => {
+  if (Array.isArray(input)) {
+    return input.map(item => redactSecrets(item));
+  }
+  if (!isPlainObject(input)) return input;
+  const clone: Record<string, any> = {};
+  for (const [rawKey, value] of Object.entries(input)) {
+    const key = rawKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (SECRET_KEYS.has(key)) continue;
+    clone[rawKey] = redactSecrets(value);
+  }
+  return clone;
+};
+
+const writeLine = (res: NextApiResponse, obj: any) => {
+  const payload = (obj && typeof obj === 'object') ? redactSecrets(obj) : obj;
+  (res as any).write(JSON.stringify(payload) + '\n');
+};
 
 function stringifyMove(m:any){
   if (!m || m.move==='pass') return 'pass';
