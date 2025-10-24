@@ -2940,6 +2940,11 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     });
   }, []);
 
+  const hasHumanSeat = useMemo(() => {
+    if (!Array.isArray(props.seats)) return false;
+    return props.seats.some(choice => choice === 'human');
+  }, [props.seats]);
+
   const isHumanSeat = useCallback((seat: number) => props.seats?.[seat] === 'human', [props.seats]);
 
   const submitHumanAction = useCallback(async (payload: any) => {
@@ -4768,7 +4773,7 @@ const handleAllSaveInner = () => {
                 selectedIndices={humanRequest && humanRequest.seat === i ? humanSelectedSet : undefined}
                 onToggle={humanRequest && humanRequest.seat === i && humanRequest.phase === 'play' ? toggleHumanCard : undefined}
                 disabled={humanSubmitting}
-                faceDown={!isHumanSeat(i)}
+                faceDown={hasHumanSeat ? !isHumanSeat(i) : false}
               />
             </div>
           ))}
@@ -4777,7 +4782,7 @@ const handleAllSaveInner = () => {
           {[0,1,2].map(i=>{
             const showAllBottom = !bottomInfo.revealed && bottomInfo.cards.length > 0;
             const isLandlord = bottomInfo.landlord === i;
-            const showCards = showAllBottom || isLandlord;
+            const showCards = (!hasHumanSeat) || showAllBottom || isLandlord;
             const cards = showCards ? bottomInfo.cards : [];
             const labelText = lang === 'en'
               ? `Bottom${showAllBottom ? ' (pre-bid)' : ''}`
