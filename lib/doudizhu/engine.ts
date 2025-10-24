@@ -1957,7 +1957,8 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
       removeLabels(hands[turn], pick);
       playedCount[turn]++;
 
-      if (cc.type === 'bomb' || cc.type === 'rocket') bombTimes++;
+      const isBomb = (cc.type === 'bomb' || cc.type === 'rocket');
+      if (isBomb) bombTimes++;
 
       yield {
         type:'event', kind:'play', seat: turn, move:'play',
@@ -1965,6 +1966,24 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
       };
       history.push({ seat: turn, move:'play', cards: clone(pick), comboType: cc.type, trick });
       seen.push(...pick);
+
+      if (isBomb) {
+        const bombScale = Math.pow(2, bombTimes);
+        const multBase = Math.max(1, multiplier * bombScale);
+        const multYi   = Math.max(1, multiplier * __doubleMulY * bombScale);
+        const multBing = Math.max(1, multiplier * __doubleMulB * bombScale);
+        try {
+          yield {
+            type:'event',
+            kind:'multiplier-sync',
+            multiplier: multBase,
+            multiplierYi: multYi,
+            multiplierBing: multBing,
+            bombTimes,
+            source: cc.type
+          };
+        } catch {}
+      }
 
 
       require = cc;
