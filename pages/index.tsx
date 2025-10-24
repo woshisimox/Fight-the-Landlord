@@ -830,24 +830,28 @@ function Card({ label, dimmed = false, compact = false }: { label:string; dimmed
   const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
   const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
   const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
-  const pad = compact ? '4px 6px' : '6px 10px';
   const fontSize = compact ? 14 : 16;
+  const rankFontSize = compact ? 16 : 18;
+  const cardDims = compact
+    ? { width: 34, height: 48, borderRadius: 6, padding: '6px 0' }
+    : { width: 42, height: 62, borderRadius: 8, padding: '8px 0' };
   const suitColor = dimmed ? '#9ca3af' : baseColor;
   const rankStyle = dimmed
     ? { color: '#9ca3af' }
     : (rankColor ? { color: rankColor } : {});
   return (
     <span style={{
-      display:'inline-flex', alignItems:'center', gap:6,
-      border:'1px solid #ddd', borderRadius:8, padding: pad,
+      display:'inline-flex', flexDirection:'column', alignItems:'center', justifyContent:'space-between',
+      border:'1px solid #ddd',
       marginRight:6, marginBottom:6, fontWeight:800,
       color: suitColor,
       background: dimmed ? '#f3f4f6' : '#fff',
       opacity: dimmed ? 0.65 : 1,
-      borderColor: dimmed ? '#d1d5db' : '#ddd'
+      borderColor: dimmed ? '#d1d5db' : '#ddd',
+      ...cardDims
     }}>
-      <span style={{ fontSize }}>{suit}</span>
-      <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+      <span style={{ fontSize: rankFontSize, lineHeight: 1, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+      <span style={{ fontSize, lineHeight: 1 }}>{suit}</span>
     </span>
   );
 }
@@ -4929,8 +4933,21 @@ function ScoreTimeline(
 
   const data = series || [[],[],[]];
   const n = Math.max(data[0]?.length||0, data[1]?.length||0, data[2]?.length||0);
+  const seatByIndex: number[] = [];
+  for (let i=0; i<n; i++) {
+    let owner = -1;
+    for (let s=0; s<data.length; s++) {
+      const v = data[s]?.[i];
+      if (typeof v === 'number' && Number.isFinite(v)) { owner = s; break; }
+    }
+    seatByIndex.push(owner);
+  }
   const values:number[] = [];
-  for (const arr of data) for (const v of (arr||[])) if (typeof v==='number') values.push(v);
+  for (const arr of data) {
+    for (const v of (arr || [])) {
+      if (typeof v === 'number' && Number.isFinite(v)) values.push(v);
+    }
+  }
   const vmin = values.length ? Math.min(...values) : -5;
   const vmax = values.length ? Math.max(...values) : 5;
   const pad = (vmax - vmin) * 0.15 + 1e-6;
@@ -4970,16 +4987,28 @@ function ScoreTimeline(
     if (k >= 0) { for (let j=0; j<k; j++) landlordsFilled[j] = landlordsFilled[k]; }
   }
 
-  const makePath = (arr:(number|null)[])=>{
-    let d=''; let open=false;
+  const makePath = (arr:(number|null)[], seatIndex:number)=>{
+    let d=''; let open=false; let lastIdx = -1;
     const cutSet = new Set(cuts);
     for (let i=0;i<n;i++){
-      if (cutSet.has(i) && i!==0) { open = false; }
+      if (cutSet.has(i) && i!==0) { open = false; lastIdx = -1; }
       const v = arr[i];
-      if (typeof v !== 'number') { open=false; continue; }
+      if (!(typeof v === 'number' && Number.isFinite(v))) { open=false; continue; }
       const px = x(i), py = y(v);
-      d += (open? ` L ${px} ${py}` : `M ${px} ${py}`);
+      let startNew = !open;
+      if (!startNew && lastIdx >= 0) {
+        let hasOther = false;
+        for (let k=lastIdx+1; k<i; k++) {
+          const owner = seatByIndex[k];
+          if (owner !== seatIndex && owner !== -1) { hasOther = true; break; }
+        }
+        if (!hasOther && seatByIndex[lastIdx] === seatIndex && seatByIndex[i] === seatIndex) {
+          startNew = true;
+        }
+      }
+      d += (startNew ? `M ${px} ${py}` : ` L ${px} ${py}`);
       open = true;
+      lastIdx = i;
     }
     return d;
   };
@@ -5042,8 +5071,8 @@ function ScoreTimeline(
           {/* 三条曲线 + 数据点 */}
           {data.map((arr, si)=>(
             <g key={'g'+si}>
-              <path d={makePath(arr)} fill="none" stroke={colors[si]} strokeWidth={2} />
-              {arr.map((v,i)=> (typeof v==='number') && (
+              <path d={makePath(arr, si)} fill="none" stroke={colors[si]} strokeWidth={2} />
+              {arr.map((v,i)=> (typeof v==='number' && Number.isFinite(v)) && (
                 <circle
                   key={'c'+si+'-'+i}
                   cx={x(i)} cy={y(v)} r={2.5} fill={colors[si]}
