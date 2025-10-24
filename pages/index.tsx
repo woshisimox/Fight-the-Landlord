@@ -768,6 +768,15 @@ type LivePanelFinishPayload = {
   endedEarlyForNegative?: boolean;
 };
 
+type HumanHint = {
+  move: 'play' | 'pass';
+  cards?: string[];
+  score?: number;
+  reason?: string;
+  label?: string;
+  by?: string;
+};
+
 type HumanPrompt = {
   seat: number;
   requestId: string;
@@ -776,6 +785,7 @@ type HumanPrompt = {
   timeoutMs?: number;
   delayMs?: number;
   by?: string;
+  hint?: HumanHint;
 };
 
 function SeatTitle({ i }: { i:number }) {
@@ -821,6 +831,41 @@ function decorateHandCycle(raw: string[]): string[] {
     const suit = SUITS[idx % SUITS.length]; idx++;
     return `${suit}${rankOf(l)}`;
   });
+}
+
+const RANK_ORDER = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const;
+const RANK_POS: Record<string, number> = Object.fromEntries(RANK_ORDER.map((r, i) => [r, i])) as Record<string, number>;
+
+function rankKeyForDisplay(label: string): string {
+  if (!label) return '';
+  if (label.startsWith('🃏')) {
+    const tail = label.slice(2).toUpperCase();
+    if (tail === 'X') return 'x';
+    if (tail === 'Y') return 'X';
+    return tail;
+  }
+  if (label === 'x' || label === 'X') return label;
+  const rk = rankOf(label);
+  if (rk === 'Y') return 'X';
+  return rk;
+}
+
+function sortDisplayHand(cards: string[]): string[] {
+  return [...cards].sort((a, b) => {
+    const va = RANK_POS[rankKeyForDisplay(a)] ?? -1;
+    const vb = RANK_POS[rankKeyForDisplay(b)] ?? -1;
+    if (va !== vb) return va - vb;
+    return a.localeCompare(b);
+  });
+}
+
+function displayLabelFromRaw(label: string): string {
+  if (!label) return label;
+  if (label.startsWith('🃏')) return label;
+  if (label === 'x') return '🃏X';
+  if (label === 'X') return '🃏Y';
+  if ('♠♥♦♣'.includes(label[0])) return label;
+  return decorateHandCycle([label])[0];
 }
 
 function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
@@ -2830,6 +2875,41 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const [humanSubmitting, setHumanSubmitting] = useState(false);
   const [humanError, setHumanError] = useState<string | null>(null);
   const humanSelectedSet = useMemo(() => new Set(humanSelectedIdx), [humanSelectedIdx]);
+  const humanHint = humanRequest?.hint ?? null;
+  const humanHintDecorated = useMemo(() => {
+    if (!humanRequest || humanRequest.phase !== 'play') return [] as string[];
+    if (!humanHint || humanHint.move !== 'play' || !Array.isArray(humanHint.cards)) return [] as string[];
+    const seat = humanRequest.seat;
+    if (seat == null || seat < 0 || seat >= hands.length) return [] as string[];
+    const seatHand = hands[seat] || [];
+    const desired = humanHint.cards.map(displayLabelFromRaw);
+    const used = new Set<number>();
+    const out: string[] = [];
+    for (const label of desired) {
+      const idx = seatHand.findIndex((card, i) => !used.has(i) && card === label);
+      if (idx >= 0) {
+        used.add(idx);
+        out.push(seatHand[idx]);
+      } else {
+        out.push(label);
+      }
+    }
+    return out;
+  }, [humanRequest, humanHint, hands]);
+  const humanHintMeta = useMemo(() => {
+    if (!humanHint) return [] as string[];
+    const items: string[] = [];
+    if (humanHint.by) items.push(lang === 'en' ? `Source: ${humanHint.by}` : `来自：${humanHint.by}`);
+    if (typeof humanHint.score === 'number' && Number.isFinite(humanHint.score)) {
+      const scoreText = humanHint.score.toFixed(2);
+      items.push(lang === 'en' ? `Estimated score ${scoreText}` : `估分：${scoreText}`);
+    }
+    if (humanHint.label && humanHint.move === 'play') {
+      items.push(lang === 'en' ? `Pattern: ${humanHint.label}` : `牌型：${humanHint.label}`);
+    }
+    if (humanHint.reason) items.push(humanHint.reason);
+    return items;
+  }, [humanHint, lang]);
 
   const resetHumanState = useCallback(() => {
     setHumanRequest(null);
@@ -2916,6 +2996,29 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     setHumanError(null);
   }, []);
 
+  const applyHumanHint = useCallback(() => {
+    if (!humanRequest || humanRequest.phase !== 'play') return;
+    const hint = humanRequest.hint;
+    if (!hint || hint.move !== 'play' || !Array.isArray(hint.cards)) return;
+    const seat = humanRequest.seat;
+    if (seat == null || seat < 0 || seat >= hands.length) return;
+    const seatHand = hands[seat] || [];
+    const desired = hint.cards.map(displayLabelFromRaw);
+    const used = new Set<number>();
+    const indices: number[] = [];
+    for (const label of desired) {
+      const idx = seatHand.findIndex((card, i) => !used.has(i) && card === label);
+      if (idx >= 0) {
+        used.add(idx);
+        indices.push(idx);
+      }
+    }
+    if (indices.length > 0) {
+      setHumanSelectedIdx(indices.sort((a, b) => a - b));
+      setHumanError(null);
+    }
+  }, [humanRequest, hands, setHumanError, setHumanSelectedIdx]);
+
   const currentHumanSeat = humanRequest?.seat ?? null;
   const humanPhase = humanRequest?.phase ?? 'play';
   const humanSeatLabel = currentHumanSeat != null ? seatName(currentHumanSeat) : '';
@@ -2934,6 +3037,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   })();
   const humanCanPass = humanPhase === 'play' ? humanRequest?.ctx?.canPass !== false : true;
   const humanSelectedCount = humanSelectedIdx.length;
+  const canAdoptHint = humanPhase === 'play' && humanHint?.move === 'play' && humanHintDecorated.length > 0;
   const initialTotals = useMemo(
     () => sanitizeTotalsArray(props.initialTotals, props.startScore || 0),
     [props.initialTotals, props.startScore],
@@ -3853,6 +3957,18 @@ for (const raw of batch) {
                 const seat = typeof m.seat === 'number' ? m.seat : -1;
                 if (seat >= 0 && seat < 3) {
                   const requestId = typeof m.requestId === 'string' ? m.requestId : `${Date.now()}-${Math.random()}`;
+                  const rawHint = (m as any).hint ?? (m as any).suggestion;
+                  let hint: HumanHint | undefined;
+                  if (rawHint && typeof rawHint === 'object') {
+                    const move = rawHint.move === 'play' ? 'play' : 'pass';
+                    const cards = Array.isArray(rawHint.cards) ? rawHint.cards.map((c: any) => String(c)) : undefined;
+                    const scoreVal = Number((rawHint as any).score);
+                    const score = Number.isFinite(scoreVal) ? scoreVal : undefined;
+                    const reason = typeof rawHint.reason === 'string' ? rawHint.reason : undefined;
+                    const label = typeof rawHint.label === 'string' ? rawHint.label : undefined;
+                    const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
+                    hint = { move, cards, score, reason, label, by: byHint };
+                  }
                   setHumanRequest({
                     seat,
                     requestId,
@@ -3861,6 +3977,7 @@ for (const raw of batch) {
                     timeoutMs: typeof m.timeoutMs === 'number' ? m.timeoutMs : undefined,
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
                     by: typeof m.by === 'string' ? m.by : undefined,
+                    hint,
                   });
                   setHumanSelectedIdx([]);
                   setHumanSubmitting(false);
@@ -3938,7 +4055,7 @@ if (m.type === 'event' && m.kind === 'reveal') {
         if (idxPrev >= 0) seatHand.splice(idxPrev, 1);
       }
     }
-    seatHand = [...seatHand, ...mapped];
+    seatHand = sortDisplayHand([...seatHand, ...mapped]);
     nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
   }
 
@@ -4705,6 +4822,68 @@ const handleAllSaveInner = () => {
                     ? `Requirement: ${humanRequireText} · Can pass: ${humanCanPass ? 'Yes' : 'No'} · Selected: ${humanSelectedCount}`
                     : `需求：${humanRequireText} ｜ 可过：${humanCanPass ? '是' : '否'} ｜ 已选：${humanSelectedCount}`}
                 </div>
+                {humanHint && (
+                  <div
+                    style={{
+                      border:'1px solid #bfdbfe',
+                      background:'#eff6ff',
+                      borderRadius:8,
+                      padding:'8px 10px',
+                      display:'flex',
+                      flexDirection:'column',
+                      gap:6,
+                    }}
+                  >
+                    <div style={{ fontWeight:600, color:'#1d4ed8' }}>
+                      {lang === 'en'
+                        ? (humanHint.move === 'play' ? 'Suggestion: play these cards' : 'Suggestion: pass this turn')
+                        : (humanHint.move === 'play' ? '提示：建议出牌' : '提示：建议过牌')}
+                    </div>
+                    {humanHint.move === 'play' ? (
+                      humanHintDecorated.length > 0 ? (
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                          {humanHintDecorated.map((card, idx) => (
+                            <Card key={`hint-${card}-${idx}`} label={card} compact />
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize:12, color:'#4b5563' }}>
+                          {lang === 'en'
+                            ? 'No specific combination suggested; choose any legal play.'
+                            : '暂无具体牌型建议，可根据规则自由选择。'}
+                        </div>
+                      )
+                    ) : (
+                      <div style={{ fontSize:12, color:'#4b5563' }}>
+                        {lang === 'en'
+                          ? 'Hint: passing keeps stronger responses for later.'
+                          : '提示：建议过牌以保留更强的牌型。'}
+                      </div>
+                    )}
+                    {humanHintMeta.length > 0 && (
+                      <div style={{ fontSize:12, color:'#4b5563' }}>
+                        {humanHintMeta.join(lang === 'en' ? ' · ' : ' ｜ ')}
+                      </div>
+                    )}
+                    {canAdoptHint && (
+                      <div>
+                        <button
+                          onClick={applyHumanHint}
+                          disabled={humanSubmitting}
+                          style={{
+                            padding:'4px 10px',
+                            border:'1px solid #3b82f6',
+                            borderRadius:6,
+                            background: humanSubmitting ? '#dbeafe' : '#3b82f6',
+                            color: humanSubmitting ? '#6b7280' : '#fff',
+                          }}
+                        >
+                          {lang === 'en' ? 'Adopt suggestion' : '采纳建议'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                   <button
                     onClick={handleHumanPlay}

@@ -296,6 +296,35 @@ function traceWrap(
     try { return JSON.parse(JSON.stringify(ctx)); } catch { return ctx; }
   };
 
+  const buildHumanHint = async (ctx: any) => {
+    try {
+      const rec = await Promise.resolve(GreedyMax(ctx));
+      if (rec && typeof rec === 'object') {
+        if (rec.move === 'play' && Array.isArray(rec.cards) && rec.cards.length > 0) {
+          const sc = unifiedScore(ctx, rec.cards);
+          return {
+            move: 'play' as const,
+            cards: rec.cards.slice(),
+            score: Number.isFinite(sc) ? Number(sc) : undefined,
+            reason: typeof rec.reason === 'string' ? rec.reason : undefined,
+            label: stringifyMove(rec),
+            by: 'GreedyMax',
+          };
+        }
+        if (rec.move === 'pass') {
+          return {
+            move: 'pass' as const,
+            reason: typeof rec.reason === 'string' ? rec.reason : undefined,
+            by: 'GreedyMax',
+          };
+        }
+      }
+    } catch (err) {
+      console.debug('[HINT]', 'failed to build human hint', err);
+    }
+    return null;
+  };
+
   const makeTimeout = (onTimeout?: () => void) => new Promise((resolve) => {
     setTimeout(() => {
       try { onTimeout?.(); } catch {}
@@ -318,6 +347,7 @@ function traceWrap(
 
       if (isHuman) {
         const requestId = `${sessionKey}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
+        const hintPayload = phase === 'play' ? await buildHumanHint(ctxWithSeen) : null;
         const payloadCtx = sanitizeCtx(ctxWithSeen);
         const humanPromise = new Promise((resolve, reject) => {
           registerHumanRequest(
@@ -339,6 +369,7 @@ function traceWrap(
             timeoutMs: turnTimeoutMs,
             delayMs: startDelayMs,
             sessionId: sessionKey,
+            hint: hintPayload || undefined,
           });
         } catch {}
         const timeout = makeTimeout(() => {
