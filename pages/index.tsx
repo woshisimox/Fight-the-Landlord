@@ -898,23 +898,9 @@ type CardProps = {
 };
 
 function Card({ label, dimmed = false, compact = false, interactive = false, selected = false, onClick, disabled = false, hidden = false }: CardProps) {
-  const pad = compact ? '4px 6px' : '6px 10px';
-  const fontSize = compact ? 14 : 16;
-  const baseStyle: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: hidden ? 0 : 6,
-    justifyContent: hidden ? 'center' : 'flex-start',
-    border: '1px solid',
-    borderRadius: 8,
-    padding: pad,
-    marginRight: 6,
-    marginBottom: 6,
-    fontWeight: 800,
-    cursor: interactive ? (disabled ? 'not-allowed' : 'pointer') : 'default',
-    outline: selected ? '2px solid #2563eb' : 'none',
-    userSelect: 'none',
-  };
+  const dims = compact
+    ? { width: 28, height: 44, gap: 2, backSize: 18, suitSize: 16, rankSize: 12, paddingShown: '6px 4px', paddingHidden: '4px' }
+    : { width: 38, height: 58, gap: 4, backSize: 24, suitSize: 22, rankSize: 16, paddingShown: '8px 6px', paddingHidden: '6px' };
 
   let background = '#fff';
   let borderColor = '#ddd';
@@ -926,7 +912,7 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
     background = selected ? '#bfdbfe' : '#1f2937';
     borderColor = selected ? '#2563eb' : '#111827';
     color = '#f9fafb';
-    inner = <span style={{ fontSize }}>🂠</span>;
+    inner = <span style={{ fontSize: dims.backSize, lineHeight: 1 }}>🂠</span>;
   } else {
     const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
     const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
@@ -942,14 +928,32 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
     opacity = dimmed ? 0.65 : 1;
     inner = (
       <>
-        <span style={{ fontSize }}>{suit}</span>
-        <span style={{ fontSize, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+        <span style={{ fontSize: dims.suitSize, lineHeight: 1 }}>{suit}</span>
+        <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
       </>
     );
   }
 
   const style: React.CSSProperties = {
-    ...baseStyle,
+    display: 'inline-flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: hidden ? 0 : dims.gap,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderRadius: 8,
+    padding: hidden ? dims.paddingHidden : dims.paddingShown,
+    marginRight: compact ? 4 : 6,
+    marginBottom: compact ? 4 : 6,
+    fontWeight: 800,
+    cursor: interactive ? (disabled ? 'not-allowed' : 'pointer') : 'default',
+    outline: selected ? '2px solid #2563eb' : 'none',
+    userSelect: 'none',
+    width: dims.width,
+    minWidth: dims.width,
+    height: dims.height,
+    boxSizing: 'border-box',
     background,
     borderColor,
     color,
@@ -962,7 +966,7 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
         type="button"
         onClick={disabled ? undefined : onClick}
         disabled={disabled}
-        style={{ ...style, borderWidth: 1 }}
+        style={style}
         title={hidden ? label : undefined}
       >
         {inner}
@@ -971,7 +975,7 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
   }
 
   return (
-    <span style={{ ...style, borderWidth: 1 }} title={hidden ? label : undefined}>
+    <span style={style} title={hidden ? label : undefined}>
       {inner}
     </span>
   );
