@@ -1438,6 +1438,7 @@ export async function* runOneGame(opts: {
           'built-in:endgame-rush': 2.1,
           'built-in:mininet':      2.2,
           'built-in:greedy-min':   2.4,
+          'human':                 2.2,
           'external':              2.2,
           'external:ai':           2.2,
           'external:http':         2.2,
