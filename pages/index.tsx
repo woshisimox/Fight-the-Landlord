@@ -5266,7 +5266,7 @@ const [lang, setLang] = useState<Lang>(() => {
                     }}
                     style={{ width:'100%' }}
                   >
-                    <optgroup label="内置">
+                    <optgroup label={lang === 'en' ? 'Built-in' : '内置'}>
                       <option value="built-in:greedy-max">Greedy Max</option>
                       <option value="built-in:greedy-min">Greedy Min</option>
                       <option value="built-in:random-legal">Random Legal</option>
@@ -5274,7 +5274,7 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
                     </optgroup>
-                    <optgroup label="AI">
+                    <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
                       <option value="ai:gemini">Gemini</option>
                       <option value="ai:grok">Grok</option>
@@ -5283,8 +5283,8 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="ai:deepseek">DeepSeek</option>
                       <option value="http">HTTP</option>
                     </optgroup>
-                    <optgroup label="Human">
-                      <option value="human">Human</option>
+                    <optgroup label={lang === 'en' ? 'Human' : '人类选手'}>
+                      <option value="human">{humanOptionLabel}</option>
                     </optgroup>
                   </select>
                 </label>
