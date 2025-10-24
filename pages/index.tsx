@@ -3090,6 +3090,8 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   // —— 每手牌得分（动态曲线）+ 分局切割与地主 ——
   const [scoreSeries, setScoreSeries] = useState<(number|null)[][]>([[],[],[]]);
   const scoreSeriesRef = useRef(scoreSeries); useEffect(()=>{ scoreSeriesRef.current = scoreSeries; }, [scoreSeries]);
+  const [scoreBreaks, setScoreBreaks] = useState<number[]>([]);
+  const scoreBreaksRef = useRef(scoreBreaks); useEffect(()=>{ scoreBreaksRef.current = scoreBreaks; }, [scoreBreaks]);
   const [roundCuts, setRoundCuts] = useState<number[]>([0]);
   const roundCutsRef = useRef(roundCuts); useEffect(()=>{ roundCutsRef.current = roundCuts; }, [roundCuts]);
 
@@ -3562,6 +3564,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       createdAt: new Date().toISOString(),
       agents,
       rounds: roundCutsRef.current,
+      breaks: scoreBreaksRef.current,
       n,
       seriesBySeat: scoreSeriesRef.current,
     };
@@ -3586,6 +3589,8 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
             mapped[i] = (idx>=0 && Array.isArray(j.seriesBySeat?.[idx])) ? j.seriesBySeat[idx] : [];
           }
           setScoreSeries(mapped);
+          if (Array.isArray(j.breaks)) setScoreBreaks(j.breaks as number[]);
+          else setScoreBreaks([]);
           if (Array.isArray(j.rounds)) setRoundCuts(j.rounds as number[]);
         } catch (err) {
           console.error('[score upload] parse error', err);
@@ -3631,6 +3636,7 @@ const handleScoreRefresh = () => {
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
+    setScoreBreaks(prev => [...prev]);
   };
 const [allLogs, setAllLogs] = useState<string[]>([]);
 const allLogsRef = useRef(allLogs);
@@ -3796,6 +3802,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
 
 
           let nextScores = scoreSeriesRef.current.map(x => [...x]);
+          let nextBreaks = scoreBreaksRef.current.slice();
           let sawAnyTurn = false;
           let nextCuts = roundCutsRef.current.slice();
           let nextLords = roundLordsRef.current.slice();
@@ -4144,6 +4151,14 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
               if (m.type === 'event' && m.kind === 'trick-reset') {
                 nextLog = [...nextLog, '一轮结束，重新起牌'];
                 nextPlays = [];
+                const idxBreak = Math.max(
+                  nextScores[0]?.length||0,
+                  nextScores[1]?.length||0,
+                  nextScores[2]?.length||0,
+                );
+                if (idxBreak > 0 && nextBreaks[nextBreaks.length-1] !== idxBreak) {
+                  nextBreaks = [...nextBreaks, idxBreak];
+                }
                 continue;
               }
 
@@ -4383,6 +4398,7 @@ nextTotals     = [
           setRoundLords(nextLords);
           setRoundCuts(nextCuts);
           setScoreSeries(nextScores);
+          setScoreBreaks(nextBreaks);
           setHands(nextHands); setPlays(nextPlays);
           setBottomInfo(nextBottom);
           setTotals(nextTotals); setFinishedCount(nextFinished);
@@ -4547,6 +4563,7 @@ const handleAllSaveInner = () => {
     applyTsFromStoreByRole(landlordRef.current, '手动刷新');
     applyRadarFromStoreByRole(landlordRef.current, '手动刷新');
     setScoreSeries(prev => prev.map(arr => Array.isArray(arr) ? [...arr] : []));
+    setScoreBreaks(prev => [...prev]);
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
     setLog(l => [...l, '【ALL】已刷新面板数据。']);
@@ -4692,7 +4709,14 @@ const handleAllSaveInner = () => {
       <Section title="出牌评分（每局动态）">
         
 <div style={{ fontSize:12, color:'#6b7280', marginBottom:6 }}>每局开始底色按“本局地主”的线色淡化显示；上传文件可替换/叠加历史，必要时点“刷新”。</div>
-        <ScoreTimeline series={scoreSeries} bands={roundCuts} landlords={roundLords} labels={[0,1,2].map(i=>agentIdForIndex(i))} height={240} />
+        <ScoreTimeline
+          series={scoreSeries}
+          bands={roundCuts}
+          landlords={roundLords}
+          breaks={scoreBreaks}
+          labels={[0,1,2].map(i=>agentIdForIndex(i))}
+          height={240}
+        />
       </Section>
       <div style={{ marginTop:10 }}></div>
       <Section title="评分统计（每局汇总）">
@@ -5495,8 +5519,8 @@ export default Home;
 
 /* ================ 实时曲线：每手牌得分（按地主淡色分局） ================= */
 function ScoreTimeline(
-  { series, bands = [], landlords = [], labels = ['甲','乙','丙'], height = 220 }:
-  { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number }
+  { series, bands = [], landlords = [], labels = ['甲','乙','丙'], height = 220, breaks = [] }:
+  { series:(number|null)[][]; bands?:number[]; landlords?:number[]; labels?:string[]; height?:number; breaks?:number[] }
 ) {
   const ref = useRef<HTMLDivElement|null>(null);
   const [w, setW] = useState(600);
@@ -5536,6 +5560,12 @@ function ScoreTimeline(
   if (cuts[0] !== 0) cuts.unshift(0);
   if (cuts[cuts.length-1] !== n) cuts.push(n);
 
+  const breakSet = new Set(
+    Array.isArray(breaks)
+      ? breaks.filter((v) => typeof v === 'number' && Number.isFinite(v)).map(v => Math.max(0, Math.floor(v)))
+      : []
+  );
+
   const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
   while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
 
@@ -5556,7 +5586,7 @@ function ScoreTimeline(
     let d=''; let open=false;
     const cutSet = new Set(cuts);
     for (let i=0;i<n;i++){
-      if (cutSet.has(i) && i!==0) { open = false; }
+      if ((cutSet.has(i) || breakSet.has(i)) && i!==0) { open = false; }
       const v = arr[i];
       if (typeof v !== 'number') { open=false; continue; }
       const px = x(i), py = y(v);
