@@ -1896,7 +1896,7 @@ function KnockoutPanel() {
   const participantsTitle = lang === 'en' ? 'Participants' : '参赛选手';
   const participantsHint = lang === 'en'
     ? 'Pick bots, AIs, or a human player just like regular matches.'
-    : '从常规对局使用的内置 / 外置 AI 或人类选手中选择参赛选手。';
+    : '从常规赛使用的内置 / 外置 AI 或人类选手中选择参赛选手。';
 
   const intervalTitle = lang === 'en' ? 'Min play interval (ms)' : '最小间隔 (ms)';
   const timeoutTitle = lang === 'en' ? 'Think timeout (s)' : '弃牌时间（秒）';
@@ -5111,7 +5111,7 @@ const [lang, setLang] = useState<Lang>(() => {
     rd.readAsText(f);
   };
   const isRegularMode = matchMode === 'regular';
-  const regularLabel = lang === 'en' ? 'Regular match' : '常规对局';
+  const regularLabel = lang === 'en' ? 'Regular match' : '常规赛';
   const knockoutLabel = lang === 'en' ? 'Knockout' : '淘汰赛';
   return (<> 
     <LangContext.Provider value={lang}>
