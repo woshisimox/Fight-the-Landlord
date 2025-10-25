@@ -3026,6 +3026,16 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
 
   const handleHumanPlay = useCallback(async () => {
     if (!humanRequest || humanRequest.phase !== 'play') return;
+    const ctxInfo: any = humanRequest.ctx;
+    if (
+      ctxInfo &&
+      typeof ctxInfo.legalCount === 'number' &&
+      ctxInfo.legalCount <= 0 &&
+      (ctxInfo.canPass ?? true)
+    ) {
+      setHumanError(lang === 'en' ? 'No playable cards available. Please pass.' : '无牌可出，请选择过牌');
+      return;
+    }
     const seat = humanRequest.seat;
     const hand = hands[seat] || [];
     const cards = humanSelectedIdx
@@ -3100,6 +3110,12 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     return lang === 'en' ? 'Follow previous play' : '跟牌';
   })();
   const humanCanPass = humanPhase === 'play' ? humanRequest?.ctx?.canPass !== false : true;
+  const humanLegalCount = humanPhase === 'play' && typeof (humanRequest?.ctx as any)?.legalCount === 'number'
+    ? Number((humanRequest?.ctx as any).legalCount)
+    : null;
+  const humanMustPass = humanPhase === 'play'
+    ? (((humanRequest?.ctx as any)?.mustPass === true) || (humanLegalCount === 0 && humanCanPass)) && humanCanPass
+    : false;
   const humanSelectedCount = humanSelectedIdx.length;
   const canAdoptHint = humanPhase === 'play' && humanHint?.move === 'play' && humanHintDecorated.length > 0;
   const initialTotals = useMemo(
@@ -4948,6 +4964,13 @@ const handleAllSaveInner = () => {
                     ? `Requirement: ${humanRequireText} · Can pass: ${humanCanPass ? 'Yes' : 'No'} · Selected: ${humanSelectedCount}`
                     : `需求：${humanRequireText} ｜ 可过：${humanCanPass ? '是' : '否'} ｜ 已选：${humanSelectedCount}`}
                 </div>
+                {humanMustPass && (
+                  <div style={{ fontSize:12, color:'#dc2626' }}>
+                    {lang === 'en'
+                      ? 'No playable cards available. Please pass this turn.'
+                      : '无牌可出，请选择过牌。'}
+                  </div>
+                )}
                 {humanHint && (
                   <div
                     style={{
@@ -5013,13 +5036,25 @@ const handleAllSaveInner = () => {
                 <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                   <button
                     onClick={handleHumanPlay}
-                    disabled={humanSubmitting || humanSelectedCount === 0}
-                    style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting || humanSelectedCount === 0 ? '#e5e7eb' : '#2563eb', color: humanSubmitting || humanSelectedCount === 0 ? '#6b7280' : '#fff' }}
+                    disabled={humanSubmitting || humanSelectedCount === 0 || humanMustPass}
+                    style={{
+                      padding:'6px 12px',
+                      border:'1px solid #2563eb',
+                      borderRadius:8,
+                      background: humanSubmitting || humanSelectedCount === 0 || humanMustPass ? '#e5e7eb' : '#2563eb',
+                      color: humanSubmitting || humanSelectedCount === 0 || humanMustPass ? '#6b7280' : '#fff',
+                    }}
                   >{lang === 'en' ? 'Play selected' : '出牌'}</button>
                   <button
                     onClick={handleHumanPass}
                     disabled={humanSubmitting || !humanCanPass}
-                    style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background: humanSubmitting || !humanCanPass ? '#f3f4f6' : '#fff', color:'#1f2937' }}
+                    style={{
+                      padding:'6px 12px',
+                      border:'1px solid #d1d5db',
+                      borderRadius:8,
+                      background: humanMustPass ? '#fee2e2' : (humanSubmitting || !humanCanPass ? '#f3f4f6' : '#fff'),
+                      color: humanMustPass ? '#b91c1c' : '#1f2937',
+                    }}
                   >{lang === 'en' ? 'Pass' : '过'}</button>
                   <button
                     onClick={handleHumanClear}
