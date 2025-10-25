@@ -868,6 +868,40 @@ function displayLabelFromRaw(label: string): string {
   return decorateHandCycle([label])[0];
 }
 
+function reconcileHandFromRaw(raw: string[] | undefined, prev: string[]): string[] {
+  if (!Array.isArray(raw)) return prev;
+  const pool = prev.slice();
+  const usedPrev = pool.map(() => false);
+  const decorated: string[] = [];
+
+  for (const label of raw) {
+    const options = candDecorations(label);
+    let chosen: string | null = null;
+
+    for (const opt of options) {
+      const idx = pool.findIndex((v, i) => !usedPrev[i] && v === opt);
+      if (idx >= 0) {
+        usedPrev[idx] = true;
+        chosen = opt;
+        break;
+      }
+    }
+
+    if (!chosen) {
+      const fallback = options.find(opt => !decorated.includes(opt));
+      if (fallback) chosen = fallback;
+    }
+
+    if (!chosen) {
+      chosen = displayLabelFromRaw(label);
+    }
+
+    decorated.push(chosen);
+  }
+
+  return sortDisplayHand(decorated);
+}
+
 function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
   if (!Array.isArray(raw)) return [];
   const seat = (typeof landlord === 'number' && landlord >= 0 && landlord < 3) ? landlord : null;
@@ -4054,6 +4088,22 @@ for (const raw of batch) {
   const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
   const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
   nextLog = [...nextLog, `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
+  const seatIdx = (typeof m.seat === 'number') ? m.seat as number : -1;
+  const explicitLordRaw = (m as any).landlordIdx ?? (m as any).landlord;
+  const explicitLord = (typeof explicitLordRaw === 'number') ? explicitLordRaw : null;
+  if (explicitLord != null && explicitLord >= 0 && explicitLord < 3) {
+    nextLandlord = explicitLord;
+  } else if (seatIdx >= 0 && seatIdx < 3 && m.bid) {
+    nextLandlord = seatIdx;
+  }
+  if (typeof nextLandlord === 'number' && nextLandlord >= 0 && nextLandlord < 3) {
+    if (nextBottom.landlord !== nextLandlord) {
+      const keep = Array.isArray(nextBottom.cards)
+        ? nextBottom.cards.map(c => ({ ...c }))
+        : [];
+      nextBottom = { landlord: nextLandlord, cards: keep, revealed: !!nextBottom.revealed };
+    }
+  }
   continue;
               }
 else if (m.type === 'event' && m.kind === 'bid-eval') {
@@ -4190,6 +4240,24 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
+                  }
+                  if (Array.isArray(m.hand)) {
+                    const prevHand = Array.isArray(nextHands?.[s]) ? nextHands[s] : [];
+                    const updatedHand = reconcileHandFromRaw(m.hand as string[], prevHand);
+                    nextHands = Object.assign([], nextHands, { [s]: updatedHand });
+                    if (s === (nextBottom.landlord ?? -1) && nextBottom.cards.length) {
+                      const bottomCards = nextBottom.cards.map(card => ({
+                        ...card,
+                        used: !updatedHand.includes(card.label),
+                      }));
+                      nextBottom = { ...nextBottom, cards: bottomCards };
+                    }
+                  }
+                  if (Array.isArray(m.totals) && m.totals.length === 3) {
+                    const totalsArr = (m.totals as any[]).map(v => Number(v));
+                    nextTotals = [0,1,2].map((idx) => (
+                      Number.isFinite(totalsArr[idx]) ? totalsArr[idx] : nextTotals[idx]
+                    )) as [number, number, number];
                   }
                 }
                 continue;
