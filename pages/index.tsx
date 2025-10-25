@@ -2941,16 +2941,24 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     const seat = humanRequest.seat;
     if (seat == null || seat < 0 || seat >= hands.length) return [] as string[];
     const seatHand = hands[seat] || [];
-    const desired = humanHint.cards.map(displayLabelFromRaw);
+    const desiredOptions = humanHint.cards.map(card => candDecorations(String(card)));
     const used = new Set<number>();
     const out: string[] = [];
-    for (const label of desired) {
-      const idx = seatHand.findIndex((card, i) => !used.has(i) && card === label);
-      if (idx >= 0) {
-        used.add(idx);
-        out.push(seatHand[idx]);
+    for (const options of desiredOptions) {
+      let chosenIdx = -1;
+      for (const opt of options) {
+        const idx = seatHand.findIndex((card, i) => !used.has(i) && card === opt);
+        if (idx >= 0) {
+          chosenIdx = idx;
+          break;
+        }
+      }
+      if (chosenIdx >= 0) {
+        used.add(chosenIdx);
+        out.push(seatHand[chosenIdx]);
       } else {
-        out.push(label);
+        const fallback = options[0] ?? '';
+        out.push(displayLabelFromRaw(fallback));
       }
     }
     return out;
@@ -3077,14 +3085,21 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     const seat = humanRequest.seat;
     if (seat == null || seat < 0 || seat >= hands.length) return;
     const seatHand = hands[seat] || [];
-    const desired = hint.cards.map(displayLabelFromRaw);
+    const desiredOptions = hint.cards.map(card => candDecorations(String(card)));
     const used = new Set<number>();
     const indices: number[] = [];
-    for (const label of desired) {
-      const idx = seatHand.findIndex((card, i) => !used.has(i) && card === label);
-      if (idx >= 0) {
-        used.add(idx);
-        indices.push(idx);
+    for (const options of desiredOptions) {
+      let chosenIdx = -1;
+      for (const opt of options) {
+        const idx = seatHand.findIndex((card, i) => !used.has(i) && card === opt);
+        if (idx >= 0) {
+          chosenIdx = idx;
+          break;
+        }
+      }
+      if (chosenIdx >= 0) {
+        used.add(chosenIdx);
+        indices.push(chosenIdx);
       }
     }
     if (indices.length > 0) {
