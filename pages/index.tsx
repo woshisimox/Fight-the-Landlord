@@ -815,8 +815,13 @@ function candDecorations(l: string): string[] {
   if (l === 'x') return ['🃏X'];
   if (l === 'X') return ['🃏Y'];
   if (l.startsWith('🃏')) return [l];
-  if ('♠♥♦♣'.includes(l[0])) return [l];
   const r = rankOf(l);
+  if ('♠♥♦♣'.includes(l[0])) {
+    const suit = l[0] as SuitSym;
+    const base = `${suit}${r}`;
+    const extras = SUITS.filter(s => s !== suit).map(s => `${s}${r}`);
+    return [base, ...extras];
+  }
   if (r === 'JOKER') return ['🃏Y'];
   return SUITS.map(s => `${s}${r}`);
 }
