@@ -1428,8 +1428,8 @@ export async function* runOneGame(opts: {
     let last = -1;
 
     for (let attempt = 0; attempt < MAX_BID_ATTEMPTS; attempt++) {
-      const bidderMap = new Map<number, { seat:number; score:number; threshold:number; margin:number }>();
-      const bidHistory: { seat:number; score:number; threshold:number; margin:number }[] = [];
+      const bidderMap = new Map<number, { seat:number; score:number; threshold:number; margin:number; doubled:boolean }>();
+      const bidHistory: { seat:number; score:number; threshold:number; margin:number; doubled:boolean }[] = [];
       last = -1;
       bidMultiplier = 1;
       multiplier = 1;
@@ -1437,6 +1437,8 @@ export async function* runOneGame(opts: {
       let passesNoBid = 0;
       let seat = 0;
       let actions = 0;
+      const perSeatBidCount: [number, number, number] = [0, 0, 0];
+      let hasAnyBid = false;
 
       while (true) {
         const sc = evalRobScore(hands[seat]);
@@ -1470,7 +1472,8 @@ export async function* runOneGame(opts: {
         const threshold = (__thMapChoice[meta.choice] ?? __thMap[meta.name] ?? 1.8);
         const recommended = (sc >= threshold);
 
-        const prevBidders = Array.from(bidderMap.values()).map(b => ({ seat:b.seat, score:b.score, threshold:b.threshold, margin:b.margin }));
+        const prevBidders = Array.from(bidderMap.values()).map(b => ({ seat:b.seat, score:b.score, threshold:b.threshold, margin:b.margin, doubled:b.doubled }));
+        const forcedPass = perSeatBidCount[seat] >= 2;
         const bidCtx: any = {
           hands: clone(hands[seat]),
           require: null,
@@ -1483,6 +1486,7 @@ export async function* runOneGame(opts: {
             multiplier,
             bidMultiplier,
             recommended,
+            forcedPass,
             attempt,
             maxAttempts: MAX_BID_ATTEMPTS,
             bidders: prevBidders,
@@ -1507,8 +1511,8 @@ export async function* runOneGame(opts: {
           },
         };
 
-        let decision = recommended;
-        if (meta.phaseAware) {
+        let decision = forcedPass ? false : recommended;
+        if (!forcedPass && meta.phaseAware) {
           const ctxForBot: any = clone(bidCtx);
           if (ctxForBot?.bid) {
             const def = !!ctxForBot.bid.recommended;
@@ -1531,18 +1535,27 @@ export async function* runOneGame(opts: {
           } catch {}
         }
 
-        yield { type:'event', kind:'bid-eval', seat, score: sc, threshold, decision: (recommended ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+        const decisionLabel = decision ? 'bid' : 'pass';
+        yield { type:'event', kind:'bid-eval', seat, score: sc, threshold, decision: decisionLabel, bidMult: bidMultiplier, mult: multiplier, forced: forcedPass, bidCount: perSeatBidCount[seat], maxBidCount: 2 };
 
         if (decision) {
           const margin = sc - threshold;
-          const rec = { seat, score: sc, threshold, margin };
+          perSeatBidCount[seat] = Math.min(2, perSeatBidCount[seat] + 1);
+          const isRob = hasAnyBid;
+          const rec = { seat, score: sc, threshold, margin, doubled: isRob };
           bidderMap.set(seat, rec);
           bidHistory.push(rec);
-          multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
+          if (isRob) {
+            multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
+          } else {
+            multiplier = Math.max(1, multiplier || 1);
+          }
+          bidMultiplier = multiplier;
           last = seat;
           passesSinceLastBid = 0;
           passesNoBid = 0;
-          yield { type:'event', kind:'bid', seat, bid:true, score: sc, bidMult: bidMultiplier, mult: multiplier };
+          hasAnyBid = true;
+          yield { type:'event', kind:'bid', seat, bid:true, score: sc, bidMult: bidMultiplier, mult: multiplier, doubled: isRob, bidCount: perSeatBidCount[seat] };
         } else {
           if (last === -1) {
             passesNoBid++;
@@ -1567,9 +1580,11 @@ export async function* runOneGame(opts: {
         bidMultiplier = 1;
         multiplier = 1;
         for (const hit of bidHistory) {
-          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+          if (hit.doubled) {
+            bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+          }
           multiplier = bidMultiplier;
-          yield { type:'event', kind:'rob2', seat: hit.seat, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
+          yield { type:'event', kind:'rob2', seat: hit.seat, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier, doubled: hit.doubled };
         }
         landlord = last;
       } else {
