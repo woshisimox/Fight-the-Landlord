@@ -695,7 +695,7 @@ function generateAllMoves(hand: Label[], four2: Four2Policy): Label[][] {
   });
 }
 
-function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy): Label[][] {
+export function generateMoves(hand: Label[], require: Combo | null, four2: Four2Policy): Label[][] {
   const all = generateAllMoves(hand, four2);
   if (!require) return all;
 
@@ -1428,13 +1428,20 @@ export async function* runOneGame(opts: {
     let last = -1;
 
     for (let attempt = 0; attempt < MAX_BID_ATTEMPTS; attempt++) {
-      const bidders: { seat:number; score:number; threshold:number; margin:number }[] = [];
+      const bidderMap = new Map<number, { seat:number; score:number; threshold:number; margin:number; doubled:boolean }>();
+      const bidHistory: { seat:number; score:number; threshold:number; margin:number; doubled:boolean }[] = [];
       last = -1;
       bidMultiplier = 1;
       multiplier = 1;
+      let passesSinceLastBid = 0;
+      let passesNoBid = 0;
+      let seat = 0;
+      let actions = 0;
+      const perSeatBidCount: [number, number, number] = [0, 0, 0];
+      let hasAnyBid = false;
 
-      for (let s = 0; s < 3; s++) {
-        const sc = evalRobScore(hands[s]);
+      while (true) {
+        const sc = evalRobScore(hands[seat]);
 
         const __thMap: Record<string, number> = {
           greedymax: 1.6,
@@ -1461,13 +1468,14 @@ export async function* runOneGame(opts: {
           'gpt':                   2.2,
           'claude':                2.2,
         };
-        const meta = seatMeta[s];
+        const meta = seatMeta[seat];
         const threshold = (__thMapChoice[meta.choice] ?? __thMap[meta.name] ?? 1.8);
         const recommended = (sc >= threshold);
 
-        const prevBidders = bidders.map(b => ({ seat:b.seat, score:b.score, threshold:b.threshold, margin:b.margin }));
+        const prevBidders = Array.from(bidderMap.values()).map(b => ({ seat:b.seat, score:b.score, threshold:b.threshold, margin:b.margin, doubled:b.doubled }));
+        const forcedPass = perSeatBidCount[seat] >= 2;
         const bidCtx: any = {
-          hands: clone(hands[s]),
+          hands: clone(hands[seat]),
           require: null,
           canPass: true,
           policy: { four2 },
@@ -1478,11 +1486,12 @@ export async function* runOneGame(opts: {
             multiplier,
             bidMultiplier,
             recommended,
+            forcedPass,
             attempt,
             maxAttempts: MAX_BID_ATTEMPTS,
             bidders: prevBidders,
           },
-          seat: s,
+          seat,
           landlord: -1,
           leader: -1,
           trick: -1,
@@ -1494,16 +1503,16 @@ export async function* runOneGame(opts: {
           handsCount: [hands[0].length, hands[1].length, hands[2].length],
           role: 'farmer',
           teammates: [],
-          opponents: [ (s+1)%3, (s+2)%3 ],
+          opponents: [ (seat+1)%3, (seat+2)%3 ],
           counts: {
-            handByRank: tallyByRank(hands[s]),
+            handByRank: tallyByRank(hands[seat]),
             seenByRank: tallyByRank([]),
-            remainingByRank: remainingCountByRank([], hands[s]),
+            remainingByRank: remainingCountByRank([], hands[seat]),
           },
         };
 
-        let decision = recommended;
-        if (meta.phaseAware) {
+        let decision = forcedPass ? false : recommended;
+        if (!forcedPass && meta.phaseAware) {
           const ctxForBot: any = clone(bidCtx);
           if (ctxForBot?.bid) {
             const def = !!ctxForBot.bid.recommended;
@@ -1512,7 +1521,7 @@ export async function* runOneGame(opts: {
             delete ctxForBot.bid.threshold;
           }
           try {
-            const result = await Promise.resolve(bots[s](ctxForBot));
+            const result = await Promise.resolve(bots[seat](ctxForBot));
             const parsed = (()=>{
               if (!result) return null;
               const r: any = result;
@@ -1526,31 +1535,58 @@ export async function* runOneGame(opts: {
           } catch {}
         }
 
-        yield { type:'event', kind:'bid-eval', seat: s, score: sc, threshold, decision: (recommended ? 'bid' : 'pass'), bidMult: bidMultiplier, mult: multiplier };
+        const decisionLabel = decision ? 'bid' : 'pass';
+        yield { type:'event', kind:'bid-eval', seat, score: sc, threshold, decision: decisionLabel, bidMult: bidMultiplier, mult: multiplier, forced: forcedPass, bidCount: perSeatBidCount[seat], maxBidCount: 2 };
 
         if (decision) {
           const margin = sc - threshold;
-          bidders.push({ seat: s, score: sc, threshold, margin });
-          multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
-          last = s;
-          yield { type:'event', kind:'bid', seat:s, bid:true, score: sc, bidMult: bidMultiplier, mult: multiplier };
+          perSeatBidCount[seat] = Math.min(2, perSeatBidCount[seat] + 1);
+          const isRob = hasAnyBid;
+          const rec = { seat, score: sc, threshold, margin, doubled: isRob };
+          bidderMap.set(seat, rec);
+          bidHistory.push(rec);
+          if (isRob) {
+            multiplier = Math.min(64, Math.max(1, (multiplier || 1) * 2));
+          } else {
+            multiplier = Math.max(1, multiplier || 1);
+          }
+          bidMultiplier = multiplier;
+          last = seat;
+          passesSinceLastBid = 0;
+          passesNoBid = 0;
+          hasAnyBid = true;
+          yield { type:'event', kind:'bid', seat, bid:true, score: sc, bidMult: bidMultiplier, mult: multiplier, doubled: isRob, bidCount: perSeatBidCount[seat] };
+        } else {
+          if (last === -1) {
+            passesNoBid++;
+          } else {
+            passesSinceLastBid++;
+          }
         }
 
         if (opts.delayMs) await wait(opts.delayMs);
+
+        const reachedActionCap = (++actions) >= 12;
+        const everyonePassed = (last === -1 && passesNoBid >= 3);
+        const biddingSettled = (last !== -1 && passesSinceLastBid >= 2);
+        if (reachedActionCap || everyonePassed || biddingSettled) {
+          break;
+        }
+
+        seat = (seat + 1) % 3;
       }
 
-      if (bidders.length > 0) {
-        let bestSeat = -1;
-        let bestMargin = -Infinity;
-        for (let t = 0; t < 3; t++) {
-          const hit = bidders.find(b => b.seat === t);
-          if (!hit) continue;
-          bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+      if (bidHistory.length > 0) {
+        bidMultiplier = 1;
+        multiplier = 1;
+        for (const hit of bidHistory) {
+          if (hit.doubled) {
+            bidMultiplier = Math.min(64, Math.max(1, (bidMultiplier || 1) * 2));
+          }
           multiplier = bidMultiplier;
-          yield { type:'event', kind:'rob2', seat: t, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier };
-          if (hit.margin >= bestMargin) { bestMargin = hit.margin; bestSeat = t; }
+          yield { type:'event', kind:'rob2', seat: hit.seat, score: hit.score, threshold: hit.threshold, margin: Number((hit.margin).toFixed(4)), bidMult: bidMultiplier, mult: multiplier, doubled: hit.doubled };
         }
-        landlord = bestSeat;
+        landlord = last;
       } else {
         try { yield { type:'event', kind:'bid-skip', reason:'no-bidders' }; } catch {}
         deck = shuffle(freshDeck());

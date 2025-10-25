@@ -15,6 +15,7 @@ import {
   expireHumanRequest,
   resetSession as resetHumanSession,
 } from '../../lib/humanStore';
+import { generateMoves } from '../../lib/doudizhu/engine';
 
 // ---- stable hash for ruleId ----
 function stableHash(s: string): string { let h=5381; for (let i=0;i<s.length;i++){ h=((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); }
@@ -398,7 +399,28 @@ function traceWrap(
       if (isHuman) {
         const requestId = `${sessionKey}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
         const hintPayload = phase === 'play' ? await buildHumanHint(ctxWithSeen) : null;
+        let legalCount: number | undefined;
+        try {
+          if (Array.isArray(ctxWithSeen?.hands) && ctxWithSeen?.require) {
+            const four2Policy = (ctxWithSeen?.policy?.four2 || 'both') as any;
+            const moves = generateMoves(ctxWithSeen.hands.slice(), ctxWithSeen.require, four2Policy);
+            legalCount = moves.length;
+          } else if (Array.isArray(ctxWithSeen?.hands) && ctxWithSeen?.require === null && ctxWithSeen?.canPass === false) {
+            // 首家必须出牌，保持 legalCount 未定义以避免误导前端。
+            legalCount = undefined;
+          }
+        } catch (err) {
+          console.debug('[HUMAN]', 'failed to tally legal moves', err);
+        }
         const payloadCtx = sanitizeCtx(ctxWithSeen);
+        if (payloadCtx && typeof legalCount === 'number' && Number.isFinite(legalCount)) {
+          try {
+            (payloadCtx as any).legalCount = legalCount;
+            if ((payloadCtx as any).require && legalCount <= 0 && (payloadCtx as any).canPass !== false) {
+              (payloadCtx as any).mustPass = true;
+            }
+          } catch {}
+        }
         const humanPromise = new Promise((resolve, reject) => {
           registerHumanRequest(
             sessionKey,

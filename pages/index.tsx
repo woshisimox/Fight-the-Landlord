@@ -815,8 +815,13 @@ function candDecorations(l: string): string[] {
   if (l === 'x') return ['🃏X'];
   if (l === 'X') return ['🃏Y'];
   if (l.startsWith('🃏')) return [l];
-  if ('♠♥♦♣'.includes(l[0])) return [l];
   const r = rankOf(l);
+  if ('♠♥♦♣'.includes(l[0])) {
+    const suit = l[0] as SuitSym;
+    const base = `${suit}${r}`;
+    const extras = SUITS.filter(s => s !== suit).map(s => `${s}${r}`);
+    return [base, ...extras];
+  }
   if (r === 'JOKER') return ['🃏Y'];
   return SUITS.map(s => `${s}${r}`);
 }
@@ -866,6 +871,40 @@ function displayLabelFromRaw(label: string): string {
   if (label === 'X') return '🃏Y';
   if ('♠♥♦♣'.includes(label[0])) return label;
   return decorateHandCycle([label])[0];
+}
+
+function reconcileHandFromRaw(raw: string[] | undefined, prev: string[]): string[] {
+  if (!Array.isArray(raw)) return prev;
+  const pool = prev.slice();
+  const usedPrev = pool.map(() => false);
+  const decorated: string[] = [];
+
+  for (const label of raw) {
+    const options = candDecorations(label);
+    let chosen: string | null = null;
+
+    for (const opt of options) {
+      const idx = pool.findIndex((v, i) => !usedPrev[i] && v === opt);
+      if (idx >= 0) {
+        usedPrev[idx] = true;
+        chosen = opt;
+        break;
+      }
+    }
+
+    if (!chosen) {
+      const fallback = options.find(opt => !decorated.includes(opt));
+      if (fallback) chosen = fallback;
+    }
+
+    if (!chosen) {
+      chosen = displayLabelFromRaw(label);
+    }
+
+    decorated.push(chosen);
+  }
+
+  return sortDisplayHand(decorated);
 }
 
 function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
@@ -2902,16 +2941,24 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     const seat = humanRequest.seat;
     if (seat == null || seat < 0 || seat >= hands.length) return [] as string[];
     const seatHand = hands[seat] || [];
-    const desired = humanHint.cards.map(displayLabelFromRaw);
+    const desiredOptions = humanHint.cards.map(card => candDecorations(String(card)));
     const used = new Set<number>();
     const out: string[] = [];
-    for (const label of desired) {
-      const idx = seatHand.findIndex((card, i) => !used.has(i) && card === label);
-      if (idx >= 0) {
-        used.add(idx);
-        out.push(seatHand[idx]);
+    for (const options of desiredOptions) {
+      let chosenIdx = -1;
+      for (const opt of options) {
+        const idx = seatHand.findIndex((card, i) => !used.has(i) && card === opt);
+        if (idx >= 0) {
+          chosenIdx = idx;
+          break;
+        }
+      }
+      if (chosenIdx >= 0) {
+        used.add(chosenIdx);
+        out.push(seatHand[chosenIdx]);
       } else {
-        out.push(label);
+        const fallback = options[0] ?? '';
+        out.push(displayLabelFromRaw(fallback));
       }
     }
     return out;
@@ -2987,6 +3034,16 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
 
   const handleHumanPlay = useCallback(async () => {
     if (!humanRequest || humanRequest.phase !== 'play') return;
+    const ctxInfo: any = humanRequest.ctx;
+    if (
+      ctxInfo &&
+      typeof ctxInfo.legalCount === 'number' &&
+      ctxInfo.legalCount <= 0 &&
+      (ctxInfo.canPass ?? true)
+    ) {
+      setHumanError(lang === 'en' ? 'No playable cards available. Please pass.' : '无牌可出，请选择过牌');
+      return;
+    }
     const seat = humanRequest.seat;
     const hand = hands[seat] || [];
     const cards = humanSelectedIdx
@@ -3028,14 +3085,21 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     const seat = humanRequest.seat;
     if (seat == null || seat < 0 || seat >= hands.length) return;
     const seatHand = hands[seat] || [];
-    const desired = hint.cards.map(displayLabelFromRaw);
+    const desiredOptions = hint.cards.map(card => candDecorations(String(card)));
     const used = new Set<number>();
     const indices: number[] = [];
-    for (const label of desired) {
-      const idx = seatHand.findIndex((card, i) => !used.has(i) && card === label);
-      if (idx >= 0) {
-        used.add(idx);
-        indices.push(idx);
+    for (const options of desiredOptions) {
+      let chosenIdx = -1;
+      for (const opt of options) {
+        const idx = seatHand.findIndex((card, i) => !used.has(i) && card === opt);
+        if (idx >= 0) {
+          chosenIdx = idx;
+          break;
+        }
+      }
+      if (chosenIdx >= 0) {
+        used.add(chosenIdx);
+        indices.push(chosenIdx);
       }
     }
     if (indices.length > 0) {
@@ -3061,6 +3125,12 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     return lang === 'en' ? 'Follow previous play' : '跟牌';
   })();
   const humanCanPass = humanPhase === 'play' ? humanRequest?.ctx?.canPass !== false : true;
+  const humanLegalCount = humanPhase === 'play' && typeof (humanRequest?.ctx as any)?.legalCount === 'number'
+    ? Number((humanRequest?.ctx as any).legalCount)
+    : null;
+  const humanMustPass = humanPhase === 'play'
+    ? (((humanRequest?.ctx as any)?.mustPass === true) || (humanLegalCount === 0 && humanCanPass)) && humanCanPass
+    : false;
   const humanSelectedCount = humanSelectedIdx.length;
   const canAdoptHint = humanPhase === 'play' && humanHint?.move === 'play' && humanHintDecorated.length > 0;
   const initialTotals = useMemo(
@@ -4054,6 +4124,22 @@ for (const raw of batch) {
   const sc = (typeof (m as any).score === 'number' ? (m as any).score : Number((m as any).score || NaN));
   const scTxt = Number.isFinite(sc) ? sc.toFixed(2) : '-';
   nextLog = [...nextLog, `${seatName(m.seat)} ${m.bid ? '抢地主' : '不抢'}｜score=${scTxt}｜叫抢x${nextBidMultiplier}｜对局x${nextMultiplier}`];
+  const seatIdx = (typeof m.seat === 'number') ? m.seat as number : -1;
+  const explicitLordRaw = (m as any).landlordIdx ?? (m as any).landlord;
+  const explicitLord = (typeof explicitLordRaw === 'number') ? explicitLordRaw : null;
+  if (explicitLord != null && explicitLord >= 0 && explicitLord < 3) {
+    nextLandlord = explicitLord;
+  } else if (seatIdx >= 0 && seatIdx < 3 && m.bid) {
+    nextLandlord = seatIdx;
+  }
+  if (typeof nextLandlord === 'number' && nextLandlord >= 0 && nextLandlord < 3) {
+    if (nextBottom.landlord !== nextLandlord) {
+      const keep = Array.isArray(nextBottom.cards)
+        ? nextBottom.cards.map(c => ({ ...c }))
+        : [];
+      nextBottom = { landlord: nextLandlord, cards: keep, revealed: !!nextBottom.revealed };
+    }
+  }
   continue;
               }
 else if (m.type === 'event' && m.kind === 'bid-eval') {
@@ -4190,6 +4276,24 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                   for (let i=0;i<3;i++){
                     if (!Array.isArray(nextScores[i])) nextScores[i]=[];
                     nextScores[i] = [...nextScores[i], (i===s ? val : null)];
+                  }
+                  if (Array.isArray(m.hand)) {
+                    const prevHand = Array.isArray(nextHands?.[s]) ? nextHands[s] : [];
+                    const updatedHand = reconcileHandFromRaw(m.hand as string[], prevHand);
+                    nextHands = Object.assign([], nextHands, { [s]: updatedHand });
+                    if (s === (nextBottom.landlord ?? -1) && nextBottom.cards.length) {
+                      const bottomCards = nextBottom.cards.map(card => ({
+                        ...card,
+                        used: !updatedHand.includes(card.label),
+                      }));
+                      nextBottom = { ...nextBottom, cards: bottomCards };
+                    }
+                  }
+                  if (Array.isArray(m.totals) && m.totals.length === 3) {
+                    const totalsArr = (m.totals as any[]).map(v => Number(v));
+                    nextTotals = [0,1,2].map((idx) => (
+                      Number.isFinite(totalsArr[idx]) ? totalsArr[idx] : nextTotals[idx]
+                    )) as [number, number, number];
                   }
                 }
                 continue;
@@ -4875,6 +4979,13 @@ const handleAllSaveInner = () => {
                     ? `Requirement: ${humanRequireText} · Can pass: ${humanCanPass ? 'Yes' : 'No'} · Selected: ${humanSelectedCount}`
                     : `需求：${humanRequireText} ｜ 可过：${humanCanPass ? '是' : '否'} ｜ 已选：${humanSelectedCount}`}
                 </div>
+                {humanMustPass && (
+                  <div style={{ fontSize:12, color:'#dc2626' }}>
+                    {lang === 'en'
+                      ? 'No playable cards available. Please pass this turn.'
+                      : '无牌可出，请选择过牌。'}
+                  </div>
+                )}
                 {humanHint && (
                   <div
                     style={{
@@ -4940,13 +5051,25 @@ const handleAllSaveInner = () => {
                 <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                   <button
                     onClick={handleHumanPlay}
-                    disabled={humanSubmitting || humanSelectedCount === 0}
-                    style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting || humanSelectedCount === 0 ? '#e5e7eb' : '#2563eb', color: humanSubmitting || humanSelectedCount === 0 ? '#6b7280' : '#fff' }}
+                    disabled={humanSubmitting || humanSelectedCount === 0 || humanMustPass}
+                    style={{
+                      padding:'6px 12px',
+                      border:'1px solid #2563eb',
+                      borderRadius:8,
+                      background: humanSubmitting || humanSelectedCount === 0 || humanMustPass ? '#e5e7eb' : '#2563eb',
+                      color: humanSubmitting || humanSelectedCount === 0 || humanMustPass ? '#6b7280' : '#fff',
+                    }}
                   >{lang === 'en' ? 'Play selected' : '出牌'}</button>
                   <button
                     onClick={handleHumanPass}
                     disabled={humanSubmitting || !humanCanPass}
-                    style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background: humanSubmitting || !humanCanPass ? '#f3f4f6' : '#fff', color:'#1f2937' }}
+                    style={{
+                      padding:'6px 12px',
+                      border:'1px solid #d1d5db',
+                      borderRadius:8,
+                      background: humanMustPass ? '#fee2e2' : (humanSubmitting || !humanCanPass ? '#f3f4f6' : '#fff'),
+                      color: humanMustPass ? '#b91c1c' : '#1f2937',
+                    }}
                   >{lang === 'en' ? 'Pass' : '过'}</button>
                   <button
                     onClick={handleHumanClear}
