@@ -5552,7 +5552,8 @@ function ScoreTimeline(
   const y = (v:number)=> ih - ( (v - y0) / (y1 - y0) ) * ih;
 
   const colorLine = ['#ef4444', '#3b82f6', '#10b981'];
-  const colorBand = ['rgba(239,68,68,0.08)','rgba(59,130,246,0.08)','rgba(16,185,129,0.10)'];
+  const colorBand = ['rgba(239,68,68,0.16)','rgba(59,130,246,0.16)','rgba(16,185,129,0.20)'];
+  const colorBandFallback = ['#fef2f2', '#eff6ff', '#f0fdf4'];
   const colors = colorLine;
 
   const cuts = Array.isArray(bands) && bands.length ? [...bands] : [0];
@@ -5648,7 +5649,9 @@ function ScoreTimeline(
             const x1 = x(Math.max(st, ed-1));
             const w  = Math.max(0.5, x1 - x0);
             const lord = landlordsFilled[i] ?? -1;
-            const fill = (lord===0||lord===1||lord===2) ? colorBand[lord] : (i%2===0 ? '#ffffff' : '#f8fafc');
+            const fill = (lord===0||lord===1||lord===2)
+              ? colorBand[lord]
+              : colorBandFallback[i % colorBandFallback.length];
             return <rect key={'band'+i} x={x0} y={0} width={w} height={ih} fill={fill} />;
           })}
 
