@@ -271,6 +271,7 @@ type BotChoice =
   | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
+  | 'human'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
@@ -367,6 +368,7 @@ const KO_ALL_CHOICES: BotChoice[] = [
   'built-in:mininet',
   'built-in:ally-support',
   'built-in:endgame-rush',
+  'human',
   'ai:openai',
   'ai:gemini',
   'ai:grok',
@@ -1944,6 +1946,7 @@ function KnockoutPanel() {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="human">{lang === 'en' ? 'Human (manual)' : '人类（手动）'}</option>
                     </optgroup>
                     <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
@@ -2529,6 +2532,7 @@ function defaultModelFor(choice: BotChoice): string {
     case 'ai:kimi':  return 'kimi-k2-0905-preview';
     case 'ai:qwen':  return 'qwen-plus';
     case 'ai:deepseek': return 'deepseek-chat';
+    case 'human': return '';
     default: return '';
   }
 }
@@ -2553,6 +2557,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:mininet':      return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'human':                 return 'Human';
     case 'ai:openai':             return 'OpenAI';
     case 'ai:gemini':             return 'Gemini';
     case 'ai:grok':               return 'Grok';
@@ -2701,6 +2706,7 @@ const sanitizeTotalsArray = (
 
 /* ==================== LivePanel（对局） ==================== */
 const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(props, ref) {
+  const { lang } = useI18n();
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const pauseRef = useRef(false);
@@ -2746,6 +2752,100 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [] });
   const [log, setLog] = useState<string[]>([]);
+  const [humanPrompt, setHumanPrompt] = useState<HumanPromptState | null>(null);
+  const humanPromptRef = useRef<HumanPromptState | null>(null);
+  useEffect(() => { humanPromptRef.current = humanPrompt; }, [humanPrompt]);
+  const [humanSelection, setHumanSelection] = useState<string[]>([]);
+  const [humanReason, setHumanReason] = useState('');
+  const [humanSubmitting, setHumanSubmitting] = useState(false);
+  const [humanError, setHumanError] = useState<string | null>(null);
+  const [humanTimerMs, setHumanTimerMs] = useState(0);
+
+  useEffect(() => {
+    if (!humanPrompt) {
+      setHumanTimerMs(0);
+      if (humanSelection.length) setHumanSelection([]);
+      if (humanReason) setHumanReason('');
+      if (humanError) setHumanError(null);
+      return;
+    }
+    const update = () => {
+      const current = humanPromptRef.current;
+      setHumanTimerMs(current ? Math.max(0, current.deadline - Date.now()) : 0);
+    };
+    update();
+    const timer = setInterval(update, 500);
+    return () => clearInterval(timer);
+  }, [humanPrompt]);
+
+  const sendHumanMove = async (payload: any) => {
+    const prompt = humanPromptRef.current;
+    if (!prompt) return;
+    setHumanSubmitting(true);
+    setHumanError(null);
+    try {
+      const res = await fetch('/api/human_move', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ requestId: prompt.requestId, move: payload }),
+      });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data?.error) msg = String(data.error);
+        } catch {}
+        throw new Error(msg);
+      }
+      setHumanPrompt(null);
+      setHumanSelection([]);
+      setHumanReason('');
+    } catch (e:any) {
+      setHumanError(e?.message || String(e));
+    } finally {
+      setHumanSubmitting(false);
+    }
+  };
+
+  const handleHumanPass = async () => {
+    const prompt = humanPromptRef.current;
+    if (!prompt) return;
+    await sendHumanMove({ move: 'pass', reason: humanReason, phase: prompt.phase });
+  };
+
+  const handleHumanPlay = async () => {
+    const prompt = humanPromptRef.current;
+    if (!prompt) return;
+    const selected = new Set(humanSelection);
+    const cards = prompt.cards.filter(card => selected.has(card.id)).map(card => card.raw);
+    if (!cards.length) {
+      setHumanError(lang === 'en' ? 'Select at least one card.' : '请选择要出的牌。');
+      return;
+    }
+    await sendHumanMove({ move: 'play', cards, reason: humanReason, phase: prompt.phase });
+  };
+
+  const handleHumanBid = async (decision: boolean) => {
+    const prompt = humanPromptRef.current;
+    if (!prompt) return;
+    await sendHumanMove({ move: decision ? 'play' : 'pass', bid: decision, reason: humanReason, phase: 'bid' });
+  };
+
+  const handleHumanDouble = async (decision: boolean) => {
+    const prompt = humanPromptRef.current;
+    if (!prompt) return;
+    await sendHumanMove({ move: decision ? 'play' : 'pass', double: decision, reason: humanReason, phase: 'double' });
+  };
+
+  const toggleHumanCard = (id: string) => {
+    setHumanSelection(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+    setHumanError(null);
+  };
+
+  const clearHumanSelection = () => {
+    setHumanSelection([]);
+    setHumanError(null);
+  };
   const initialTotals = useMemo(
     () => sanitizeTotalsArray(props.initialTotals, props.startScore || 0),
     [props.initialTotals, props.startScore],
@@ -2780,7 +2880,21 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
 
   /* ====== 评分统计（每局） ====== */
   type SeatStat = { rounds:number; overallAvg:number; lastAvg:number; best:number; worst:number; mean:number; sigma:number };
-  const [scoreStats, setScoreStats] = useState<SeatStat[]>([
+  type HumanCardChoice = { id: string; display: string; raw: string };
+  type HumanPromptState = {
+    requestId: string;
+    seat: number;
+    phase: string;
+    canPass: boolean;
+    cards: HumanCardChoice[];
+    require: any;
+    landlord: number | null;
+    leader: number | null;
+    trick: number;
+    timeoutMs: number;
+    deadline: number;
+  };
+const [scoreStats, setScoreStats] = useState<SeatStat[]>([
     { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
     { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
     { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
@@ -3364,9 +3478,12 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     const seatSummaryText = (specs: any[]) =>
       specs.map((s, i) => {
         const nm = seatName(i);
-        if (s.choice.startsWith('built-in')) return `${nm}=${choiceLabel(s.choice as BotChoice)}`;
-        if (s.choice === 'http') return `${nm}=HTTP(${s.baseUrl ? 'custom' : 'default'})`;
-        return `${nm}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
+        const choice = s.choice as BotChoice;
+        if (choice.startsWith('built-in')) return `${nm}=${choiceLabel(choice)}`;
+        if (choice === 'http') return `${nm}=HTTP(${s.baseUrl ? 'custom' : 'default'})`;
+        const model = (s.model || defaultModelFor(choice)).trim();
+        const label = choiceLabel(choice);
+        return model ? `${nm}=${label}(${model})` : `${nm}=${label}`;
       }).join(', ');
 
     type RoundSnapshot = {
@@ -3680,6 +3797,59 @@ for (const raw of batch) {
 
             // m already defined above
             try {
+              if (m.type === 'event' && m.kind === 'human-request') {
+                const seat = typeof m.seat === 'number' ? m.seat : null;
+                const requestId = typeof m.requestId === 'string' ? m.requestId : '';
+                if (seat != null && requestId) {
+                  const context = m.context || {};
+                  const phase = typeof m.phase === 'string'
+                    ? m.phase
+                    : (typeof context.phase === 'string' ? context.phase : 'play');
+                  const rawHand = Array.isArray(context.hands)
+                    ? context.hands.map((c: any) => String(c))
+                    : [];
+                  const decorated = (() => {
+                    const current = handsRef.current?.[seat];
+                    if (Array.isArray(current) && current.length === rawHand.length) {
+                      return [...current];
+                    }
+                    return decorateHandCycle(rawHand, roundSuitRegistryRef.current);
+                  })();
+                  const cards: HumanCardChoice[] = decorated.map((label, idx) => ({
+                    id: `${requestId}-${idx}`,
+                    display: label,
+                    raw: rawHand[idx] ?? label,
+                  }));
+                  const landlordSeat = typeof context.landlord === 'number' ? context.landlord : null;
+                  const leaderSeat = typeof context.leader === 'number' ? context.leader : null;
+                  const trickIdx = typeof context.trick === 'number' ? context.trick : 0;
+                  const timeoutMs = typeof m.timeoutMs === 'number'
+                    ? Math.max(0, Math.floor(m.timeoutMs))
+                    : (typeof context.timeoutMs === 'number' ? Math.max(0, Math.floor(context.timeoutMs)) : 0);
+                  const deadline = Date.now() + timeoutMs;
+                  setHumanPrompt({
+                    requestId,
+                    seat,
+                    phase,
+                    canPass: !!(m.canPass ?? context.canPass),
+                    cards,
+                    require: context.require ?? null,
+                    landlord: landlordSeat,
+                    leader: leaderSeat,
+                    trick: trickIdx,
+                    timeoutMs,
+                    deadline,
+                  });
+                  setHumanSelection([]);
+                  setHumanReason('');
+                  setHumanError(null);
+                }
+                continue;
+              }
+              if (m.type === 'event' && (m.kind === 'human-timeout' || m.kind === 'human-cancel')) {
+                setHumanPrompt(prev => (prev && prev.requestId === m.requestId ? null : prev));
+                continue;
+              }
               // -------- TS 帧（后端主动提供） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
@@ -3705,6 +3875,10 @@ for (const raw of batch) {
                 nextLandlord = null;
                 nextBottom = { landlord: null, cards: [] };
                 roundSuitRegistryRef.current = new Map();
+                setHumanPrompt(null);
+                setHumanSelection([]);
+                setHumanReason('');
+                setHumanError(null);
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -4303,6 +4477,14 @@ nextTotals     = [
   };
 
   const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); };
+  useEffect(() => {
+    if (!running) {
+      setHumanPrompt(null);
+      setHumanSelection([]);
+      setHumanReason('');
+      setHumanError(null);
+    }
+  }, [running]);
 
   const togglePause = () => {
     if (!running) return;
@@ -4319,6 +4501,7 @@ nextTotals     = [
   }));
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
+  const humanSeconds = Math.max(0, Math.ceil(humanTimerMs / 1000));
 
   // ===== 统一统计打包（All-in-One） =====
 type AllBundle = {
@@ -4447,6 +4630,107 @@ const handleAllSaveInner = () => {
           剩余局数：{remainingGames}
         </span>
       </div>
+      )}
+      {humanPrompt && (
+        <div style={{ border:'1px solid #f59e0b', borderRadius:10, padding:12, marginBottom:12, background:'#fffbeb' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, marginBottom:8 }}>
+            <div style={{ fontWeight:700 }}>
+              {seatName(humanPrompt.seat)} · {
+                humanPrompt.phase === 'bid'
+                  ? (lang === 'en' ? 'Bid decision' : '抢地主决定')
+                  : humanPrompt.phase === 'double'
+                    ? (lang === 'en' ? 'Double decision' : '加倍决定')
+                    : (lang === 'en' ? 'Play cards' : '出牌')
+              }
+            </div>
+            <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', color:'#b45309' }}>
+              {humanSeconds}s
+            </div>
+          </div>
+          {humanError && (
+            <div style={{ color:'#b91c1c', marginBottom:8 }}>{humanError}</div>
+          )}
+          {humanPrompt.phase === 'bid' ? (
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+              <button
+                onClick={() => handleHumanBid(true)}
+                disabled={humanSubmitting}
+                style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d97706', background:'#f97316', color:'#fff', fontWeight:600 }}
+              >{lang === 'en' ? 'Bid (抢地主)' : '抢地主'}</button>
+              <button
+                onClick={() => handleHumanBid(false)}
+                disabled={humanSubmitting}
+                style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#fff', color:'#1f2937' }}
+              >{lang === 'en' ? 'Pass' : '不抢'}</button>
+            </div>
+          ) : humanPrompt.phase === 'double' ? (
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+              <button
+                onClick={() => handleHumanDouble(true)}
+                disabled={humanSubmitting}
+                style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #2563eb', background:'#3b82f6', color:'#fff', fontWeight:600 }}
+              >{lang === 'en' ? 'Double' : '加倍'}</button>
+              <button
+                onClick={() => handleHumanDouble(false)}
+                disabled={humanSubmitting}
+                style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#fff', color:'#1f2937' }}
+              >{lang === 'en' ? 'No double' : '不加倍'}</button>
+            </div>
+          ) : (
+            <>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:8 }}>
+                {humanPrompt.cards.map(card => {
+                  const selected = humanSelection.includes(card.id);
+                  return (
+                    <button
+                      key={card.id}
+                      onClick={() => toggleHumanCard(card.id)}
+                      disabled={humanSubmitting}
+                      style={{
+                        padding:0,
+                        border:selected ? '2px solid #2563eb' : '1px solid #d1d5db',
+                        borderRadius:8,
+                        background:selected ? '#dbeafe' : '#fff',
+                        cursor: humanSubmitting ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      <Card label={card.display} compact dimmed={humanSelection.length > 0 && !selected} />
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+                <button
+                  onClick={handleHumanPlay}
+                  disabled={humanSubmitting || humanSelection.length === 0}
+                  style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #2563eb', background: humanSelection.length ? '#2563eb' : '#bfdbfe', color:'#fff', fontWeight:600 }}
+                >{lang === 'en' ? 'Play selected' : '出牌'}</button>
+                <button
+                  onClick={handleHumanPass}
+                  disabled={humanSubmitting || !humanPrompt.canPass}
+                  style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background: humanPrompt.canPass ? '#fff' : '#f3f4f6', color: humanPrompt.canPass ? '#1f2937' : '#9ca3af' }}
+                >{lang === 'en' ? 'Pass' : '过'}</button>
+                <button
+                  onClick={clearHumanSelection}
+                  disabled={humanSubmitting || humanSelection.length === 0}
+                  style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#fff', color:'#1f2937' }}
+                >{lang === 'en' ? 'Clear' : '清空选择'}</button>
+              </div>
+            </>
+          )}
+          <div>
+            <label style={{ display:'flex', flexDirection:'column', gap:4 }}>
+              <span style={{ fontSize:12, color:'#6b7280' }}>{lang === 'en' ? 'Reason (optional)' : '理由（可选）'}</span>
+              <input
+                type="text"
+                value={humanReason}
+                onChange={e => setHumanReason(e.target.value)}
+                disabled={humanSubmitting}
+                style={{ padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+              />
+            </label>
+          </div>
+        </div>
       )}
 
       {/* ========= TrueSkill（实时） ========= */}
@@ -4956,6 +5240,7 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="human">{lang === 'en' ? 'Human (manual)' : '人类（手动）'}</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>
