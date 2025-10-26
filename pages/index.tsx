@@ -799,6 +799,8 @@ function SeatTitle({ i }: { i:number }) {
 
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
+type SuitUsageOwner = string;
+type RankSuitUsage = Map<string, Map<string, SuitUsageOwner>>;
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
 type BottomInfo = {
   landlord: number | null;
@@ -818,6 +820,50 @@ const suitOf = (l: string): SuitSym | null => {
   const c0 = l[0];
   return SUITS.includes(c0 as SuitSym) ? (c0 as SuitSym) : null;
 };
+const suitKeyForLabel = (label: string): string | null => {
+  if (!label) return null;
+  if (label.startsWith('🃏')) return label;
+  if ('♠♥♦♣'.includes(label[0])) return label[0];
+  const suit = suitOf(label);
+  return suit ?? null;
+};
+const snapshotSuitUsage = (usage: RankSuitUsage, excludeOwner?: SuitUsageOwner): Map<string, Set<string>> => {
+  const out = new Map<string, Set<string>>();
+  for (const [rank, entries] of usage.entries()) {
+    const set = new Set<string>();
+    for (const [suitKey, owner] of entries.entries()) {
+      if (excludeOwner && owner === excludeOwner) continue;
+      set.add(suitKey);
+    }
+    if (set.size) out.set(rank, set);
+  }
+  return out;
+};
+const unregisterSuitUsage = (usage: RankSuitUsage, owner: SuitUsageOwner, labels: string[]) => {
+  if (!labels?.length) return;
+  for (const label of labels) {
+    const rank = rankOf(label);
+    const key = suitKeyForLabel(label);
+    if (!rank || !key) continue;
+    const perRank = usage.get(rank);
+    if (!perRank) continue;
+    if (perRank.get(key) === owner) {
+      perRank.delete(key);
+      if (perRank.size === 0) usage.delete(rank);
+    }
+  }
+};
+const registerSuitUsage = (usage: RankSuitUsage, owner: SuitUsageOwner, labels: string[]) => {
+  if (!labels?.length) return;
+  for (const label of labels) {
+    const rank = rankOf(label);
+    const key = suitKeyForLabel(label);
+    if (!rank || !key) continue;
+    if (!usage.has(rank)) usage.set(rank, new Map());
+    usage.get(rank)!.set(key, owner);
+  }
+};
+const ownerKeyForSeat = (seat: number) => `seat-${seat}`;
 function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l === 'x') return ['🃏X'];
@@ -881,25 +927,34 @@ function displayLabelFromRaw(label: string): string {
   return decorateHandCycle([label])[0];
 }
 
-function reconcileHandFromRaw(raw: string[] | undefined, prev: string[]): string[] {
+function reconcileHandFromRaw(
+  raw: string[] | undefined,
+  prev: string[],
+  reservedByRank?: Map<string, Set<string>>,
+): string[] {
   if (!Array.isArray(raw)) return prev;
   const pool = prev.slice();
   const usedPrev = pool.map(() => false);
-  const usedByRank = new Map<string, Set<SuitSym>>();
+  const usedByRank = new Map<string, Set<string>>();
+  if (reservedByRank) {
+    for (const [rank, suits] of reservedByRank.entries()) {
+      usedByRank.set(rank, new Set(suits));
+    }
+  }
   const markUsed = (label: string) => {
-    const suit = suitOf(label);
-    if (!suit) return;
+    const key = suitKeyForLabel(label);
+    if (!key) return;
     const rank = rankOf(label);
     if (!rank) return;
-    if (!usedByRank.has(rank)) usedByRank.set(rank, new Set<SuitSym>());
-    usedByRank.get(rank)!.add(suit);
+    if (!usedByRank.has(rank)) usedByRank.set(rank, new Set<string>());
+    usedByRank.get(rank)!.add(key);
   };
   const canUse = (label: string) => {
-    const suit = suitOf(label);
-    if (!suit) return true;
+    const key = suitKeyForLabel(label);
+    if (!key) return true;
     const rank = rankOf(label);
     const used = usedByRank.get(rank);
-    return !(used && used.has(suit));
+    return !(used && used.has(key));
   };
   const decorated: string[] = [];
 
@@ -937,21 +992,62 @@ function reconcileHandFromRaw(raw: string[] | undefined, prev: string[]): string
   return sortDisplayHand(decorated);
 }
 
-function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
+function resolveBottomDecorations(
+  raw: string[],
+  landlord: number | null,
+  hands: string[][],
+  reservedByRank?: Map<string, Set<string>>,
+): string[] {
   if (!Array.isArray(raw)) return [];
   const seat = (typeof landlord === 'number' && landlord >= 0 && landlord < 3) ? landlord : null;
-  if (seat == null) return decorateHandCycle(raw);
+  const usedByRank = new Map<string, Set<string>>();
+  if (reservedByRank) {
+    for (const [rank, suits] of reservedByRank.entries()) {
+      usedByRank.set(rank, new Set(suits));
+    }
+  }
+  const markUsed = (label: string) => {
+    const key = suitKeyForLabel(label);
+    if (!key) return;
+    const rank = rankOf(label);
+    if (!rank) return;
+    if (!usedByRank.has(rank)) usedByRank.set(rank, new Set<string>());
+    usedByRank.get(rank)!.add(key);
+  };
+  const canUse = (label: string) => {
+    const key = suitKeyForLabel(label);
+    if (!key) return true;
+    const rank = rankOf(label);
+    const used = usedByRank.get(rank);
+    return !(used && used.has(key));
+  };
+  if (seat == null) {
+    return raw.map(card => {
+      const options = candDecorations(card);
+      const chosen = options.find(opt => canUse(opt)) || options[0] || card;
+      markUsed(chosen);
+      return chosen;
+    });
+  }
   const pool = [...(hands?.[seat] || [])];
   return raw.map(card => {
     const options = candDecorations(card);
     for (const opt of options) {
       const idx = pool.indexOf(opt);
-      if (idx >= 0) {
+      if (idx >= 0 && canUse(opt)) {
         pool.splice(idx, 1);
+        markUsed(opt);
         return opt;
       }
     }
-    return options[0] || card;
+    const fallback = options.find(opt => canUse(opt));
+    if (fallback) {
+      markUsed(fallback);
+      return fallback;
+    }
+    const alt = options[0] || card;
+    markUsed(alt);
+    return alt;
   });
 }
 
@@ -3698,6 +3794,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const alphaRef    = useRef(alpha);    useEffect(()=>{ alphaRef.current    = alpha;    }, [alpha]);
 
   const lastReasonRef = useRef<(string|null)[]>([null, null, null]);
+  const suitUsageRef = useRef<RankSuitUsage>(new Map());
 
   // 每局观测标记
   const roundFinishedRef = useRef<boolean>(false);
@@ -3807,6 +3904,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setRunning(true);
     setAllLogs([]);
     setLandlord(null); setHands([[], [], []]); setPlays([]);
+    suitUsageRef.current = new Map();
     setBottomInfo({ landlord: null, cards: [], revealed: false });
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
@@ -4030,6 +4128,7 @@ for (const raw of batch) {
                 nextLandlord = null;
                 nextBottom = { landlord: null, cards: [], revealed: false };
                 resetHumanState();
+                suitUsageRef.current = new Map();
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -4050,7 +4149,14 @@ for (const raw of batch) {
                   nextWinner = null;
                   nextDelta = null;
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
-                  nextHands = (rh as string[][]).map(decorateHandCycle);
+                  const freshUsage: RankSuitUsage = new Map();
+                  nextHands = (rh as string[][]).map((hand, seatIdx) => {
+                    const reserved = snapshotSuitUsage(freshUsage);
+                    const decorated = reconcileHandFromRaw(hand, [], reserved);
+                    registerSuitUsage(freshUsage, ownerKeyForSeat(seatIdx), decorated);
+                    return decorated;
+                  });
+                  suitUsageRef.current = freshUsage;
 
                   const rawLord = m.landlordIdx ?? m.landlord;
                   const lord = (typeof rawLord === 'number' && rawLord >= 0 && rawLord < 3)
@@ -4058,7 +4164,10 @@ for (const raw of batch) {
                     : null;
                   nextLandlord = lord;
                   const bottomRaw = Array.isArray(m.bottom) ? (m.bottom as string[]) : [];
-                  const decoratedBottom = bottomRaw.length ? decorateHandCycle(bottomRaw) : [];
+                  const bottomReserved = snapshotSuitUsage(freshUsage);
+                  const decoratedBottom = bottomRaw.length
+                    ? resolveBottomDecorations(bottomRaw, lord, nextHands as string[][], bottomReserved)
+                    : [];
                   nextBottom = {
                     landlord: lord ?? null,
                     cards: decoratedBottom.map(label => ({ label, used: false })),
@@ -4092,7 +4201,14 @@ for (const raw of batch) {
               {
                 const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
                 if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
-                  nextHands = (rh0 as string[][]).map(decorateHandCycle);
+                  const freshUsage: RankSuitUsage = new Map();
+                  nextHands = (rh0 as string[][]).map((hand, seatIdx) => {
+                    const reserved = snapshotSuitUsage(freshUsage);
+                    const decorated = reconcileHandFromRaw(hand, [], reserved);
+                    registerSuitUsage(freshUsage, ownerKeyForSeat(seatIdx), decorated);
+                    return decorated;
+                  });
+                  suitUsageRef.current = freshUsage;
                   const rawLord2 = m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null;
                   const lord2 = (typeof rawLord2 === 'number' && rawLord2 >= 0 && rawLord2 < 3)
                     ? rawLord2
@@ -4108,7 +4224,13 @@ for (const raw of batch) {
                   }
                   const bottom0 = m.bottom ?? m.payload?.bottom ?? m.state?.bottom ?? m.init?.bottom;
                   if (Array.isArray(bottom0)) {
-                    const decoratedBottom0 = decorateHandCycle(bottom0 as string[]);
+                    const bottomReserved0 = snapshotSuitUsage(freshUsage);
+                    const decoratedBottom0 = resolveBottomDecorations(
+                      bottom0 as string[],
+                      nextLandlord ?? nextBottom.landlord ?? null,
+                      nextHands as string[][],
+                      bottomReserved0,
+                    );
                     nextBottom = {
                       landlord: nextLandlord ?? nextBottom.landlord ?? null,
                       cards: decoratedBottom0.map(label => ({ label, used: false })),
@@ -4256,10 +4378,14 @@ if (m.type === 'event' && m.kind === 'reveal') {
     ? (m.landlordIdx ?? m.landlord) as number
     : nextLandlord;
   const landlordSeat = (typeof seatIdxRaw === 'number') ? seatIdxRaw : (nextLandlord ?? nextBottom.landlord ?? null);
-  const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][]);
+  const reservedForBottom = snapshotSuitUsage(suitUsageRef.current);
+  const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][], reservedForBottom);
 
   if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
     let seatHand = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
+    const usage = suitUsageRef.current;
+    const ownerKey = ownerKeyForSeat(landlordSeat);
+    unregisterSuitUsage(usage, ownerKey, Array.isArray(nextHands[landlordSeat]) ? nextHands[landlordSeat] : []);
     const prevBottom = bottomRef.current;
     if (prevBottom && prevBottom.landlord === landlordSeat && Array.isArray(prevBottom.cards)) {
       for (const prevCard of prevBottom.cards) {
@@ -4269,6 +4395,8 @@ if (m.type === 'event' && m.kind === 'reveal') {
     }
     seatHand = sortDisplayHand([...seatHand, ...mapped]);
     nextHands = Object.assign([], nextHands, { [landlordSeat]: seatHand });
+    registerSuitUsage(usage, ownerKey, seatHand);
+    suitUsageRef.current = usage;
   }
 
   nextBottom = {
@@ -4373,7 +4501,13 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                   }
                   if (Array.isArray(m.hand)) {
                     const prevHand = Array.isArray(nextHands?.[s]) ? nextHands[s] : [];
-                    const updatedHand = reconcileHandFromRaw(m.hand as string[], prevHand);
+                    const usage = suitUsageRef.current;
+                    const ownerKey = ownerKeyForSeat(s);
+                    unregisterSuitUsage(usage, ownerKey, prevHand);
+                    const reserved = snapshotSuitUsage(usage);
+                    const updatedHand = reconcileHandFromRaw(m.hand as string[], prevHand, reserved);
+                    registerSuitUsage(usage, ownerKey, updatedHand);
+                    suitUsageRef.current = usage;
                     nextHands = Object.assign([], nextHands, { [s]: updatedHand });
                     if (s === (nextBottom.landlord ?? -1) && nextBottom.cards.length) {
                       const bottomCards = nextBottom.cards.map(card => ({
@@ -4403,6 +4537,10 @@ if (m.type === 'event' && m.kind === 'play') {
                   const seat = m.seat as number;
                   const cards: string[] = m.cards || [];
                   const nh = (nextHands && (nextHands as any[]).length === 3 ? nextHands : [[], [], []]).map((x: any) => [...x]);
+                  const usage = suitUsageRef.current;
+                  const ownerKey = ownerKeyForSeat(seat);
+                  const prevSeatHand = Array.isArray(nextHands?.[seat]) ? nextHands[seat] : [];
+                  unregisterSuitUsage(usage, ownerKey, prevSeatHand);
                   for (const rawCard of cards) {
                     const options = candDecorations(rawCard);
                     const chosen = options.find((d: string) => nh[seat].includes(d)) || options[0];
@@ -4424,6 +4562,8 @@ if (m.type === 'event' && m.kind === 'play') {
                   lastReasonRef.current[m.seat] = null;
 
                   nextHands = nh;
+                  registerSuitUsage(usage, ownerKey, nh[seat]);
+                  suitUsageRef.current = usage;
                   nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason }];
                   nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reason ? `（理由：${reason}）` : ''}`];
                 }
