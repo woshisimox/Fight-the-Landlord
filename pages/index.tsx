@@ -271,6 +271,7 @@ type BotChoice =
   | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
+  | 'human'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
@@ -367,6 +368,7 @@ const KO_ALL_CHOICES: BotChoice[] = [
   'built-in:mininet',
   'built-in:ally-support',
   'built-in:endgame-rush',
+  'human',
   'ai:openai',
   'ai:gemini',
   'ai:grok',
@@ -773,7 +775,9 @@ function SeatTitle({ i }: { i:number }) {
 
 
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
-const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
+type PlayingSuit = Exclude<SuitSym, '🃏'>;
+const SUITS: PlayingSuit[] = ['♠','♥','♦','♣'];
+type SuitRegistry = Map<string, PlayingSuit[]>;
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
 type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[] };
 
@@ -784,6 +788,32 @@ const rankOf = (l: string) => {
   if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
   return l.replace(/10/i, 'T').toUpperCase();
 };
+const isPlayingSuit = (c: string): c is PlayingSuit => c === '♠' || c === '♥' || c === '♦' || c === '♣';
+function registerSuit(registry: SuitRegistry, rank: string, suit: PlayingSuit) {
+  const used = registry.get(rank) ?? [];
+  if (!used.includes(suit)) registry.set(rank, [...used, suit]);
+}
+function pickSuit(registry: SuitRegistry, rank: string): PlayingSuit {
+  const used = registry.get(rank) ?? [];
+  const available = SUITS.find(s => !used.includes(s));
+  if (available) return available;
+  return SUITS[used.length % SUITS.length];
+}
+function decorateCardLabel(label: string, registry: SuitRegistry): string {
+  if (!label) return label;
+  if (label === 'x') return '🃏X';
+  if (label === 'X') return '🃏Y';
+  if (label.startsWith('🃏')) return label;
+  const rank = rankOf(label);
+  const c0 = label.charAt(0);
+  if (isPlayingSuit(c0)) {
+    registerSuit(registry, rank, c0);
+    return `${c0}${rank}`;
+  }
+  const suit = pickSuit(registry, rank);
+  registerSuit(registry, rank, suit);
+  return `${suit}${rank}`;
+}
 function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l === 'x') return ['🃏X'];
@@ -794,23 +824,16 @@ function candDecorations(l: string): string[] {
   if (r === 'JOKER') return ['🃏Y'];
   return SUITS.map(s => `${s}${r}`);
 }
-function decorateHandCycle(raw: string[]): string[] {
-  let idx = 0;
-  return raw.map(l => {
-    if (!l) return l;
-    if (l === 'x') return '🃏X';
-    if (l === 'X') return '🃏Y';
-    if (l.startsWith('🃏')) return l;
-    if ('♠♥♦♣'.includes(l[0])) return l;
-    const suit = SUITS[idx % SUITS.length]; idx++;
-    return `${suit}${rankOf(l)}`;
-  });
+function decorateHandCycle(raw: string[], registry?: SuitRegistry): string[] {
+  const reg = registry ?? new Map<string, PlayingSuit[]>();
+  return raw.map(l => decorateCardLabel(l, reg));
 }
 
-function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
+function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][], registry?: SuitRegistry): string[] {
   if (!Array.isArray(raw)) return [];
+  const reg = registry ?? new Map<string, PlayingSuit[]>();
   const seat = (typeof landlord === 'number' && landlord >= 0 && landlord < 3) ? landlord : null;
-  if (seat == null) return decorateHandCycle(raw);
+  if (seat == null) return decorateHandCycle(raw, reg);
   const pool = [...(hands?.[seat] || [])];
   return raw.map(card => {
     const options = candDecorations(card);
@@ -818,10 +841,13 @@ function resolveBottomDecorations(raw: string[], landlord: number | null, hands:
       const idx = pool.indexOf(opt);
       if (idx >= 0) {
         pool.splice(idx, 1);
+        const rank = rankOf(opt);
+        const suitChar = opt.charAt(0);
+        if (isPlayingSuit(suitChar)) registerSuit(reg, rank, suitChar);
         return opt;
       }
     }
-    return options[0] || card;
+    return decorateCardLabel(card, reg);
   });
 }
 
@@ -1920,6 +1946,7 @@ function KnockoutPanel() {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="human">{lang === 'en' ? 'Human (manual)' : '人类（手动）'}</option>
                     </optgroup>
                     <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
@@ -2505,6 +2532,7 @@ function defaultModelFor(choice: BotChoice): string {
     case 'ai:kimi':  return 'kimi-k2-0905-preview';
     case 'ai:qwen':  return 'qwen-plus';
     case 'ai:deepseek': return 'deepseek-chat';
+    case 'human': return '';
     default: return '';
   }
 }
@@ -2529,6 +2557,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:mininet':      return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'human':                 return 'Human';
     case 'ai:openai':             return 'OpenAI';
     case 'ai:gemini':             return 'Gemini';
     case 'ai:grok':               return 'Grok';
@@ -2677,6 +2706,7 @@ const sanitizeTotalsArray = (
 
 /* ==================== LivePanel（对局） ==================== */
 const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(props, ref) {
+  const { lang } = useI18n();
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const pauseRef = useRef(false);
@@ -2722,6 +2752,100 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [] });
   const [log, setLog] = useState<string[]>([]);
+  const [humanPrompt, setHumanPrompt] = useState<HumanPromptState | null>(null);
+  const humanPromptRef = useRef<HumanPromptState | null>(null);
+  useEffect(() => { humanPromptRef.current = humanPrompt; }, [humanPrompt]);
+  const [humanSelection, setHumanSelection] = useState<string[]>([]);
+  const [humanReason, setHumanReason] = useState('');
+  const [humanSubmitting, setHumanSubmitting] = useState(false);
+  const [humanError, setHumanError] = useState<string | null>(null);
+  const [humanTimerMs, setHumanTimerMs] = useState(0);
+
+  useEffect(() => {
+    if (!humanPrompt) {
+      setHumanTimerMs(0);
+      if (humanSelection.length) setHumanSelection([]);
+      if (humanReason) setHumanReason('');
+      if (humanError) setHumanError(null);
+      return;
+    }
+    const update = () => {
+      const current = humanPromptRef.current;
+      setHumanTimerMs(current ? Math.max(0, current.deadline - Date.now()) : 0);
+    };
+    update();
+    const timer = setInterval(update, 500);
+    return () => clearInterval(timer);
+  }, [humanPrompt]);
+
+  const sendHumanMove = async (payload: any) => {
+    const prompt = humanPromptRef.current;
+    if (!prompt) return;
+    setHumanSubmitting(true);
+    setHumanError(null);
+    try {
+      const res = await fetch('/api/human_move', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ requestId: prompt.requestId, move: payload }),
+      });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data?.error) msg = String(data.error);
+        } catch {}
+        throw new Error(msg);
+      }
+      setHumanPrompt(null);
+      setHumanSelection([]);
+      setHumanReason('');
+    } catch (e:any) {
+      setHumanError(e?.message || String(e));
+    } finally {
+      setHumanSubmitting(false);
+    }
+  };
+
+  const handleHumanPass = async () => {
+    const prompt = humanPromptRef.current;
+    if (!prompt) return;
+    await sendHumanMove({ move: 'pass', reason: humanReason, phase: prompt.phase });
+  };
+
+  const handleHumanPlay = async () => {
+    const prompt = humanPromptRef.current;
+    if (!prompt) return;
+    const selected = new Set(humanSelection);
+    const cards = prompt.cards.filter(card => selected.has(card.id)).map(card => card.raw);
+    if (!cards.length) {
+      setHumanError(lang === 'en' ? 'Select at least one card.' : '请选择要出的牌。');
+      return;
+    }
+    await sendHumanMove({ move: 'play', cards, reason: humanReason, phase: prompt.phase });
+  };
+
+  const handleHumanBid = async (decision: boolean) => {
+    const prompt = humanPromptRef.current;
+    if (!prompt) return;
+    await sendHumanMove({ move: decision ? 'play' : 'pass', bid: decision, reason: humanReason, phase: 'bid' });
+  };
+
+  const handleHumanDouble = async (decision: boolean) => {
+    const prompt = humanPromptRef.current;
+    if (!prompt) return;
+    await sendHumanMove({ move: decision ? 'play' : 'pass', double: decision, reason: humanReason, phase: 'double' });
+  };
+
+  const toggleHumanCard = (id: string) => {
+    setHumanSelection(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+    setHumanError(null);
+  };
+
+  const clearHumanSelection = () => {
+    setHumanSelection([]);
+    setHumanError(null);
+  };
   const initialTotals = useMemo(
     () => sanitizeTotalsArray(props.initialTotals, props.startScore || 0),
     [props.initialTotals, props.startScore],
@@ -2756,7 +2880,21 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
 
   /* ====== 评分统计（每局） ====== */
   type SeatStat = { rounds:number; overallAvg:number; lastAvg:number; best:number; worst:number; mean:number; sigma:number };
-  const [scoreStats, setScoreStats] = useState<SeatStat[]>([
+  type HumanCardChoice = { id: string; display: string; raw: string };
+  type HumanPromptState = {
+    requestId: string;
+    seat: number;
+    phase: string;
+    canPass: boolean;
+    cards: HumanCardChoice[];
+    require: any;
+    landlord: number | null;
+    leader: number | null;
+    trick: number;
+    timeoutMs: number;
+    deadline: number;
+  };
+const [scoreStats, setScoreStats] = useState<SeatStat[]>([
     { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
     { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
     { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 },
@@ -2765,6 +2903,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const statsFileRef = useRef<HTMLInputElement|null>(null);
   const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
   const bottomRef = useRef(bottomInfo); useEffect(()=>{ bottomRef.current = bottomInfo; }, [bottomInfo]);
+  const roundSuitRegistryRef = useRef<SuitRegistry>(new Map());
 
   // 依据 scoreSeries（每手评分）与 roundCuts（每局切点）计算每局均值，并汇总到席位统计
   const recomputeScoreStats = () => {
@@ -3301,9 +3440,12 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     exitPause();
     setRunning(true);
     setAllLogs([]);
+    allLogsRef.current = [];
     setLandlord(null); setHands([[], [], []]); setPlays([]);
     setWinner(null); setDelta(null); setMultiplier(1);
-    setLog([]); setFinishedCount(0);
+    logRef.current = [];
+    setLog([]);
+    setFinishedCount(0);
     const base = initialTotalsRef.current;
     setTotals([base[0], base[1], base[2]] as [number, number, number]);
     lastReasonRef.current = [null, null, null];
@@ -3336,10 +3478,168 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     const seatSummaryText = (specs: any[]) =>
       specs.map((s, i) => {
         const nm = seatName(i);
-        if (s.choice.startsWith('built-in')) return `${nm}=${choiceLabel(s.choice as BotChoice)}`;
-        if (s.choice === 'http') return `${nm}=HTTP(${s.baseUrl ? 'custom' : 'default'})`;
-        return `${nm}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
+        const choice = s.choice as BotChoice;
+        if (choice.startsWith('built-in')) return `${nm}=${choiceLabel(choice)}`;
+        if (choice === 'http') return `${nm}=HTTP(${s.baseUrl ? 'custom' : 'default'})`;
+        const model = (s.model || defaultModelFor(choice)).trim();
+        const label = choiceLabel(choice);
+        return model ? `${nm}=${label}(${model})` : `${nm}=${label}`;
       }).join(', ');
+
+    type RoundSnapshot = {
+      hands: string[][];
+      plays: { seat: number; move: 'play'|'pass'; cards?: string[]; reason?: string }[];
+      totals: [number, number, number];
+      log: string[];
+      landlord: number | null;
+      winner: number | null;
+      delta: [number, number, number] | null;
+      multiplier: number;
+      bidMultiplier: number;
+      aggStats: Score5[] | null;
+      aggCount: number;
+      finished: number;
+      roundCuts: number[];
+      roundLords: number[];
+      bottom: BottomInfo;
+      scoreSeries: (number|null)[][];
+      tsArr: Rating[];
+      roundFinished: boolean;
+      seenStats: boolean;
+      lastReasons: (string | null)[];
+    };
+
+    const clonePlays = (
+      list: { seat: number; move: 'play'|'pass'; cards?: string[]; reason?: string }[]
+    ) => list.map(p => ({ ...p, cards: Array.isArray(p.cards) ? [...p.cards] : undefined }));
+
+    const captureRoundSnapshot = (): RoundSnapshot => {
+      const handsSnap = handsRef.current.map(arr => [...arr]);
+      const playsSnap = clonePlays(playsRef.current);
+      const totalsSrc = Array.isArray(totalsRef.current)
+        ? (totalsRef.current as [number, number, number])
+        : initialTotalsRef.current;
+      const totalsSnap: [number, number, number] = [
+        Number(totalsSrc?.[0] ?? 0),
+        Number(totalsSrc?.[1] ?? 0),
+        Number(totalsSrc?.[2] ?? 0),
+      ];
+      const logSnap = Array.isArray(logRef.current) ? [...logRef.current] : [];
+      const deltaSnap = Array.isArray(deltaRef.current)
+        ? ([...(deltaRef.current as number[])] as [number, number, number])
+        : null;
+      const bottomCur = bottomRef.current;
+      const bottomSnap: BottomInfo = {
+        landlord: bottomCur?.landlord ?? null,
+        cards: Array.isArray(bottomCur?.cards) ? bottomCur!.cards.map(c => ({ ...c })) : [],
+      };
+      const scoreSnap = scoreSeriesRef.current.map(arr => [...arr]);
+      const aggSnap = aggStatsRef.current ? aggStatsRef.current.map(s => ({ ...s })) : null;
+      const tsSnap = tsRef.current.map(r => ({ ...r }));
+      return {
+        hands: handsSnap,
+        plays: playsSnap,
+        totals: totalsSnap,
+        log: logSnap,
+        landlord: landlordRef.current,
+        winner: winnerRef.current as number | null,
+        delta: deltaSnap,
+        multiplier: multiplierRef.current,
+        bidMultiplier: bidMultiplierRef.current,
+        aggStats: aggSnap,
+        aggCount: aggCountRef.current || 0,
+        finished: finishedRef.current || 0,
+        roundCuts: roundCutsRef.current.slice(),
+        roundLords: roundLordsRef.current.slice(),
+        bottom: bottomSnap,
+        scoreSeries: scoreSnap,
+        tsArr: tsSnap,
+        roundFinished: roundFinishedRef.current,
+        seenStats: seenStatsRef.current,
+        lastReasons: [...lastReasonRef.current],
+      };
+    };
+
+    const restoreRoundSnapshot = (snap: RoundSnapshot) => {
+      const handsClone = snap.hands.map(arr => [...arr]);
+      setHands(handsClone);
+      handsRef.current = handsClone;
+
+      const playsClone = clonePlays(snap.plays);
+      setPlays(playsClone);
+      playsRef.current = playsClone;
+
+      const totalsClone: [number, number, number] = [snap.totals[0], snap.totals[1], snap.totals[2]];
+      setTotals(totalsClone);
+      totalsRef.current = totalsClone;
+
+      const logClone = [...snap.log];
+      setLog(logClone);
+      logRef.current = logClone;
+
+      setLandlord(snap.landlord);
+      landlordRef.current = snap.landlord;
+
+      setWinner(snap.winner);
+      winnerRef.current = snap.winner;
+
+      const deltaClone = snap.delta ? ([snap.delta[0], snap.delta[1], snap.delta[2]] as [number, number, number]) : null;
+      setDelta(deltaClone);
+      deltaRef.current = deltaClone;
+
+      setMultiplier(snap.multiplier);
+      multiplierRef.current = snap.multiplier;
+
+      setBidMultiplier(snap.bidMultiplier);
+      bidMultiplierRef.current = snap.bidMultiplier;
+
+      const aggClone = snap.aggStats ? snap.aggStats.map(s => ({ ...s })) : null;
+      setAggStats(aggClone);
+      aggStatsRef.current = aggClone;
+
+      setAggCount(snap.aggCount);
+      aggCountRef.current = snap.aggCount;
+
+      setFinishedCount(snap.finished);
+      finishedRef.current = snap.finished;
+
+      const cutsClone = [...snap.roundCuts];
+      setRoundCuts(cutsClone);
+      roundCutsRef.current = cutsClone;
+
+      const lordsClone = [...snap.roundLords];
+      setRoundLords(lordsClone);
+      roundLordsRef.current = lordsClone;
+
+      const bottomClone: BottomInfo = {
+        landlord: snap.bottom.landlord,
+        cards: snap.bottom.cards.map(c => ({ ...c })),
+      };
+      setBottomInfo(bottomClone);
+      bottomRef.current = bottomClone;
+
+      const seriesClone = snap.scoreSeries.map(arr => [...arr]);
+      setScoreSeries(seriesClone);
+      scoreSeriesRef.current = seriesClone;
+
+      const tsClone = snap.tsArr.map(r => ({ ...r }));
+      setTsArr(tsClone);
+      tsRef.current = tsClone;
+
+      roundFinishedRef.current = snap.roundFinished;
+      seenStatsRef.current = snap.seenStats;
+      lastReasonRef.current = [...snap.lastReasons];
+    };
+
+    const shouldRetryStream = (err: any) => {
+      if (!err) return false;
+      if ((err as any)?.name === 'AbortError') return false;
+      const msg = String((err as any)?.message || err || '').toLowerCase();
+      if (!msg) return false;
+      const keywords = ['request expired', 'fetch failed', 'network', 'socket', 'connection', 'timed out', 'timeout'];
+      if ((err as any)?.name === 'TypeError') return true;
+      return keywords.some(k => msg.includes(k));
+    };
 
     const markRoundFinishedIfNeeded = (
       nextFinished:number,
@@ -3366,65 +3666,68 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     };
 
     const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
-    let lastEventTs = Date.now();
-    const timeoutMs = (()=>{
-      const arr = props.turnTimeoutSecs || [30,30,30];
-      const norm = arr.map(x=> (Number.isFinite(x as any) && (x as any)>0 ? (x as any) : 30));
-      const sec = Math.min(...norm);
-      return Math.max(5000, sec*1000);
-    })();
-    let dogId: any = null;
+      let lastEventTs = Date.now();
+      const timeoutMs = (()=>{
+        const arr = props.turnTimeoutSecs || [30,30,30];
+        const norm = arr.map(x=> (Number.isFinite(x as any) && (x as any)>0 ? (x as any) : 30));
+        const sec = Math.min(...norm);
+        return Math.max(5000, sec*1000);
+      })();
+      let dogId: any = null;
 
-      setLog([]); lastReasonRef.current = [null, null, null];
-      const baseSpecs = buildSeatSpecs();
-      const startShift = ((labelRoundNo - 1) % 3 + 3) % 3;
-      const specs = [0,1,2].map(i => baseSpecs[(i + startShift) % 3]);
-      const toUiSeat = (j:number) => (j + startShift) % 3;
-      const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
-      const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
-      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
+      lastReasonRef.current = [null, null, null];
 
-      roundFinishedRef.current = false;
-      seenStatsRef.current = false;
+      try {
+        const baseSpecs = buildSeatSpecs();
+        const startShift = ((labelRoundNo - 1) % 3 + 3) % 3;
+        const specs = [0,1,2].map(i => baseSpecs[(i + startShift) % 3]);
+        const toUiSeat = (j:number) => (j + startShift) % 3;
+        const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
+        const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
+        setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
-      const r = await fetch('/api/stream_ndjson', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          rounds: 1,
-          startScore: props.startScore,
-          seatDelayMs: props.seatDelayMs,
-          enabled: props.enabled,
-          bid: props.bid,
-          four2: props.four2,
-          seats: specs,
-          clientTraceId: traceId,
-          stopBelowZero: true,
-          farmerCoop: props.farmerCoop,
+        roundFinishedRef.current = false;
+        seenStatsRef.current = false;
+
+        const r = await fetch('/api/stream_ndjson', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            rounds: 1,
+            startScore: props.startScore,
+            seatDelayMs: props.seatDelayMs,
+            enabled: props.enabled,
+            bid: props.bid,
+            four2: props.four2,
+            seats: specs,
+            clientTraceId: traceId,
+            stopBelowZero: true,
+            farmerCoop: props.farmerCoop,
         turnTimeoutSec: (props.turnTimeoutSecs ?? [30,30,30])
-        }),
-        signal: controllerRef.current!.signal,
-      });
-      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+          }),
+          signal: controllerRef.current!.signal,
+        });
+        if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
 
-      const reader = r.body.getReader();
-      dogId = setInterval(() => {
-        if (Date.now() - lastEventTs > timeoutMs) {
-          setLog(l => [...l, `⏳ 超过 ${Math.round(timeoutMs/1000)}s 未收到事件，已触发前端提示（后端会按规则自动“过”或出最小牌），继续等待…`]);
-          lastEventTs = Date.now(); // 防止重复提示
-        }
-      }, 1000);
-    
-      const decoder = new TextDecoder('utf-8');
-      let buf = '';
-      const rewrite = makeRewriteRoundLabel(labelRoundNo);
+        const reader = r.body.getReader();
+        dogId = setInterval(() => {
+          if (Date.now() - lastEventTs > timeoutMs) {
+            setLog(l => [...l, `⏳ 超过 ${Math.round(timeoutMs/1000)}s 未收到事件，已触发前端提示（后端会按规则自动“过”或出最小牌），继续等待…`]);
+            lastEventTs = Date.now(); // 防止重复提示
+          }
+        }, 1000);
 
-      while (true) {
-        if (controllerRef.current?.signal.aborted) break;
-        if (pauseRef.current) await waitWhilePaused();
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
+        const decoder = new TextDecoder('utf-8');
+        let buf = '';
+        const rewrite = makeRewriteRoundLabel(labelRoundNo);
+
+        while (true) {
+          if (controllerRef.current?.signal.aborted) break;
+          if (pauseRef.current) await waitWhilePaused();
+          const { value, done } = await reader.read();
+          if (done) break;
+          lastEventTs = Date.now();
+          buf += decoder.decode(value, { stream: true });
 
         let idx: number;
         const batch: any[] = [];
@@ -3494,6 +3797,59 @@ for (const raw of batch) {
 
             // m already defined above
             try {
+              if (m.type === 'event' && m.kind === 'human-request') {
+                const seat = typeof m.seat === 'number' ? m.seat : null;
+                const requestId = typeof m.requestId === 'string' ? m.requestId : '';
+                if (seat != null && requestId) {
+                  const context = m.context || {};
+                  const phase = typeof m.phase === 'string'
+                    ? m.phase
+                    : (typeof context.phase === 'string' ? context.phase : 'play');
+                  const rawHand = Array.isArray(context.hands)
+                    ? context.hands.map((c: any) => String(c))
+                    : [];
+                  const decorated = (() => {
+                    const current = handsRef.current?.[seat];
+                    if (Array.isArray(current) && current.length === rawHand.length) {
+                      return [...current];
+                    }
+                    return decorateHandCycle(rawHand, roundSuitRegistryRef.current);
+                  })();
+                  const cards: HumanCardChoice[] = decorated.map((label, idx) => ({
+                    id: `${requestId}-${idx}`,
+                    display: label,
+                    raw: rawHand[idx] ?? label,
+                  }));
+                  const landlordSeat = typeof context.landlord === 'number' ? context.landlord : null;
+                  const leaderSeat = typeof context.leader === 'number' ? context.leader : null;
+                  const trickIdx = typeof context.trick === 'number' ? context.trick : 0;
+                  const timeoutMs = typeof m.timeoutMs === 'number'
+                    ? Math.max(0, Math.floor(m.timeoutMs))
+                    : (typeof context.timeoutMs === 'number' ? Math.max(0, Math.floor(context.timeoutMs)) : 0);
+                  const deadline = Date.now() + timeoutMs;
+                  setHumanPrompt({
+                    requestId,
+                    seat,
+                    phase,
+                    canPass: !!(m.canPass ?? context.canPass),
+                    cards,
+                    require: context.require ?? null,
+                    landlord: landlordSeat,
+                    leader: leaderSeat,
+                    trick: trickIdx,
+                    timeoutMs,
+                    deadline,
+                  });
+                  setHumanSelection([]);
+                  setHumanReason('');
+                  setHumanError(null);
+                }
+                continue;
+              }
+              if (m.type === 'event' && (m.kind === 'human-timeout' || m.kind === 'human-cancel')) {
+                setHumanPrompt(prev => (prev && prev.requestId === m.requestId ? null : prev));
+                continue;
+              }
               // -------- TS 帧（后端主动提供） --------
               if (m.type === 'ts' && Array.isArray(m.ratings) && m.ratings.length === 3) {
                 const incoming: Rating[] = m.ratings.map((r:any)=>({ mu:Number(r.mu)||25, sigma:Number(r.sigma)||25/3 }));
@@ -3518,6 +3874,11 @@ for (const raw of batch) {
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
                 nextBottom = { landlord: null, cards: [] };
+                roundSuitRegistryRef.current = new Map();
+                setHumanPrompt(null);
+                setHumanSelection([]);
+                setHumanReason('');
+                setHumanError(null);
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -3537,7 +3898,9 @@ for (const raw of batch) {
                   nextWinner = null;
                   nextDelta = null;
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
-                  nextHands = (rh as string[][]).map(decorateHandCycle);
+                  const suitRegistry = new Map<string, PlayingSuit[]>();
+                  nextHands = (rh as string[][]).map(hand => decorateHandCycle(hand, suitRegistry));
+                  roundSuitRegistryRef.current = suitRegistry;
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
@@ -3570,7 +3933,9 @@ for (const raw of batch) {
               {
                 const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
                 if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
-                  nextHands = (rh0 as string[][]).map(decorateHandCycle);
+                  const suitRegistry = new Map<string, PlayingSuit[]>();
+                  nextHands = (rh0 as string[][]).map(hand => decorateHandCycle(hand, suitRegistry));
+                  roundSuitRegistryRef.current = suitRegistry;
                   const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
                   if (lord2 != null) {
                     nextLandlord = lord2;
@@ -3657,7 +4022,7 @@ if (m.type === 'event' && m.kind === 'reveal') {
     ? (m.landlordIdx ?? m.landlord) as number
     : nextLandlord;
   const landlordSeat = (typeof seatIdxRaw === 'number') ? seatIdxRaw : (nextLandlord ?? nextBottom.landlord ?? null);
-  const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][]);
+  const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][], roundSuitRegistryRef.current);
 
   if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
     let seatHand = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
@@ -3676,7 +4041,7 @@ if (m.type === 'event' && m.kind === 'reveal') {
     landlord: landlordSeat ?? nextBottom.landlord ?? null,
     cards: mapped.map(label => ({ label, used: false })),
   };
-  const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
+  const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm, roundSuitRegistryRef.current) : btm);
   nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
   // 不改变 nextMultiplier，仅展示
   continue;
@@ -3980,16 +4345,24 @@ nextTotals     = [
         if (pauseRef.current) await waitWhilePaused();
       }
 
-          if (dogId) { try { clearInterval(dogId); } catch {} }
-    setLog((l:any)=>{
-  const __snapshot = [...(Array.isArray(l)?l:[]), `—— 本局流结束 ——`];
-  (logRef as any).current = __snapshot;
-  setAllLogs((prev:any)=>[...(Array.isArray(prev)?prev:[]), ...__snapshot, `
+        setLog((l:any)=>{
+          const prev = Array.isArray(l) ? l : [];
+          const __snapshot = [...prev, `—— 本局流结束 ——`];
+          (logRef as any).current = __snapshot;
+          setAllLogs((prevAll:any)=>{
+            const base = Array.isArray(prevAll) ? prevAll : [];
+            return [...base, ...__snapshot, `
 --- End of Round ${labelRoundNo} ---
-`]);
-  return __snapshot;
-});
-};
+`];
+          });
+          return __snapshot;
+        });
+      } finally {
+        if (dogId) {
+          try { clearInterval(dogId); } catch {}
+        }
+      }
+    };
 
     const restBetweenRounds = async () => {
       const base = 800 + Math.floor(Math.random() * 600);
@@ -4009,24 +4382,77 @@ nextTotals     = [
     let aborted = false;
     let endedEarlyForNegative = false;
     try {
-      for (let i = 0; i < props.rounds; i++) {
-        if (controllerRef.current?.signal.aborted) break;
+      let retries = 0;
+      for (let i = 0; i < props.rounds; ) {
+        if (controllerRef.current?.signal.aborted) { aborted = true; break; }
         if (pauseRef.current) await waitWhilePaused();
-        const thisRound = i + 1;
-        await playOneGame(i, thisRound);
-        if (controllerRef.current?.signal.aborted) break;
+
+        if (retries === 0) {
+          logRef.current = [];
+          setLog([]);
+        }
+
+        const snapshot = captureRoundSnapshot();
+
+        try {
+          await playOneGame(i, i + 1);
+          retries = 0;
+          i++;
+        } catch (err: any) {
+          restoreRoundSnapshot(snapshot);
+          if (controllerRef.current?.signal.aborted) throw err;
+          if (shouldRetryStream(err) && retries < 2) {
+            retries += 1;
+            const waitMs = Math.min(5000, 1500 * retries);
+            const waitLabel = waitMs % 1000 === 0 ? `${waitMs / 1000}` : (waitMs / 1000).toFixed(1);
+            const errorText = String((err as any)?.message || err || '');
+            setLog(prev => {
+              const base = Array.isArray(prev) ? prev : [];
+              const next = [...base, `【前端】第 ${i + 1} 局数据流中断（${errorText || '未知错误'}），将在 ${waitLabel}s 后重试（${retries}/2）…`];
+              logRef.current = next;
+              return next;
+            });
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+            continue;
+          }
+          throw err;
+        }
+
+        if (controllerRef.current?.signal.aborted) { aborted = true; break; }
         if (pauseRef.current) await waitWhilePaused();
+
         const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
         if (hasNegative) {
           endedEarlyForNegative = true;
-          setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']);
+          setLog(prev => {
+            const base = Array.isArray(prev) ? prev : [];
+            const next = [...base, '【前端】检测到总分 < 0，停止连打。'];
+            logRef.current = next;
+            return next;
+          });
           break;
         }
+
         await restBetweenRounds();
       }
     } catch (e: any) {
-      if (e?.name === 'AbortError') { aborted = true; setLog(l => [...l, '已手动停止。']); }
-      else setLog(l => [...l, `错误：${e?.message || e}`]);
+      if (e?.name === 'AbortError') {
+        aborted = true;
+        setLog(prev => {
+          const base = Array.isArray(prev) ? prev : [];
+          const next = [...base, '已手动停止。'];
+          logRef.current = next;
+          return next;
+        });
+      } else {
+        const msg = e?.message || e;
+        setLog(prev => {
+          const base = Array.isArray(prev) ? prev : [];
+          const next = [...base, `错误：${msg}`];
+          logRef.current = next;
+          return next;
+        });
+      }
     } finally {
       exitPause();
       setRunning(false);
@@ -4051,6 +4477,14 @@ nextTotals     = [
   };
 
   const stop = () => { exitPause(); controllerRef.current?.abort(); setRunning(false); };
+  useEffect(() => {
+    if (!running) {
+      setHumanPrompt(null);
+      setHumanSelection([]);
+      setHumanReason('');
+      setHumanError(null);
+    }
+  }, [running]);
 
   const togglePause = () => {
     if (!running) return;
@@ -4067,6 +4501,7 @@ nextTotals     = [
   }));
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
+  const humanSeconds = Math.max(0, Math.ceil(humanTimerMs / 1000));
 
   // ===== 统一统计打包（All-in-One） =====
 type AllBundle = {
@@ -4195,6 +4630,107 @@ const handleAllSaveInner = () => {
           剩余局数：{remainingGames}
         </span>
       </div>
+      )}
+      {humanPrompt && (
+        <div style={{ border:'1px solid #f59e0b', borderRadius:10, padding:12, marginBottom:12, background:'#fffbeb' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, marginBottom:8 }}>
+            <div style={{ fontWeight:700 }}>
+              {seatName(humanPrompt.seat)} · {
+                humanPrompt.phase === 'bid'
+                  ? (lang === 'en' ? 'Bid decision' : '抢地主决定')
+                  : humanPrompt.phase === 'double'
+                    ? (lang === 'en' ? 'Double decision' : '加倍决定')
+                    : (lang === 'en' ? 'Play cards' : '出牌')
+              }
+            </div>
+            <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', color:'#b45309' }}>
+              {humanSeconds}s
+            </div>
+          </div>
+          {humanError && (
+            <div style={{ color:'#b91c1c', marginBottom:8 }}>{humanError}</div>
+          )}
+          {humanPrompt.phase === 'bid' ? (
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+              <button
+                onClick={() => handleHumanBid(true)}
+                disabled={humanSubmitting}
+                style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d97706', background:'#f97316', color:'#fff', fontWeight:600 }}
+              >{lang === 'en' ? 'Bid (抢地主)' : '抢地主'}</button>
+              <button
+                onClick={() => handleHumanBid(false)}
+                disabled={humanSubmitting}
+                style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#fff', color:'#1f2937' }}
+              >{lang === 'en' ? 'Pass' : '不抢'}</button>
+            </div>
+          ) : humanPrompt.phase === 'double' ? (
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+              <button
+                onClick={() => handleHumanDouble(true)}
+                disabled={humanSubmitting}
+                style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #2563eb', background:'#3b82f6', color:'#fff', fontWeight:600 }}
+              >{lang === 'en' ? 'Double' : '加倍'}</button>
+              <button
+                onClick={() => handleHumanDouble(false)}
+                disabled={humanSubmitting}
+                style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#fff', color:'#1f2937' }}
+              >{lang === 'en' ? 'No double' : '不加倍'}</button>
+            </div>
+          ) : (
+            <>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:8 }}>
+                {humanPrompt.cards.map(card => {
+                  const selected = humanSelection.includes(card.id);
+                  return (
+                    <button
+                      key={card.id}
+                      onClick={() => toggleHumanCard(card.id)}
+                      disabled={humanSubmitting}
+                      style={{
+                        padding:0,
+                        border:selected ? '2px solid #2563eb' : '1px solid #d1d5db',
+                        borderRadius:8,
+                        background:selected ? '#dbeafe' : '#fff',
+                        cursor: humanSubmitting ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      <Card label={card.display} compact dimmed={humanSelection.length > 0 && !selected} />
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+                <button
+                  onClick={handleHumanPlay}
+                  disabled={humanSubmitting || humanSelection.length === 0}
+                  style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #2563eb', background: humanSelection.length ? '#2563eb' : '#bfdbfe', color:'#fff', fontWeight:600 }}
+                >{lang === 'en' ? 'Play selected' : '出牌'}</button>
+                <button
+                  onClick={handleHumanPass}
+                  disabled={humanSubmitting || !humanPrompt.canPass}
+                  style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background: humanPrompt.canPass ? '#fff' : '#f3f4f6', color: humanPrompt.canPass ? '#1f2937' : '#9ca3af' }}
+                >{lang === 'en' ? 'Pass' : '过'}</button>
+                <button
+                  onClick={clearHumanSelection}
+                  disabled={humanSubmitting || humanSelection.length === 0}
+                  style={{ padding:'6px 12px', borderRadius:8, border:'1px solid #d1d5db', background:'#fff', color:'#1f2937' }}
+                >{lang === 'en' ? 'Clear' : '清空选择'}</button>
+              </div>
+            </>
+          )}
+          <div>
+            <label style={{ display:'flex', flexDirection:'column', gap:4 }}>
+              <span style={{ fontSize:12, color:'#6b7280' }}>{lang === 'en' ? 'Reason (optional)' : '理由（可选）'}</span>
+              <input
+                type="text"
+                value={humanReason}
+                onChange={e => setHumanReason(e.target.value)}
+                disabled={humanSubmitting}
+                style={{ padding:'6px 8px', border:'1px solid #d1d5db', borderRadius:6 }}
+              />
+            </label>
+          </div>
+        </div>
       )}
 
       {/* ========= TrueSkill（实时） ========= */}
@@ -4704,6 +5240,7 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="human">{lang === 'en' ? 'Human (manual)' : '人类（手动）'}</option>
                     </optgroup>
                     <optgroup label="AI">
                       <option value="ai:openai">OpenAI</option>

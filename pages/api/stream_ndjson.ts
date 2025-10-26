@@ -25,6 +25,17 @@ declare global {
 }
 (globalThis as any).__DDZ_SEEN ??= [];
 (globalThis as any).__DDZ_SEEN_BY_SEAT ??= [[],[],[]];
+
+type HumanRequestEntry = {
+  resolve: (move: any) => void;
+  reject: (error?: any) => void;
+  sessionId: string;
+  seat: number;
+  createdAt: number;
+};
+
+const HUMAN_REQUESTS: Map<string, HumanRequestEntry> = (globalThis as any).__DDZ_HUMAN_REQUESTS ?? new Map();
+(globalThis as any).__DDZ_HUMAN_REQUESTS = HUMAN_REQUESTS;
 /* ========== 统一打分（与内置算法口径一致） ========== */
 const __SEQ = ['3','4','5','6','7','8','9','T','J','Q','K','A'];
 const __POS: Record<string, number> = Object.fromEntries(__SEQ.map((r,i)=>[r,i])) as any;
@@ -155,6 +166,173 @@ function stringifyMove(m:any){
   return `${type}${cards}`;
 }
 
+type HumanPromptResult = { move: any; requestId: string; source: 'human'|'timeout'|'cancel'|'error' };
+
+function makeHumanRequestId(sessionId: string, seat: number) {
+  const base = typeof sessionId === 'string' && sessionId ? sessionId : 'session';
+  const safe = base.replace(/[^a-zA-Z0-9_-]/g, '').slice(-24) || 'session';
+  return `${safe}-${seat}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sanitizeCombo(raw: any) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out: Record<string, any> = {};
+  for (const key of ['type', 'len', 'rank', 'carry', 'width', 'min', 'max']) {
+    if (raw[key] != null) out[key] = raw[key];
+  }
+  return out;
+}
+
+function sanitizePlayEvent(raw: any) {
+  if (!raw || typeof raw !== 'object') return null;
+  const move = raw.move === 'play' ? 'play' : 'pass';
+  const cards = Array.isArray(raw.cards) ? raw.cards.map(String) : undefined;
+  const comboType = raw.comboType;
+  return {
+    seat: typeof raw.seat === 'number' ? raw.seat : -1,
+    move,
+    cards,
+    comboType,
+    trick: typeof raw.trick === 'number' ? raw.trick : 0,
+  };
+}
+
+function sanitizeHumanCtx(ctx: any) {
+  try {
+    const history = Array.isArray(ctx?.history)
+      ? ctx.history.map(sanitizePlayEvent).filter(Boolean)
+      : [];
+    const currentTrick = Array.isArray(ctx?.currentTrick)
+      ? ctx.currentTrick.map(sanitizePlayEvent).filter(Boolean)
+      : [];
+    const seenBySeat = Array.isArray(ctx?.seenBySeat)
+      ? ctx.seenBySeat.map((arr: any) => (Array.isArray(arr) ? arr.map(String) : []))
+      : [];
+    const coop = ctx?.coop && typeof ctx.coop === 'object'
+      ? {
+          enabled: !!ctx.coop.enabled,
+          teammate: typeof ctx.coop.teammate === 'number' ? ctx.coop.teammate : null,
+          landlord: typeof ctx.coop.landlord === 'number' ? ctx.coop.landlord : null,
+          recommended: ctx.coop.recommended && typeof ctx.coop.recommended === 'object'
+            ? {
+                move: ctx.coop.recommended.move,
+                cards: Array.isArray(ctx.coop.recommended.cards)
+                  ? ctx.coop.recommended.cards.map(String)
+                  : undefined,
+                reason: typeof ctx.coop.recommended.reason === 'string'
+                  ? ctx.coop.recommended.reason
+                  : undefined,
+              }
+            : undefined,
+        }
+      : undefined;
+    return {
+      phase: typeof ctx?.phase === 'string' ? ctx.phase : 'play',
+      seat: typeof ctx?.seat === 'number' ? ctx.seat : -1,
+      landlord: typeof ctx?.landlord === 'number' ? ctx.landlord : null,
+      leader: typeof ctx?.leader === 'number' ? ctx.leader : null,
+      trick: typeof ctx?.trick === 'number' ? ctx.trick : 0,
+      role: ctx?.role === 'landlord' || ctx?.role === 'farmer' ? ctx.role : null,
+      canPass: !!ctx?.canPass,
+      hands: Array.isArray(ctx?.hands) ? ctx.hands.map(String) : [],
+      require: sanitizeCombo(ctx?.require),
+      handsCount: Array.isArray(ctx?.handsCount)
+        ? ctx.handsCount.map((n: any) => Number.isFinite(n) ? Number(n) : 0)
+        : [],
+      teammates: Array.isArray(ctx?.teammates)
+        ? ctx.teammates.map((n: any) => Number.isFinite(n) ? Number(n) : 0)
+        : [],
+      opponents: Array.isArray(ctx?.opponents)
+        ? ctx.opponents.map((n: any) => Number.isFinite(n) ? Number(n) : 0)
+        : [],
+      seen: Array.isArray(ctx?.seen) ? ctx.seen.map(String) : [],
+      seenBySeat,
+      bottom: Array.isArray(ctx?.bottom) ? ctx.bottom.map(String) : [],
+      history,
+      currentTrick,
+      policy: ctx?.policy && typeof ctx.policy === 'object' && ctx.policy.four2
+        ? { four2: ctx.policy.four2 }
+        : undefined,
+      coop,
+    };
+  } catch (e) {
+    console.error('[human] sanitize ctx error', e);
+    return {
+      phase: typeof ctx?.phase === 'string' ? ctx.phase : 'play',
+      hands: Array.isArray(ctx?.hands) ? ctx.hands.map(String) : [],
+      canPass: !!ctx?.canPass,
+    };
+  }
+}
+
+function startHumanPrompt(
+  sessionId: string,
+  seatIndex: number,
+  ctx: any,
+  res: NextApiResponse,
+  turnTimeoutMs: number,
+) {
+  const requestId = makeHumanRequestId(sessionId, seatIndex);
+  const context = sanitizeHumanCtx(ctx);
+  const timeoutMs = Math.max(0, Math.floor(turnTimeoutMs));
+  try {
+    writeLine(res, {
+      type: 'event',
+      kind: 'human-request',
+      seat: seatIndex,
+      requestId,
+      timeoutMs,
+      canPass: !!ctx?.canPass,
+      phase: typeof ctx?.phase === 'string' ? ctx.phase : undefined,
+      context,
+    });
+  } catch {}
+
+  let settled = false;
+  let settle: ((value: HumanPromptResult) => void) | null = null;
+  const wait = new Promise<HumanPromptResult>(resolve => { settle = resolve; });
+
+  HUMAN_REQUESTS.set(requestId, {
+    sessionId,
+    seat: seatIndex,
+    createdAt: Date.now(),
+    resolve: (move: any) => {
+      if (settled) return;
+      settled = true;
+      HUMAN_REQUESTS.delete(requestId);
+      if (settle) settle({ move, requestId, source: 'human' });
+      settle = null;
+    },
+    reject: (err?: any) => {
+      if (settled) return;
+      settled = true;
+      HUMAN_REQUESTS.delete(requestId);
+      const reason = err?.message || String(err || 'error');
+      if (settle) settle({ move: { move: 'pass', reason: `error:${reason}` }, requestId, source: 'error' });
+      settle = null;
+    },
+  });
+
+  const cancel = (source: 'timeout' | 'cancel', moveOverride?: any) => {
+    if (settled) return;
+    settled = true;
+    HUMAN_REQUESTS.delete(requestId);
+    const move = moveOverride || { move: 'pass', reason: source };
+    try {
+      writeLine(res, {
+        type: 'event',
+        kind: source === 'timeout' ? 'human-timeout' : 'human-cancel',
+        seat: seatIndex,
+        requestId,
+      });
+    } catch {}
+    if (settle) settle({ move, requestId, source });
+    settle = null;
+  };
+
+  return { requestId, wait, cancel };
+}
+
 /** 解析每座位思考超时（毫秒） */
 function parseTurnTimeoutMsArr(req: NextApiRequest): [number,number,number] {
   const fromQuery = (k:string) => {
@@ -197,6 +375,7 @@ type BotChoice =
   | 'built-in:random-legal'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
+  | 'human'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http';
 
@@ -219,6 +398,7 @@ type RunBody = {
   turnTimeoutSec?: number | number[];
   rob?: boolean;
   debug?: any;
+  clientTraceId?: string;
 };
 
 /* ========== Bot 工厂 ========== */
@@ -229,6 +409,7 @@ function providerLabel(choice: BotChoice) {
     case 'built-in:random-legal': return 'RandomLegal';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'human': return 'Human';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
     case 'ai:grok': return 'Grok';
@@ -246,6 +427,7 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
     case 'built-in:random-legal': return RandomLegal;
     case 'built-in:ally-support': return AllySupport;
     case 'built-in:endgame-rush': return EndgameRush;
+    case 'human': return GreedyMax;
     case 'ai:openai':  return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
     case 'ai:gemini':  return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-pro' });
     case 'ai:grok':    return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
@@ -267,11 +449,12 @@ function traceWrap(
   onScore: (seat:number, sc?:number)=>void,
   turnTimeoutMs: number,
   startDelayMs: number,
-  seatIndex: number
+  seatIndex: number,
+  sessionId: string
 ){
   const label = providerLabel(choice);
   const supportsPhase = typeof choice === 'string'
-    ? (choice.startsWith('ai:') || choice === 'http')
+    ? (choice.startsWith('ai:') || choice === 'http' || choice === 'human')
     : false;
 
   const wrapped = async (ctx:any) => {
@@ -279,18 +462,49 @@ function traceWrap(
       await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
     }
     const phase = ctx?.phase || 'play';
-    try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch {}
-
-    const timeout = new Promise((resolve)=> {
-      setTimeout(()=> resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` }), Math.max(1000, turnTimeoutMs));
-    });
+    try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch{}
 
     let result:any;
     const t0 = Date.now();
+    const timeoutMsClamped = Math.max(1000, turnTimeoutMs);
     try {
       const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
-      try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
-      result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
+      try {
+        console.debug(
+          '[CTX]',
+          `seat=${ctxWithSeen.seat}`,
+          `landlord=${ctxWithSeen.landlord}`,
+          `leader=${ctxWithSeen.leader}`,
+          `trick=${ctxWithSeen.trick}`,
+          `seen=${ctxWithSeen.seen?.length||0}`,
+          `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`
+        );
+      } catch {}
+
+      if (choice === 'human') {
+        const prompt = startHumanPrompt(sessionId, seatIndex, ctxWithSeen, res, timeoutMsClamped);
+        const humanRace = await Promise.race<HumanPromptResult>([
+          prompt.wait,
+          new Promise<HumanPromptResult>(resolve => {
+            setTimeout(() => {
+              resolve({
+                move: { move:'pass', reason:`timeout@${Math.round(timeoutMsClamped/1000)}s` },
+                requestId: prompt.requestId,
+                source: 'timeout',
+              });
+            }, timeoutMsClamped);
+          }),
+        ]);
+        if (humanRace.source === 'timeout') {
+          prompt.cancel('timeout', humanRace.move);
+        }
+        result = humanRace.move;
+      } else {
+        const timeout = new Promise((resolve)=> {
+          setTimeout(()=> resolve({ move:'pass', reason:`timeout@${Math.round(timeoutMsClamped/1000)}s` }), timeoutMsClamped);
+        });
+        result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
+      }
     } catch (e:any) {
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
     }
@@ -340,6 +554,7 @@ function traceWrap(
 
   return wrapped;
 }
+
 
 /* ========== 单局执行（NDJSON 输出 + 画像统计） ========== */
 async function runOneRoundWithGuard(
@@ -555,6 +770,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const turnTimeoutMsArr = parseTurnTimeoutMsArr(req);
     const seatSpecs = (body.seats || []).slice(0,3) as SeatSpec[];
     const baseBots = seatSpecs.map((s) => asBot(s.choice, s));
+    const rawSession = typeof body.clientTraceId === 'string' ? body.clientTraceId : '';
+    const sessionId = (rawSession.replace(/[^a-zA-Z0-9_-]/g, '').slice(-40)) || `session-${Date.now().toString(36)}`;
     const delays = ((body.seatDelayMs || []) as number[]);
 
     writeLine(res, { type:'log', message:`开始连打 ${rounds} 局（four2=${four2}）…` });
@@ -576,7 +793,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         traceWrap(seatSpecs[i]?.choice as BotChoice, seatSpecs[i], bot as any, res, onReason, onScore,
                   turnTimeoutMsArr[i] ?? turnTimeoutMsArr[0],
                   Math.max(0, Math.floor(delays[i] ?? 0)),
-                  i)
+                  i,
+                  sessionId)
       );
 
       await runOneRoundWithGuard({ seats: wrapped as any, four2, rule, ruleId, lastReason, lastScore }, res, round);
