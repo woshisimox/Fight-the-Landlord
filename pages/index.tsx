@@ -775,6 +775,8 @@ type HumanHint = {
   reason?: string;
   label?: string;
   by?: string;
+  valid?: boolean;
+  missing?: string[];
 };
 
 type HumanPrompt = {
@@ -811,6 +813,19 @@ type BottomInfo = {
   landlord: number | null;
   cards: { label: string; used: boolean }[];
   revealed: boolean;
+};
+
+type DeckOwner = { type: 'seat'; seat: number } | { type: 'bottom'; index: number };
+type DeckDuplicate = { key: string; owners: DeckOwner[]; count: number };
+type DeckAuditReport = {
+  total: number;
+  expectedTotal: number;
+  perSeat: number[];
+  bottom: number;
+  duplicates: DeckDuplicate[];
+  missing: string[];
+  fingerprint: string;
+  timestamp: number;
 };
 
 const rankOf = (l: string) => {
@@ -1054,6 +1069,86 @@ function resolveBottomDecorations(
     markUsed(alt);
     return alt;
   });
+}
+
+const RANKS_FOR_DECK: readonly string[] = ['3','4','5','6','7','8','9','T','J','Q','K','A','2'];
+const FULL_DECK_KEYS: readonly string[] = (() => {
+  const keys: string[] = [];
+  for (const suit of SUITS) {
+    for (const rank of RANKS_FOR_DECK) {
+      keys.push(`${suit}${rank}`);
+    }
+  }
+  keys.push('JOKER-SMALL', 'JOKER-BIG');
+  return keys;
+})();
+
+const canonicalDeckKey = (label: string): string => {
+  if (!label) return '';
+  if (label.startsWith('🃏')) {
+    const tail = label.slice(2).toUpperCase();
+    return tail === 'Y' ? 'JOKER-BIG' : 'JOKER-SMALL';
+  }
+  const suit = '♠♥♦♣'.includes(label[0]) ? label[0] : '?';
+  const rank = rankOf(label);
+  return `${suit}${rank}`;
+};
+
+const deckKeyDisplay = (key: string): string => {
+  if (!key) return key;
+  if (key === 'JOKER-BIG') return '🃏Y';
+  if (key === 'JOKER-SMALL') return '🃏X';
+  const suit = key[0];
+  const rank = key.slice(1);
+  const displayRank = rank === 'T' ? '10' : rank;
+  if ('♠♥♦♣'.includes(suit)) return `${suit}${displayRank}`;
+  return displayRank;
+};
+
+function computeDeckAuditSnapshot(hands: string[][], bottom: BottomInfo | null): DeckAuditReport | null {
+  if (!Array.isArray(hands) || hands.length !== 3) return null;
+  const perSeat = hands.map(hand => (Array.isArray(hand) ? hand.length : 0));
+  const bottomCards = bottom?.cards?.map(c => c.label).filter((label): label is string => !!label) ?? [];
+  const entries: { key: string; owner: DeckOwner }[] = [];
+  hands.forEach((hand, seat) => {
+    if (!Array.isArray(hand)) return;
+    hand.forEach(label => {
+      const key = canonicalDeckKey(label);
+      if (!key) return;
+      entries.push({ key, owner: { type: 'seat', seat } });
+    });
+  });
+  bottomCards.forEach((label, index) => {
+    const key = canonicalDeckKey(label);
+    if (!key) return;
+    entries.push({ key, owner: { type: 'bottom', index } });
+  });
+  if (!entries.length) return null;
+  const seen = new Map<string, DeckOwner[]>();
+  for (const entry of entries) {
+    if (!seen.has(entry.key)) seen.set(entry.key, []);
+    seen.get(entry.key)!.push(entry.owner);
+  }
+  const duplicates = [...seen.entries()]
+    .filter(([, owners]) => owners.length > 1)
+    .map(([key, owners]) => ({ key, owners, count: owners.length }));
+  const expectedTotal = FULL_DECK_KEYS.length;
+  const total = entries.length;
+  const missing = FULL_DECK_KEYS.filter(key => !seen.has(key));
+  const fingerprint = entries
+    .map(entry => `${entry.key}@${entry.owner.type === 'seat' ? `s${entry.owner.seat}` : `b${entry.owner.index}`}`)
+    .sort()
+    .join('|');
+  return {
+    total,
+    expectedTotal,
+    perSeat,
+    bottom: bottomCards.length,
+    duplicates,
+    missing,
+    fingerprint,
+    timestamp: Date.now(),
+  };
 }
 
 type CardProps = {
@@ -3059,6 +3154,9 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [], revealed: false });
   const [log, setLog] = useState<string[]>([]);
+  const [deckAudit, setDeckAudit] = useState<DeckAuditReport | null>(null);
+  const deckAuditRef = useRef<DeckAuditReport | null>(null);
+  useEffect(() => { deckAuditRef.current = deckAudit; }, [deckAudit]);
   const humanTraceRef = useRef<string>('');
   const [humanRequest, setHumanRequest] = useState<HumanPrompt | null>(null);
   const [humanSelectedIdx, setHumanSelectedIdx] = useState<number[]>([]);
@@ -3069,6 +3167,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const humanHintDecorated = useMemo(() => {
     if (!humanRequest || humanRequest.phase !== 'play') return [] as string[];
     if (!humanHint || humanHint.move !== 'play' || !Array.isArray(humanHint.cards)) return [] as string[];
+    if (humanHint.valid === false) return [] as string[];
     const seat = humanRequest.seat;
     if (seat == null || seat < 0 || seat >= hands.length) return [] as string[];
     const seatHand = hands[seat] || [];
@@ -3084,13 +3183,11 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
           break;
         }
       }
-      if (chosenIdx >= 0) {
-        used.add(chosenIdx);
-        out.push(seatHand[chosenIdx]);
-      } else {
-        const fallback = options[0] ?? '';
-        out.push(displayLabelFromRaw(fallback));
+      if (chosenIdx < 0) {
+        return [] as string[];
       }
+      used.add(chosenIdx);
+      out.push(seatHand[chosenIdx]);
     }
     return out;
   }, [humanRequest, humanHint, hands]);
@@ -3106,6 +3203,14 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       items.push(lang === 'en' ? `Pattern: ${humanHint.label}` : `牌型：${humanHint.label}`);
     }
     if (humanHint.reason) items.push(humanHint.reason);
+    if (humanHint.valid === false) {
+      items.push(lang === 'en'
+        ? 'Warning: suggested cards were not found in the hand.'
+        : '警告：提示中包含未在手牌中的牌。');
+      if (humanHint.missing && humanHint.missing.length) {
+        items.push((lang === 'en' ? 'Missing: ' : '缺失：') + humanHint.missing.join(lang === 'en' ? ', ' : '、'));
+      }
+    }
     return items;
   }, [humanHint, lang]);
 
@@ -3288,6 +3393,12 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     if (!humanRequest || humanRequest.phase !== 'play') return;
     const hint = humanRequest.hint;
     if (!hint || hint.move !== 'play' || !Array.isArray(hint.cards)) return;
+    if (hint.valid === false) {
+      setHumanError(lang === 'en'
+        ? 'Suggestion contains cards that are not in your hand. Please pick manually.'
+        : '提示包含未在手牌中的牌，请手动选择出牌。');
+      return;
+    }
     const seat = humanRequest.seat;
     if (seat == null || seat < 0 || seat >= hands.length) return;
     const seatHand = hands[seat] || [];
@@ -3303,16 +3414,20 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
           break;
         }
       }
-      if (chosenIdx >= 0) {
-        used.add(chosenIdx);
-        indices.push(chosenIdx);
+      if (chosenIdx < 0) {
+        setHumanError(lang === 'en'
+          ? 'Suggestion could not be applied. Please choose cards manually.'
+          : '无法应用建议，请手动选择要出的牌。');
+        return;
       }
+      used.add(chosenIdx);
+      indices.push(chosenIdx);
     }
     if (indices.length > 0) {
       setHumanSelectedIdx(indices.sort((a, b) => a - b));
       setHumanError(null);
     }
-  }, [humanRequest, hands, setHumanError, setHumanSelectedIdx]);
+  }, [humanRequest, hands, setHumanError, setHumanSelectedIdx, lang]);
 
   const currentHumanSeat = humanRequest?.seat ?? null;
   const humanPhase = humanRequest?.phase ?? 'play';
@@ -3338,7 +3453,10 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     ? (((humanRequest?.ctx as any)?.mustPass === true) || (humanLegalCount === 0 && humanCanPass)) && humanCanPass
     : false;
   const humanSelectedCount = humanSelectedIdx.length;
-  const canAdoptHint = humanPhase === 'play' && humanHint?.move === 'play' && humanHintDecorated.length > 0;
+  const canAdoptHint = humanPhase === 'play'
+    && humanHint?.move === 'play'
+    && humanHint?.valid !== false
+    && humanHintDecorated.length > 0;
   const initialTotals = useMemo(
     () => sanitizeTotalsArray(props.initialTotals, props.startScore || 0),
     [props.initialTotals, props.startScore],
@@ -4078,6 +4196,33 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
           let nextAggStats = aggStatsRef.current;
           let nextAggCount = aggCountRef.current;
 
+          let nextDeckAudit = deckAuditRef.current;
+          let deckAuditChanged = false;
+
+          const updateDeckAuditSnapshot = (handsSnapshot: string[][], bottomSnapshot: BottomInfo) => {
+            const auditCandidate = computeDeckAuditSnapshot(handsSnapshot, bottomSnapshot);
+            if (!auditCandidate) return;
+            const prevFingerprint = nextDeckAudit?.fingerprint;
+            if (!nextDeckAudit || prevFingerprint !== auditCandidate.fingerprint) {
+              nextDeckAudit = auditCandidate;
+              deckAuditChanged = true;
+              const ownerLabel = (owner: DeckOwner) => owner.type === 'seat'
+                ? seatName(owner.seat)
+                : '底牌';
+              const duplicateText = auditCandidate.duplicates.length
+                ? auditCandidate.duplicates
+                    .map(dup => `${deckKeyDisplay(dup.key)}@${dup.owners.map(ownerLabel).join('+')}`)
+                    .join('；')
+                : '无';
+              const missingText = auditCandidate.missing.length
+                ? auditCandidate.missing.map(deckKeyDisplay).join('、')
+                : '无';
+              nextLog = [
+                ...nextLog,
+                `【牌局校验】总数=${auditCandidate.total}/${auditCandidate.expectedTotal}｜重复=${duplicateText}｜缺失=${missingText}`,
+              ];
+            }
+          };
 
           let nextScores = scoreSeriesRef.current.map(x => [...x]);
           let nextBreaks = scoreBreaksRef.current.slice();
@@ -4092,7 +4237,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               revealed: !!cur?.revealed,
             } as BottomInfo;
           })();
-for (const raw of batch) {
+          for (const raw of batch) {
             let m: any = raw;
             // Remap engine->UI indices when startShift != 0
             if (startShift) {
@@ -4149,6 +4294,10 @@ for (const raw of batch) {
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
                 nextBottom = { landlord: null, cards: [], revealed: false };
+                if (nextDeckAudit) {
+                  nextDeckAudit = null;
+                  deckAuditChanged = true;
+                }
                 resetHumanState();
                 suitUsageRef.current = new Map();
 
@@ -4195,6 +4344,7 @@ for (const raw of batch) {
                     cards: decoratedBottom.map(label => ({ label, used: false })),
                     revealed: false,
                   };
+                  updateDeckAuditSnapshot(nextHands as string[][], nextBottom);
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
@@ -4258,6 +4408,7 @@ for (const raw of batch) {
                       cards: decoratedBottom0.map(label => ({ label, used: false })),
                       revealed: false,
                     };
+                    updateDeckAuditSnapshot(nextHands as string[][], nextBottom);
                   }
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
@@ -4302,6 +4453,29 @@ for (const raw of batch) {
                     const label = typeof rawHint.label === 'string' ? rawHint.label : undefined;
                     const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
                     hint = { move, cards, score, reason, label, by: byHint };
+                  }
+                  if (hint && hint.move === 'play' && Array.isArray(hint.cards)) {
+                    const seatHandSnapshot = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : [];
+                    if (seatHandSnapshot.length > 0) {
+                      const usedLocal = new Set<number>();
+                      const missingRaw: string[] = [];
+                      for (const cardLabel of hint.cards) {
+                        const options = candDecorations(String(cardLabel));
+                        const matchIdx = seatHandSnapshot.findIndex((card, idx) => !usedLocal.has(idx) && options.includes(card));
+                        if (matchIdx >= 0) {
+                          usedLocal.add(matchIdx);
+                        } else {
+                          missingRaw.push(String(cardLabel));
+                        }
+                      }
+                      if (missingRaw.length) {
+                        const missingDisplay = missingRaw.map(label => displayLabelFromRaw(String(label)));
+                        hint = { ...hint, valid: false, missing: missingDisplay };
+                        nextLog = [...nextLog, `【Human】${seatName(seat)} 提示包含无效牌：${missingDisplay.join('、')}`];
+                      } else {
+                        hint = { ...hint, valid: true, missing: [] };
+                      }
+                    }
                   }
                   const timeoutRaw = typeof m.timeoutMs === 'number' ? m.timeoutMs : Number((m as any).timeout_ms);
                   const timeoutParsed = Number.isFinite(timeoutRaw) ? Math.max(0, Math.floor(timeoutRaw)) : undefined;
@@ -4799,6 +4973,7 @@ nextTotals     = [
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setBidMultiplier(nextBidMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
+          if (deckAuditChanged) setDeckAudit(nextDeckAudit ?? null);
         }
         if (pauseRef.current) await waitWhilePaused();
       }
@@ -5182,6 +5357,69 @@ const handleAllSaveInner = () => {
         </div>
       </Section>
 
+      {deckAudit && (() => {
+        const totalOk = deckAudit.total === deckAudit.expectedTotal;
+        const hasDuplicates = deckAudit.duplicates.length > 0;
+        const hasMissing = deckAudit.missing.length > 0;
+        const hasIssue = !totalOk || hasDuplicates || hasMissing;
+        const seatCounts = deckAudit.perSeat.map((count, idx) =>
+          lang === 'en'
+            ? `${seatLabel(idx, lang)}: ${count}`
+            : `${seatLabel(idx, lang)}：${count}`
+        );
+        const bottomLabel = lang === 'en' ? 'Bottom' : '底牌';
+        const ownerName = (owner: DeckOwner) => owner.type === 'seat'
+          ? seatLabel(owner.seat, lang)
+          : bottomLabel;
+        return (
+          <Section title={lang === 'en' ? 'Deck integrity check' : '牌局完整性检查'}>
+            <div style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12, color:'#374151' }}>
+              <div style={{ color: totalOk ? '#065f46' : '#b91c1c', fontWeight:600 }}>
+                {lang === 'en'
+                  ? `Total cards: ${deckAudit.total} / ${deckAudit.expectedTotal}`
+                  : `总牌数：${deckAudit.total} / ${deckAudit.expectedTotal}`}
+              </div>
+              <div>
+                {lang === 'en'
+                  ? `Initial distribution — ${seatCounts.join(' · ')} · ${bottomLabel}: ${deckAudit.bottom}`
+                  : `开局统计：${seatCounts.join(' ｜ ')} ｜ ${bottomLabel}：${deckAudit.bottom}`}
+              </div>
+              {hasDuplicates && (
+                <div style={{ color:'#b91c1c' }}>
+                  {lang === 'en' ? 'Duplicates:' : '重复牌：'}
+                  <ul style={{ margin:'4px 0 0 18px', padding:0 }}>
+                    {deckAudit.duplicates.map((dup, idx) => (
+                      <li key={`${dup.key}-${idx}`} style={{ listStyle:'disc' }}>
+                        {deckKeyDisplay(dup.key)} → {dup.owners.map(ownerName).join(lang === 'en' ? ', ' : '、')}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {hasMissing && (
+                <div style={{ color:'#b91c1c' }}>
+                  {lang === 'en'
+                    ? `Missing cards: ${deckAudit.missing.map(deckKeyDisplay).join(', ')}`
+                    : `缺失牌：${deckAudit.missing.map(deckKeyDisplay).join('、')}`}
+                </div>
+              )}
+              {!hasIssue && (
+                <div style={{ color:'#16a34a', fontWeight:600 }}>
+                  {lang === 'en'
+                    ? 'Deck verified: all 54 unique cards accounted for.'
+                    : '校验通过：54 张牌均唯一。'}
+                </div>
+              )}
+              <div style={{ fontSize:11, color:'#6b7280' }}>
+                {lang === 'en'
+                  ? `Checked at ${new Date(deckAudit.timestamp).toLocaleTimeString()}`
+                  : `校验时间：${new Date(deckAudit.timestamp).toLocaleTimeString('zh-CN')}`}
+              </div>
+            </div>
+          </Section>
+        );
+      })()}
+
       <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
           {[0,1,2].map(i => {
@@ -5338,9 +5576,13 @@ const handleAllSaveInner = () => {
                         </div>
                       ) : (
                         <div style={{ fontSize:12, color:'#4b5563' }}>
-                          {lang === 'en'
-                            ? 'No specific combination suggested; choose any legal play.'
-                            : '暂无具体牌型建议，可根据规则自由选择。'}
+                          {humanHint.valid === false
+                            ? (lang === 'en'
+                              ? 'Suggestion ignored because cards are missing from your hand.'
+                              : '提示包含不在手牌中的牌，已忽略。')
+                            : (lang === 'en'
+                              ? 'No specific combination suggested; choose any legal play.'
+                              : '暂无具体牌型建议，可根据规则自由选择。')}
                         </div>
                       )
                     ) : (
