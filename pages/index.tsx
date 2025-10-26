@@ -849,9 +849,11 @@ const JOKER_ALIAS_MAP: Record<string, 'x' | 'X'> = {
   JOKER: 'X',
 };
 
+const stripVariantSelectors = (value: string): string => value.replace(/[\u200d\ufe0e\ufe0f]/g, '');
+
 const normalizeRankToken = (token: string): string => {
   if (!token) return '';
-  const trimmed = token.trim();
+  const trimmed = stripVariantSelectors(token.trim());
   if (!trimmed) return '';
   const upper = trimmed.toUpperCase();
   const alias = JOKER_ALIAS_MAP[upper];
@@ -888,7 +890,7 @@ type DeckAuditReport = {
 
 const rankOf = (l: string) => {
   if (!l) return '';
-  const raw = String(l).trim();
+  const raw = stripVariantSelectors(String(l).trim());
   if (!raw) return '';
   if (raw === 'x') return 'x';
   if (raw === 'X') return 'X';
@@ -911,7 +913,8 @@ const rankOf = (l: string) => {
 };
 const suitOf = (l: string): SuitSym | null => {
   if (!l) return null;
-  const c0 = l[0];
+  const cleaned = stripVariantSelectors(l);
+  const c0 = cleaned[0];
   if (SUITS.includes(c0 as SuitSym)) return c0 as SuitSym;
   const ascii = ASCII_SUIT_MAP[c0];
   return ascii ?? null;
@@ -919,9 +922,8 @@ const suitOf = (l: string): SuitSym | null => {
 const suitKeyForLabel = (label: string): string | null => {
   if (!label) return null;
   if (label.startsWith('🃏')) return label;
-  const alias = JOKER_ALIAS_MAP[label.trim().toUpperCase()];
+  const alias = JOKER_ALIAS_MAP[stripVariantSelectors(label).trim().toUpperCase()];
   if (alias) return alias === 'x' ? '🃏X' : '🃏Y';
-  if ('♠♥♦♣'.includes(label[0])) return label[0];
   const suit = suitOf(label);
   return suit ?? null;
 };
@@ -966,20 +968,21 @@ function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l === 'x') return ['🃏X'];
   if (l === 'X') return ['🃏Y'];
+  const cleaned = stripVariantSelectors(String(l));
   {
-    const alias = JOKER_ALIAS_MAP[String(l).trim().toUpperCase()];
+    const alias = JOKER_ALIAS_MAP[cleaned.trim().toUpperCase()];
     if (alias === 'x') return ['🃏X'];
     if (alias === 'X') return ['🃏Y'];
   }
-  if (l.startsWith('🃏')) return [l];
-  const r = rankOf(l);
-  if ('♠♥♦♣'.includes(l[0])) {
-    const suit = l[0] as SuitSym;
+  if (cleaned.startsWith('🃏')) return [cleaned];
+  const r = rankOf(cleaned);
+  if ('♠♥♦♣'.includes(cleaned[0])) {
+    const suit = cleaned[0] as SuitSym;
     const base = `${suit}${r}`;
     const extras = SUITS.filter(s => s !== suit).map(s => `${s}${r}`);
     return [base, ...extras];
   }
-  const asciiSuit = ASCII_SUIT_MAP[l[0]];
+  const asciiSuit = ASCII_SUIT_MAP[cleaned[0]];
   if (asciiSuit) {
     const base = `${asciiSuit}${r}`;
     const extras = SUITS.filter(s => s !== asciiSuit).map(s => `${s}${r}`);
@@ -994,10 +997,11 @@ function decorateHandCycle(raw: string[]): string[] {
     if (!l) return l;
     if (l === 'x') return '🃏X';
     if (l === 'X') return '🃏Y';
-    if (l.startsWith('🃏')) return l;
-    if ('♠♥♦♣'.includes(l[0])) return l;
+    const cleaned = stripVariantSelectors(l);
+    if (cleaned.startsWith('🃏')) return cleaned;
+    if ('♠♥♦♣'.includes(cleaned[0])) return `${cleaned[0]}${rankOf(cleaned)}`;
     const suit = SUITS[idx % SUITS.length]; idx++;
-    return `${suit}${rankOf(l)}`;
+    return `${suit}${rankOf(cleaned)}`;
   });
 }
 
@@ -1029,16 +1033,17 @@ function sortDisplayHand(cards: string[]): string[] {
 
 function displayLabelFromRaw(label: string): string {
   if (!label) return label;
-  if (label.startsWith('🃏')) return label;
+  if (label.startsWith('🃏')) return `🃏${rankOf(label) || label.slice(2)}`;
   if (label === 'x') return '🃏X';
   if (label === 'X') return '🃏Y';
   {
-    const alias = JOKER_ALIAS_MAP[label.trim().toUpperCase()];
+    const alias = JOKER_ALIAS_MAP[stripVariantSelectors(label).trim().toUpperCase()];
     if (alias === 'x') return '🃏X';
     if (alias === 'X') return '🃏Y';
   }
-  if ('♠♥♦♣'.includes(label[0])) return label;
-  const asciiSuit = ASCII_SUIT_MAP[label[0]];
+  const suit = suitOf(label);
+  if (suit) return `${suit}${rankOf(label)}`;
+  const asciiSuit = ASCII_SUIT_MAP[stripVariantSelectors(label)[0]];
   if (asciiSuit) return `${asciiSuit}${rankOf(label)}`;
   return decorateHandCycle([label])[0];
 }
@@ -1185,7 +1190,7 @@ const canonicalDeckKey = (label: string): string => {
     const tail = label.slice(2).toUpperCase();
     return tail === 'Y' ? 'JOKER-BIG' : 'JOKER-SMALL';
   }
-  const suit = '♠♥♦♣'.includes(label[0]) ? label[0] : '?';
+  const suit = suitOf(label) ?? '?';
   const rank = rankOf(label);
   return `${suit}${rank}`;
 };
