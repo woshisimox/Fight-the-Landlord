@@ -3301,9 +3301,12 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     exitPause();
     setRunning(true);
     setAllLogs([]);
+    allLogsRef.current = [];
     setLandlord(null); setHands([[], [], []]); setPlays([]);
     setWinner(null); setDelta(null); setMultiplier(1);
-    setLog([]); setFinishedCount(0);
+    logRef.current = [];
+    setLog([]);
+    setFinishedCount(0);
     const base = initialTotalsRef.current;
     setTotals([base[0], base[1], base[2]] as [number, number, number]);
     lastReasonRef.current = [null, null, null];
@@ -3341,6 +3344,161 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
         return `${nm}=${choiceLabel(s.choice as BotChoice)}(${s.model || defaultModelFor(s.choice as BotChoice)})`;
       }).join(', ');
 
+    type RoundSnapshot = {
+      hands: string[][];
+      plays: { seat: number; move: 'play'|'pass'; cards?: string[]; reason?: string }[];
+      totals: [number, number, number];
+      log: string[];
+      landlord: number | null;
+      winner: number | null;
+      delta: [number, number, number] | null;
+      multiplier: number;
+      bidMultiplier: number;
+      aggStats: Score5[] | null;
+      aggCount: number;
+      finished: number;
+      roundCuts: number[];
+      roundLords: number[];
+      bottom: BottomInfo;
+      scoreSeries: (number|null)[][];
+      tsArr: Rating[];
+      roundFinished: boolean;
+      seenStats: boolean;
+      lastReasons: (string | null)[];
+    };
+
+    const clonePlays = (
+      list: { seat: number; move: 'play'|'pass'; cards?: string[]; reason?: string }[]
+    ) => list.map(p => ({ ...p, cards: Array.isArray(p.cards) ? [...p.cards] : undefined }));
+
+    const captureRoundSnapshot = (): RoundSnapshot => {
+      const handsSnap = handsRef.current.map(arr => [...arr]);
+      const playsSnap = clonePlays(playsRef.current);
+      const totalsSrc = Array.isArray(totalsRef.current)
+        ? (totalsRef.current as [number, number, number])
+        : initialTotalsRef.current;
+      const totalsSnap: [number, number, number] = [
+        Number(totalsSrc?.[0] ?? 0),
+        Number(totalsSrc?.[1] ?? 0),
+        Number(totalsSrc?.[2] ?? 0),
+      ];
+      const logSnap = Array.isArray(logRef.current) ? [...logRef.current] : [];
+      const deltaSnap = Array.isArray(deltaRef.current)
+        ? ([...(deltaRef.current as number[])] as [number, number, number])
+        : null;
+      const bottomCur = bottomRef.current;
+      const bottomSnap: BottomInfo = {
+        landlord: bottomCur?.landlord ?? null,
+        cards: Array.isArray(bottomCur?.cards) ? bottomCur!.cards.map(c => ({ ...c })) : [],
+      };
+      const scoreSnap = scoreSeriesRef.current.map(arr => [...arr]);
+      const aggSnap = aggStatsRef.current ? aggStatsRef.current.map(s => ({ ...s })) : null;
+      const tsSnap = tsRef.current.map(r => ({ ...r }));
+      return {
+        hands: handsSnap,
+        plays: playsSnap,
+        totals: totalsSnap,
+        log: logSnap,
+        landlord: landlordRef.current,
+        winner: winnerRef.current as number | null,
+        delta: deltaSnap,
+        multiplier: multiplierRef.current,
+        bidMultiplier: bidMultiplierRef.current,
+        aggStats: aggSnap,
+        aggCount: aggCountRef.current || 0,
+        finished: finishedRef.current || 0,
+        roundCuts: roundCutsRef.current.slice(),
+        roundLords: roundLordsRef.current.slice(),
+        bottom: bottomSnap,
+        scoreSeries: scoreSnap,
+        tsArr: tsSnap,
+        roundFinished: roundFinishedRef.current,
+        seenStats: seenStatsRef.current,
+        lastReasons: [...lastReasonRef.current],
+      };
+    };
+
+    const restoreRoundSnapshot = (snap: RoundSnapshot) => {
+      const handsClone = snap.hands.map(arr => [...arr]);
+      setHands(handsClone);
+      handsRef.current = handsClone;
+
+      const playsClone = clonePlays(snap.plays);
+      setPlays(playsClone);
+      playsRef.current = playsClone;
+
+      const totalsClone: [number, number, number] = [snap.totals[0], snap.totals[1], snap.totals[2]];
+      setTotals(totalsClone);
+      totalsRef.current = totalsClone;
+
+      const logClone = [...snap.log];
+      setLog(logClone);
+      logRef.current = logClone;
+
+      setLandlord(snap.landlord);
+      landlordRef.current = snap.landlord;
+
+      setWinner(snap.winner);
+      winnerRef.current = snap.winner;
+
+      const deltaClone = snap.delta ? ([snap.delta[0], snap.delta[1], snap.delta[2]] as [number, number, number]) : null;
+      setDelta(deltaClone);
+      deltaRef.current = deltaClone;
+
+      setMultiplier(snap.multiplier);
+      multiplierRef.current = snap.multiplier;
+
+      setBidMultiplier(snap.bidMultiplier);
+      bidMultiplierRef.current = snap.bidMultiplier;
+
+      const aggClone = snap.aggStats ? snap.aggStats.map(s => ({ ...s })) : null;
+      setAggStats(aggClone);
+      aggStatsRef.current = aggClone;
+
+      setAggCount(snap.aggCount);
+      aggCountRef.current = snap.aggCount;
+
+      setFinishedCount(snap.finished);
+      finishedRef.current = snap.finished;
+
+      const cutsClone = [...snap.roundCuts];
+      setRoundCuts(cutsClone);
+      roundCutsRef.current = cutsClone;
+
+      const lordsClone = [...snap.roundLords];
+      setRoundLords(lordsClone);
+      roundLordsRef.current = lordsClone;
+
+      const bottomClone: BottomInfo = {
+        landlord: snap.bottom.landlord,
+        cards: snap.bottom.cards.map(c => ({ ...c })),
+      };
+      setBottomInfo(bottomClone);
+      bottomRef.current = bottomClone;
+
+      const seriesClone = snap.scoreSeries.map(arr => [...arr]);
+      setScoreSeries(seriesClone);
+      scoreSeriesRef.current = seriesClone;
+
+      const tsClone = snap.tsArr.map(r => ({ ...r }));
+      setTsArr(tsClone);
+      tsRef.current = tsClone;
+
+      roundFinishedRef.current = snap.roundFinished;
+      seenStatsRef.current = snap.seenStats;
+      lastReasonRef.current = [...snap.lastReasons];
+    };
+
+    const shouldRetryStream = (err: any) => {
+      if (!err) return false;
+      if ((err as any)?.name === 'AbortError') return false;
+      const msg = String((err as any)?.message || err || '').toLowerCase();
+      if (!msg) return false;
+      const keywords = ['request expired', 'fetch failed', 'network', 'socket', 'connection', 'timed out', 'timeout'];
+      if ((err as any)?.name === 'TypeError') return true;
+      return keywords.some(k => msg.includes(k));
+    };
+
     const markRoundFinishedIfNeeded = (
       nextFinished:number,
       nextAggStats: Score5[] | null,
@@ -3366,65 +3524,68 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     };
 
     const playOneGame = async (_gameIndex: number, labelRoundNo: number) => {
-    let lastEventTs = Date.now();
-    const timeoutMs = (()=>{
-      const arr = props.turnTimeoutSecs || [30,30,30];
-      const norm = arr.map(x=> (Number.isFinite(x as any) && (x as any)>0 ? (x as any) : 30));
-      const sec = Math.min(...norm);
-      return Math.max(5000, sec*1000);
-    })();
-    let dogId: any = null;
+      let lastEventTs = Date.now();
+      const timeoutMs = (()=>{
+        const arr = props.turnTimeoutSecs || [30,30,30];
+        const norm = arr.map(x=> (Number.isFinite(x as any) && (x as any)>0 ? (x as any) : 30));
+        const sec = Math.min(...norm);
+        return Math.max(5000, sec*1000);
+      })();
+      let dogId: any = null;
 
-      setLog([]); lastReasonRef.current = [null, null, null];
-      const baseSpecs = buildSeatSpecs();
-      const startShift = ((labelRoundNo - 1) % 3 + 3) % 3;
-      const specs = [0,1,2].map(i => baseSpecs[(i + startShift) % 3]);
-      const toUiSeat = (j:number) => (j + startShift) % 3;
-      const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
-      const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
-      setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
+      lastReasonRef.current = [null, null, null];
 
-      roundFinishedRef.current = false;
-      seenStatsRef.current = false;
+      try {
+        const baseSpecs = buildSeatSpecs();
+        const startShift = ((labelRoundNo - 1) % 3 + 3) % 3;
+        const specs = [0,1,2].map(i => baseSpecs[(i + startShift) % 3]);
+        const toUiSeat = (j:number) => (j + startShift) % 3;
+        const remap3 = <T,>(arr: T[]) => ([ arr[(0 - startShift + 3) % 3], arr[(1 - startShift + 3) % 3], arr[(2 - startShift + 3) % 3] ]) as T[];
+        const traceId = Math.random().toString(36).slice(2,10) + '-' + Date.now().toString(36);
+        setLog(l => [...l, `【前端】开始第 ${labelRoundNo} 局 | 座位: ${seatSummaryText(baseSpecs)} | coop=${props.farmerCoop ? 'on' : 'off'} | trace=${traceId}`]);
 
-      const r = await fetch('/api/stream_ndjson', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          rounds: 1,
-          startScore: props.startScore,
-          seatDelayMs: props.seatDelayMs,
-          enabled: props.enabled,
-          bid: props.bid,
-          four2: props.four2,
-          seats: specs,
-          clientTraceId: traceId,
-          stopBelowZero: true,
-          farmerCoop: props.farmerCoop,
+        roundFinishedRef.current = false;
+        seenStatsRef.current = false;
+
+        const r = await fetch('/api/stream_ndjson', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            rounds: 1,
+            startScore: props.startScore,
+            seatDelayMs: props.seatDelayMs,
+            enabled: props.enabled,
+            bid: props.bid,
+            four2: props.four2,
+            seats: specs,
+            clientTraceId: traceId,
+            stopBelowZero: true,
+            farmerCoop: props.farmerCoop,
         turnTimeoutSec: (props.turnTimeoutSecs ?? [30,30,30])
-        }),
-        signal: controllerRef.current!.signal,
-      });
-      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+          }),
+          signal: controllerRef.current!.signal,
+        });
+        if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
 
-      const reader = r.body.getReader();
-      dogId = setInterval(() => {
-        if (Date.now() - lastEventTs > timeoutMs) {
-          setLog(l => [...l, `⏳ 超过 ${Math.round(timeoutMs/1000)}s 未收到事件，已触发前端提示（后端会按规则自动“过”或出最小牌），继续等待…`]);
-          lastEventTs = Date.now(); // 防止重复提示
-        }
-      }, 1000);
-    
-      const decoder = new TextDecoder('utf-8');
-      let buf = '';
-      const rewrite = makeRewriteRoundLabel(labelRoundNo);
+        const reader = r.body.getReader();
+        dogId = setInterval(() => {
+          if (Date.now() - lastEventTs > timeoutMs) {
+            setLog(l => [...l, `⏳ 超过 ${Math.round(timeoutMs/1000)}s 未收到事件，已触发前端提示（后端会按规则自动“过”或出最小牌），继续等待…`]);
+            lastEventTs = Date.now(); // 防止重复提示
+          }
+        }, 1000);
 
-      while (true) {
-        if (controllerRef.current?.signal.aborted) break;
-        if (pauseRef.current) await waitWhilePaused();
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
+        const decoder = new TextDecoder('utf-8');
+        let buf = '';
+        const rewrite = makeRewriteRoundLabel(labelRoundNo);
+
+        while (true) {
+          if (controllerRef.current?.signal.aborted) break;
+          if (pauseRef.current) await waitWhilePaused();
+          const { value, done } = await reader.read();
+          if (done) break;
+          lastEventTs = Date.now();
+          buf += decoder.decode(value, { stream: true });
 
         let idx: number;
         const batch: any[] = [];
@@ -3980,16 +4141,24 @@ nextTotals     = [
         if (pauseRef.current) await waitWhilePaused();
       }
 
-          if (dogId) { try { clearInterval(dogId); } catch {} }
-    setLog((l:any)=>{
-  const __snapshot = [...(Array.isArray(l)?l:[]), `—— 本局流结束 ——`];
-  (logRef as any).current = __snapshot;
-  setAllLogs((prev:any)=>[...(Array.isArray(prev)?prev:[]), ...__snapshot, `
+        setLog((l:any)=>{
+          const prev = Array.isArray(l) ? l : [];
+          const __snapshot = [...prev, `—— 本局流结束 ——`];
+          (logRef as any).current = __snapshot;
+          setAllLogs((prevAll:any)=>{
+            const base = Array.isArray(prevAll) ? prevAll : [];
+            return [...base, ...__snapshot, `
 --- End of Round ${labelRoundNo} ---
-`]);
-  return __snapshot;
-});
-};
+`];
+          });
+          return __snapshot;
+        });
+      } finally {
+        if (dogId) {
+          try { clearInterval(dogId); } catch {}
+        }
+      }
+    };
 
     const restBetweenRounds = async () => {
       const base = 800 + Math.floor(Math.random() * 600);
@@ -4009,24 +4178,77 @@ nextTotals     = [
     let aborted = false;
     let endedEarlyForNegative = false;
     try {
-      for (let i = 0; i < props.rounds; i++) {
-        if (controllerRef.current?.signal.aborted) break;
+      let retries = 0;
+      for (let i = 0; i < props.rounds; ) {
+        if (controllerRef.current?.signal.aborted) { aborted = true; break; }
         if (pauseRef.current) await waitWhilePaused();
-        const thisRound = i + 1;
-        await playOneGame(i, thisRound);
-        if (controllerRef.current?.signal.aborted) break;
+
+        if (retries === 0) {
+          logRef.current = [];
+          setLog([]);
+        }
+
+        const snapshot = captureRoundSnapshot();
+
+        try {
+          await playOneGame(i, i + 1);
+          retries = 0;
+          i++;
+        } catch (err: any) {
+          restoreRoundSnapshot(snapshot);
+          if (controllerRef.current?.signal.aborted) throw err;
+          if (shouldRetryStream(err) && retries < 2) {
+            retries += 1;
+            const waitMs = Math.min(5000, 1500 * retries);
+            const waitLabel = waitMs % 1000 === 0 ? `${waitMs / 1000}` : (waitMs / 1000).toFixed(1);
+            const errorText = String((err as any)?.message || err || '');
+            setLog(prev => {
+              const base = Array.isArray(prev) ? prev : [];
+              const next = [...base, `【前端】第 ${i + 1} 局数据流中断（${errorText || '未知错误'}），将在 ${waitLabel}s 后重试（${retries}/2）…`];
+              logRef.current = next;
+              return next;
+            });
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+            continue;
+          }
+          throw err;
+        }
+
+        if (controllerRef.current?.signal.aborted) { aborted = true; break; }
         if (pauseRef.current) await waitWhilePaused();
+
         const hasNegative = Array.isArray(totalsRef.current) && totalsRef.current.some(v => (v as number) < 0);
         if (hasNegative) {
           endedEarlyForNegative = true;
-          setLog(l => [...l, '【前端】检测到总分 < 0，停止连打。']);
+          setLog(prev => {
+            const base = Array.isArray(prev) ? prev : [];
+            const next = [...base, '【前端】检测到总分 < 0，停止连打。'];
+            logRef.current = next;
+            return next;
+          });
           break;
         }
+
         await restBetweenRounds();
       }
     } catch (e: any) {
-      if (e?.name === 'AbortError') { aborted = true; setLog(l => [...l, '已手动停止。']); }
-      else setLog(l => [...l, `错误：${e?.message || e}`]);
+      if (e?.name === 'AbortError') {
+        aborted = true;
+        setLog(prev => {
+          const base = Array.isArray(prev) ? prev : [];
+          const next = [...base, '已手动停止。'];
+          logRef.current = next;
+          return next;
+        });
+      } else {
+        const msg = e?.message || e;
+        setLog(prev => {
+          const base = Array.isArray(prev) ? prev : [];
+          const next = [...base, `错误：${msg}`];
+          logRef.current = next;
+          return next;
+        });
+      }
     } finally {
       exitPause();
       setRunning(false);
