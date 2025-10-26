@@ -786,6 +786,9 @@ type HumanPrompt = {
   delayMs?: number;
   by?: string;
   hint?: HumanHint;
+  issuedAt: number;
+  expiresAt?: number;
+  stale?: boolean;
 };
 
 function SeatTitle({ i }: { i:number }) {
@@ -2978,11 +2981,50 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     return items;
   }, [humanHint, lang]);
 
+  const [humanClockTs, setHumanClockTs] = useState(() => Date.now());
+  const humanExpiresAt = humanRequest?.expiresAt ?? undefined;
+  const humanExpired = useMemo(() => {
+    if (!humanRequest) return false;
+    if (humanRequest.stale) return true;
+    if (typeof humanExpiresAt !== 'number') return false;
+    return humanClockTs >= humanExpiresAt - 100;
+  }, [humanRequest, humanExpiresAt, humanClockTs]);
+  const humanMsRemaining = useMemo(() => {
+    if (!humanRequest) return null;
+    if (humanRequest.stale) return 0;
+    if (typeof humanExpiresAt !== 'number') return null;
+    return Math.max(0, humanExpiresAt - humanClockTs);
+  }, [humanRequest, humanExpiresAt, humanClockTs]);
+  const humanSecondsRemaining = useMemo(() => {
+    if (humanMsRemaining == null) return null;
+    return Math.max(0, Math.ceil(humanMsRemaining / 1000));
+  }, [humanMsRemaining]);
+
+  useEffect(() => {
+    if (!humanRequest) return;
+    if (humanRequest.stale) return;
+    if (typeof humanExpiresAt !== 'number') return;
+    setHumanClockTs(Date.now());
+    const interval = window.setInterval(() => {
+      setHumanClockTs(Date.now());
+    }, Math.min(1000, Math.max(200, humanRequest.timeoutMs || 1000)));
+    return () => window.clearInterval(interval);
+  }, [humanRequest, humanExpiresAt]);
+
+  useEffect(() => {
+    if (!humanRequest) return;
+    if (!humanExpired) return;
+    setHumanError(lang === 'en'
+      ? 'Request expired. Waiting for auto-action or the next prompt…'
+      : '请求已超时，请等待系统自动处理或下一次提示…');
+  }, [humanExpired, humanRequest, lang]);
+
   const resetHumanState = useCallback(() => {
     setHumanRequest(null);
     setHumanSelectedIdx([]);
     setHumanSubmitting(false);
     setHumanError(null);
+    setHumanClockTs(Date.now());
   }, []);
 
   const toggleHumanCard = useCallback((idx: number) => {
@@ -3004,6 +3046,20 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     const trace = humanTraceRef.current;
     if (!trace) {
       setHumanError(lang === 'en' ? 'Client trace missing' : '缺少客户端标识');
+      return;
+    }
+    if (humanRequest.stale) {
+      setHumanError(lang === 'en'
+        ? 'Request already expired. Please wait for the next prompt.'
+        : '该请求已失效，请等待下一次提示。');
+      return;
+    }
+    if (typeof humanRequest.expiresAt === 'number' && Date.now() > humanRequest.expiresAt) {
+      setHumanError(lang === 'en'
+        ? 'Request expired. Waiting for auto-action or the next prompt…'
+        : '请求已超时，请等待系统自动处理或下一次提示…');
+      setHumanRequest(prev => (prev ? { ...prev, stale: true } : prev));
+      setHumanSelectedIdx([]);
       return;
     }
     setHumanSubmitting(true);
@@ -3028,7 +3084,12 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       }
     } catch (err:any) {
       setHumanSubmitting(false);
-      setHumanError(err?.message || String(err));
+      const msg = err?.message || String(err);
+      setHumanError(msg);
+      if (/request expired/i.test(msg)) {
+        setHumanRequest(prev => (prev ? { ...prev, stale: true } : prev));
+        setHumanSelectedIdx([]);
+      }
     }
   }, [humanRequest, humanSubmitting, lang]);
 
@@ -4071,6 +4132,9 @@ for (const raw of batch) {
                     const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
                     hint = { move, cards, score, reason, label, by: byHint };
                   }
+                  const issuedAt = Date.now();
+                  const timeoutMs = typeof m.timeoutMs === 'number' ? Math.max(0, m.timeoutMs) : undefined;
+                  const expiresAt = typeof timeoutMs === 'number' && timeoutMs > 0 ? issuedAt + timeoutMs : undefined;
                   setHumanRequest({
                     seat,
                     requestId,
@@ -4080,6 +4144,9 @@ for (const raw of batch) {
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
                     by: typeof m.by === 'string' ? m.by : undefined,
                     hint,
+                    issuedAt,
+                    expiresAt,
+                    stale: false,
                   });
                   setHumanSelectedIdx([]);
                   setHumanSubmitting(false);
@@ -4894,22 +4961,40 @@ const handleAllSaveInner = () => {
 
       <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
-          {[0,1,2].map(i=>(
-            <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
-                            <div style={{ position:'absolute', top:8, right:8, fontSize:16, fontWeight:800, background:'#fff', border:'1px solid #eee', borderRadius:6, padding:'2px 6px' }}>{totals[i]}</div>
-<div style={{ marginBottom:6 }}>
-                <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
+          {[0,1,2].map(i => {
+            const isHumanTurn = !!(humanRequest && humanRequest.seat === i && humanRequest.phase === 'play');
+            const seatInteractive = isHumanTurn && !humanExpired;
+            return (
+              <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
+                <div
+                  style={{
+                    position:'absolute',
+                    top:8,
+                    right:8,
+                    fontSize:16,
+                    fontWeight:800,
+                    background:'#fff',
+                    border:'1px solid #eee',
+                    borderRadius:6,
+                    padding:'2px 6px',
+                  }}
+                >
+                  {totals[i]}
+                </div>
+                <div style={{ marginBottom:6 }}>
+                  <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
+                </div>
+                <Hand
+                  cards={hands[i]}
+                  interactive={seatInteractive}
+                  selectedIndices={humanRequest && humanRequest.seat === i ? humanSelectedSet : undefined}
+                  onToggle={seatInteractive ? toggleHumanCard : undefined}
+                  disabled={humanSubmitting || humanExpired}
+                  faceDown={hasHumanSeat ? !isHumanSeat(i) : false}
+                />
               </div>
-              <Hand
-                cards={hands[i]}
-                interactive={!!(humanRequest && humanRequest.seat === i && humanRequest.phase === 'play')}
-                selectedIndices={humanRequest && humanRequest.seat === i ? humanSelectedSet : undefined}
-                onToggle={humanRequest && humanRequest.seat === i && humanRequest.phase === 'play' ? toggleHumanCard : undefined}
-                disabled={humanSubmitting}
-                faceDown={hasHumanSeat ? !isHumanSeat(i) : false}
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
           {[0,1,2].map(i=>{
@@ -4979,11 +5064,26 @@ const handleAllSaveInner = () => {
                     ? `Requirement: ${humanRequireText} · Can pass: ${humanCanPass ? 'Yes' : 'No'} · Selected: ${humanSelectedCount}`
                     : `需求：${humanRequireText} ｜ 可过：${humanCanPass ? '是' : '否'} ｜ 已选：${humanSelectedCount}`}
                 </div>
+                {humanSecondsRemaining != null && (
+                  <div style={{ fontSize:12, color: humanExpired ? '#dc2626' : '#1d4ed8' }}>
+                    {lang === 'en'
+                      ? `Time left: ${humanSecondsRemaining}s`
+                      : `剩余时间：${humanSecondsRemaining}秒`}
+                  </div>
+                )}
                 {humanMustPass && (
                   <div style={{ fontSize:12, color:'#dc2626' }}>
                     {lang === 'en'
                       ? 'No playable cards available. Please pass this turn.'
                       : '无牌可出，请选择过牌。'}
+                  </div>
+                )}
+
+                {humanExpired && !humanMustPass && (
+                  <div style={{ fontSize:12, color:'#dc2626' }}>
+                    {lang === 'en'
+                      ? 'This prompt has expired. Please wait for the system to act.'
+                      : '该回合请求已失效，请等待系统处理。'}
                   </div>
                 )}
                 {humanHint && (
@@ -5033,13 +5133,13 @@ const handleAllSaveInner = () => {
                       <div>
                         <button
                           onClick={applyHumanHint}
-                          disabled={humanSubmitting}
+                          disabled={humanSubmitting || humanExpired}
                           style={{
                             padding:'4px 10px',
                             border:'1px solid #3b82f6',
                             borderRadius:6,
-                            background: humanSubmitting ? '#dbeafe' : '#3b82f6',
-                            color: humanSubmitting ? '#6b7280' : '#fff',
+                            background: humanSubmitting || humanExpired ? '#dbeafe' : '#3b82f6',
+                            color: humanSubmitting || humanExpired ? '#6b7280' : '#fff',
                           }}
                         >
                           {lang === 'en' ? 'Adopt suggestion' : '采纳建议'}
@@ -5051,30 +5151,30 @@ const handleAllSaveInner = () => {
                 <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                   <button
                     onClick={handleHumanPlay}
-                    disabled={humanSubmitting || humanSelectedCount === 0 || humanMustPass}
+                    disabled={humanSubmitting || humanSelectedCount === 0 || humanMustPass || humanExpired}
                     style={{
                       padding:'6px 12px',
                       border:'1px solid #2563eb',
                       borderRadius:8,
-                      background: humanSubmitting || humanSelectedCount === 0 || humanMustPass ? '#e5e7eb' : '#2563eb',
-                      color: humanSubmitting || humanSelectedCount === 0 || humanMustPass ? '#6b7280' : '#fff',
+                      background: humanSubmitting || humanSelectedCount === 0 || humanMustPass || humanExpired ? '#e5e7eb' : '#2563eb',
+                      color: humanSubmitting || humanSelectedCount === 0 || humanMustPass || humanExpired ? '#6b7280' : '#fff',
                     }}
                   >{lang === 'en' ? 'Play selected' : '出牌'}</button>
                   <button
                     onClick={handleHumanPass}
-                    disabled={humanSubmitting || !humanCanPass}
+                    disabled={humanSubmitting || !humanCanPass || humanExpired}
                     style={{
                       padding:'6px 12px',
                       border:'1px solid #d1d5db',
                       borderRadius:8,
-                      background: humanMustPass ? '#fee2e2' : (humanSubmitting || !humanCanPass ? '#f3f4f6' : '#fff'),
+                      background: humanMustPass ? '#fee2e2' : (humanSubmitting || !humanCanPass || humanExpired ? '#f3f4f6' : '#fff'),
                       color: humanMustPass ? '#b91c1c' : '#1f2937',
                     }}
                   >{lang === 'en' ? 'Pass' : '过'}</button>
                   <button
                     onClick={handleHumanClear}
-                    disabled={humanSubmitting || humanSelectedCount === 0}
-                    style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                    disabled={humanSubmitting || humanSelectedCount === 0 || humanExpired}
+                    style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background: humanSubmitting || humanExpired ? '#f3f4f6' : '#fff', color:'#1f2937' }}
                   >{lang === 'en' ? 'Clear selection' : '清空选择'}</button>
                 </div>
               </>
