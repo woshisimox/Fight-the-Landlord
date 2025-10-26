@@ -783,6 +783,9 @@ type HumanPrompt = {
   phase: string;
   ctx: any;
   timeoutMs?: number;
+  totalTimeoutMs?: number;
+  latencyMs?: number;
+  remainingMs?: number;
   delayMs?: number;
   by?: string;
   hint?: HumanHint;
@@ -3125,6 +3128,17 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     return Math.max(0, Math.ceil(humanMsRemaining / 1000));
   }, [humanMsRemaining]);
 
+  const humanLagDisplay = useMemo(() => {
+    if (!humanRequest) return null;
+    const lag = humanRequest.latencyMs;
+    if (!Number.isFinite(lag) || lag == null) return null;
+    if (lag <= 150) return null;
+    const seconds = (lag / 1000).toFixed(lag >= 950 ? 0 : 1);
+    return lang === 'en'
+      ? `Adjusted for upstream delay ≈${seconds}s`
+      : `已扣除约 ${seconds} 秒的传输延迟`;
+  }, [humanRequest, lang]);
+
   useEffect(() => {
     if (!humanRequest) return;
     if (humanRequest.stale) return;
@@ -4298,14 +4312,33 @@ for (const raw of batch) {
                   const expiresAtRaw = (m as any).expiresAt ?? (m as any).expires_at;
                   const issuedAtParsed = typeof issuedAtRaw === 'number' ? issuedAtRaw : Number(issuedAtRaw);
                   const expiresAtParsed = typeof expiresAtRaw === 'number' ? expiresAtRaw : Number(expiresAtRaw);
+                  const serverWindowMs = Number.isFinite(expiresAtParsed) && Number.isFinite(issuedAtParsed)
+                    ? Math.max(0, Math.floor(expiresAtParsed - issuedAtParsed))
+                    : undefined;
+                  const totalWindowMs = Math.max(
+                    0,
+                    Math.min(
+                      effectiveTimeoutMs,
+                      typeof serverWindowMs === 'number' && Number.isFinite(serverWindowMs)
+                        ? serverWindowMs
+                        : effectiveTimeoutMs,
+                    ),
+                  );
                   const clientIssuedAt = Date.now();
-                  const clientExpiresAt = clientIssuedAt + effectiveTimeoutMs;
+                  const upstreamLagMs = Number.isFinite(issuedAtParsed)
+                    ? Math.max(0, clientIssuedAt - issuedAtParsed)
+                    : 0;
+                  const remainingWindowMs = Math.max(0, totalWindowMs - upstreamLagMs);
+                  const clientExpiresAt = clientIssuedAt + remainingWindowMs;
                   setHumanRequest({
                     seat,
                     requestId,
                     phase: typeof m.phase === 'string' ? m.phase : 'play',
                     ctx: m.ctx ?? {},
-                    timeoutMs: effectiveTimeoutMs,
+                    timeoutMs: remainingWindowMs,
+                    totalTimeoutMs: totalWindowMs,
+                    latencyMs: upstreamLagMs,
+                    remainingMs: remainingWindowMs,
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
                     by: typeof m.by === 'string' ? m.by : undefined,
                     hint,
@@ -4313,7 +4346,7 @@ for (const raw of batch) {
                     expiresAt: clientExpiresAt,
                     serverIssuedAt: Number.isFinite(issuedAtParsed) ? issuedAtParsed : undefined,
                     serverExpiresAt: Number.isFinite(expiresAtParsed) ? expiresAtParsed : undefined,
-                    stale: false,
+                    stale: remainingWindowMs <= 0,
                   });
                   setHumanClockTs(clientIssuedAt);
                   setHumanSelectedIdx([]);
@@ -5260,6 +5293,9 @@ const handleAllSaveInner = () => {
                       ? `Time left: ${humanSecondsRemaining}s`
                       : `剩余时间：${humanSecondsRemaining}秒`}
                   </div>
+                )}
+                {humanLagDisplay && (
+                  <div style={{ fontSize:12, color:'#6b7280' }}>{humanLagDisplay}</div>
                 )}
                 {humanMustPass && (
                   <div style={{ fontSize:12, color:'#dc2626' }}>
