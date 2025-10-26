@@ -4621,6 +4621,23 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
               }
+              if (m.type === 'event' && m.kind === 'bid-skip') {
+                const reason = typeof m.reason === 'string' ? m.reason : '';
+                nextLog = [...nextLog, `【抢地主】全部选择不抢，重新发牌${reason ? `｜原因=${reason}` : ''}`];
+                nextBidMultiplier = 1;
+                nextMultiplier = 1;
+                nextPlays = [];
+                nextHands = [[], [], []] as any;
+                nextLandlord = null;
+                nextBottom = { landlord: null, cards: [], revealed: false };
+                resetHumanState();
+                suitUsageRef.current = new Map();
+                if (nextDeckAudit) {
+                  nextDeckAudit = null;
+                  deckAuditChanged = true;
+                }
+                continue;
+              }
               if (m.type === 'event' && m.kind === 'round-end') {
                 nextLog = [...nextLog, `【边界】round-end #${m.round}`];
                 const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
@@ -4630,8 +4647,13 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               }
 
               // -------- 初始发牌（仅限 init 帧） --------
-              if (m.type === 'init') {
-                const rh = m.hands;
+              const isInitState = m.type === 'init' || (m.type === 'state' && m.kind === 'init');
+              if (isInitState) {
+                const rh = Array.isArray(m.hands)
+                  ? m.hands
+                  : Array.isArray(m.payload?.hands)
+                    ? m.payload.hands
+                    : [];
                 if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
                   nextPlays = [];
                   nextWinner = null;
@@ -4646,12 +4668,16 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   });
                   suitUsageRef.current = freshUsage;
 
-                  const rawLord = m.landlordIdx ?? m.landlord;
+                  const rawLord = m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? null;
                   const lord = (typeof rawLord === 'number' && rawLord >= 0 && rawLord < 3)
                     ? rawLord
                     : null;
                   nextLandlord = lord;
-                  const bottomRaw = Array.isArray(m.bottom) ? (m.bottom as string[]) : [];
+                  const bottomRaw = Array.isArray(m.bottom)
+                    ? (m.bottom as string[])
+                    : Array.isArray(m.payload?.bottom)
+                      ? (m.payload.bottom as string[])
+                      : [];
                   const bottomReserved = snapshotSuitUsage(freshUsage);
                   const decoratedBottom = bottomRaw.length
                     ? resolveBottomDecorations(bottomRaw, lord, nextHands as string[][], bottomReserved)
@@ -4677,7 +4703,8 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     }
                   }
 
-                  nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
+                  const initLabel = m.type === 'state' ? '（state）' : '';
+                  nextLog = [...nextLog, `发牌完成${initLabel}，${lord != null ? seatName(lord) : '?' }为地主`];
 
                   try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
                   lastReasonRef.current = [null, null, null];
