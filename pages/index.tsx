@@ -850,6 +850,13 @@ const JOKER_ALIAS_MAP: Record<string, 'x' | 'X'> = {
 };
 
 const stripVariantSelectors = (value: string): string => value.replace(/[\u200d\ufe0e\ufe0f]/g, '');
+const ensureTextSuitGlyph = (value: string): string => {
+  if (!value) return value;
+  const cleaned = stripVariantSelectors(value);
+  if (cleaned === '🃏') return '🃏';
+  if (SUITS.includes(cleaned as SuitSym)) return `${cleaned}\uFE0E`;
+  return cleaned;
+};
 
 const normalizeRankToken = (token: string): string => {
   if (!token) return '';
@@ -1294,13 +1301,14 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
       ? { color: '#9ca3af' }
       : (rankColor ? { color: rankColor } : {});
     const displayRank = rankToken === 'T' ? '10' : rankToken;
+    const displaySuit = ensureTextSuitGlyph(suit);
     background = selected ? '#dbeafe' : (dimmed ? '#f3f4f6' : '#fff');
     borderColor = selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd');
     color = suitColor;
     opacity = dimmed ? 0.65 : 1;
     inner = (
       <>
-        <span style={{ fontSize: dims.suitSize, lineHeight: 1 }}>{suit}</span>
+        <span style={{ fontSize: dims.suitSize, lineHeight: 1 }}>{displaySuit}</span>
         <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{displayRank}</span>
       </>
     );
