@@ -3510,9 +3510,22 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   useEffect(() => {
     if (!humanRequest) return;
     if (!humanExpired) return;
-    setHumanError(lang === 'en'
-      ? 'Request expired. Waiting for auto-action or the next prompt…'
-      : '请求已超时，请等待系统自动处理或下一次提示…');
+    const phase = humanRequest.phase;
+    let msg: string;
+    if (phase === 'bid') {
+      msg = lang === 'en'
+        ? 'Time expired. System will pass on bidding.'
+        : '已超时，默认不抢地主。';
+    } else if (phase === 'double') {
+      msg = lang === 'en'
+        ? 'Time expired. System will skip doubling.'
+        : '已超时，默认不加倍。';
+    } else {
+      msg = lang === 'en'
+        ? 'Request expired. Waiting for auto-action or the next prompt…'
+        : '请求已超时，请等待系统自动处理或下一次提示…';
+    }
+    setHumanError(msg);
   }, [humanExpired, humanRequest, lang]);
 
   const resetHumanState = useCallback(() => {
@@ -3628,13 +3641,25 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
 
   const handleHumanBid = useCallback(async (decision: boolean) => {
     if (!humanRequest || humanRequest.phase !== 'bid') return;
+    if (humanExpired) {
+      setHumanError(lang === 'en'
+        ? 'Time expired. Please wait for the next prompt.'
+        : '操作已超时，请等待下一次提示。');
+      return;
+    }
     await submitHumanAction({ phase:'bid', bid: decision });
-  }, [humanRequest, submitHumanAction]);
+  }, [humanRequest, submitHumanAction, humanExpired, lang, setHumanError]);
 
   const handleHumanDouble = useCallback(async (decision: boolean) => {
     if (!humanRequest || humanRequest.phase !== 'double') return;
+    if (humanExpired) {
+      setHumanError(lang === 'en'
+        ? 'Time expired. Please wait for the next prompt.'
+        : '操作已超时，请等待下一次提示。');
+      return;
+    }
     await submitHumanAction({ phase:'double', double: decision });
-  }, [humanRequest, submitHumanAction]);
+  }, [humanRequest, submitHumanAction, humanExpired, lang, setHumanError]);
 
   const handleHumanClear = useCallback(() => {
     setHumanSelectedIdx([]);
@@ -3704,6 +3729,44 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const humanMustPass = humanPhase === 'play'
     ? (((humanRequest?.ctx as any)?.mustPass === true) || (humanLegalCount === 0 && humanCanPass)) && humanCanPass
     : false;
+  const humanCountdownText = useMemo(() => {
+    if (humanSecondsRemaining == null) return null;
+    if (humanPhase === 'bid') {
+      return lang === 'en'
+        ? `Time left to bid: ${humanSecondsRemaining}s`
+        : `抢地主剩余时间：${humanSecondsRemaining}秒`;
+    }
+    if (humanPhase === 'double') {
+      return lang === 'en'
+        ? `Time left to decide on doubling: ${humanSecondsRemaining}s`
+        : `加倍剩余时间：${humanSecondsRemaining}秒`;
+    }
+    if (humanPhase === 'play') {
+      return lang === 'en'
+        ? `Time left: ${humanSecondsRemaining}s`
+        : `剩余时间：${humanSecondsRemaining}秒`;
+    }
+    return null;
+  }, [humanSecondsRemaining, humanPhase, lang]);
+  const humanExpirationNotice = useMemo(() => {
+    if (!humanExpired) return null;
+    if (humanPhase === 'bid') {
+      return lang === 'en'
+        ? 'Time expired. System will pass on bidding.'
+        : '已超时，默认不抢地主。';
+    }
+    if (humanPhase === 'double') {
+      return lang === 'en'
+        ? 'Time expired. System will skip doubling.'
+        : '已超时，默认不加倍。';
+    }
+    if (humanPhase === 'play' && !humanMustPass) {
+      return lang === 'en'
+        ? 'This prompt has expired. Please wait for the system to act.'
+        : '该回合请求已失效，请等待系统处理。';
+    }
+    return null;
+  }, [humanExpired, humanPhase, lang, humanMustPass]);
   const humanSelectedCount = humanSelectedIdx.length;
   const canAdoptHint = humanPhase === 'play'
     && humanHint?.move === 'play'
@@ -4733,6 +4796,12 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   }
                   const timeoutRaw = typeof m.timeoutMs === 'number' ? m.timeoutMs : Number((m as any).timeout_ms);
                   const timeoutParsed = Number.isFinite(timeoutRaw) ? Math.max(0, Math.floor(timeoutRaw)) : undefined;
+                  const rawPhase = typeof m.phase === 'string' ? m.phase : 'play';
+                  const normalizedPhase = rawPhase === 'bid'
+                    ? 'bid'
+                    : rawPhase === 'double'
+                      ? 'double'
+                      : rawPhase;
                   const effectiveTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
                     ? timeoutParsed
                     : 30_000;
@@ -4744,12 +4813,15 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   const upstreamLagMs = Number.isFinite(issuedAtParsed)
                     ? Math.max(0, clientIssuedAt - issuedAtParsed)
                     : 0;
-                  const resolvedWindowMs = Math.max(0, effectiveTimeoutMs);
+                  let resolvedWindowMs = Math.max(0, effectiveTimeoutMs);
+                  if (normalizedPhase === 'bid' || normalizedPhase === 'double') {
+                    resolvedWindowMs = 30_000;
+                  }
                   const clientExpiresAt = clientIssuedAt + resolvedWindowMs;
                   setHumanRequest({
                     seat,
                     requestId,
-                    phase: typeof m.phase === 'string' ? m.phase : 'play',
+                    phase: normalizedPhase,
                     ctx: m.ctx ?? {},
                     timeoutMs: resolvedWindowMs,
                     totalTimeoutMs: resolvedWindowMs,
@@ -4769,7 +4841,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   setHumanSubmitting(false);
                   setHumanError(null);
                   const label = seatName(seat);
-                  const phaseLabel = typeof m.phase === 'string' ? m.phase : 'play';
+                  const phaseLabel = normalizedPhase;
                   nextLog = [...nextLog, `【Human】${label} 等待操作｜phase=${phaseLabel}`];
                 }
                 continue;
@@ -4781,11 +4853,19 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 const seatIdx = typeof m.seat === 'number' ? m.seat : -1;
                 if (seatIdx >= 0 && seatIdx < 3 && !isHumanSeat(seatIdx)) {
                   const timeoutRaw = typeof m.timeoutMs === 'number' ? m.timeoutMs : Number((m as any).timeout_ms);
-                  const resolvedTimeout = Number.isFinite(timeoutRaw)
-                    ? Math.max(1_000, Math.min(30_000, Math.floor(timeoutRaw)))
-                    : 30_000;
+                  const rawPhase = typeof m.phase === 'string' ? m.phase : 'play';
+                  const normalizedPhase = rawPhase === 'bid'
+                    ? 'bid'
+                    : rawPhase === 'double'
+                      ? 'double'
+                      : rawPhase;
+                  const resolvedTimeout = (normalizedPhase === 'bid' || normalizedPhase === 'double')
+                    ? 30_000
+                    : (Number.isFinite(timeoutRaw)
+                      ? Math.max(1_000, Math.min(30_000, Math.floor(timeoutRaw)))
+                      : 30_000);
                   const clientIssuedAt = Date.now();
-                  const phaseLabel = typeof m.phase === 'string' ? m.phase : 'play';
+                  const phaseLabel = normalizedPhase;
                   const providerLabel = typeof m.by === 'string' ? m.by : undefined;
                   setBotTimers(prev => {
                     const next = [...prev];
@@ -5822,6 +5902,17 @@ const handleAllSaveInner = () => {
                 ? `Seat ${humanSeatLabel} · ${humanPhaseText}`
                 : `${humanSeatLabel} ｜ ${humanPhaseText}`}
             </div>
+            {humanCountdownText && (
+              <div style={{ fontSize:12, color: humanExpired ? '#dc2626' : '#1d4ed8' }}>
+                {humanCountdownText}
+              </div>
+            )}
+            {humanLagDisplay && (
+              <div style={{ fontSize:12, color:'#6b7280' }}>{humanLagDisplay}</div>
+            )}
+            {humanExpirationNotice && (
+              <div style={{ fontSize:12, color:'#dc2626' }}>{humanExpirationNotice}</div>
+            )}
             {humanPhase === 'play' && (
               <>
                 <div style={{ fontSize:12, color:'#6b7280' }}>
@@ -5829,29 +5920,11 @@ const handleAllSaveInner = () => {
                     ? `Requirement: ${humanRequireText} · Can pass: ${humanCanPass ? 'Yes' : 'No'} · Selected: ${humanSelectedCount}`
                     : `需求：${humanRequireText} ｜ 可过：${humanCanPass ? '是' : '否'} ｜ 已选：${humanSelectedCount}`}
                 </div>
-                {humanSecondsRemaining != null && (
-                  <div style={{ fontSize:12, color: humanExpired ? '#dc2626' : '#1d4ed8' }}>
-                    {lang === 'en'
-                      ? `Time left: ${humanSecondsRemaining}s`
-                      : `剩余时间：${humanSecondsRemaining}秒`}
-                  </div>
-                )}
-                {humanLagDisplay && (
-                  <div style={{ fontSize:12, color:'#6b7280' }}>{humanLagDisplay}</div>
-                )}
                 {humanMustPass && (
                   <div style={{ fontSize:12, color:'#dc2626' }}>
                     {lang === 'en'
                       ? 'No playable cards available. Please pass this turn.'
                       : '无牌可出，请选择过牌。'}
-                  </div>
-                )}
-
-                {humanExpired && !humanMustPass && (
-                  <div style={{ fontSize:12, color:'#dc2626' }}>
-                    {lang === 'en'
-                      ? 'This prompt has expired. Please wait for the system to act.'
-                      : '该回合请求已失效，请等待系统处理。'}
                   </div>
                 )}
                 {humanHint && (
@@ -5955,13 +6028,13 @@ const handleAllSaveInner = () => {
               <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                 <button
                   onClick={() => handleHumanBid(true)}
-                  disabled={humanSubmitting}
-                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting ? '#e5e7eb' : '#2563eb', color: humanSubmitting ? '#6b7280' : '#fff' }}
+                  disabled={humanSubmitting || humanExpired}
+                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting || humanExpired ? '#e5e7eb' : '#2563eb', color: humanSubmitting || humanExpired ? '#6b7280' : '#fff' }}
                 >{lang === 'en' ? 'Bid' : '抢地主'}</button>
                 <button
                   onClick={() => handleHumanBid(false)}
-                  disabled={humanSubmitting}
-                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                  disabled={humanSubmitting || humanExpired}
+                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background: humanSubmitting || humanExpired ? '#f3f4f6' : '#fff', color:'#1f2937' }}
                 >{lang === 'en' ? 'Pass' : '不抢'}</button>
               </div>
             )}
@@ -5969,13 +6042,13 @@ const handleAllSaveInner = () => {
               <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                 <button
                   onClick={() => handleHumanDouble(true)}
-                  disabled={humanSubmitting}
-                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting ? '#e5e7eb' : '#2563eb', color: humanSubmitting ? '#6b7280' : '#fff' }}
+                  disabled={humanSubmitting || humanExpired}
+                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting || humanExpired ? '#e5e7eb' : '#2563eb', color: humanSubmitting || humanExpired ? '#6b7280' : '#fff' }}
                 >{lang === 'en' ? 'Double' : '加倍'}</button>
                 <button
                   onClick={() => handleHumanDouble(false)}
-                  disabled={humanSubmitting}
-                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                  disabled={humanSubmitting || humanExpired}
+                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background: humanSubmitting || humanExpired ? '#f3f4f6' : '#fff', color:'#1f2937' }}
                 >{lang === 'en' ? 'No double' : '不加倍'}</button>
               </div>
             )}
