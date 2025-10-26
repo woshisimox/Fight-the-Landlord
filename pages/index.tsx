@@ -773,7 +773,9 @@ function SeatTitle({ i }: { i:number }) {
 
 
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
-const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
+type PlayingSuit = Exclude<SuitSym, '🃏'>;
+const SUITS: PlayingSuit[] = ['♠','♥','♦','♣'];
+type SuitRegistry = Map<string, PlayingSuit[]>;
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
 type BottomInfo = { landlord:number|null; cards:{ label:string; used:boolean }[] };
 
@@ -784,6 +786,32 @@ const rankOf = (l: string) => {
   if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
   return l.replace(/10/i, 'T').toUpperCase();
 };
+const isPlayingSuit = (c: string): c is PlayingSuit => c === '♠' || c === '♥' || c === '♦' || c === '♣';
+function registerSuit(registry: SuitRegistry, rank: string, suit: PlayingSuit) {
+  const used = registry.get(rank) ?? [];
+  if (!used.includes(suit)) registry.set(rank, [...used, suit]);
+}
+function pickSuit(registry: SuitRegistry, rank: string): PlayingSuit {
+  const used = registry.get(rank) ?? [];
+  const available = SUITS.find(s => !used.includes(s));
+  if (available) return available;
+  return SUITS[used.length % SUITS.length];
+}
+function decorateCardLabel(label: string, registry: SuitRegistry): string {
+  if (!label) return label;
+  if (label === 'x') return '🃏X';
+  if (label === 'X') return '🃏Y';
+  if (label.startsWith('🃏')) return label;
+  const rank = rankOf(label);
+  const c0 = label.charAt(0);
+  if (isPlayingSuit(c0)) {
+    registerSuit(registry, rank, c0);
+    return `${c0}${rank}`;
+  }
+  const suit = pickSuit(registry, rank);
+  registerSuit(registry, rank, suit);
+  return `${suit}${rank}`;
+}
 function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l === 'x') return ['🃏X'];
@@ -794,23 +822,16 @@ function candDecorations(l: string): string[] {
   if (r === 'JOKER') return ['🃏Y'];
   return SUITS.map(s => `${s}${r}`);
 }
-function decorateHandCycle(raw: string[]): string[] {
-  let idx = 0;
-  return raw.map(l => {
-    if (!l) return l;
-    if (l === 'x') return '🃏X';
-    if (l === 'X') return '🃏Y';
-    if (l.startsWith('🃏')) return l;
-    if ('♠♥♦♣'.includes(l[0])) return l;
-    const suit = SUITS[idx % SUITS.length]; idx++;
-    return `${suit}${rankOf(l)}`;
-  });
+function decorateHandCycle(raw: string[], registry?: SuitRegistry): string[] {
+  const reg = registry ?? new Map<string, PlayingSuit[]>();
+  return raw.map(l => decorateCardLabel(l, reg));
 }
 
-function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][]): string[] {
+function resolveBottomDecorations(raw: string[], landlord: number | null, hands: string[][], registry?: SuitRegistry): string[] {
   if (!Array.isArray(raw)) return [];
+  const reg = registry ?? new Map<string, PlayingSuit[]>();
   const seat = (typeof landlord === 'number' && landlord >= 0 && landlord < 3) ? landlord : null;
-  if (seat == null) return decorateHandCycle(raw);
+  if (seat == null) return decorateHandCycle(raw, reg);
   const pool = [...(hands?.[seat] || [])];
   return raw.map(card => {
     const options = candDecorations(card);
@@ -818,10 +839,13 @@ function resolveBottomDecorations(raw: string[], landlord: number | null, hands:
       const idx = pool.indexOf(opt);
       if (idx >= 0) {
         pool.splice(idx, 1);
+        const rank = rankOf(opt);
+        const suitChar = opt.charAt(0);
+        if (isPlayingSuit(suitChar)) registerSuit(reg, rank, suitChar);
         return opt;
       }
     }
-    return options[0] || card;
+    return decorateCardLabel(card, reg);
   });
 }
 
@@ -2765,6 +2789,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const statsFileRef = useRef<HTMLInputElement|null>(null);
   const roundLordsRef = useRef(roundLords); useEffect(()=>{ roundLordsRef.current = roundLords; }, [roundLords]);
   const bottomRef = useRef(bottomInfo); useEffect(()=>{ bottomRef.current = bottomInfo; }, [bottomInfo]);
+  const roundSuitRegistryRef = useRef<SuitRegistry>(new Map());
 
   // 依据 scoreSeries（每手评分）与 roundCuts（每局切点）计算每局均值，并汇总到席位统计
   const recomputeScoreStats = () => {
@@ -3679,6 +3704,7 @@ for (const raw of batch) {
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
                 nextBottom = { landlord: null, cards: [] };
+                roundSuitRegistryRef.current = new Map();
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -3698,7 +3724,9 @@ for (const raw of batch) {
                   nextWinner = null;
                   nextDelta = null;
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
-                  nextHands = (rh as string[][]).map(decorateHandCycle);
+                  const suitRegistry = new Map<string, PlayingSuit[]>();
+                  nextHands = (rh as string[][]).map(hand => decorateHandCycle(hand, suitRegistry));
+                  roundSuitRegistryRef.current = suitRegistry;
 
                   const lord = (m.landlordIdx ?? m.landlord ?? null) as number | null;
                   nextLandlord = lord;
@@ -3731,7 +3759,9 @@ for (const raw of batch) {
               {
                 const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
                 if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
-                  nextHands = (rh0 as string[][]).map(decorateHandCycle);
+                  const suitRegistry = new Map<string, PlayingSuit[]>();
+                  nextHands = (rh0 as string[][]).map(hand => decorateHandCycle(hand, suitRegistry));
+                  roundSuitRegistryRef.current = suitRegistry;
                   const lord2 = (m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? m.state?.landlord ?? m.init?.landlord ?? null) as number | null;
                   if (lord2 != null) {
                     nextLandlord = lord2;
@@ -3818,7 +3848,7 @@ if (m.type === 'event' && m.kind === 'reveal') {
     ? (m.landlordIdx ?? m.landlord) as number
     : nextLandlord;
   const landlordSeat = (typeof seatIdxRaw === 'number') ? seatIdxRaw : (nextLandlord ?? nextBottom.landlord ?? null);
-  const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][]);
+  const mapped = resolveBottomDecorations(btm, landlordSeat, nextHands as string[][], roundSuitRegistryRef.current);
 
   if (typeof landlordSeat === 'number' && landlordSeat >= 0 && landlordSeat < 3) {
     let seatHand = Array.isArray(nextHands[landlordSeat]) ? [...nextHands[landlordSeat]] : [];
@@ -3837,7 +3867,7 @@ if (m.type === 'event' && m.kind === 'reveal') {
     landlord: landlordSeat ?? nextBottom.landlord ?? null,
     cards: mapped.map(label => ({ label, used: false })),
   };
-  const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm) : btm);
+  const pretty = mapped.length ? mapped : (decorateHandCycle ? decorateHandCycle(btm, roundSuitRegistryRef.current) : btm);
   nextLog = [...nextLog, `明牌｜底牌：${pretty.join(' ')}`];
   // 不改变 nextMultiplier，仅展示
   continue;
