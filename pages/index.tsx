@@ -815,6 +815,55 @@ function SeatTitle({ i }: { i:number }) {
 
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
+const ASCII_SUIT_MAP: Record<string, SuitSym> = {
+  S: '♠', s: '♠',
+  H: '♥', h: '♥',
+  D: '♦', d: '♦',
+  C: '♣', c: '♣',
+};
+const JOKER_ALIAS_MAP: Record<string, 'x' | 'X'> = {
+  BJ: 'x',
+  SJ: 'x',
+  BLACKJOKER: 'x',
+  BLACK_JOKER: 'x',
+  SMALLJOKER: 'x',
+  SMALL_JOKER: 'x',
+  'SMALL-JOKER': 'x',
+  JOKERX: 'x',
+  'JOKER-X': 'x',
+  JOKER_X: 'x',
+  'JOKER-SMALL': 'x',
+  JOKER_SMALL: 'x',
+  RJ: 'X',
+  LJ: 'X',
+  REDJOKER: 'X',
+  RED_JOKER: 'X',
+  BIGJOKER: 'X',
+  BIG_JOKER: 'X',
+  'BIG-JOKER': 'X',
+  'JOKER-BIG': 'X',
+  JOKER_BIG: 'X',
+  JOKERY: 'X',
+  'JOKER-Y': 'X',
+  JOKER_Y: 'X',
+  JOKER: 'X',
+};
+
+const normalizeRankToken = (token: string): string => {
+  if (!token) return '';
+  const trimmed = token.trim();
+  if (!trimmed) return '';
+  const upper = trimmed.toUpperCase();
+  const alias = JOKER_ALIAS_MAP[upper];
+  if (alias) return alias;
+  const lower = trimmed.toLowerCase();
+  if (lower === 'x') return 'x';
+  if (lower === 'y') return 'X';
+  if (lower === 'small') return 'x';
+  if (lower === 'big') return 'X';
+  if (upper === '10') return 'T';
+  return upper;
+};
 type SuitUsageOwner = string;
 type RankSuitUsage = Map<string, Map<string, SuitUsageOwner>>;
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
@@ -839,19 +888,39 @@ type DeckAuditReport = {
 
 const rankOf = (l: string) => {
   if (!l) return '';
-  const c0 = l[0];
-  if ('♠♥♦♣'.includes(c0)) return l.slice(1).replace(/10/i, 'T').toUpperCase();
-  if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
-  return l.replace(/10/i, 'T').toUpperCase();
+  const raw = String(l).trim();
+  if (!raw) return '';
+  if (raw === 'x') return 'x';
+  if (raw === 'X') return 'X';
+  if (raw.startsWith('🃏')) {
+    const tail = raw.slice(2).trim();
+    if (!tail) return 'X';
+    const alias = JOKER_ALIAS_MAP[tail.toUpperCase()];
+    if (alias) return alias;
+    if (/^[x]$/i.test(tail)) return tail === 'x' ? 'x' : 'X';
+    if (/^[y]$/i.test(tail)) return 'X';
+    return normalizeRankToken(tail);
+  }
+  const c0 = raw[0];
+  if ('♠♥♦♣'.includes(c0)) return normalizeRankToken(raw.slice(1));
+  const asciiSuit = ASCII_SUIT_MAP[c0];
+  if (asciiSuit) return normalizeRankToken(raw.slice(1));
+  const alias = JOKER_ALIAS_MAP[raw.toUpperCase()];
+  if (alias) return alias;
+  return normalizeRankToken(raw);
 };
 const suitOf = (l: string): SuitSym | null => {
   if (!l) return null;
   const c0 = l[0];
-  return SUITS.includes(c0 as SuitSym) ? (c0 as SuitSym) : null;
+  if (SUITS.includes(c0 as SuitSym)) return c0 as SuitSym;
+  const ascii = ASCII_SUIT_MAP[c0];
+  return ascii ?? null;
 };
 const suitKeyForLabel = (label: string): string | null => {
   if (!label) return null;
   if (label.startsWith('🃏')) return label;
+  const alias = JOKER_ALIAS_MAP[label.trim().toUpperCase()];
+  if (alias) return alias === 'x' ? '🃏X' : '🃏Y';
   if ('♠♥♦♣'.includes(label[0])) return label[0];
   const suit = suitOf(label);
   return suit ?? null;
@@ -897,12 +966,23 @@ function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l === 'x') return ['🃏X'];
   if (l === 'X') return ['🃏Y'];
+  {
+    const alias = JOKER_ALIAS_MAP[String(l).trim().toUpperCase()];
+    if (alias === 'x') return ['🃏X'];
+    if (alias === 'X') return ['🃏Y'];
+  }
   if (l.startsWith('🃏')) return [l];
   const r = rankOf(l);
   if ('♠♥♦♣'.includes(l[0])) {
     const suit = l[0] as SuitSym;
     const base = `${suit}${r}`;
     const extras = SUITS.filter(s => s !== suit).map(s => `${s}${r}`);
+    return [base, ...extras];
+  }
+  const asciiSuit = ASCII_SUIT_MAP[l[0]];
+  if (asciiSuit) {
+    const base = `${asciiSuit}${r}`;
+    const extras = SUITS.filter(s => s !== asciiSuit).map(s => `${s}${r}`);
     return [base, ...extras];
   }
   if (r === 'JOKER') return ['🃏Y'];
@@ -952,7 +1032,14 @@ function displayLabelFromRaw(label: string): string {
   if (label.startsWith('🃏')) return label;
   if (label === 'x') return '🃏X';
   if (label === 'X') return '🃏Y';
+  {
+    const alias = JOKER_ALIAS_MAP[label.trim().toUpperCase()];
+    if (alias === 'x') return '🃏X';
+    if (alias === 'X') return '🃏Y';
+  }
   if ('♠♥♦♣'.includes(label[0])) return label;
+  const asciiSuit = ASCII_SUIT_MAP[label[0]];
+  if (asciiSuit) return `${asciiSuit}${rankOf(label)}`;
   return decorateHandCycle([label])[0];
 }
 
