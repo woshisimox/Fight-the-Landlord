@@ -441,8 +441,8 @@ function traceWrap(
   const sanitizedTimeoutMs = (() => {
     const raw = Number.isFinite(turnTimeoutMs) ? Math.floor(turnTimeoutMs) : 30_000;
     const lowerBounded = Math.max(1_000, raw);
-    if (!isHuman) return lowerBounded;
-    return Math.min(30_000, lowerBounded);
+    const upperBounded = Math.min(30_000, lowerBounded);
+    return upperBounded;
   })();
   const timeoutSecondsLabel = Math.max(1, Math.round(sanitizedTimeoutMs / 1000));
 
@@ -536,7 +536,21 @@ function traceWrap(
       await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
     }
     const phase = ctx?.phase || 'play';
-    try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch{}
+    const callIssuedAt = Date.now();
+    const callExpiresAt = callIssuedAt + sanitizedTimeoutMs;
+    try {
+      writeLine(res, {
+        type:'event',
+        kind:'bot-call',
+        seat: seatIndex,
+        by: label,
+        model: spec?.model||'',
+        phase,
+        timeoutMs: sanitizedTimeoutMs,
+        issuedAt: callIssuedAt,
+        expiresAt: callExpiresAt,
+      });
+    } catch{}
 
     let result:any;
     const t0 = Date.now();

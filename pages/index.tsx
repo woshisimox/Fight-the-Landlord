@@ -798,6 +798,15 @@ type HumanPrompt = {
   stale?: boolean;
 };
 
+type BotTimer = {
+  seat: number;
+  phase: string;
+  timeoutMs: number;
+  issuedAt: number;
+  expiresAt: number;
+  provider?: string;
+};
+
 function SeatTitle({ i }: { i:number }) {
   const { lang } = useI18n();
   return <span style={{ fontWeight:700 }}>{seatLabel(i, lang)}</span>;
@@ -3214,6 +3223,21 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     return items;
   }, [humanHint, lang]);
 
+  const [botTimers, setBotTimers] = useState<(BotTimer | null)[]>(() => [null, null, null]);
+  const [botClockTs, setBotClockTs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const now = Date.now();
+    const hasActive = botTimers.some(timer => timer && timer.expiresAt > now);
+    if (!hasActive) return;
+    setBotClockTs(Date.now());
+    const id = window.setInterval(() => {
+      setBotClockTs(Date.now());
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [botTimers]);
+
   const [humanClockTs, setHumanClockTs] = useState(() => Date.now());
   const humanExpiresAt = humanRequest?.expiresAt ?? undefined;
   const humanExpired = useMemo(() => {
@@ -4048,6 +4072,8 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setBottomInfo({ landlord: null, cards: [], revealed: false });
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
+    setBotTimers([null, null, null]);
+    setBotClockTs(Date.now());
     const base = initialTotalsRef.current;
     setTotals([base[0], base[1], base[2]] as [number, number, number]);
     lastReasonRef.current = [null, null, null];
@@ -4524,11 +4550,43 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
                 const prefix = isHumanSeat(m.seat) ? 'Human' : 'AI';
+                const seatIdx = typeof m.seat === 'number' ? m.seat : -1;
+                if (seatIdx >= 0 && seatIdx < 3 && !isHumanSeat(seatIdx)) {
+                  const timeoutRaw = typeof m.timeoutMs === 'number' ? m.timeoutMs : Number((m as any).timeout_ms);
+                  const resolvedTimeout = Number.isFinite(timeoutRaw)
+                    ? Math.max(1_000, Math.min(30_000, Math.floor(timeoutRaw)))
+                    : 30_000;
+                  const clientIssuedAt = Date.now();
+                  const phaseLabel = typeof m.phase === 'string' ? m.phase : 'play';
+                  const providerLabel = typeof m.by === 'string' ? m.by : undefined;
+                  setBotTimers(prev => {
+                    const next = [...prev];
+                    next[seatIdx] = {
+                      seat: seatIdx,
+                      phase: phaseLabel,
+                      timeoutMs: resolvedTimeout,
+                      issuedAt: clientIssuedAt,
+                      expiresAt: clientIssuedAt + resolvedTimeout,
+                      provider: providerLabel,
+                    };
+                    return next;
+                  });
+                  setBotClockTs(clientIssuedAt);
+                }
                 nextLog = [...nextLog, `${prefix}调用｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
                 const prefix = isHumanSeat(m.seat) ? 'Human' : 'AI';
+                const seatIdx = typeof m.seat === 'number' ? m.seat : -1;
+                if (seatIdx >= 0 && seatIdx < 3) {
+                  setBotTimers(prev => {
+                    if (!prev[seatIdx]) return prev;
+                    const next = [...prev];
+                    next[seatIdx] = null;
+                    return next;
+                  });
+                }
                 const rawReason = typeof m.reason === 'string' ? m.reason : undefined;
                 const showReason = rawReason && canDisplaySeatReason(m.seat);
                 nextLog = [
@@ -5018,6 +5076,8 @@ nextTotals     = [
       setRunning(false);
       resetHumanState();
       humanTraceRef.current = '';
+      setBotTimers([null, null, null]);
+      setBotClockTs(Date.now());
       const totalsSnap = (() => {
         const value = totalsRef.current;
         if (value && Array.isArray(value) && value.length === 3) {
@@ -5044,6 +5104,8 @@ nextTotals     = [
     setRunning(false);
     resetHumanState();
     humanTraceRef.current = '';
+    setBotTimers([null, null, null]);
+    setBotClockTs(Date.now());
   };
 
   const togglePause = () => {
@@ -5204,11 +5266,37 @@ const handleAllSaveInner = () => {
             const stored = getStoredForSeat(i);
             const usingRole: 'overall'|'landlord'|'farmer' =
               landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
+            const seatIsHuman = isHumanSeat(i);
+            const timer = seatIsHuman ? null : botTimers[i];
+            let timerDisplay: ReactNode = null;
+            if (timer) {
+              const remainingMs = Math.max(0, timer.expiresAt - botClockTs);
+              const expired = remainingMs <= 0;
+              const seconds = Math.ceil(remainingMs / 1000);
+              const phaseLabel = timer.phase === 'bid'
+                ? (lang === 'en' ? 'Bidding' : '抢地主')
+                : timer.phase === 'double'
+                  ? (lang === 'en' ? 'Double' : '加倍')
+                  : (lang === 'en' ? 'Play' : '出牌');
+              const text = expired
+                ? (lang === 'en'
+                  ? 'Time expired. Waiting for auto action…'
+                  : '已超时，等待系统自动处理…')
+                : (lang === 'en'
+                  ? `Time left: ${seconds}s (${phaseLabel})`
+                  : `剩余时间：${seconds}秒（${phaseLabel}）`);
+              timerDisplay = (
+                <div style={{ fontSize:12, color: expired ? '#dc2626' : '#2563eb', marginBottom:6 }}>
+                  {text}
+                </div>
+              );
+            }
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
                   <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
                 </div>
+                {timerDisplay}
                 <div style={{ fontSize:13, color:'#374151' }}>
                   <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
                   <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
