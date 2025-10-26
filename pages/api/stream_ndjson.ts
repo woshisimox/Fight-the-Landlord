@@ -438,6 +438,14 @@ function traceWrap(
     : false;
   const sessionKey = (sessionId && sessionId.trim()) ? sessionId.trim() : '__human__';
 
+  const sanitizedTimeoutMs = (() => {
+    const raw = Number.isFinite(turnTimeoutMs) ? Math.floor(turnTimeoutMs) : 30_000;
+    const lowerBounded = Math.max(1_000, raw);
+    const upperBounded = Math.min(30_000, lowerBounded);
+    return upperBounded;
+  })();
+  const timeoutSecondsLabel = Math.max(1, Math.round(sanitizedTimeoutMs / 1000));
+
   const sanitizeCtx = (ctx:any) => {
     try { return JSON.parse(JSON.stringify(ctx)); } catch { return ctx; }
   };
@@ -493,7 +501,7 @@ function traceWrap(
   const makeTimeout = (onTimeout?: () => void, fallback?: () => BotMove | Promise<BotMove>) =>
     new Promise<BotMove>((resolve) => {
       setTimeout(() => {
-        const defaultPayload: BotMove = { move: 'pass', reason: `timeout@${Math.round(turnTimeoutMs / 1000)}s` };
+        const defaultPayload: BotMove = { move: 'pass', reason: `timeout@${timeoutSecondsLabel}s` };
         try { onTimeout?.(); } catch {}
         if (typeof fallback !== 'function') {
           resolve(defaultPayload);
@@ -520,7 +528,7 @@ function traceWrap(
         } catch (err: any) {
           resolve({ move: 'pass', reason: `timeout-error:${err?.message || String(err)}` });
         }
-      }, Math.max(1000, turnTimeoutMs));
+      }, sanitizedTimeoutMs);
     });
 
   const wrapped = async (ctx:any) => {
@@ -528,7 +536,21 @@ function traceWrap(
       await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
     }
     const phase = ctx?.phase || 'play';
-    try { writeLine(res, { type:'event', kind:'bot-call', seat: seatIndex, by: label, model: spec?.model||'', phase }); } catch{}
+    const callIssuedAt = Date.now();
+    const callExpiresAt = callIssuedAt + sanitizedTimeoutMs;
+    try {
+      writeLine(res, {
+        type:'event',
+        kind:'bot-call',
+        seat: seatIndex,
+        by: label,
+        model: spec?.model||'',
+        phase,
+        timeoutMs: sanitizedTimeoutMs,
+        issuedAt: callIssuedAt,
+        expiresAt: callExpiresAt,
+      });
+    } catch{}
 
     let result:any;
     const t0 = Date.now();
@@ -570,6 +592,8 @@ function traceWrap(
             (err) => reject(err),
           );
         });
+        const issuedAt = Date.now();
+        const expiresAt = issuedAt + sanitizedTimeoutMs;
         try {
           writeLine(res, {
             type: 'human-request',
@@ -578,10 +602,12 @@ function traceWrap(
             requestId,
             phase,
             ctx: payloadCtx,
-            timeoutMs: turnTimeoutMs,
+            timeoutMs: sanitizedTimeoutMs,
             delayMs: startDelayMs,
             sessionId: sessionKey,
             hint: hintPayload || undefined,
+            issuedAt,
+            expiresAt,
           });
         } catch {}
         const timeout = makeTimeout(
