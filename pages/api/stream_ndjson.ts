@@ -1,6 +1,15 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AllySupport, EndgameRush } from '../../lib/doudizhu/engine';
+import {
+  runOneGame,
+  GreedyMax,
+  GreedyMin,
+  RandomLegal,
+  AllySupport,
+  EndgameRush,
+  generateMoves,
+  classify,
+} from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -15,7 +24,7 @@ import {
   expireHumanRequest,
   resetSession as resetHumanSession,
 } from '../../lib/humanStore';
-import { generateMoves } from '../../lib/doudizhu/engine';
+import type { BotMove, Combo, Four2Policy } from '../../lib/doudizhu/engine';
 
 // ---- stable hash for ruleId ----
 function stableHash(s: string): string { let h=5381; for (let i=0;i<s.length;i++){ h=((h<<5)+h) ^ s.charCodeAt(i); } return 'h'+((h>>>0).toString(16).padStart(8,'0')); }
@@ -89,6 +98,111 @@ const __longestPairChain=(cs:string[])=>{
   const rs=Array.from(cnt.entries()).filter(([r,n])=>n>=2&&r!=='2'&&r!=='x'&&r!=='X').map(([r])=>r).sort((a,b)=>(__POS[a]??-1)-(__POS[b]??-1));
   let best=0,i=0; while(i<rs.length){ let j=i; while(j+1<rs.length && (__POS[rs[j+1]]??-1)===(__POS[rs[j]]??-2)+1) j++; best=Math.max(best,j-i+1); i=j+1; } return best;
 };
+
+const __TYPE_PRIORITY: Record<string, number> = {
+  single: 0,
+  pair: 1,
+  triple: 2,
+  triple_one: 3,
+  triple_pair: 4,
+  straight: 5,
+  pair_seq: 6,
+  plane: 7,
+  plane_single: 8,
+  plane_pair: 9,
+  four_two_singles: 10,
+  four_two_pairs: 11,
+  bomb: 12,
+  rocket: 13,
+};
+
+function __cardValue(label: string): number {
+  const rk = __rank(label);
+  return __POSALL[rk] ?? -1;
+}
+
+function __lowestSingle(hand: string[]): string | undefined {
+  if (!Array.isArray(hand) || hand.length === 0) return undefined;
+  const sorted = hand.slice().sort((a, b) => {
+    const va = __cardValue(a);
+    const vb = __cardValue(b);
+    if (va !== vb) return va - vb;
+    return a.localeCompare(b);
+  });
+  return sorted[0];
+}
+
+function buildAutoTimeoutMove(ctx: any): BotMove {
+  const policy = ((ctx?.policy?.four2) ?? 'both') as Four2Policy;
+  const hand: string[] = Array.isArray(ctx?.hands) ? ctx.hands.slice() : [];
+  const require = (ctx?.require ?? null) as Combo | null;
+  const canPass = ctx?.canPass !== false;
+
+  if (!hand.length) {
+    return { move: 'pass', reason: 'auto:timeout-empty' };
+  }
+
+  if (require) {
+    const legal = generateMoves(hand, require, policy);
+    if (!legal.length) {
+      if (canPass) return { move: 'pass', reason: 'auto:timeout-pass' };
+      const fallback = __lowestSingle(hand);
+      return fallback ? { move: 'play', cards: [fallback], reason: 'auto:timeout-force' } : { move: 'pass', reason: 'auto:timeout-empty' };
+    }
+
+    const scored = legal.map((cards) => {
+      const info = classify(cards, policy) || undefined;
+      let score = 0;
+      if (!info) {
+        score = 10_000;
+      } else {
+        if (require.type && info.type !== require.type) {
+          score += 500;
+        }
+        if (typeof require.len === 'number') {
+          const targetLen = require.len;
+          const actualLen = typeof info.len === 'number' ? info.len : targetLen;
+          if (info.type === require.type) {
+            score += Math.abs(actualLen - targetLen) * 40;
+          } else {
+            score += 200;
+          }
+        }
+        if (info.type === 'bomb' || info.type === 'rocket') {
+          score += 1000;
+        }
+        score += info.rank;
+        score += cards.length * 0.01;
+      }
+      return { cards, info, score };
+    });
+
+    scored.sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score;
+      const at = a.info?.type ?? '';
+      const bt = b.info?.type ?? '';
+      if (at !== bt) return (__TYPE_PRIORITY[at] ?? 99) - (__TYPE_PRIORITY[bt] ?? 99);
+      const ar = a.info?.rank ?? 999;
+      const br = b.info?.rank ?? 999;
+      if (ar !== br) return ar - br;
+      return a.cards.join('').localeCompare(b.cards.join(''));
+    });
+
+    const pick = scored[0]?.cards;
+    if (pick && pick.length) {
+      return { move: 'play', cards: pick, reason: 'auto:timeout-play' };
+    }
+  } else {
+    const lowest = __lowestSingle(hand);
+    if (lowest) {
+      return { move: 'play', cards: [lowest], reason: 'auto:timeout-lead' };
+    }
+  }
+
+  if (canPass) return { move: 'pass', reason: 'auto:timeout-pass' };
+  const fallback = __lowestSingle(hand);
+  return fallback ? { move: 'play', cards: [fallback], reason: 'auto:timeout-force' } : { move: 'pass', reason: 'auto:timeout-empty' };
+}
 function unifiedScore(ctx:any, mv:string[]): number {
   if (!Array.isArray(mv) || mv.length===0) return -999;
   const BASE:Record<string,number> = Object.fromEntries(__ORDER.map(r=>[r,(r==='x'||r==='X')?1:4])) as any;
@@ -376,12 +490,38 @@ function traceWrap(
     return null;
   };
 
-  const makeTimeout = (onTimeout?: () => void) => new Promise((resolve) => {
-    setTimeout(() => {
-      try { onTimeout?.(); } catch {}
-      resolve({ move:'pass', reason:`timeout@${Math.round(turnTimeoutMs/1000)}s` });
-    }, Math.max(1000, turnTimeoutMs));
-  });
+  const makeTimeout = (onTimeout?: () => void, fallback?: () => BotMove | Promise<BotMove>) =>
+    new Promise<BotMove>((resolve) => {
+      setTimeout(() => {
+        const defaultPayload: BotMove = { move: 'pass', reason: `timeout@${Math.round(turnTimeoutMs / 1000)}s` };
+        try { onTimeout?.(); } catch {}
+        if (typeof fallback !== 'function') {
+          resolve(defaultPayload);
+          return;
+        }
+        try {
+          const alt = fallback();
+          if (alt && typeof (alt as any).then === 'function') {
+            (alt as Promise<BotMove>)
+              .then((value) => {
+                if (value) resolve(value);
+                else resolve(defaultPayload);
+              })
+              .catch((err: any) => {
+                resolve({ move: 'pass', reason: `timeout-error:${err?.message || String(err)}` });
+              });
+            return;
+          }
+          if (alt) {
+            resolve(alt as BotMove);
+          } else {
+            resolve(defaultPayload);
+          }
+        } catch (err: any) {
+          resolve({ move: 'pass', reason: `timeout-error:${err?.message || String(err)}` });
+        }
+      }, Math.max(1000, turnTimeoutMs));
+    });
 
   const wrapped = async (ctx:any) => {
     if (startDelayMs && startDelayMs>0) {
@@ -444,9 +584,12 @@ function traceWrap(
             hint: hintPayload || undefined,
           });
         } catch {}
-        const timeout = makeTimeout(() => {
-          expireHumanRequest(sessionKey, requestId, new Error('timeout'));
-        });
+        const timeout = makeTimeout(
+          () => {
+            expireHumanRequest(sessionKey, requestId, new Error('timeout'));
+          },
+          () => buildAutoTimeoutMove(ctxWithSeen),
+        );
         try {
           result = await Promise.race([humanPromise, timeout]);
         } catch (err:any) {
