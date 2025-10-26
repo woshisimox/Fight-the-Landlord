@@ -1308,7 +1308,7 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
     opacity = dimmed ? 0.65 : 1;
     inner = (
       <>
-        <span style={{ fontSize: dims.suitSize, lineHeight: 1 }}>{displaySuit}</span>
+        <span style={{ fontSize: dims.suitSize, lineHeight: 1, fontVariantEmoji: 'text' }}>{displaySuit}</span>
         <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{displayRank}</span>
       </>
     );
