@@ -775,6 +775,8 @@ type HumanHint = {
   reason?: string;
   label?: string;
   by?: string;
+  valid?: boolean;
+  missing?: string[];
 };
 
 type HumanPrompt = {
@@ -783,12 +785,26 @@ type HumanPrompt = {
   phase: string;
   ctx: any;
   timeoutMs?: number;
+  totalTimeoutMs?: number;
+  latencyMs?: number;
+  remainingMs?: number;
   delayMs?: number;
   by?: string;
   hint?: HumanHint;
   issuedAt: number;
   expiresAt?: number;
+  serverIssuedAt?: number;
+  serverExpiresAt?: number;
   stale?: boolean;
+};
+
+type BotTimer = {
+  seat: number;
+  phase: string;
+  timeoutMs: number;
+  issuedAt: number;
+  expiresAt: number;
+  provider?: string;
 };
 
 function SeatTitle({ i }: { i:number }) {
@@ -799,6 +815,57 @@ function SeatTitle({ i }: { i:number }) {
 
 type SuitSym = '♠'|'♥'|'♦'|'♣'|'🃏';
 const SUITS: SuitSym[] = ['♠','♥','♦','♣'];
+const ASCII_SUIT_MAP: Record<string, SuitSym> = {
+  S: '♠', s: '♠',
+  H: '♥', h: '♥',
+  D: '♦', d: '♦',
+  C: '♣', c: '♣',
+};
+const JOKER_ALIAS_MAP: Record<string, 'x' | 'X'> = {
+  BJ: 'x',
+  SJ: 'x',
+  BLACKJOKER: 'x',
+  BLACK_JOKER: 'x',
+  SMALLJOKER: 'x',
+  SMALL_JOKER: 'x',
+  'SMALL-JOKER': 'x',
+  JOKERX: 'x',
+  'JOKER-X': 'x',
+  JOKER_X: 'x',
+  'JOKER-SMALL': 'x',
+  JOKER_SMALL: 'x',
+  RJ: 'X',
+  LJ: 'X',
+  REDJOKER: 'X',
+  RED_JOKER: 'X',
+  BIGJOKER: 'X',
+  BIG_JOKER: 'X',
+  'BIG-JOKER': 'X',
+  'JOKER-BIG': 'X',
+  JOKER_BIG: 'X',
+  JOKERY: 'X',
+  'JOKER-Y': 'X',
+  JOKER_Y: 'X',
+  JOKER: 'X',
+};
+
+const stripVariantSelectors = (value: string): string => value.replace(/[\u200d\ufe0e\ufe0f]/g, '');
+
+const normalizeRankToken = (token: string): string => {
+  if (!token) return '';
+  const trimmed = stripVariantSelectors(token.trim());
+  if (!trimmed) return '';
+  const upper = trimmed.toUpperCase();
+  const alias = JOKER_ALIAS_MAP[upper];
+  if (alias) return alias;
+  const lower = trimmed.toLowerCase();
+  if (lower === 'x') return 'x';
+  if (lower === 'y') return 'X';
+  if (lower === 'small') return 'x';
+  if (lower === 'big') return 'X';
+  if (upper === '10') return 'T';
+  return upper;
+};
 type SuitUsageOwner = string;
 type RankSuitUsage = Map<string, Map<string, SuitUsageOwner>>;
 const seatName = (i:number)=>['甲','乙','丙'][i] || String(i);
@@ -808,22 +875,55 @@ type BottomInfo = {
   revealed: boolean;
 };
 
+type DeckOwner = { type: 'seat'; seat: number } | { type: 'bottom'; index: number };
+type DeckDuplicate = { key: string; owners: DeckOwner[]; count: number };
+type DeckAuditReport = {
+  total: number;
+  expectedTotal: number;
+  perSeat: number[];
+  bottom: number;
+  duplicates: DeckDuplicate[];
+  missing: string[];
+  fingerprint: string;
+  timestamp: number;
+};
+
 const rankOf = (l: string) => {
   if (!l) return '';
-  const c0 = l[0];
-  if ('♠♥♦♣'.includes(c0)) return l.slice(1).replace(/10/i, 'T').toUpperCase();
-  if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
-  return l.replace(/10/i, 'T').toUpperCase();
+  const raw = stripVariantSelectors(String(l).trim());
+  if (!raw) return '';
+  if (raw === 'x') return 'x';
+  if (raw === 'X') return 'X';
+  if (raw.startsWith('🃏')) {
+    const tail = raw.slice(2).trim();
+    if (!tail) return 'X';
+    const alias = JOKER_ALIAS_MAP[tail.toUpperCase()];
+    if (alias) return alias;
+    if (/^[x]$/i.test(tail)) return tail === 'x' ? 'x' : 'X';
+    if (/^[y]$/i.test(tail)) return 'X';
+    return normalizeRankToken(tail);
+  }
+  const c0 = raw[0];
+  if ('♠♥♦♣'.includes(c0)) return normalizeRankToken(raw.slice(1));
+  const asciiSuit = ASCII_SUIT_MAP[c0];
+  if (asciiSuit) return normalizeRankToken(raw.slice(1));
+  const alias = JOKER_ALIAS_MAP[raw.toUpperCase()];
+  if (alias) return alias;
+  return normalizeRankToken(raw);
 };
 const suitOf = (l: string): SuitSym | null => {
   if (!l) return null;
-  const c0 = l[0];
-  return SUITS.includes(c0 as SuitSym) ? (c0 as SuitSym) : null;
+  const cleaned = stripVariantSelectors(l);
+  const c0 = cleaned[0];
+  if (SUITS.includes(c0 as SuitSym)) return c0 as SuitSym;
+  const ascii = ASCII_SUIT_MAP[c0];
+  return ascii ?? null;
 };
 const suitKeyForLabel = (label: string): string | null => {
   if (!label) return null;
   if (label.startsWith('🃏')) return label;
-  if ('♠♥♦♣'.includes(label[0])) return label[0];
+  const alias = JOKER_ALIAS_MAP[stripVariantSelectors(label).trim().toUpperCase()];
+  if (alias) return alias === 'x' ? '🃏X' : '🃏Y';
   const suit = suitOf(label);
   return suit ?? null;
 };
@@ -868,12 +968,24 @@ function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l === 'x') return ['🃏X'];
   if (l === 'X') return ['🃏Y'];
-  if (l.startsWith('🃏')) return [l];
-  const r = rankOf(l);
-  if ('♠♥♦♣'.includes(l[0])) {
-    const suit = l[0] as SuitSym;
+  const cleaned = stripVariantSelectors(String(l));
+  {
+    const alias = JOKER_ALIAS_MAP[cleaned.trim().toUpperCase()];
+    if (alias === 'x') return ['🃏X'];
+    if (alias === 'X') return ['🃏Y'];
+  }
+  if (cleaned.startsWith('🃏')) return [cleaned];
+  const r = rankOf(cleaned);
+  if ('♠♥♦♣'.includes(cleaned[0])) {
+    const suit = cleaned[0] as SuitSym;
     const base = `${suit}${r}`;
     const extras = SUITS.filter(s => s !== suit).map(s => `${s}${r}`);
+    return [base, ...extras];
+  }
+  const asciiSuit = ASCII_SUIT_MAP[cleaned[0]];
+  if (asciiSuit) {
+    const base = `${asciiSuit}${r}`;
+    const extras = SUITS.filter(s => s !== asciiSuit).map(s => `${s}${r}`);
     return [base, ...extras];
   }
   if (r === 'JOKER') return ['🃏Y'];
@@ -885,10 +997,11 @@ function decorateHandCycle(raw: string[]): string[] {
     if (!l) return l;
     if (l === 'x') return '🃏X';
     if (l === 'X') return '🃏Y';
-    if (l.startsWith('🃏')) return l;
-    if ('♠♥♦♣'.includes(l[0])) return l;
+    const cleaned = stripVariantSelectors(l);
+    if (cleaned.startsWith('🃏')) return cleaned;
+    if ('♠♥♦♣'.includes(cleaned[0])) return `${cleaned[0]}${rankOf(cleaned)}`;
     const suit = SUITS[idx % SUITS.length]; idx++;
-    return `${suit}${rankOf(l)}`;
+    return `${suit}${rankOf(cleaned)}`;
   });
 }
 
@@ -920,10 +1033,18 @@ function sortDisplayHand(cards: string[]): string[] {
 
 function displayLabelFromRaw(label: string): string {
   if (!label) return label;
-  if (label.startsWith('🃏')) return label;
+  if (label.startsWith('🃏')) return `🃏${rankOf(label) || label.slice(2)}`;
   if (label === 'x') return '🃏X';
   if (label === 'X') return '🃏Y';
-  if ('♠♥♦♣'.includes(label[0])) return label;
+  {
+    const alias = JOKER_ALIAS_MAP[stripVariantSelectors(label).trim().toUpperCase()];
+    if (alias === 'x') return '🃏X';
+    if (alias === 'X') return '🃏Y';
+  }
+  const suit = suitOf(label);
+  if (suit) return `${suit}${rankOf(label)}`;
+  const asciiSuit = ASCII_SUIT_MAP[stripVariantSelectors(label)[0]];
+  if (asciiSuit) return `${asciiSuit}${rankOf(label)}`;
   return decorateHandCycle([label])[0];
 }
 
@@ -1051,6 +1172,86 @@ function resolveBottomDecorations(
   });
 }
 
+const RANKS_FOR_DECK: readonly string[] = ['3','4','5','6','7','8','9','T','J','Q','K','A','2'];
+const FULL_DECK_KEYS: readonly string[] = (() => {
+  const keys: string[] = [];
+  for (const suit of SUITS) {
+    for (const rank of RANKS_FOR_DECK) {
+      keys.push(`${suit}${rank}`);
+    }
+  }
+  keys.push('JOKER-SMALL', 'JOKER-BIG');
+  return keys;
+})();
+
+const canonicalDeckKey = (label: string): string => {
+  if (!label) return '';
+  if (label.startsWith('🃏')) {
+    const tail = label.slice(2).toUpperCase();
+    return tail === 'Y' ? 'JOKER-BIG' : 'JOKER-SMALL';
+  }
+  const suit = suitOf(label) ?? '?';
+  const rank = rankOf(label);
+  return `${suit}${rank}`;
+};
+
+const deckKeyDisplay = (key: string): string => {
+  if (!key) return key;
+  if (key === 'JOKER-BIG') return '🃏Y';
+  if (key === 'JOKER-SMALL') return '🃏X';
+  const suit = key[0];
+  const rank = key.slice(1);
+  const displayRank = rank === 'T' ? '10' : rank;
+  if ('♠♥♦♣'.includes(suit)) return `${suit}${displayRank}`;
+  return displayRank;
+};
+
+function computeDeckAuditSnapshot(hands: string[][], bottom: BottomInfo | null): DeckAuditReport | null {
+  if (!Array.isArray(hands) || hands.length !== 3) return null;
+  const perSeat = hands.map(hand => (Array.isArray(hand) ? hand.length : 0));
+  const bottomCards = bottom?.cards?.map(c => c.label).filter((label): label is string => !!label) ?? [];
+  const entries: { key: string; owner: DeckOwner }[] = [];
+  hands.forEach((hand, seat) => {
+    if (!Array.isArray(hand)) return;
+    hand.forEach(label => {
+      const key = canonicalDeckKey(label);
+      if (!key) return;
+      entries.push({ key, owner: { type: 'seat', seat } });
+    });
+  });
+  bottomCards.forEach((label, index) => {
+    const key = canonicalDeckKey(label);
+    if (!key) return;
+    entries.push({ key, owner: { type: 'bottom', index } });
+  });
+  if (!entries.length) return null;
+  const seen = new Map<string, DeckOwner[]>();
+  for (const entry of entries) {
+    if (!seen.has(entry.key)) seen.set(entry.key, []);
+    seen.get(entry.key)!.push(entry.owner);
+  }
+  const duplicates = [...seen.entries()]
+    .filter(([, owners]) => owners.length > 1)
+    .map(([key, owners]) => ({ key, owners, count: owners.length }));
+  const expectedTotal = FULL_DECK_KEYS.length;
+  const total = entries.length;
+  const missing = FULL_DECK_KEYS.filter(key => !seen.has(key));
+  const fingerprint = entries
+    .map(entry => `${entry.key}@${entry.owner.type === 'seat' ? `s${entry.owner.seat}` : `b${entry.owner.index}`}`)
+    .sort()
+    .join('|');
+  return {
+    total,
+    expectedTotal,
+    perSeat,
+    bottom: bottomCards.length,
+    duplicates,
+    missing,
+    fingerprint,
+    timestamp: Date.now(),
+  };
+}
+
 type CardProps = {
   label: string;
   dimmed?: boolean;
@@ -1079,14 +1280,20 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
     color = '#f9fafb';
     inner = <span style={{ fontSize: dims.backSize, lineHeight: 1 }}>🂠</span>;
   } else {
-    const suit = label.startsWith('🃏') ? '🃏' : label.charAt(0);
+    const normalized = stripVariantSelectors(String(label ?? ''));
+    const baseLabel = normalized || String(label ?? '');
+    const isJoker = baseLabel.startsWith('🃏');
+    const suit = isJoker ? '🃏' : (suitOf(baseLabel) ?? (baseLabel.charAt(0) || ''));
+    const rawRank = isJoker ? baseLabel.slice(2) : baseLabel.slice(suit ? 1 : 0);
+    const computedRank = rankOf(baseLabel);
+    const rankToken = rawRank || computedRank || '';
     const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
-    const rank = label.startsWith('🃏') ? (label.slice(2) || '') : label.slice(1);
-    const rankColor = suit === '🃏' ? (rank === 'Y' ? '#d11' : '#16a34a') : undefined;
+    const rankColor = suit === '🃏' ? (rankToken === 'Y' ? '#d11' : '#16a34a') : undefined;
     const suitColor = dimmed ? '#9ca3af' : baseColor;
     const rankStyle = dimmed
       ? { color: '#9ca3af' }
       : (rankColor ? { color: rankColor } : {});
+    const displayRank = rankToken === 'T' ? '10' : rankToken;
     background = selected ? '#dbeafe' : (dimmed ? '#f3f4f6' : '#fff');
     borderColor = selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd');
     color = suitColor;
@@ -1094,7 +1301,7 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
     inner = (
       <>
         <span style={{ fontSize: dims.suitSize, lineHeight: 1 }}>{suit}</span>
-        <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{rank === 'T' ? '10' : rank}</span>
+        <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{displayRank}</span>
       </>
     );
   }
@@ -1174,7 +1381,7 @@ function Hand({ cards, interactive = false, selectedIndices, onToggle, disabled 
     </div>
   );
 }
-function PlayRow({ seat, move, cards, reason }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string }) {
+function PlayRow({ seat, move, cards, reason, showReason = true }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string; showReason?:boolean }) {
   const { t, lang } = useI18n();
 
   return (
@@ -1184,7 +1391,7 @@ function PlayRow({ seat, move, cards, reason }:{ seat:number; move:'play'|'pass'
       <div style={{ flex:1 }}>
         {move === 'pass' ? <span style={{ opacity:0.6 }}>过</span> : <Hand cards={cards || []} />}
       </div>
-      {reason && <div style={{ width:260, fontSize:12, color:'#666' }}>{reason}</div>}
+      {showReason && reason && <div style={{ width:260, fontSize:12, color:'#666' }}>{reason}</div>}
     </div>
   );
 }
@@ -3054,6 +3261,9 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const [delta, setDelta] = useState<[number,number,number] | null>(null);
   const [bottomInfo, setBottomInfo] = useState<BottomInfo>({ landlord: null, cards: [], revealed: false });
   const [log, setLog] = useState<string[]>([]);
+  const [deckAudit, setDeckAudit] = useState<DeckAuditReport | null>(null);
+  const deckAuditRef = useRef<DeckAuditReport | null>(null);
+  useEffect(() => { deckAuditRef.current = deckAudit; }, [deckAudit]);
   const humanTraceRef = useRef<string>('');
   const [humanRequest, setHumanRequest] = useState<HumanPrompt | null>(null);
   const [humanSelectedIdx, setHumanSelectedIdx] = useState<number[]>([]);
@@ -3064,6 +3274,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const humanHintDecorated = useMemo(() => {
     if (!humanRequest || humanRequest.phase !== 'play') return [] as string[];
     if (!humanHint || humanHint.move !== 'play' || !Array.isArray(humanHint.cards)) return [] as string[];
+    if (humanHint.valid === false) return [] as string[];
     const seat = humanRequest.seat;
     if (seat == null || seat < 0 || seat >= hands.length) return [] as string[];
     const seatHand = hands[seat] || [];
@@ -3079,13 +3290,11 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
           break;
         }
       }
-      if (chosenIdx >= 0) {
-        used.add(chosenIdx);
-        out.push(seatHand[chosenIdx]);
-      } else {
-        const fallback = options[0] ?? '';
-        out.push(displayLabelFromRaw(fallback));
+      if (chosenIdx < 0) {
+        return [] as string[];
       }
+      used.add(chosenIdx);
+      out.push(seatHand[chosenIdx]);
     }
     return out;
   }, [humanRequest, humanHint, hands]);
@@ -3101,8 +3310,31 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       items.push(lang === 'en' ? `Pattern: ${humanHint.label}` : `牌型：${humanHint.label}`);
     }
     if (humanHint.reason) items.push(humanHint.reason);
+    if (humanHint.valid === false) {
+      items.push(lang === 'en'
+        ? 'Warning: suggested cards were not found in the hand.'
+        : '警告：提示中包含未在手牌中的牌。');
+      if (humanHint.missing && humanHint.missing.length) {
+        items.push((lang === 'en' ? 'Missing: ' : '缺失：') + humanHint.missing.join(lang === 'en' ? ', ' : '、'));
+      }
+    }
     return items;
   }, [humanHint, lang]);
+
+  const [botTimers, setBotTimers] = useState<(BotTimer | null)[]>(() => [null, null, null]);
+  const [botClockTs, setBotClockTs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const now = Date.now();
+    const hasActive = botTimers.some(timer => timer && timer.expiresAt > now);
+    if (!hasActive) return;
+    setBotClockTs(Date.now());
+    const id = window.setInterval(() => {
+      setBotClockTs(Date.now());
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [botTimers]);
 
   const [humanClockTs, setHumanClockTs] = useState(() => Date.now());
   const humanExpiresAt = humanRequest?.expiresAt ?? undefined;
@@ -3122,6 +3354,17 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     if (humanMsRemaining == null) return null;
     return Math.max(0, Math.ceil(humanMsRemaining / 1000));
   }, [humanMsRemaining]);
+
+  const humanLagDisplay = useMemo(() => {
+    if (!humanRequest) return null;
+    const lag = humanRequest.latencyMs;
+    if (!Number.isFinite(lag) || lag == null) return null;
+    if (lag <= 150) return null;
+    const seconds = (lag / 1000).toFixed(lag >= 950 ? 0 : 1);
+    return lang === 'en'
+      ? `Upstream delay observed ≈${seconds}s`
+      : `检测到约 ${seconds} 秒的传输延迟`;
+  }, [humanRequest, lang]);
 
   useEffect(() => {
     if (!humanRequest) return;
@@ -3163,6 +3406,12 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   }, [props.seats]);
 
   const isHumanSeat = useCallback((seat: number) => props.seats?.[seat] === 'human', [props.seats]);
+
+  const canDisplaySeatReason = useCallback((seat: number | null | undefined) => {
+    if (!hasHumanSeat) return true;
+    if (typeof seat !== 'number') return false;
+    return isHumanSeat(seat);
+  }, [hasHumanSeat, isHumanSeat]);
 
   const submitHumanAction = useCallback(async (payload: any) => {
     if (!humanRequest || humanSubmitting) return;
@@ -3266,6 +3515,12 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     if (!humanRequest || humanRequest.phase !== 'play') return;
     const hint = humanRequest.hint;
     if (!hint || hint.move !== 'play' || !Array.isArray(hint.cards)) return;
+    if (hint.valid === false) {
+      setHumanError(lang === 'en'
+        ? 'Suggestion contains cards that are not in your hand. Please pick manually.'
+        : '提示包含未在手牌中的牌，请手动选择出牌。');
+      return;
+    }
     const seat = humanRequest.seat;
     if (seat == null || seat < 0 || seat >= hands.length) return;
     const seatHand = hands[seat] || [];
@@ -3281,16 +3536,20 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
           break;
         }
       }
-      if (chosenIdx >= 0) {
-        used.add(chosenIdx);
-        indices.push(chosenIdx);
+      if (chosenIdx < 0) {
+        setHumanError(lang === 'en'
+          ? 'Suggestion could not be applied. Please choose cards manually.'
+          : '无法应用建议，请手动选择要出的牌。');
+        return;
       }
+      used.add(chosenIdx);
+      indices.push(chosenIdx);
     }
     if (indices.length > 0) {
       setHumanSelectedIdx(indices.sort((a, b) => a - b));
       setHumanError(null);
     }
-  }, [humanRequest, hands, setHumanError, setHumanSelectedIdx]);
+  }, [humanRequest, hands, setHumanError, setHumanSelectedIdx, lang]);
 
   const currentHumanSeat = humanRequest?.seat ?? null;
   const humanPhase = humanRequest?.phase ?? 'play';
@@ -3316,7 +3575,10 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     ? (((humanRequest?.ctx as any)?.mustPass === true) || (humanLegalCount === 0 && humanCanPass)) && humanCanPass
     : false;
   const humanSelectedCount = humanSelectedIdx.length;
-  const canAdoptHint = humanPhase === 'play' && humanHint?.move === 'play' && humanHintDecorated.length > 0;
+  const canAdoptHint = humanPhase === 'play'
+    && humanHint?.move === 'play'
+    && humanHint?.valid !== false
+    && humanHintDecorated.length > 0;
   const initialTotals = useMemo(
     () => sanitizeTotalsArray(props.initialTotals, props.startScore || 0),
     [props.initialTotals, props.startScore],
@@ -3908,6 +4170,8 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setBottomInfo({ landlord: null, cards: [], revealed: false });
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
+    setBotTimers([null, null, null]);
+    setBotClockTs(Date.now());
     const base = initialTotalsRef.current;
     setTotals([base[0], base[1], base[2]] as [number, number, number]);
     lastReasonRef.current = [null, null, null];
@@ -4056,6 +4320,33 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
           let nextAggStats = aggStatsRef.current;
           let nextAggCount = aggCountRef.current;
 
+          let nextDeckAudit = deckAuditRef.current;
+          let deckAuditChanged = false;
+
+          const updateDeckAuditSnapshot = (handsSnapshot: string[][], bottomSnapshot: BottomInfo) => {
+            const auditCandidate = computeDeckAuditSnapshot(handsSnapshot, bottomSnapshot);
+            if (!auditCandidate) return;
+            const prevFingerprint = nextDeckAudit?.fingerprint;
+            if (!nextDeckAudit || prevFingerprint !== auditCandidate.fingerprint) {
+              nextDeckAudit = auditCandidate;
+              deckAuditChanged = true;
+              const ownerLabel = (owner: DeckOwner) => owner.type === 'seat'
+                ? seatName(owner.seat)
+                : '底牌';
+              const duplicateText = auditCandidate.duplicates.length
+                ? auditCandidate.duplicates
+                    .map(dup => `${deckKeyDisplay(dup.key)}@${dup.owners.map(ownerLabel).join('+')}`)
+                    .join('；')
+                : '无';
+              const missingText = auditCandidate.missing.length
+                ? auditCandidate.missing.map(deckKeyDisplay).join('、')
+                : '无';
+              nextLog = [
+                ...nextLog,
+                `【牌局校验】总数=${auditCandidate.total}/${auditCandidate.expectedTotal}｜重复=${duplicateText}｜缺失=${missingText}`,
+              ];
+            }
+          };
 
           let nextScores = scoreSeriesRef.current.map(x => [...x]);
           let nextBreaks = scoreBreaksRef.current.slice();
@@ -4070,7 +4361,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               revealed: !!cur?.revealed,
             } as BottomInfo;
           })();
-for (const raw of batch) {
+          for (const raw of batch) {
             let m: any = raw;
             // Remap engine->UI indices when startShift != 0
             if (startShift) {
@@ -4127,6 +4418,10 @@ for (const raw of batch) {
                 nextHands = [[], [], []] as any;
                 nextLandlord = null;
                 nextBottom = { landlord: null, cards: [], revealed: false };
+                if (nextDeckAudit) {
+                  nextDeckAudit = null;
+                  deckAuditChanged = true;
+                }
                 resetHumanState();
                 suitUsageRef.current = new Map();
 
@@ -4173,6 +4468,7 @@ for (const raw of batch) {
                     cards: decoratedBottom.map(label => ({ label, used: false })),
                     revealed: false,
                   };
+                  updateDeckAuditSnapshot(nextHands as string[][], nextBottom);
                   {
                     const n0 = Math.max(nextScores[0]?.length||0, nextScores[1]?.length||0, nextScores[2]?.length||0);
                     const lordVal = (lord ?? -1) as number | -1;
@@ -4236,6 +4532,7 @@ for (const raw of batch) {
                       cards: decoratedBottom0.map(label => ({ label, used: false })),
                       revealed: false,
                     };
+                    updateDeckAuditSnapshot(nextHands as string[][], nextBottom);
                   }
                   // 不重置倍数/不清空已产生的出牌，避免覆盖后续事件
                   nextLog = [...nextLog, `发牌完成（推断），${lord2 != null ? seatName(lord2) : '?' }为地主`];
@@ -4281,22 +4578,63 @@ for (const raw of batch) {
                     const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
                     hint = { move, cards, score, reason, label, by: byHint };
                   }
-                  const issuedAt = Date.now();
-                  const timeoutMs = typeof m.timeoutMs === 'number' ? Math.max(0, m.timeoutMs) : undefined;
-                  const expiresAt = typeof timeoutMs === 'number' && timeoutMs > 0 ? issuedAt + timeoutMs : undefined;
+                  if (hint && hint.move === 'play' && Array.isArray(hint.cards)) {
+                    const seatHandSnapshot = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : [];
+                    if (seatHandSnapshot.length > 0) {
+                      const usedLocal = new Set<number>();
+                      const missingRaw: string[] = [];
+                      for (const cardLabel of hint.cards) {
+                        const options = candDecorations(String(cardLabel));
+                        const matchIdx = seatHandSnapshot.findIndex((card, idx) => !usedLocal.has(idx) && options.includes(card));
+                        if (matchIdx >= 0) {
+                          usedLocal.add(matchIdx);
+                        } else {
+                          missingRaw.push(String(cardLabel));
+                        }
+                      }
+                      if (missingRaw.length) {
+                        const missingDisplay = missingRaw.map(label => displayLabelFromRaw(String(label)));
+                        hint = { ...hint, valid: false, missing: missingDisplay };
+                        nextLog = [...nextLog, `【Human】${seatName(seat)} 提示包含无效牌：${missingDisplay.join('、')}`];
+                      } else {
+                        hint = { ...hint, valid: true, missing: [] };
+                      }
+                    }
+                  }
+                  const timeoutRaw = typeof m.timeoutMs === 'number' ? m.timeoutMs : Number((m as any).timeout_ms);
+                  const timeoutParsed = Number.isFinite(timeoutRaw) ? Math.max(0, Math.floor(timeoutRaw)) : undefined;
+                  const effectiveTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
+                    ? timeoutParsed
+                    : 30_000;
+                  const issuedAtRaw = (m as any).issuedAt ?? (m as any).issued_at;
+                  const expiresAtRaw = (m as any).expiresAt ?? (m as any).expires_at;
+                  const issuedAtParsed = typeof issuedAtRaw === 'number' ? issuedAtRaw : Number(issuedAtRaw);
+                  const expiresAtParsed = typeof expiresAtRaw === 'number' ? expiresAtRaw : Number(expiresAtRaw);
+                  const clientIssuedAt = Date.now();
+                  const upstreamLagMs = Number.isFinite(issuedAtParsed)
+                    ? Math.max(0, clientIssuedAt - issuedAtParsed)
+                    : 0;
+                  const resolvedWindowMs = Math.max(0, effectiveTimeoutMs);
+                  const clientExpiresAt = clientIssuedAt + resolvedWindowMs;
                   setHumanRequest({
                     seat,
                     requestId,
                     phase: typeof m.phase === 'string' ? m.phase : 'play',
                     ctx: m.ctx ?? {},
-                    timeoutMs: typeof m.timeoutMs === 'number' ? m.timeoutMs : undefined,
+                    timeoutMs: resolvedWindowMs,
+                    totalTimeoutMs: resolvedWindowMs,
+                    latencyMs: upstreamLagMs,
+                    remainingMs: resolvedWindowMs,
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
                     by: typeof m.by === 'string' ? m.by : undefined,
                     hint,
-                    issuedAt,
-                    expiresAt,
-                    stale: false,
+                    issuedAt: clientIssuedAt,
+                    expiresAt: clientExpiresAt,
+                    serverIssuedAt: Number.isFinite(issuedAtParsed) ? issuedAtParsed : undefined,
+                    serverExpiresAt: Number.isFinite(expiresAtParsed) ? expiresAtParsed : undefined,
+                    stale: resolvedWindowMs <= 0,
                   });
+                  setHumanClockTs(clientIssuedAt);
                   setHumanSelectedIdx([]);
                   setHumanSubmitting(false);
                   setHumanError(null);
@@ -4310,22 +4648,56 @@ for (const raw of batch) {
               // -------- AI 过程日志 --------
               if (m.type === 'event' && m.kind === 'bot-call') {
                 const prefix = isHumanSeat(m.seat) ? 'Human' : 'AI';
+                const seatIdx = typeof m.seat === 'number' ? m.seat : -1;
+                if (seatIdx >= 0 && seatIdx < 3 && !isHumanSeat(seatIdx)) {
+                  const timeoutRaw = typeof m.timeoutMs === 'number' ? m.timeoutMs : Number((m as any).timeout_ms);
+                  const resolvedTimeout = Number.isFinite(timeoutRaw)
+                    ? Math.max(1_000, Math.min(30_000, Math.floor(timeoutRaw)))
+                    : 30_000;
+                  const clientIssuedAt = Date.now();
+                  const phaseLabel = typeof m.phase === 'string' ? m.phase : 'play';
+                  const providerLabel = typeof m.by === 'string' ? m.by : undefined;
+                  setBotTimers(prev => {
+                    const next = [...prev];
+                    next[seatIdx] = {
+                      seat: seatIdx,
+                      phase: phaseLabel,
+                      timeoutMs: resolvedTimeout,
+                      issuedAt: clientIssuedAt,
+                      expiresAt: clientIssuedAt + resolvedTimeout,
+                      provider: providerLabel,
+                    };
+                    return next;
+                  });
+                  setBotClockTs(clientIssuedAt);
+                }
                 nextLog = [...nextLog, `${prefix}调用｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
                 continue;
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
                 const prefix = isHumanSeat(m.seat) ? 'Human' : 'AI';
+                const seatIdx = typeof m.seat === 'number' ? m.seat : -1;
+                if (seatIdx >= 0 && seatIdx < 3) {
+                  setBotTimers(prev => {
+                    if (!prev[seatIdx]) return prev;
+                    const next = [...prev];
+                    next[seatIdx] = null;
+                    return next;
+                  });
+                }
+                const rawReason = typeof m.reason === 'string' ? m.reason : undefined;
+                const showReason = rawReason && canDisplaySeatReason(m.seat);
                 nextLog = [
                   ...nextLog,
                   `${prefix}完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
-                  ...(m.reason ? [`${prefix}理由｜${seatName(m.seat)}：${m.reason}`] : []),
+                  ...(showReason ? [`${prefix}理由｜${seatName(m.seat)}：${rawReason}`] : []),
                 ];
                 if (isHumanSeat(m.seat)) {
                   setHumanSubmitting(false);
                   setHumanRequest(prev => (prev && prev.seat === m.seat ? null : prev));
                   setHumanSelectedIdx([]);
                 }
-                lastReasonRef.current[m.seat] = m.reason || null;
+                lastReasonRef.current[m.seat] = rawReason || null;
                 continue;
               }
 
@@ -4429,7 +4801,7 @@ if (m.type === 'event' && m.kind === 'double-decision') {
   if (typeof m.delta === 'number' && isFinite(m.delta)) parts.push(`Δ=${m.delta.toFixed(2)}`);
   if (typeof m.dLhat === 'number' && isFinite(m.dLhat)) parts.push(`Δ̂=${m.dLhat.toFixed(2)}`);
   if (typeof m.counter === 'number' && isFinite(m.counter)) parts.push(`counter=${m.counter.toFixed(2)}`);
-  if (typeof m.reason === 'string') parts.push(`理由=${m.reason}`);
+  if (typeof m.reason === 'string' && canDisplaySeatReason(m.seat)) parts.push(`理由=${m.reason}`);
   if (m.bayes && (typeof m.bayes.landlord!=='undefined' || typeof m.bayes.farmerY!=='undefined')) {
     const l = Number(m.bayes.landlord||0), y = Number(m.bayes.farmerY||0);
     parts.push(`bayes:{L=${l},Y=${y}}`);
@@ -4529,9 +4901,10 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
 if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  const reasonForLog = reason && canDisplaySeatReason(m.seat) ? reason : undefined;
                   lastReasonRef.current[m.seat] = null;
                   nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason }];
-                  nextLog = [...nextLog, `${seatName(m.seat)} 过${reason ? `（${reason}）` : ''}`];
+                  nextLog = [...nextLog, `${seatName(m.seat)} 过${reasonForLog ? `（${reasonForLog}）` : ''}`];
                 } else {
                   const pretty: string[] = [];
                   const seat = m.seat as number;
@@ -4565,7 +4938,8 @@ if (m.type === 'event' && m.kind === 'play') {
                   registerSuitUsage(usage, ownerKey, nh[seat]);
                   suitUsageRef.current = usage;
                   nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason }];
-                  nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reason ? `（理由：${reason}）` : ''}`];
+                  const reasonForLog = reason && canDisplaySeatReason(m.seat) ? reason : undefined;
+                  nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reasonForLog ? `（理由：${reasonForLog}）` : ''}`];
                 }
                 continue;
               }
@@ -4743,6 +5117,7 @@ nextTotals     = [
           setLog(nextLog); setLandlord(nextLandlord);
           setWinner(nextWinner); setMultiplier(nextMultiplier); setBidMultiplier(nextBidMultiplier); setDelta(nextDelta);
           setAggStats(nextAggStats || null); setAggCount(nextAggCount || 0);
+          if (deckAuditChanged) setDeckAudit(nextDeckAudit ?? null);
         }
         if (pauseRef.current) await waitWhilePaused();
       }
@@ -4799,6 +5174,8 @@ nextTotals     = [
       setRunning(false);
       resetHumanState();
       humanTraceRef.current = '';
+      setBotTimers([null, null, null]);
+      setBotClockTs(Date.now());
       const totalsSnap = (() => {
         const value = totalsRef.current;
         if (value && Array.isArray(value) && value.length === 3) {
@@ -4825,6 +5202,8 @@ nextTotals     = [
     setRunning(false);
     resetHumanState();
     humanTraceRef.current = '';
+    setBotTimers([null, null, null]);
+    setBotClockTs(Date.now());
   };
 
   const togglePause = () => {
@@ -4985,11 +5364,37 @@ const handleAllSaveInner = () => {
             const stored = getStoredForSeat(i);
             const usingRole: 'overall'|'landlord'|'farmer' =
               landlord==null ? 'overall' : (landlord===i ? 'landlord' : 'farmer');
+            const seatIsHuman = isHumanSeat(i);
+            const timer = seatIsHuman ? null : botTimers[i];
+            let timerDisplay: ReactNode = null;
+            if (timer) {
+              const remainingMs = Math.max(0, timer.expiresAt - botClockTs);
+              const expired = remainingMs <= 0;
+              const seconds = Math.ceil(remainingMs / 1000);
+              const phaseLabel = timer.phase === 'bid'
+                ? (lang === 'en' ? 'Bidding' : '抢地主')
+                : timer.phase === 'double'
+                  ? (lang === 'en' ? 'Double' : '加倍')
+                  : (lang === 'en' ? 'Play' : '出牌');
+              const text = expired
+                ? (lang === 'en'
+                  ? 'Time expired. Waiting for auto action…'
+                  : '已超时，等待系统自动处理…')
+                : (lang === 'en'
+                  ? `Time left: ${seconds}s (${phaseLabel})`
+                  : `剩余时间：${seconds}秒（${phaseLabel}）`);
+              timerDisplay = (
+                <div style={{ fontSize:12, color: expired ? '#dc2626' : '#2563eb', marginBottom:6 }}>
+                  {text}
+                </div>
+              );
+            }
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
                   <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
                 </div>
+                {timerDisplay}
                 <div style={{ fontSize:13, color:'#374151' }}>
                   <div>μ：<b>{fmt2(tsArr[i].mu)}</b></div>
                   <div>σ：<b>{fmt2(tsArr[i].sigma)}</b></div>
@@ -5126,6 +5531,69 @@ const handleAllSaveInner = () => {
         </div>
       </Section>
 
+      {deckAudit && (() => {
+        const totalOk = deckAudit.total === deckAudit.expectedTotal;
+        const hasDuplicates = deckAudit.duplicates.length > 0;
+        const hasMissing = deckAudit.missing.length > 0;
+        const hasIssue = !totalOk || hasDuplicates || hasMissing;
+        const seatCounts = deckAudit.perSeat.map((count, idx) =>
+          lang === 'en'
+            ? `${seatLabel(idx, lang)}: ${count}`
+            : `${seatLabel(idx, lang)}：${count}`
+        );
+        const bottomLabel = lang === 'en' ? 'Bottom' : '底牌';
+        const ownerName = (owner: DeckOwner) => owner.type === 'seat'
+          ? seatLabel(owner.seat, lang)
+          : bottomLabel;
+        return (
+          <Section title={lang === 'en' ? 'Deck integrity check' : '牌局完整性检查'}>
+            <div style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12, color:'#374151' }}>
+              <div style={{ color: totalOk ? '#065f46' : '#b91c1c', fontWeight:600 }}>
+                {lang === 'en'
+                  ? `Total cards: ${deckAudit.total} / ${deckAudit.expectedTotal}`
+                  : `总牌数：${deckAudit.total} / ${deckAudit.expectedTotal}`}
+              </div>
+              <div>
+                {lang === 'en'
+                  ? `Initial distribution — ${seatCounts.join(' · ')} · ${bottomLabel}: ${deckAudit.bottom}`
+                  : `开局统计：${seatCounts.join(' ｜ ')} ｜ ${bottomLabel}：${deckAudit.bottom}`}
+              </div>
+              {hasDuplicates && (
+                <div style={{ color:'#b91c1c' }}>
+                  {lang === 'en' ? 'Duplicates:' : '重复牌：'}
+                  <ul style={{ margin:'4px 0 0 18px', padding:0 }}>
+                    {deckAudit.duplicates.map((dup, idx) => (
+                      <li key={`${dup.key}-${idx}`} style={{ listStyle:'disc' }}>
+                        {deckKeyDisplay(dup.key)} → {dup.owners.map(ownerName).join(lang === 'en' ? ', ' : '、')}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {hasMissing && (
+                <div style={{ color:'#b91c1c' }}>
+                  {lang === 'en'
+                    ? `Missing cards: ${deckAudit.missing.map(deckKeyDisplay).join(', ')}`
+                    : `缺失牌：${deckAudit.missing.map(deckKeyDisplay).join('、')}`}
+                </div>
+              )}
+              {!hasIssue && (
+                <div style={{ color:'#16a34a', fontWeight:600 }}>
+                  {lang === 'en'
+                    ? 'Deck verified: all 54 unique cards accounted for.'
+                    : '校验通过：54 张牌均唯一。'}
+                </div>
+              )}
+              <div style={{ fontSize:11, color:'#6b7280' }}>
+                {lang === 'en'
+                  ? `Checked at ${new Date(deckAudit.timestamp).toLocaleTimeString()}`
+                  : `校验时间：${new Date(deckAudit.timestamp).toLocaleTimeString('zh-CN')}`}
+              </div>
+            </div>
+          </Section>
+        );
+      })()}
+
       <Section title="手牌">
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8 }}>
           {[0,1,2].map(i => {
@@ -5238,6 +5706,9 @@ const handleAllSaveInner = () => {
                       : `剩余时间：${humanSecondsRemaining}秒`}
                   </div>
                 )}
+                {humanLagDisplay && (
+                  <div style={{ fontSize:12, color:'#6b7280' }}>{humanLagDisplay}</div>
+                )}
                 {humanMustPass && (
                   <div style={{ fontSize:12, color:'#dc2626' }}>
                     {lang === 'en'
@@ -5279,9 +5750,13 @@ const handleAllSaveInner = () => {
                         </div>
                       ) : (
                         <div style={{ fontSize:12, color:'#4b5563' }}>
-                          {lang === 'en'
-                            ? 'No specific combination suggested; choose any legal play.'
-                            : '暂无具体牌型建议，可根据规则自由选择。'}
+                          {humanHint.valid === false
+                            ? (lang === 'en'
+                              ? 'Suggestion ignored because cards are missing from your hand.'
+                              : '提示包含不在手牌中的牌，已忽略。')
+                            : (lang === 'en'
+                              ? 'No specific combination suggested; choose any legal play.'
+                              : '暂无具体牌型建议，可根据规则自由选择。')}
                         </div>
                       )
                     ) : (
@@ -5390,7 +5865,16 @@ const handleAllSaveInner = () => {
         <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
           {plays.length === 0
             ? <div style={{ opacity:0.6 }}>（尚无出牌）</div>
-            : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)
+            : plays.map((p, idx) => (
+              <PlayRow
+                key={idx}
+                seat={p.seat}
+                move={p.move}
+                cards={p.cards}
+                reason={p.reason}
+                showReason={canDisplaySeatReason(p.seat)}
+              />
+            ))
           }
         </div>
       </Section>
