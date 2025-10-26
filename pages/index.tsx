@@ -1174,7 +1174,7 @@ function Hand({ cards, interactive = false, selectedIndices, onToggle, disabled 
     </div>
   );
 }
-function PlayRow({ seat, move, cards, reason }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string }) {
+function PlayRow({ seat, move, cards, reason, showReason = true }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string; showReason?:boolean }) {
   const { t, lang } = useI18n();
 
   return (
@@ -1184,7 +1184,7 @@ function PlayRow({ seat, move, cards, reason }:{ seat:number; move:'play'|'pass'
       <div style={{ flex:1 }}>
         {move === 'pass' ? <span style={{ opacity:0.6 }}>过</span> : <Hand cards={cards || []} />}
       </div>
-      {reason && <div style={{ width:260, fontSize:12, color:'#666' }}>{reason}</div>}
+      {showReason && reason && <div style={{ width:260, fontSize:12, color:'#666' }}>{reason}</div>}
     </div>
   );
 }
@@ -3164,6 +3164,12 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
 
   const isHumanSeat = useCallback((seat: number) => props.seats?.[seat] === 'human', [props.seats]);
 
+  const canDisplaySeatReason = useCallback((seat: number | null | undefined) => {
+    if (!hasHumanSeat) return true;
+    if (typeof seat !== 'number') return false;
+    return isHumanSeat(seat);
+  }, [hasHumanSeat, isHumanSeat]);
+
   const submitHumanAction = useCallback(async (payload: any) => {
     if (!humanRequest || humanSubmitting) return;
     const trace = humanTraceRef.current;
@@ -4315,17 +4321,19 @@ for (const raw of batch) {
               }
               if (m.type === 'event' && m.kind === 'bot-done') {
                 const prefix = isHumanSeat(m.seat) ? 'Human' : 'AI';
+                const rawReason = typeof m.reason === 'string' ? m.reason : undefined;
+                const showReason = rawReason && canDisplaySeatReason(m.seat);
                 nextLog = [
                   ...nextLog,
                   `${prefix}完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
-                  ...(m.reason ? [`${prefix}理由｜${seatName(m.seat)}：${m.reason}`] : []),
+                  ...(showReason ? [`${prefix}理由｜${seatName(m.seat)}：${rawReason}`] : []),
                 ];
                 if (isHumanSeat(m.seat)) {
                   setHumanSubmitting(false);
                   setHumanRequest(prev => (prev && prev.seat === m.seat ? null : prev));
                   setHumanSelectedIdx([]);
                 }
-                lastReasonRef.current[m.seat] = m.reason || null;
+                lastReasonRef.current[m.seat] = rawReason || null;
                 continue;
               }
 
@@ -4429,7 +4437,7 @@ if (m.type === 'event' && m.kind === 'double-decision') {
   if (typeof m.delta === 'number' && isFinite(m.delta)) parts.push(`Δ=${m.delta.toFixed(2)}`);
   if (typeof m.dLhat === 'number' && isFinite(m.dLhat)) parts.push(`Δ̂=${m.dLhat.toFixed(2)}`);
   if (typeof m.counter === 'number' && isFinite(m.counter)) parts.push(`counter=${m.counter.toFixed(2)}`);
-  if (typeof m.reason === 'string') parts.push(`理由=${m.reason}`);
+  if (typeof m.reason === 'string' && canDisplaySeatReason(m.seat)) parts.push(`理由=${m.reason}`);
   if (m.bayes && (typeof m.bayes.landlord!=='undefined' || typeof m.bayes.farmerY!=='undefined')) {
     const l = Number(m.bayes.landlord||0), y = Number(m.bayes.farmerY||0);
     parts.push(`bayes:{L=${l},Y=${y}}`);
@@ -4529,9 +4537,10 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
 if (m.type === 'event' && m.kind === 'play') {
                 if (m.move === 'pass') {
                   const reason = (m.reason ?? lastReasonRef.current[m.seat]) || undefined;
+                  const reasonForLog = reason && canDisplaySeatReason(m.seat) ? reason : undefined;
                   lastReasonRef.current[m.seat] = null;
                   nextPlays = [...nextPlays, { seat: m.seat, move: 'pass', reason }];
-                  nextLog = [...nextLog, `${seatName(m.seat)} 过${reason ? `（${reason}）` : ''}`];
+                  nextLog = [...nextLog, `${seatName(m.seat)} 过${reasonForLog ? `（${reasonForLog}）` : ''}`];
                 } else {
                   const pretty: string[] = [];
                   const seat = m.seat as number;
@@ -4565,7 +4574,8 @@ if (m.type === 'event' && m.kind === 'play') {
                   registerSuitUsage(usage, ownerKey, nh[seat]);
                   suitUsageRef.current = usage;
                   nextPlays = [...nextPlays, { seat: m.seat, move: 'play', cards: pretty, reason }];
-                  nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reason ? `（理由：${reason}）` : ''}`];
+                  const reasonForLog = reason && canDisplaySeatReason(m.seat) ? reason : undefined;
+                  nextLog = [...nextLog, `${seatName(m.seat)} 出牌：${pretty.join(' ')}${reasonForLog ? `（理由：${reasonForLog}）` : ''}`];
                 }
                 continue;
               }
@@ -5390,7 +5400,16 @@ const handleAllSaveInner = () => {
         <div style={{ border:'1px dashed #eee', borderRadius:8, padding:'6px 8px' }}>
           {plays.length === 0
             ? <div style={{ opacity:0.6 }}>（尚无出牌）</div>
-            : plays.map((p, idx) => <PlayRow key={idx} seat={p.seat} move={p.move} cards={p.cards} reason={p.reason} />)
+            : plays.map((p, idx) => (
+              <PlayRow
+                key={idx}
+                seat={p.seat}
+                move={p.move}
+                cards={p.cards}
+                reason={p.reason}
+                showReason={canDisplaySeatReason(p.seat)}
+              />
+            ))
           }
         </div>
       </Section>
