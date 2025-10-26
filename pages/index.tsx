@@ -788,6 +788,8 @@ type HumanPrompt = {
   hint?: HumanHint;
   issuedAt: number;
   expiresAt?: number;
+  serverIssuedAt?: number;
+  serverExpiresAt?: number;
   stale?: boolean;
 };
 
@@ -4288,28 +4290,32 @@ for (const raw of batch) {
                     hint = { move, cards, score, reason, label, by: byHint };
                   }
                   const timeoutRaw = typeof m.timeoutMs === 'number' ? m.timeoutMs : Number((m as any).timeout_ms);
-                  const timeoutMs = Number.isFinite(timeoutRaw) ? Math.max(0, Math.floor(timeoutRaw)) : undefined;
+                  const timeoutParsed = Number.isFinite(timeoutRaw) ? Math.max(0, Math.floor(timeoutRaw)) : undefined;
+                  const effectiveTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
+                    ? timeoutParsed
+                    : 30_000;
                   const issuedAtRaw = (m as any).issuedAt ?? (m as any).issued_at;
                   const expiresAtRaw = (m as any).expiresAt ?? (m as any).expires_at;
                   const issuedAtParsed = typeof issuedAtRaw === 'number' ? issuedAtRaw : Number(issuedAtRaw);
                   const expiresAtParsed = typeof expiresAtRaw === 'number' ? expiresAtRaw : Number(expiresAtRaw);
-                  const issuedAt = Number.isFinite(issuedAtParsed) ? issuedAtParsed : Date.now();
-                  const expiresAt = Number.isFinite(expiresAtParsed)
-                    ? expiresAtParsed
-                    : (typeof timeoutMs === 'number' && timeoutMs > 0 ? issuedAt + timeoutMs : undefined);
+                  const clientIssuedAt = Date.now();
+                  const clientExpiresAt = clientIssuedAt + effectiveTimeoutMs;
                   setHumanRequest({
                     seat,
                     requestId,
                     phase: typeof m.phase === 'string' ? m.phase : 'play',
                     ctx: m.ctx ?? {},
-                    timeoutMs,
+                    timeoutMs: effectiveTimeoutMs,
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
                     by: typeof m.by === 'string' ? m.by : undefined,
                     hint,
-                    issuedAt,
-                    expiresAt,
+                    issuedAt: clientIssuedAt,
+                    expiresAt: clientExpiresAt,
+                    serverIssuedAt: Number.isFinite(issuedAtParsed) ? issuedAtParsed : undefined,
+                    serverExpiresAt: Number.isFinite(expiresAtParsed) ? expiresAtParsed : undefined,
                     stale: false,
                   });
+                  setHumanClockTs(clientIssuedAt);
                   setHumanSelectedIdx([]);
                   setHumanSubmitting(false);
                   setHumanError(null);
