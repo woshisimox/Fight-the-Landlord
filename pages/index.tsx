@@ -813,6 +813,11 @@ const rankOf = (l: string) => {
   if (c0 === '🃏') return (l.slice(2) || 'X').replace(/10/i, 'T').toUpperCase();
   return l.replace(/10/i, 'T').toUpperCase();
 };
+const suitOf = (l: string): SuitSym | null => {
+  if (!l) return null;
+  const c0 = l[0];
+  return SUITS.includes(c0 as SuitSym) ? (c0 as SuitSym) : null;
+};
 function candDecorations(l: string): string[] {
   if (!l) return [];
   if (l === 'x') return ['🃏X'];
@@ -880,6 +885,22 @@ function reconcileHandFromRaw(raw: string[] | undefined, prev: string[]): string
   if (!Array.isArray(raw)) return prev;
   const pool = prev.slice();
   const usedPrev = pool.map(() => false);
+  const usedByRank = new Map<string, Set<SuitSym>>();
+  const markUsed = (label: string) => {
+    const suit = suitOf(label);
+    if (!suit) return;
+    const rank = rankOf(label);
+    if (!rank) return;
+    if (!usedByRank.has(rank)) usedByRank.set(rank, new Set<SuitSym>());
+    usedByRank.get(rank)!.add(suit);
+  };
+  const canUse = (label: string) => {
+    const suit = suitOf(label);
+    if (!suit) return true;
+    const rank = rankOf(label);
+    const used = usedByRank.get(rank);
+    return !(used && used.has(suit));
+  };
   const decorated: string[] = [];
 
   for (const label of raw) {
@@ -887,7 +908,7 @@ function reconcileHandFromRaw(raw: string[] | undefined, prev: string[]): string
     let chosen: string | null = null;
 
     for (const opt of options) {
-      const idx = pool.findIndex((v, i) => !usedPrev[i] && v === opt);
+      const idx = pool.findIndex((v, i) => !usedPrev[i] && v === opt && canUse(opt));
       if (idx >= 0) {
         usedPrev[idx] = true;
         chosen = opt;
@@ -896,7 +917,12 @@ function reconcileHandFromRaw(raw: string[] | undefined, prev: string[]): string
     }
 
     if (!chosen) {
-      const fallback = options.find(opt => !decorated.includes(opt));
+      const fallback = options.find(opt => !decorated.includes(opt) && canUse(opt));
+      if (fallback) chosen = fallback;
+    }
+
+    if (!chosen) {
+      const fallback = options.find(opt => canUse(opt));
       if (fallback) chosen = fallback;
     }
 
@@ -905,6 +931,7 @@ function reconcileHandFromRaw(raw: string[] | undefined, prev: string[]): string
     }
 
     decorated.push(chosen);
+    markUsed(chosen);
   }
 
   return sortDisplayHand(decorated);
