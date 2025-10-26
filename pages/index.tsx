@@ -3240,8 +3240,8 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     if (lag <= 150) return null;
     const seconds = (lag / 1000).toFixed(lag >= 950 ? 0 : 1);
     return lang === 'en'
-      ? `Adjusted for upstream delay ≈${seconds}s`
-      : `已扣除约 ${seconds} 秒的传输延迟`;
+      ? `Upstream delay observed ≈${seconds}s`
+      : `检测到约 ${seconds} 秒的传输延迟`;
   }, [humanRequest, lang]);
 
   useEffect(() => {
@@ -4486,33 +4486,21 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   const expiresAtRaw = (m as any).expiresAt ?? (m as any).expires_at;
                   const issuedAtParsed = typeof issuedAtRaw === 'number' ? issuedAtRaw : Number(issuedAtRaw);
                   const expiresAtParsed = typeof expiresAtRaw === 'number' ? expiresAtRaw : Number(expiresAtRaw);
-                  const serverWindowMs = Number.isFinite(expiresAtParsed) && Number.isFinite(issuedAtParsed)
-                    ? Math.max(0, Math.floor(expiresAtParsed - issuedAtParsed))
-                    : undefined;
-                  const totalWindowMs = Math.max(
-                    0,
-                    Math.min(
-                      effectiveTimeoutMs,
-                      typeof serverWindowMs === 'number' && Number.isFinite(serverWindowMs)
-                        ? serverWindowMs
-                        : effectiveTimeoutMs,
-                    ),
-                  );
                   const clientIssuedAt = Date.now();
                   const upstreamLagMs = Number.isFinite(issuedAtParsed)
                     ? Math.max(0, clientIssuedAt - issuedAtParsed)
                     : 0;
-                  const remainingWindowMs = Math.max(0, totalWindowMs - upstreamLagMs);
-                  const clientExpiresAt = clientIssuedAt + remainingWindowMs;
+                  const resolvedWindowMs = Math.max(0, effectiveTimeoutMs);
+                  const clientExpiresAt = clientIssuedAt + resolvedWindowMs;
                   setHumanRequest({
                     seat,
                     requestId,
                     phase: typeof m.phase === 'string' ? m.phase : 'play',
                     ctx: m.ctx ?? {},
-                    timeoutMs: remainingWindowMs,
-                    totalTimeoutMs: totalWindowMs,
+                    timeoutMs: resolvedWindowMs,
+                    totalTimeoutMs: resolvedWindowMs,
                     latencyMs: upstreamLagMs,
-                    remainingMs: remainingWindowMs,
+                    remainingMs: resolvedWindowMs,
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
                     by: typeof m.by === 'string' ? m.by : undefined,
                     hint,
@@ -4520,7 +4508,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     expiresAt: clientExpiresAt,
                     serverIssuedAt: Number.isFinite(issuedAtParsed) ? issuedAtParsed : undefined,
                     serverExpiresAt: Number.isFinite(expiresAtParsed) ? expiresAtParsed : undefined,
-                    stale: remainingWindowMs <= 0,
+                    stale: resolvedWindowMs <= 0,
                   });
                   setHumanClockTs(clientIssuedAt);
                   setHumanSelectedIdx([]);
