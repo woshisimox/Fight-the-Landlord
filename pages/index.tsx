@@ -1392,12 +1392,16 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
     const normalized = stripVariantSelectors(String(label ?? ''));
     const baseLabel = normalized || String(label ?? '');
     const isJoker = baseLabel.startsWith('🃏');
-    const suit = isJoker ? '🃏' : (suitOf(baseLabel) ?? (baseLabel.charAt(0) || ''));
-    const rawRank = isJoker ? baseLabel.slice(2) : baseLabel.slice(suit ? 1 : 0);
+    const resolvedSuit: SuitSym | null = isJoker ? '🃏' : suitOf(baseLabel);
+    const fallbackSuitGlyph = !isJoker && !resolvedSuit
+      ? ensureTextSuitGlyph(baseLabel.charAt(0) || '?')
+      : null;
+    const hasSuitGlyph = Boolean(resolvedSuit || fallbackSuitGlyph);
+    const rawRank = isJoker ? baseLabel.slice(2) : baseLabel.slice(hasSuitGlyph ? 1 : 0);
     const computedRank = rankOf(baseLabel);
     const rankToken = rawRank || computedRank || '';
-    const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
-    const rankColor = suit === '🃏' ? (rankToken === 'Y' ? '#d11' : '#16a34a') : undefined;
+    const baseColor = (resolvedSuit === '♥' || resolvedSuit === '♦') ? '#af1d22' : '#1a1a1a';
+    const rankColor = isJoker ? (rankToken === 'Y' ? '#d11' : '#16a34a') : undefined;
     const suitColor = dimmed ? '#9ca3af' : baseColor;
     const rankStyle = dimmed
       ? { color: '#9ca3af' }
@@ -1409,7 +1413,24 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
     opacity = dimmed ? 0.65 : 1;
     inner = (
       <>
-        <SuitIcon suit={suit} size={dims.suitSize} color={suitColor} />
+        {resolvedSuit ? (
+          <SuitIcon suit={resolvedSuit} size={dims.suitSize} color={suitColor} />
+        ) : (
+          <span
+            style={{
+              width: dims.suitSize,
+              height: dims.suitSize,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: dims.suitSize,
+              lineHeight: 1,
+              fontVariantEmoji: 'text',
+            }}
+          >
+            {fallbackSuitGlyph ?? '?'}
+          </span>
+        )}
         <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{displayRank}</span>
       </>
     );
