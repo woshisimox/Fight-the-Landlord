@@ -4287,15 +4287,22 @@ for (const raw of batch) {
                     const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
                     hint = { move, cards, score, reason, label, by: byHint };
                   }
-                  const issuedAt = Date.now();
-                  const timeoutMs = typeof m.timeoutMs === 'number' ? Math.max(0, m.timeoutMs) : undefined;
-                  const expiresAt = typeof timeoutMs === 'number' && timeoutMs > 0 ? issuedAt + timeoutMs : undefined;
+                  const timeoutRaw = typeof m.timeoutMs === 'number' ? m.timeoutMs : Number((m as any).timeout_ms);
+                  const timeoutMs = Number.isFinite(timeoutRaw) ? Math.max(0, Math.floor(timeoutRaw)) : undefined;
+                  const issuedAtRaw = (m as any).issuedAt ?? (m as any).issued_at;
+                  const expiresAtRaw = (m as any).expiresAt ?? (m as any).expires_at;
+                  const issuedAtParsed = typeof issuedAtRaw === 'number' ? issuedAtRaw : Number(issuedAtRaw);
+                  const expiresAtParsed = typeof expiresAtRaw === 'number' ? expiresAtRaw : Number(expiresAtRaw);
+                  const issuedAt = Number.isFinite(issuedAtParsed) ? issuedAtParsed : Date.now();
+                  const expiresAt = Number.isFinite(expiresAtParsed)
+                    ? expiresAtParsed
+                    : (typeof timeoutMs === 'number' && timeoutMs > 0 ? issuedAt + timeoutMs : undefined);
                   setHumanRequest({
                     seat,
                     requestId,
                     phase: typeof m.phase === 'string' ? m.phase : 'play',
                     ctx: m.ctx ?? {},
-                    timeoutMs: typeof m.timeoutMs === 'number' ? m.timeoutMs : undefined,
+                    timeoutMs,
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
                     by: typeof m.by === 'string' ? m.by : undefined,
                     hint,
