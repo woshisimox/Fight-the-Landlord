@@ -1224,22 +1224,37 @@ const deckKeyDisplay = (key: string): string => {
 
 function computeDeckAuditSnapshot(hands: string[][], bottom: BottomInfo | null): DeckAuditReport | null {
   if (!Array.isArray(hands) || hands.length !== 3) return null;
-  const perSeat = hands.map(hand => (Array.isArray(hand) ? hand.length : 0));
   const bottomCards = bottom?.cards?.map(c => c.label).filter((label): label is string => !!label) ?? [];
+  const landlord = typeof bottom?.landlord === 'number' && bottom.landlord >= 0 && bottom.landlord < 3
+    ? bottom.landlord
+    : null;
+
+  const mergedHands = hands.map((hand, seat) => {
+    const base = Array.isArray(hand) ? [...hand] : [];
+    if (landlord != null && seat === landlord && bottomCards.length) {
+      base.push(...bottomCards);
+    }
+    return base;
+  });
+
+  const perSeat = mergedHands.map(hand => hand.length);
   const entries: { key: string; owner: DeckOwner }[] = [];
-  hands.forEach((hand, seat) => {
-    if (!Array.isArray(hand)) return;
+  mergedHands.forEach((hand, seat) => {
     hand.forEach(label => {
       const key = canonicalDeckKey(label);
       if (!key) return;
       entries.push({ key, owner: { type: 'seat', seat } });
     });
   });
-  bottomCards.forEach((label, index) => {
-    const key = canonicalDeckKey(label);
-    if (!key) return;
-    entries.push({ key, owner: { type: 'bottom', index } });
-  });
+
+  if (landlord == null) {
+    bottomCards.forEach((label, index) => {
+      const key = canonicalDeckKey(label);
+      if (!key) return;
+      entries.push({ key, owner: { type: 'bottom', index } });
+    });
+  }
+
   if (!entries.length) return null;
   const seen = new Map<string, DeckOwner[]>();
   for (const entry of entries) {
