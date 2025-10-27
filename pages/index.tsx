@@ -854,7 +854,7 @@ const ensureTextSuitGlyph = (value: string): string => {
   if (!value) return value;
   const cleaned = stripVariantSelectors(value);
   if (cleaned === '🃏') return '🃏';
-  if (SUITS.includes(cleaned as SuitSym)) return `${cleaned}\uFE0E`;
+  if (SUITS.includes(cleaned as SuitSym)) return cleaned;
   return cleaned;
 };
 
@@ -1302,13 +1302,19 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
       : (rankColor ? { color: rankColor } : {});
     const displayRank = rankToken === 'T' ? '10' : rankToken;
     const displaySuit = ensureTextSuitGlyph(suit);
+    const suitStyle: React.CSSProperties = {
+      fontSize: dims.suitSize,
+      lineHeight: 1,
+      fontVariantEmoji: 'text',
+      fontFamily: '"Segoe UI Symbol","Noto Sans Symbols 2","Noto Sans Symbols","Apple Symbols","Symbola","Arial Unicode MS",sans-serif',
+    };
     background = selected ? '#dbeafe' : (dimmed ? '#f3f4f6' : '#fff');
     borderColor = selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd');
     color = suitColor;
     opacity = dimmed ? 0.65 : 1;
     inner = (
       <>
-        <span style={{ fontSize: dims.suitSize, lineHeight: 1, fontVariantEmoji: 'text' }}>{displaySuit}</span>
+        <span style={suitStyle}>{displaySuit}</span>
         <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{displayRank}</span>
       </>
     );
