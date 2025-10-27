@@ -850,11 +850,20 @@ const JOKER_ALIAS_MAP: Record<string, 'x' | 'X'> = {
 };
 
 const stripVariantSelectors = (value: string): string => value.replace(/[\u200d\ufe0e\ufe0f]/g, '');
+const TEXT_VARIANT_SUITS: Record<SuitSym, string> = {
+  '♠': '♠︎',
+  '♥': '♥︎',
+  '♦': '♦︎',
+  '♣': '♣︎',
+  '🃏': '🃏',
+};
 const ensureTextSuitGlyph = (value: string): string => {
   if (!value) return value;
   const cleaned = stripVariantSelectors(value);
   if (cleaned === '🃏') return '🃏';
-  if (SUITS.includes(cleaned as SuitSym)) return cleaned;
+  if (SUITS.includes(cleaned as SuitSym)) {
+    return TEXT_VARIANT_SUITS[cleaned as SuitSym] ?? cleaned;
+  }
   return cleaned;
 };
 
@@ -1305,8 +1314,6 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
     const suitStyle: React.CSSProperties = {
       fontSize: dims.suitSize,
       lineHeight: 1,
-      fontVariantEmoji: 'text',
-      fontFamily: '"Segoe UI Symbol","Noto Sans Symbols 2","Noto Sans Symbols","Apple Symbols","Symbola","Arial Unicode MS",sans-serif',
     };
     background = selected ? '#dbeafe' : (dimmed ? '#f3f4f6' : '#fff');
     borderColor = selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd');
