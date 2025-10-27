@@ -1232,7 +1232,18 @@ function computeDeckAuditSnapshot(hands: string[][], bottom: BottomInfo | null):
   const mergedHands = hands.map((hand, seat) => {
     const base = Array.isArray(hand) ? [...hand] : [];
     if (landlord != null && seat === landlord && bottomCards.length) {
-      base.push(...bottomCards);
+      const existingCounts = new Map<string, number>();
+      for (const label of base) {
+        existingCounts.set(label, (existingCounts.get(label) ?? 0) + 1);
+      }
+      for (const label of bottomCards) {
+        const remaining = existingCounts.get(label) ?? 0;
+        if (remaining > 0) {
+          existingCounts.set(label, remaining - 1);
+        } else {
+          base.push(label);
+        }
+      }
     }
     return base;
   });
