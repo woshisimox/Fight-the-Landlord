@@ -1270,108 +1270,6 @@ type CardProps = {
   hidden?: boolean;
 };
 
-type SuitIconProps = {
-  suit: SuitSym;
-  size: number;
-  color: string;
-};
-
-const SuitIcon = ({ suit, size, color }: SuitIconProps) => {
-  if (suit === '🃏') {
-    return (
-      <span
-        style={{
-          fontSize: size,
-          lineHeight: 1,
-          fontVariantEmoji: 'text',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        🃏
-      </span>
-    );
-  }
-
-  const svg = (() => {
-    switch (suit) {
-      case '♠':
-        return (
-          <>
-            <path
-              d="M12 2c-4.6 4.6-8 7.8-8 11 0 2.76 2.1 5 4.8 5 1.6 0 3-.78 3.7-1.94V22h2.98v-5.94c.7 1.16 2.12 1.94 3.72 1.94 2.68 0 4.8-2.24 4.8-5 0-3.22-3.38-6.4-8-11z"
-              fill={color}
-            />
-            <path d="M9 19h6c0 1.66-1.34 3-3 3s-3-1.34-3-3z" fill={color} />
-          </>
-        );
-      case '♥':
-        return (
-          <path
-            d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
-            fill={color}
-          />
-        );
-      case '♦':
-        return <path d="M12 2L4 12l8 10 8-10-8-10z" fill={color} />;
-      case '♣':
-        return (
-          <>
-            <circle cx={12} cy={7.5} r={4.5} fill={color} />
-            <circle cx={7.5} cy={13} r={4.2} fill={color} />
-            <circle cx={16.5} cy={13} r={4.2} fill={color} />
-            <path d="M10.75 12.5h2.5c.28 0 .5.22.5.5v6.25a1.75 1.75 0 0 1-3.5 0V13c0-.28.22-.5.5-.5z" fill={color} />
-            <path d="M9.25 19.25h5.5c0 1.5-1.23 2.75-2.75 2.75s-2.75-1.25-2.75-2.75z" fill={color} />
-          </>
-        );
-      default:
-        return null;
-    }
-  })();
-
-  if (!svg) {
-    const fallback = ensureTextSuitGlyph(suit);
-    return (
-      <span
-        style={{
-          fontSize: size,
-          lineHeight: 1,
-          fontVariantEmoji: 'text',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        {fallback}
-      </span>
-    );
-  }
-
-  return (
-    <span
-      style={{
-        width: size,
-        height: size,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-        focusable="false"
-        style={{ display: 'block' }}
-      >
-        {svg}
-      </svg>
-    </span>
-  );
-};
-
 function Card({ label, dimmed = false, compact = false, interactive = false, selected = false, onClick, disabled = false, hidden = false }: CardProps) {
   const dims = compact
     ? { width: 28, height: 44, gap: 2, backSize: 18, suitSize: 16, rankSize: 12, paddingShown: '6px 4px', paddingHidden: '4px' }
@@ -1392,45 +1290,25 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
     const normalized = stripVariantSelectors(String(label ?? ''));
     const baseLabel = normalized || String(label ?? '');
     const isJoker = baseLabel.startsWith('🃏');
-    const resolvedSuit: SuitSym | null = isJoker ? '🃏' : suitOf(baseLabel);
-    const fallbackSuitGlyph = !isJoker && !resolvedSuit
-      ? ensureTextSuitGlyph(baseLabel.charAt(0) || '?')
-      : null;
-    const hasSuitGlyph = Boolean(resolvedSuit || fallbackSuitGlyph);
-    const rawRank = isJoker ? baseLabel.slice(2) : baseLabel.slice(hasSuitGlyph ? 1 : 0);
+    const suit = isJoker ? '🃏' : (suitOf(baseLabel) ?? (baseLabel.charAt(0) || ''));
+    const rawRank = isJoker ? baseLabel.slice(2) : baseLabel.slice(suit ? 1 : 0);
     const computedRank = rankOf(baseLabel);
     const rankToken = rawRank || computedRank || '';
-    const baseColor = (resolvedSuit === '♥' || resolvedSuit === '♦') ? '#af1d22' : '#1a1a1a';
-    const rankColor = isJoker ? (rankToken === 'Y' ? '#d11' : '#16a34a') : undefined;
+    const baseColor = (suit === '♥' || suit === '♦') ? '#af1d22' : '#1a1a1a';
+    const rankColor = suit === '🃏' ? (rankToken === 'Y' ? '#d11' : '#16a34a') : undefined;
     const suitColor = dimmed ? '#9ca3af' : baseColor;
     const rankStyle = dimmed
       ? { color: '#9ca3af' }
       : (rankColor ? { color: rankColor } : {});
     const displayRank = rankToken === 'T' ? '10' : rankToken;
+    const displaySuit = ensureTextSuitGlyph(suit);
     background = selected ? '#dbeafe' : (dimmed ? '#f3f4f6' : '#fff');
     borderColor = selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd');
     color = suitColor;
     opacity = dimmed ? 0.65 : 1;
     inner = (
       <>
-        {resolvedSuit ? (
-          <SuitIcon suit={resolvedSuit} size={dims.suitSize} color={suitColor} />
-        ) : (
-          <span
-            style={{
-              width: dims.suitSize,
-              height: dims.suitSize,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: dims.suitSize,
-              lineHeight: 1,
-              fontVariantEmoji: 'text',
-            }}
-          >
-            {fallbackSuitGlyph ?? '?'}
-          </span>
-        )}
+        <span style={{ fontSize: dims.suitSize, lineHeight: 1, fontVariantEmoji: 'text' }}>{displaySuit}</span>
         <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{displayRank}</span>
       </>
     );
