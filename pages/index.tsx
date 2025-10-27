@@ -5008,6 +5008,7 @@ if (m.type === 'event' && m.kind === 'hand-snapshot') {
       ? '结算手牌'
       : `手牌快照(${stageRaw})`;
   const rawHands = Array.isArray(m.hands) ? (m.hands as any[][]) : null;
+  const hasRawHands = !!(rawHands && rawHands.length === 3 && rawHands.every(h => Array.isArray(h)));
   const seatParts = [0, 1, 2].map(seat => {
     const currentHand = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : null;
     const fallbackHand = rawHands && Array.isArray(rawHands[seat])
@@ -5037,6 +5038,25 @@ if (m.type === 'event' && m.kind === 'hand-snapshot') {
       message += `｜明牌：${revealLabel}`;
     }
     queueHandReveal(revealSeats, revealDuration);
+  }
+  if (hasRawHands) {
+    const resetForStage = stageRaw === 'pre-play';
+    const freshUsage = new Map<string, Map<string, SuitUsageOwner>>() as RankSuitUsage;
+    const baseline = resetForStage
+      ? [[], [], []]
+      : (Array.isArray(nextHands) ? nextHands : [[], [], []]);
+    const decoratedHands = (rawHands as string[][]).map((hand, seatIdx) => {
+      const prev = Array.isArray(baseline?.[seatIdx]) ? baseline[seatIdx] as string[] : [];
+      const reserved = snapshotSuitUsage(freshUsage);
+      const decorated = reconcileHandFromRaw(hand, prev, reserved);
+      registerSuitUsage(freshUsage, ownerKeyForSeat(seatIdx), decorated);
+      return decorated;
+    }) as string[][];
+    suitUsageRef.current = freshUsage;
+    nextHands = decoratedHands;
+    if (resetForStage) {
+      updateDeckAuditSnapshot(decoratedHands, nextBottom);
+    }
   }
   nextLog = [...nextLog, message];
   continue;
