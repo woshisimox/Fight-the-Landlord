@@ -2065,25 +2065,27 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
         .map((meta, idx) => (meta.choice === 'human' ? idx : -1))
         .filter(idx => idx >= 0);
       const hasHuman = humanSeats.length > 0;
-      if (hasHuman) {
-        const remainingHands = hands.map(h => h.slice());
-        const humanWon = humanSeats.includes(winner);
-        const revealTargets = humanWon
+      const remainingHands = hands.map(h => h.slice());
+      const humanWon = hasHuman ? humanSeats.includes(winner) : false;
+      const revealTargets = hasHuman
+        ? (humanWon
           ? [0, 1, 2].filter(seat => !humanSeats.includes(seat))
-          : [0, 1, 2].filter(seat => !humanSeats.includes(seat) && remainingHands[seat].length > 0);
-        const revealDurationMs = 5000;
-        try {
-          yield {
-            type: 'event',
-            kind: 'hand-snapshot',
-            stage: 'post-game',
-            hands: remainingHands,
-            landlord,
-            winner,
-            revealSeats: revealTargets,
-            revealDurationMs,
-          };
-        } catch {}
+          : [0, 1, 2].filter(seat => !humanSeats.includes(seat) && remainingHands[seat].length > 0))
+        : [];
+      const revealDurationMs = revealTargets.length ? 5000 : 0;
+      try {
+        yield {
+          type: 'event',
+          kind: 'hand-snapshot',
+          stage: 'post-game',
+          hands: remainingHands,
+          landlord,
+          winner,
+          revealSeats: revealTargets,
+          revealDurationMs,
+        };
+      } catch {}
+      if (revealDurationMs > 0) {
         try { await wait(revealDurationMs); } catch {}
       }
 
