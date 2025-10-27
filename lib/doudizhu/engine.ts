@@ -1815,6 +1815,16 @@ __doubleMulB = Math.min(__DOUBLE_CFG.cap, __doubleMulB * multiplier) / Math.max(
 
 try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bing:Bseat, mulY: __doubleMulY, mulB: __doubleMulB, base: multiplier }; } catch{}
 
+  try {
+    yield {
+      type: 'event',
+      kind: 'hand-snapshot',
+      stage: 'pre-play',
+      hands: hands.map(h => h.slice()),
+      landlord,
+    };
+  } catch {}
+
 
   // 历史与记牌数据
   let trick = 0;                          // 轮次（从 0 开始）
@@ -2050,6 +2060,33 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
           ? [+(finalYi + finalBing), -finalYi, -finalBing]
           : [-(finalYi + finalBing), +finalYi, +finalBing];
       yield { type:'event', kind:'win', winner, multiplier: multiplier, multiplierYi: finalYi, multiplierBing: finalBing, deltaScores: delta };
+
+      const humanSeats = seatMeta
+        .map((meta, idx) => (meta.choice === 'human' ? idx : -1))
+        .filter(idx => idx >= 0);
+      const hasHuman = humanSeats.length > 0;
+      if (hasHuman) {
+        const remainingHands = hands.map(h => h.slice());
+        const humanWon = humanSeats.includes(winner);
+        const revealTargets = humanWon
+          ? [0, 1, 2].filter(seat => !humanSeats.includes(seat))
+          : [0, 1, 2].filter(seat => !humanSeats.includes(seat) && remainingHands[seat].length > 0);
+        const revealDurationMs = 5000;
+        try {
+          yield {
+            type: 'event',
+            kind: 'hand-snapshot',
+            stage: 'post-game',
+            hands: remainingHands,
+            landlord,
+            winner,
+            revealSeats: revealTargets,
+            revealDurationMs,
+          };
+        } catch {}
+        try { await wait(revealDurationMs); } catch {}
+      }
+
       return;
     }
 

@@ -3286,6 +3286,51 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const deckAuditRef = useRef<DeckAuditReport | null>(null);
   useEffect(() => { deckAuditRef.current = deckAudit; }, [deckAudit]);
   const humanTraceRef = useRef<string>('');
+  const handRevealRef = useRef<[number, number, number]>([0, 0, 0]);
+  const [, setHandRevealTick] = useState(0);
+  const bumpHandReveal = useCallback(() => setHandRevealTick(t => t + 1), []);
+  const resetHandReveal = useCallback(() => {
+    handRevealRef.current = [0, 0, 0];
+    bumpHandReveal();
+  }, [bumpHandReveal]);
+  const queueHandReveal = useCallback((seatList: number[], durationMs: number) => {
+    const seats = seatList
+      .map(seat => Number(seat))
+      .filter(seat => Number.isInteger(seat) && seat >= 0 && seat < 3);
+    if (!seats.length) return;
+    const rawDuration = Number(durationMs);
+    const duration = Math.max(0, Number.isFinite(rawDuration) ? Math.floor(rawDuration) : 0);
+    const now = Date.now();
+    const next = [...handRevealRef.current] as number[];
+    let changed = false;
+    seats.forEach(seat => {
+      const until = now + duration;
+      if (next[seat] < until) {
+        next[seat] = until;
+        changed = true;
+      }
+    });
+    if (changed) {
+      handRevealRef.current = next as [number, number, number];
+      bumpHandReveal();
+    }
+    const timeoutMs = duration + 25;
+    setTimeout(() => {
+      const snapshot = [...handRevealRef.current] as number[];
+      const now2 = Date.now();
+      let updated = false;
+      seats.forEach(seat => {
+        if (snapshot[seat] !== 0 && snapshot[seat] <= now2) {
+          snapshot[seat] = 0;
+          updated = true;
+        }
+      });
+      if (updated) {
+        handRevealRef.current = snapshot as [number, number, number];
+        bumpHandReveal();
+      }
+    }, timeoutMs);
+  }, [bumpHandReveal]);
   const [humanRequest, setHumanRequest] = useState<HumanPrompt | null>(null);
   const [humanSelectedIdx, setHumanSelectedIdx] = useState<number[]>([]);
   const [humanSubmitting, setHumanSubmitting] = useState(false);
@@ -4330,6 +4375,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     let dogId: any = null;
 
       setLog([]); lastReasonRef.current = [null, null, null];
+      resetHandReveal();
       const baseSpecs = buildSeatSpecs();
       const startShift = ((labelRoundNo - 1) % 3 + 3) % 3;
       const specs = [0,1,2].map(i => baseSpecs[(i + startShift) % 3]);
@@ -4507,6 +4553,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   deckAuditChanged = true;
                 }
                 resetHumanState();
+                resetHandReveal();
                 suitUsageRef.current = new Map();
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
@@ -4522,6 +4569,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 nextLandlord = null;
                 nextBottom = { landlord: null, cards: [], revealed: false };
                 resetHumanState();
+                resetHandReveal();
                 suitUsageRef.current = new Map();
                 if (nextDeckAudit) {
                   nextDeckAudit = null;
@@ -4948,6 +4996,49 @@ if (m.type === 'event' && m.kind === 'double-summary') {
     `对乙x${yi}｜对丙x${bing}`
   ];
   // 不直接改 nextMultiplier，保持旧逻辑一致性
+  continue;
+}
+if (m.type === 'event' && m.kind === 'hand-snapshot') {
+  const stageRaw = typeof (m as any).stage === 'string'
+    ? String((m as any).stage)
+    : (typeof (m as any).phase === 'string' ? String((m as any).phase) : 'snapshot');
+  const stageLabel = stageRaw === 'pre-play'
+    ? '开局手牌'
+    : stageRaw === 'post-game'
+      ? '结算手牌'
+      : `手牌快照(${stageRaw})`;
+  const rawHands = Array.isArray(m.hands) ? (m.hands as any[][]) : null;
+  const seatParts = [0, 1, 2].map(seat => {
+    const currentHand = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : null;
+    const fallbackHand = rawHands && Array.isArray(rawHands[seat])
+      ? (rawHands[seat] as any[]).map(card => String(card))
+      : [];
+    const cards = currentHand && currentHand.length ? currentHand : fallbackHand;
+    const pretty = cards && cards.length ? cards.join(' ') : '（无）';
+    return `${seatName(seat)}：${pretty}`;
+  });
+  let message = `${stageLabel}｜${seatParts.join(' ｜ ')}`;
+  const revealSeatsRaw = Array.isArray((m as any).revealSeats) ? (m as any).revealSeats as any[] : [];
+  const revealSeats = revealSeatsRaw
+    .map(v => Number(v))
+    .filter(seat => Number.isInteger(seat) && seat >= 0 && seat < 3);
+  const durationRaw = Number((m as any).revealDurationMs ?? (m as any).durationMs ?? 0);
+  const duration = Number.isFinite(durationRaw) ? Math.max(0, Math.floor(durationRaw)) : 0;
+  const revealDuration = revealSeats.length ? (duration > 0 ? duration : 5000) : 0;
+  if (revealSeats.length) {
+    const revealLabel = revealSeats.map(seatName).join('、');
+    const showDuration = revealDuration;
+    if (showDuration > 0) {
+      const seconds = showDuration >= 1000
+        ? (showDuration % 1000 === 0 ? (showDuration / 1000).toFixed(0) : (showDuration / 1000).toFixed(1))
+        : showDuration.toString();
+      message += `｜明牌：${revealLabel}（${showDuration >= 1000 ? `${seconds}s` : `${seconds}ms`}）`;
+    } else {
+      message += `｜明牌：${revealLabel}`;
+    }
+    queueHandReveal(revealSeats, revealDuration);
+  }
+  nextLog = [...nextLog, message];
   continue;
 }
 if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double')) {
@@ -5727,6 +5818,8 @@ const handleAllSaveInner = () => {
           {[0,1,2].map(i => {
             const isHumanTurn = !!(humanRequest && humanRequest.seat === i && humanRequest.phase === 'play');
             const seatInteractive = isHumanTurn && !humanExpired;
+            const revealActive = handRevealRef.current[i] > Date.now();
+            const faceDown = revealActive ? false : (hasHumanSeat ? !isHumanSeat(i) : false);
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
                 <div
@@ -5753,7 +5846,7 @@ const handleAllSaveInner = () => {
                   selectedIndices={humanRequest && humanRequest.seat === i ? humanSelectedSet : undefined}
                   onToggle={seatInteractive ? toggleHumanCard : undefined}
                   disabled={humanSubmitting || humanExpired}
-                  faceDown={hasHumanSeat ? !isHumanSeat(i) : false}
+                  faceDown={faceDown}
                 />
               </div>
             );
