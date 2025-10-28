@@ -5031,16 +5031,16 @@ if (m.type === 'event' && m.kind === 'hand-snapshot') {
   const stageLabel = stageRaw === 'pre-play'
     ? '开局手牌'
     : stageRaw === 'post-game'
-      ? '结算手牌'
+      ? '结算余牌'
       : `手牌快照(${stageRaw})`;
   const rawHands = Array.isArray(m.hands) ? (m.hands as any[][]) : null;
   const hasRawHands = !!(rawHands && rawHands.length === 3 && rawHands.every(h => Array.isArray(h)));
   const seatParts = [0, 1, 2].map(seat => {
-    const currentHand = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : null;
-    const fallbackHand = rawHands && Array.isArray(rawHands[seat])
+    const snapshotHand = rawHands && Array.isArray(rawHands[seat])
       ? (rawHands[seat] as any[]).map(card => String(card))
       : [];
-    const cards = currentHand && currentHand.length ? currentHand : fallbackHand;
+    const currentHand = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : null;
+    const cards = snapshotHand.length ? snapshotHand : (currentHand || []);
     const pretty = cards && cards.length ? cards.join(' ') : '（无）';
     return `${seatName(seat)}：${pretty}`;
   });

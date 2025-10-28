@@ -1401,7 +1401,7 @@ export async function* runOneGame(opts: {
     const label = stage === 'pre-play'
       ? '开局手牌'
       : stage === 'post-game'
-        ? '结算手牌'
+        ? '结算余牌'
         : stage;
 
     const seatLines = snapshot.map((hand, idx) => {
