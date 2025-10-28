@@ -1392,6 +1392,26 @@ export async function* runOneGame(opts: {
   const bots: BotFunc[] = Array.from(opts.seats as BotFunc[]);
   const four2 = opts.four2 || 'both';
   const coopEnabled = !!(opts.rule?.farmerCoop);
+  const seatLabels = ['甲', '乙', '丙'];
+
+  const logHandsToConsole = (stage: string, snapshot: Label[][], landlordSeat: number) => {
+    if (typeof console === 'undefined' || typeof console.log !== 'function') return;
+    if (!Array.isArray(snapshot) || snapshot.length !== 3) return;
+    const label = stage === 'pre-play'
+      ? '开局手牌'
+      : stage === 'post-game'
+        ? '结算手牌'
+        : stage;
+    const parts = snapshot.map((hand, idx) => {
+      const base = seatLabels[idx] ?? `Seat${idx}`;
+      const role = idx === landlordSeat ? '地主' : '农民';
+      const cards = Array.isArray(hand) && hand.length ? hand.join(' ') : '（无）';
+      return `${base}(${role})：${cards}`;
+    });
+    try {
+      console.log(`[DDZ][${label}] ${parts.join(' ｜ ')}`);
+    } catch {}
+  };
 
   // 发牌
   let deck = shuffle(freshDeck());
@@ -1824,6 +1844,7 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
       landlord,
     };
   } catch {}
+  logHandsToConsole('pre-play', hands, landlord);
 
 
   // 历史与记牌数据
@@ -2085,6 +2106,7 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
           revealDurationMs,
         };
       } catch {}
+      logHandsToConsole('post-game', remainingHands, landlord);
       if (revealDurationMs > 0) {
         try { await wait(revealDurationMs); } catch {}
       }
