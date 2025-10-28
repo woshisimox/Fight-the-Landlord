@@ -47,7 +47,7 @@ function makeBot(name: BotChoice, model: string|undefined, keybag: any): EngineB
     case 'built-in:greedy-min': return GreedyMin;
     case 'built-in:random-legal': return RandomLegal;
     case 'ai:openai': return OpenAIBot({ apiKey: k.openai||'', model: m||'gpt-4o-mini' });
-    case 'ai:gemini': return GeminiBot({ apiKey: k.gemini||'', model: m||'gemini-1.5-flash' });
+    case 'ai:gemini': return GeminiBot({ apiKey: k.gemini||'', model: m||'gemini-1.5-flash-latest' });
     case 'ai:grok':   return GrokBot({ apiKey: k.grok||'', model: m||'grok-2-latest' });
     case 'ai:kimi':   return KimiBot({ apiKey: k.kimi||'', model: m||'moonshot-v1-8k' });
     case 'ai:qwen':   return QwenBot({ apiKey: k.qwen||'', model: m||'qwen-plus' });

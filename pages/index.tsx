@@ -3082,7 +3082,7 @@ function Section({ title, children }:{title:string; children:React.ReactNode}) {
 function defaultModelFor(choice: BotChoice): string {
   switch (choice) {
     case 'ai:openai': return 'gpt-4o-mini';
-    case 'ai:gemini': return 'gemini-1.5-flash';
+    case 'ai:gemini': return 'gemini-1.5-flash-latest';
     case 'ai:grok':  return 'grok-2-latest';
     case 'ai:kimi':  return 'kimi-k2-0905-preview';
     case 'ai:qwen':  return 'qwen-plus';
