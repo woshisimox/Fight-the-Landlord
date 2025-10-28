@@ -684,6 +684,7 @@ async function runOneRoundWithGuard(
 ){
   const iter = runOneGame({ seats, four2, rule, ruleId } as any);
   let sentInit = false;
+  let resultSent = false;
 
   // 画像统计
   let landlordIdx: number = -1;
@@ -827,37 +828,40 @@ continue;
       (ev?.type==='game-over') || (ev?.type==='game_end');
 
     if (isResultLike) {
-      // —— 在 result 之前产出画像（前端会立即累计，避免兜底 2.5）——
-      const perSeat = [0,1,2].map((i)=>{
-        const s = stats[i];
-        const total = Math.max(1, s.plays + s.passes);
-        const passRate = s.passes / total;
-        const avgCards = s.plays ? (s.cardsPlayed / s.plays) : 0;
+      if (!resultSent) {
+        // —— 在 result 之前产出画像（前端会立即累计，避免兜底 2.5）——
+        const perSeat = [0,1,2].map((i)=>{
+          const s = stats[i];
+          const total = Math.max(1, s.plays + s.passes);
+          const passRate = s.passes / total;
+          const avgCards = s.plays ? (s.cardsPlayed / s.plays) : 0;
 
-        const agg   = clamp(1.5*s.bombs + 2.0*s.rockets + (1-passRate)*3 + Math.min(4, avgCards)*0.25);
-        const cons  = clamp(3 + passRate*2 - (s.bombs + s.rockets)*0.6);
-        let   eff   = clamp(2 + avgCards*0.6 - passRate*1.5);
-        if ((ev as any).winner === i) eff = clamp(eff + 0.8);
-        const coop  = clamp((i===landlordIdx ? 2.0 : 2.5) + passRate*2.5 - (s.bombs + s.rockets)*0.4);
-        const rob   = clamp((i===landlordIdx ? 3.5 : 2.0) + 0.3*s.bombs + 0.6*s.rockets - passRate);
+          const agg   = clamp(1.5*s.bombs + 2.0*s.rockets + (1-passRate)*3 + Math.min(4, avgCards)*0.25);
+          const cons  = clamp(3 + passRate*2 - (s.bombs + s.rockets)*0.6);
+          let   eff   = clamp(2 + avgCards*0.6 - passRate*1.5);
+          if ((ev as any).winner === i) eff = clamp(eff + 0.8);
+          const coop  = clamp((i===landlordIdx ? 2.0 : 2.5) + passRate*2.5 - (s.bombs + s.rockets)*0.4);
+          const rob   = clamp((i===landlordIdx ? 3.5 : 2.0) + 0.3*s.bombs + 0.6*s.rockets - passRate);
 
-        return { seat: i, scaled: {
-          coop: +coop.toFixed(2),
-          agg : +agg.toFixed(2),
-          cons: +cons.toFixed(2),
-          eff : +eff.toFixed(2),
-          bid: +rob.toFixed(2),
-        }};
-      });
+          return { seat: i, scaled: {
+            coop: +coop.toFixed(2),
+            agg : +agg.toFixed(2),
+            cons: +cons.toFixed(2),
+            eff : +eff.toFixed(2),
+            bid: +rob.toFixed(2),
+          }};
+        });
 
-      // 两种画像格式都发，前端任一命中都不会兜底
-      writeLine(res, { type:'stats', perSeat });
-      writeLine(res, { type:'event', kind:'stats', perSeat });
+        // 两种画像格式都发，前端任一命中都不会兜底
+        writeLine(res, { type:'stats', perSeat });
+        writeLine(res, { type:'event', kind:'stats', perSeat });
 
-      // 再写 result（展开 & 带 lastReason）
-      const baseResult = (ev?.type==='result') ? ev : { type:'result', ...(ev||{}) };
-      writeLine(res, { ...(baseResult||{}), lastReason: [...lastReason] });
-      break;
+        // 再写 result（展开 & 带 lastReason）
+        const baseResult = (ev?.type==='result') ? ev : { type:'result', ...(ev||{}) };
+        writeLine(res, { ...(baseResult||{}), lastReason: [...lastReason] });
+      }
+      resultSent = true;
+      continue;
     }
 
     // 其它事件透传
