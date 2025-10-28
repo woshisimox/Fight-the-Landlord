@@ -48,7 +48,7 @@ export function getBot(spec: BotSpec, seatIdx: number): IBot {
       return mark('openai', OpenAIBot({ apiKey: spec.apiKey || '', model: model || 'gpt-4o-mini' }));
     }
     if (spec.name === 'gemini') {
-      return mark('gemini', GeminiBot({ apiKey: spec.apiKey || '', model: model || 'gemini-1.5-flash' }));
+      return mark('gemini', GeminiBot({ apiKey: spec.apiKey || '', model: model || 'gemini-1.5-flash-latest' }));
     }
     if (spec.name === 'grok') {
       return mark('grok', GrokBot({ apiKey: spec.apiKey || '', model: model || 'grok-2-latest' }));

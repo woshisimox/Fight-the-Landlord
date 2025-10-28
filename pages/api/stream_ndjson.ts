@@ -408,7 +408,7 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
       return stub;
     }
     case 'ai:openai':  return OpenAIBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gpt-4o-mini' });
-    case 'ai:gemini':  return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-pro' });
+    case 'ai:gemini':  return GeminiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'gemini-1.5-pro-latest' });
     case 'ai:grok':    return GrokBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'grok-2' });
     case 'ai:kimi':    return KimiBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'kimi-k2-0905-preview' });
     case 'ai:qwen':    return QwenBot({ apiKey: spec?.apiKey || '', model: spec?.model || 'qwen-plus' });
@@ -444,6 +444,16 @@ function traceWrap(
     const upperBounded = Math.min(30_000, lowerBounded);
     return upperBounded;
   })();
+  const minIntervalMs = Math.max(0, Math.floor(Number.isFinite(startDelayMs) ? startDelayMs : 0));
+  let lastDecisionSettledAt = 0;
+  const ensureMinInterval = async () => {
+    if (!minIntervalMs) return;
+    if (lastDecisionSettledAt <= 0) return;
+    const elapsed = Date.now() - lastDecisionSettledAt;
+    const waitMs = minIntervalMs - elapsed;
+    if (waitMs <= 0) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(60_000, waitMs)));
+  };
   const timeoutSecondsLabel = Math.max(1, Math.round(sanitizedTimeoutMs / 1000));
 
   const sanitizeCtx = (ctx:any) => {
@@ -532,9 +542,7 @@ function traceWrap(
     });
 
   const wrapped = async (ctx:any) => {
-    if (startDelayMs && startDelayMs>0) {
-      await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
-    }
+    await ensureMinInterval();
     const phase = ctx?.phase || 'play';
     const callIssuedAt = Date.now();
     const callExpiresAt = callIssuedAt + sanitizedTimeoutMs;
@@ -547,6 +555,7 @@ function traceWrap(
         model: spec?.model||'',
         phase,
         timeoutMs: sanitizedTimeoutMs,
+        minIntervalMs,
         issuedAt: callIssuedAt,
         expiresAt: callExpiresAt,
       });
@@ -556,6 +565,7 @@ function traceWrap(
     const t0 = Date.now();
     try {
       const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
+      const fallbackCtx = sanitizeCtx(ctxWithSeen);
       try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
 
       if (isHuman) {
@@ -603,7 +613,8 @@ function traceWrap(
             phase,
             ctx: payloadCtx,
             timeoutMs: sanitizedTimeoutMs,
-            delayMs: startDelayMs,
+            delayMs: minIntervalMs,
+            minIntervalMs,
             sessionId: sessionKey,
             hint: hintPayload || undefined,
             issuedAt,
@@ -614,7 +625,7 @@ function traceWrap(
           () => {
             expireHumanRequest(sessionKey, requestId, new Error('timeout'));
           },
-          () => buildAutoTimeoutMove(ctxWithSeen),
+          () => buildAutoTimeoutMove(fallbackCtx),
         );
         try {
           result = await Promise.race([humanPromise, timeout]);
@@ -622,11 +633,13 @@ function traceWrap(
           result = { move:'pass', reason:`error:${err?.message||String(err)}` };
         }
       } else {
-        const timeout = makeTimeout();
+        const timeout = makeTimeout(undefined, () => buildAutoTimeoutMove(fallbackCtx));
         result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
       }
     } catch (e:any) {
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
+    } finally {
+      lastDecisionSettledAt = Date.now();
     }
 
     const resPhase = (result && typeof result.phase === 'string') ? result.phase : phase;
@@ -865,6 +878,38 @@ continue;
     }
 
     // 其它事件透传
+    let snapshotLogLines: string[] | null = null;
+    if (ev?.type === 'event' && ev.kind === 'hand-snapshot') {
+      const stageRaw = typeof ev.stage === 'string'
+        ? String(ev.stage)
+        : (typeof ev.phase === 'string' ? String(ev.phase) : '');
+      if (stageRaw === 'post-game') {
+        const seatLabels = ['甲', '乙', '丙'];
+        const landlordSeat = typeof ev.landlord === 'number' ? ev.landlord : -1;
+        const handsArr = Array.isArray(ev.hands) ? ev.hands as any[] : null;
+        if (handsArr && handsArr.length === 3) {
+          const revealSeats = Array.isArray((ev as any).revealSeats)
+            ? (ev as any).revealSeats
+                .map((v:any) => Number(v))
+                .filter((v:number) => Number.isInteger(v) && v >= 0 && v < 3)
+            : [];
+          const durationRaw = Number((ev as any).revealDurationMs ?? (ev as any).durationMs ?? 0);
+          const duration = Number.isFinite(durationRaw) ? Math.max(0, Math.floor(durationRaw)) : 0;
+          const revealPart = revealSeats.length
+            ? `｜明牌：${revealSeats.map((s:number) => seatLabels[s] ?? s).join('、')}${duration > 0 ? `（${duration >= 1000 ? `${(duration/1000).toFixed(duration % 1000 === 0 ? 0 : 1)}s` : `${duration}ms`}）` : ''}`
+            : '';
+          snapshotLogLines = [`结算余牌${revealPart}`];
+          for (let idx = 0; idx < 3; idx++) {
+            const cards = Array.isArray(handsArr[idx]) ? handsArr[idx] as string[] : [];
+            const seatLabel = seatLabels[idx] ?? `Seat${idx}`;
+            const role = idx === landlordSeat ? '地主' : '农民';
+            const pretty = cards.length ? cards.join(' ') : '（无）';
+            snapshotLogLines.push(`  ${seatLabel}(${role})：${pretty}`);
+          }
+        }
+      }
+    }
+
     if (ev?.type === 'event' && ev.kind === 'reveal') {
       const raw = (typeof ev.landlordIdx === 'number')
         ? ev.landlordIdx
@@ -873,6 +918,11 @@ continue;
     }
 
     if (ev && ev.type) writeLine(res, ev);
+    if (snapshotLogLines) {
+      for (const line of snapshotLogLines) {
+        writeLine(res, { type: 'log', message: line });
+      }
+    }
   }
 }
 

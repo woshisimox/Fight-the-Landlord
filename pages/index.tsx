@@ -3082,7 +3082,7 @@ function Section({ title, children }:{title:string; children:React.ReactNode}) {
 function defaultModelFor(choice: BotChoice): string {
   switch (choice) {
     case 'ai:openai': return 'gpt-4o-mini';
-    case 'ai:gemini': return 'gemini-1.5-flash';
+    case 'ai:gemini': return 'gemini-1.5-flash-latest';
     case 'ai:grok':  return 'grok-2-latest';
     case 'ai:kimi':  return 'kimi-k2-0905-preview';
     case 'ai:qwen':  return 'qwen-plus';
@@ -3873,7 +3873,6 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     const ids = [0,1,2].map(seatIdentity);
     const init = ids.map(id => resolveRatingForIdentity(id) || { ...TS_DEFAULT });
     setTsArr(init);
-    setLog(l => [...l, `【TS】已从存档应用（${why}）：` + init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')]);
   };
 
   // NEW: 按角色应用（若知道地主，则地主用 landlord 档，其他用 farmer 档；未知则退回 overall）
@@ -3884,10 +3883,6 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       return resolveRatingForIdentity(ids[i], role) || { ...TS_DEFAULT };
     });
     setTsArr(init);
-    setLog(l => [...l,
-      `【TS】按角色应用（${why}，地主=${lord ?? '未知'}）：` +
-      init.map((r,i)=>`${['甲','乙','丙'][i]} μ=${(Math.round(r.mu*100)/100).toFixed(2)} σ=${(Math.round(r.sigma*100)/100).toFixed(2)}`).join(' | ')
-    ]);
   };
 
   const updateStoreAfterRound = (updated: Rating[], landlordIndex:number) => {
@@ -3936,7 +3931,6 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       }
 
       tsStoreRef.current = store; writeStore(store);
-      setLog(l => [...l, `【TS】已上传存档（共 ${Object.keys(store.players).length} 名玩家）`]);
     } catch (err:any) {
       setLog(l => [...l, `【TS】上传解析失败：${err?.message || err}`]);
     } finally { e.target.value = ''; }
@@ -3961,7 +3955,6 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = makeArchiveName('_trueskill.json'); a.click();
     setTimeout(()=>URL.revokeObjectURL(url), 1200);
-    setLog(l => [...l, '【TS】已导出当前存档。']);
   };
 
   // —— 用于“区分显示”的帮助函数 —— //
@@ -4108,7 +4101,6 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     });
     setAggStats(s3.map(x=>({ ...x.scores })));
     setAggCount(Math.max(s3[0].count, s3[1].count, s3[2].count));
-    setLog(l => [...l, `【Radar】已从存档应用（${why}，地主=${lord ?? '未知'}）`]);
   };
 
   /** 在收到一帧“本局画像 s3[0..2]”后，写入 Radar 存档（overall + 角色分档） */
@@ -4172,17 +4164,10 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       }
 
       radarStoreRef.current = store; writeRadarStore(store);
-      setLog(l => [...l, `【Radar】已上传存档（${Object.keys(store.players).length} 位）`]);
     } catch (err:any) {
       setLog(l => [...l, `【Radar】上传解析失败：${err?.message || err}`]);
     } finally { e.target.value = ''; }
   };
-
-  /** 导出当前 Radar 存档 */
-  const handleRadarSave = () => {
-  setLog(l => [...l, '【Radar】存档已禁用（仅支持查看/刷新，不再保存到本地或 ALL 文件）。']);
-};
-;
 
   // 累计画像
   const [aggMode, setAggMode] = useState<'mean'|'ewma'>('ewma');
@@ -4558,9 +4543,6 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 if (m.where === 'after-round') {
                   const res = markRoundFinishedIfNeeded(nextFinished, nextAggStats, nextAggCount);
                   nextFinished = res.nextFinished; nextAggStats = res.nextAggStats; nextAggCount = res.nextAggCount;
-                  nextLog = [...nextLog, `【TS】after-round 已更新 μ/σ`];
-                } else if (m.where === 'before-round') {
-                  nextLog = [...nextLog, `【TS】before-round μ/σ 准备就绪`];
                 }
                 continue;
               }
@@ -5526,7 +5508,6 @@ const applyAllBundleInner = (obj:any) => {
     if (obj?.ladder?.schema === 'ddz-ladder@1') {
       try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {}
     }
-    setLog(l => [...l, '【ALL】统一上传完成（TS / 画像 / 天梯）。']);
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
@@ -5537,7 +5518,6 @@ const handleAllSaveInner = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = makeArchiveName('.json'); a.click();
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
-    setLog(l => [...l, '【ALL】已导出统一统计文件。']);
   };
 
   
@@ -5549,7 +5529,6 @@ const handleAllSaveInner = () => {
     setScoreBreaks(prev => [...prev]);
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
-    setLog(l => [...l, '【ALL】已刷新面板数据。']);
   };
 
   useEffect(()=>{

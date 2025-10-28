@@ -32,7 +32,7 @@ export const GeminiBot = (o: { apiKey: string; model?: string }): BotFunc =>
   async (ctx: BotCtx) => {
     try {
       if (!o.apiKey) throw new Error('Missing Gemini API Key');
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${o.model||'gemini-1.5-flash'}:generateContent?key=${encodeURIComponent(o.apiKey)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${o.model || 'gemini-1.5-flash-latest'}:generateContent?key=${encodeURIComponent(o.apiKey)}`;
       const phase = (ctx as any)?.phase || 'play';
       const handsStr = Array.isArray(ctx?.hands) ? ctx.hands.join('') : '';
       const seenArr = Array.isArray((ctx as any)?.seen) ? (ctx as any).seen : [];
