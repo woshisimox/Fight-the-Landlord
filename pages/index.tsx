@@ -850,11 +850,20 @@ const JOKER_ALIAS_MAP: Record<string, 'x' | 'X'> = {
 };
 
 const stripVariantSelectors = (value: string): string => value.replace(/[\u200d\ufe0e\ufe0f]/g, '');
+const TEXT_VARIANT_SUITS: Record<SuitSym, string> = {
+  '♠': '♠︎',
+  '♥': '♥︎',
+  '♦': '♦︎',
+  '♣': '♣︎',
+  '🃏': '🃏',
+};
 const ensureTextSuitGlyph = (value: string): string => {
   if (!value) return value;
   const cleaned = stripVariantSelectors(value);
   if (cleaned === '🃏') return '🃏';
-  if (SUITS.includes(cleaned as SuitSym)) return `${cleaned}\uFE0E`;
+  if (SUITS.includes(cleaned as SuitSym)) {
+    return TEXT_VARIANT_SUITS[cleaned as SuitSym] ?? cleaned;
+  }
   return cleaned;
 };
 
@@ -1215,22 +1224,48 @@ const deckKeyDisplay = (key: string): string => {
 
 function computeDeckAuditSnapshot(hands: string[][], bottom: BottomInfo | null): DeckAuditReport | null {
   if (!Array.isArray(hands) || hands.length !== 3) return null;
-  const perSeat = hands.map(hand => (Array.isArray(hand) ? hand.length : 0));
   const bottomCards = bottom?.cards?.map(c => c.label).filter((label): label is string => !!label) ?? [];
+  const landlord = typeof bottom?.landlord === 'number' && bottom.landlord >= 0 && bottom.landlord < 3
+    ? bottom.landlord
+    : null;
+
+  const mergedHands = hands.map((hand, seat) => {
+    const base = Array.isArray(hand) ? [...hand] : [];
+    if (landlord != null && seat === landlord && bottomCards.length) {
+      const existingCounts = new Map<string, number>();
+      for (const label of base) {
+        existingCounts.set(label, (existingCounts.get(label) ?? 0) + 1);
+      }
+      for (const label of bottomCards) {
+        const remaining = existingCounts.get(label) ?? 0;
+        if (remaining > 0) {
+          existingCounts.set(label, remaining - 1);
+        } else {
+          base.push(label);
+        }
+      }
+    }
+    return base;
+  });
+
+  const perSeat = mergedHands.map(hand => hand.length);
   const entries: { key: string; owner: DeckOwner }[] = [];
-  hands.forEach((hand, seat) => {
-    if (!Array.isArray(hand)) return;
+  mergedHands.forEach((hand, seat) => {
     hand.forEach(label => {
       const key = canonicalDeckKey(label);
       if (!key) return;
       entries.push({ key, owner: { type: 'seat', seat } });
     });
   });
-  bottomCards.forEach((label, index) => {
-    const key = canonicalDeckKey(label);
-    if (!key) return;
-    entries.push({ key, owner: { type: 'bottom', index } });
-  });
+
+  if (landlord == null) {
+    bottomCards.forEach((label, index) => {
+      const key = canonicalDeckKey(label);
+      if (!key) return;
+      entries.push({ key, owner: { type: 'bottom', index } });
+    });
+  }
+
   if (!entries.length) return null;
   const seen = new Map<string, DeckOwner[]>();
   for (const entry of entries) {
@@ -1302,13 +1337,17 @@ function Card({ label, dimmed = false, compact = false, interactive = false, sel
       : (rankColor ? { color: rankColor } : {});
     const displayRank = rankToken === 'T' ? '10' : rankToken;
     const displaySuit = ensureTextSuitGlyph(suit);
+    const suitStyle: React.CSSProperties = {
+      fontSize: dims.suitSize,
+      lineHeight: 1,
+    };
     background = selected ? '#dbeafe' : (dimmed ? '#f3f4f6' : '#fff');
     borderColor = selected ? '#2563eb' : (dimmed ? '#d1d5db' : '#ddd');
     color = suitColor;
     opacity = dimmed ? 0.65 : 1;
     inner = (
       <>
-        <span style={{ fontSize: dims.suitSize, lineHeight: 1 }}>{displaySuit}</span>
+        <span style={suitStyle}>{displaySuit}</span>
         <span style={{ fontSize: dims.rankSize, lineHeight: 1, ...rankStyle }}>{displayRank}</span>
       </>
     );
@@ -3273,6 +3312,51 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const deckAuditRef = useRef<DeckAuditReport | null>(null);
   useEffect(() => { deckAuditRef.current = deckAudit; }, [deckAudit]);
   const humanTraceRef = useRef<string>('');
+  const handRevealRef = useRef<[number, number, number]>([0, 0, 0]);
+  const [, setHandRevealTick] = useState(0);
+  const bumpHandReveal = useCallback(() => setHandRevealTick(t => t + 1), []);
+  const resetHandReveal = useCallback(() => {
+    handRevealRef.current = [0, 0, 0];
+    bumpHandReveal();
+  }, [bumpHandReveal]);
+  const queueHandReveal = useCallback((seatList: number[], durationMs: number) => {
+    const seats = seatList
+      .map(seat => Number(seat))
+      .filter(seat => Number.isInteger(seat) && seat >= 0 && seat < 3);
+    if (!seats.length) return;
+    const rawDuration = Number(durationMs);
+    const duration = Math.max(0, Number.isFinite(rawDuration) ? Math.floor(rawDuration) : 0);
+    const now = Date.now();
+    const next = [...handRevealRef.current] as number[];
+    let changed = false;
+    seats.forEach(seat => {
+      const until = now + duration;
+      if (next[seat] < until) {
+        next[seat] = until;
+        changed = true;
+      }
+    });
+    if (changed) {
+      handRevealRef.current = next as [number, number, number];
+      bumpHandReveal();
+    }
+    const timeoutMs = duration + 25;
+    setTimeout(() => {
+      const snapshot = [...handRevealRef.current] as number[];
+      const now2 = Date.now();
+      let updated = false;
+      seats.forEach(seat => {
+        if (snapshot[seat] !== 0 && snapshot[seat] <= now2) {
+          snapshot[seat] = 0;
+          updated = true;
+        }
+      });
+      if (updated) {
+        handRevealRef.current = snapshot as [number, number, number];
+        bumpHandReveal();
+      }
+    }, timeoutMs);
+  }, [bumpHandReveal]);
   const [humanRequest, setHumanRequest] = useState<HumanPrompt | null>(null);
   const [humanSelectedIdx, setHumanSelectedIdx] = useState<number[]>([]);
   const [humanSubmitting, setHumanSubmitting] = useState(false);
@@ -3388,9 +3472,22 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   useEffect(() => {
     if (!humanRequest) return;
     if (!humanExpired) return;
-    setHumanError(lang === 'en'
-      ? 'Request expired. Waiting for auto-action or the next prompt…'
-      : '请求已超时，请等待系统自动处理或下一次提示…');
+    const phase = humanRequest.phase;
+    let msg: string;
+    if (phase === 'bid') {
+      msg = lang === 'en'
+        ? 'Time expired. System will pass on bidding.'
+        : '已超时，默认不抢地主。';
+    } else if (phase === 'double') {
+      msg = lang === 'en'
+        ? 'Time expired. System will skip doubling.'
+        : '已超时，默认不加倍。';
+    } else {
+      msg = lang === 'en'
+        ? 'Request expired. Waiting for auto-action or the next prompt…'
+        : '请求已超时，请等待系统自动处理或下一次提示…';
+    }
+    setHumanError(msg);
   }, [humanExpired, humanRequest, lang]);
 
   const resetHumanState = useCallback(() => {
@@ -3506,13 +3603,25 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
 
   const handleHumanBid = useCallback(async (decision: boolean) => {
     if (!humanRequest || humanRequest.phase !== 'bid') return;
+    if (humanExpired) {
+      setHumanError(lang === 'en'
+        ? 'Time expired. Please wait for the next prompt.'
+        : '操作已超时，请等待下一次提示。');
+      return;
+    }
     await submitHumanAction({ phase:'bid', bid: decision });
-  }, [humanRequest, submitHumanAction]);
+  }, [humanRequest, submitHumanAction, humanExpired, lang, setHumanError]);
 
   const handleHumanDouble = useCallback(async (decision: boolean) => {
     if (!humanRequest || humanRequest.phase !== 'double') return;
+    if (humanExpired) {
+      setHumanError(lang === 'en'
+        ? 'Time expired. Please wait for the next prompt.'
+        : '操作已超时，请等待下一次提示。');
+      return;
+    }
     await submitHumanAction({ phase:'double', double: decision });
-  }, [humanRequest, submitHumanAction]);
+  }, [humanRequest, submitHumanAction, humanExpired, lang, setHumanError]);
 
   const handleHumanClear = useCallback(() => {
     setHumanSelectedIdx([]);
@@ -3582,6 +3691,44 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const humanMustPass = humanPhase === 'play'
     ? (((humanRequest?.ctx as any)?.mustPass === true) || (humanLegalCount === 0 && humanCanPass)) && humanCanPass
     : false;
+  const humanCountdownText = useMemo(() => {
+    if (humanSecondsRemaining == null) return null;
+    if (humanPhase === 'bid') {
+      return lang === 'en'
+        ? `Time left to bid: ${humanSecondsRemaining}s`
+        : `抢地主剩余时间：${humanSecondsRemaining}秒`;
+    }
+    if (humanPhase === 'double') {
+      return lang === 'en'
+        ? `Time left to decide on doubling: ${humanSecondsRemaining}s`
+        : `加倍剩余时间：${humanSecondsRemaining}秒`;
+    }
+    if (humanPhase === 'play') {
+      return lang === 'en'
+        ? `Time left: ${humanSecondsRemaining}s`
+        : `剩余时间：${humanSecondsRemaining}秒`;
+    }
+    return null;
+  }, [humanSecondsRemaining, humanPhase, lang]);
+  const humanExpirationNotice = useMemo(() => {
+    if (!humanExpired) return null;
+    if (humanPhase === 'bid') {
+      return lang === 'en'
+        ? 'Time expired. System will pass on bidding.'
+        : '已超时，默认不抢地主。';
+    }
+    if (humanPhase === 'double') {
+      return lang === 'en'
+        ? 'Time expired. System will skip doubling.'
+        : '已超时，默认不加倍。';
+    }
+    if (humanPhase === 'play' && !humanMustPass) {
+      return lang === 'en'
+        ? 'This prompt has expired. Please wait for the system to act.'
+        : '该回合请求已失效，请等待系统处理。';
+    }
+    return null;
+  }, [humanExpired, humanPhase, lang, humanMustPass]);
   const humanSelectedCount = humanSelectedIdx.length;
   const canAdoptHint = humanPhase === 'play'
     && humanHint?.move === 'play'
@@ -4254,6 +4401,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     let dogId: any = null;
 
       setLog([]); lastReasonRef.current = [null, null, null];
+      resetHandReveal();
       const baseSpecs = buildSeatSpecs();
       const startShift = ((labelRoundNo - 1) % 3 + 3) % 3;
       const specs = [0,1,2].map(i => baseSpecs[(i + startShift) % 3]);
@@ -4431,9 +4579,28 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   deckAuditChanged = true;
                 }
                 resetHumanState();
+                resetHandReveal();
                 suitUsageRef.current = new Map();
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
+                continue;
+              }
+              if (m.type === 'event' && m.kind === 'bid-skip') {
+                const reason = typeof m.reason === 'string' ? m.reason : '';
+                nextLog = [...nextLog, `【抢地主】全部选择不抢，重新发牌${reason ? `｜原因=${reason}` : ''}`];
+                nextBidMultiplier = 1;
+                nextMultiplier = 1;
+                nextPlays = [];
+                nextHands = [[], [], []] as any;
+                nextLandlord = null;
+                nextBottom = { landlord: null, cards: [], revealed: false };
+                resetHumanState();
+                resetHandReveal();
+                suitUsageRef.current = new Map();
+                if (nextDeckAudit) {
+                  nextDeckAudit = null;
+                  deckAuditChanged = true;
+                }
                 continue;
               }
               if (m.type === 'event' && m.kind === 'round-end') {
@@ -4445,8 +4612,13 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
               }
 
               // -------- 初始发牌（仅限 init 帧） --------
-              if (m.type === 'init') {
-                const rh = m.hands;
+              const isInitState = m.type === 'init' || (m.type === 'state' && m.kind === 'init');
+              if (isInitState) {
+                const rh = Array.isArray(m.hands)
+                  ? m.hands
+                  : Array.isArray(m.payload?.hands)
+                    ? m.payload.hands
+                    : [];
                 if (Array.isArray(rh) && rh.length === 3 && Array.isArray(rh[0])) {
                   nextPlays = [];
                   nextWinner = null;
@@ -4461,12 +4633,16 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   });
                   suitUsageRef.current = freshUsage;
 
-                  const rawLord = m.landlordIdx ?? m.landlord;
+                  const rawLord = m.landlordIdx ?? m.landlord ?? m.payload?.landlord ?? null;
                   const lord = (typeof rawLord === 'number' && rawLord >= 0 && rawLord < 3)
                     ? rawLord
                     : null;
                   nextLandlord = lord;
-                  const bottomRaw = Array.isArray(m.bottom) ? (m.bottom as string[]) : [];
+                  const bottomRaw = Array.isArray(m.bottom)
+                    ? (m.bottom as string[])
+                    : Array.isArray(m.payload?.bottom)
+                      ? (m.payload.bottom as string[])
+                      : [];
                   const bottomReserved = snapshotSuitUsage(freshUsage);
                   const decoratedBottom = bottomRaw.length
                     ? resolveBottomDecorations(bottomRaw, lord, nextHands as string[][], bottomReserved)
@@ -4492,7 +4668,8 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     }
                   }
 
-                  nextLog = [...nextLog, `发牌完成，${lord != null ? seatName(lord) : '?' }为地主`];
+                  const initLabel = m.type === 'state' ? '（state）' : '';
+                  nextLog = [...nextLog, `发牌完成${initLabel}，${lord != null ? seatName(lord) : '?' }为地主`];
 
                   try { applyTsFromStoreByRole(lord, '发牌后'); } catch {}
                   lastReasonRef.current = [null, null, null];
@@ -4611,6 +4788,12 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   }
                   const timeoutRaw = typeof m.timeoutMs === 'number' ? m.timeoutMs : Number((m as any).timeout_ms);
                   const timeoutParsed = Number.isFinite(timeoutRaw) ? Math.max(0, Math.floor(timeoutRaw)) : undefined;
+                  const rawPhase = typeof m.phase === 'string' ? m.phase : 'play';
+                  const normalizedPhase = rawPhase === 'bid'
+                    ? 'bid'
+                    : rawPhase === 'double'
+                      ? 'double'
+                      : rawPhase;
                   const effectiveTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
                     ? timeoutParsed
                     : 30_000;
@@ -4622,12 +4805,15 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   const upstreamLagMs = Number.isFinite(issuedAtParsed)
                     ? Math.max(0, clientIssuedAt - issuedAtParsed)
                     : 0;
-                  const resolvedWindowMs = Math.max(0, effectiveTimeoutMs);
+                  let resolvedWindowMs = Math.max(0, effectiveTimeoutMs);
+                  if (normalizedPhase === 'bid' || normalizedPhase === 'double') {
+                    resolvedWindowMs = 30_000;
+                  }
                   const clientExpiresAt = clientIssuedAt + resolvedWindowMs;
                   setHumanRequest({
                     seat,
                     requestId,
-                    phase: typeof m.phase === 'string' ? m.phase : 'play',
+                    phase: normalizedPhase,
                     ctx: m.ctx ?? {},
                     timeoutMs: resolvedWindowMs,
                     totalTimeoutMs: resolvedWindowMs,
@@ -4647,7 +4833,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   setHumanSubmitting(false);
                   setHumanError(null);
                   const label = seatName(seat);
-                  const phaseLabel = typeof m.phase === 'string' ? m.phase : 'play';
+                  const phaseLabel = normalizedPhase;
                   nextLog = [...nextLog, `【Human】${label} 等待操作｜phase=${phaseLabel}`];
                 }
                 continue;
@@ -4659,11 +4845,19 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 const seatIdx = typeof m.seat === 'number' ? m.seat : -1;
                 if (seatIdx >= 0 && seatIdx < 3 && !isHumanSeat(seatIdx)) {
                   const timeoutRaw = typeof m.timeoutMs === 'number' ? m.timeoutMs : Number((m as any).timeout_ms);
-                  const resolvedTimeout = Number.isFinite(timeoutRaw)
-                    ? Math.max(1_000, Math.min(30_000, Math.floor(timeoutRaw)))
-                    : 30_000;
+                  const rawPhase = typeof m.phase === 'string' ? m.phase : 'play';
+                  const normalizedPhase = rawPhase === 'bid'
+                    ? 'bid'
+                    : rawPhase === 'double'
+                      ? 'double'
+                      : rawPhase;
+                  const resolvedTimeout = (normalizedPhase === 'bid' || normalizedPhase === 'double')
+                    ? 30_000
+                    : (Number.isFinite(timeoutRaw)
+                      ? Math.max(1_000, Math.min(30_000, Math.floor(timeoutRaw)))
+                      : 30_000);
                   const clientIssuedAt = Date.now();
-                  const phaseLabel = typeof m.phase === 'string' ? m.phase : 'play';
+                  const phaseLabel = normalizedPhase;
                   const providerLabel = typeof m.by === 'string' ? m.by : undefined;
                   setBotTimers(prev => {
                     const next = [...prev];
@@ -4828,6 +5022,70 @@ if (m.type === 'event' && m.kind === 'double-summary') {
     `对乙x${yi}｜对丙x${bing}`
   ];
   // 不直接改 nextMultiplier，保持旧逻辑一致性
+  continue;
+}
+if (m.type === 'event' && m.kind === 'hand-snapshot') {
+  const stageRaw = typeof (m as any).stage === 'string'
+    ? String((m as any).stage)
+    : (typeof (m as any).phase === 'string' ? String((m as any).phase) : 'snapshot');
+  const stageLabel = stageRaw === 'pre-play'
+    ? '开局手牌'
+    : stageRaw === 'post-game'
+      ? '结算余牌'
+      : `手牌快照(${stageRaw})`;
+  const rawHands = Array.isArray(m.hands) ? (m.hands as any[][]) : null;
+  const hasRawHands = !!(rawHands && rawHands.length === 3 && rawHands.every(h => Array.isArray(h)));
+  const seatParts = [0, 1, 2].map(seat => {
+    const snapshotHand = rawHands && Array.isArray(rawHands[seat])
+      ? (rawHands[seat] as any[]).map(card => String(card))
+      : [];
+    const currentHand = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : null;
+    const cards = snapshotHand.length ? snapshotHand : (currentHand || []);
+    const pretty = cards && cards.length ? cards.join(' ') : '（无）';
+    return `${seatName(seat)}：${pretty}`;
+  });
+  let header = stageLabel;
+  const revealSeatsRaw = Array.isArray((m as any).revealSeats) ? (m as any).revealSeats as any[] : [];
+  const revealSeats = revealSeatsRaw
+    .map(v => Number(v))
+    .filter(seat => Number.isInteger(seat) && seat >= 0 && seat < 3);
+  const durationRaw = Number((m as any).revealDurationMs ?? (m as any).durationMs ?? 0);
+  const duration = Number.isFinite(durationRaw) ? Math.max(0, Math.floor(durationRaw)) : 0;
+  const revealDuration = revealSeats.length ? (duration > 0 ? duration : 5000) : 0;
+  if (revealSeats.length) {
+    const revealLabel = revealSeats.map(seatName).join('、');
+    const showDuration = revealDuration;
+    if (showDuration > 0) {
+      const seconds = showDuration >= 1000
+        ? (showDuration % 1000 === 0 ? (showDuration / 1000).toFixed(0) : (showDuration / 1000).toFixed(1))
+        : showDuration.toString();
+      header += `｜明牌：${revealLabel}（${showDuration >= 1000 ? `${seconds}s` : `${seconds}ms`}）`;
+    } else {
+      header += `｜明牌：${revealLabel}`;
+    }
+    queueHandReveal(revealSeats, revealDuration);
+  }
+  if (hasRawHands) {
+    const resetForStage = stageRaw === 'pre-play';
+    const freshUsage = new Map<string, Map<string, SuitUsageOwner>>() as RankSuitUsage;
+    const baseline = resetForStage
+      ? [[], [], []]
+      : (Array.isArray(nextHands) ? nextHands : [[], [], []]);
+    const decoratedHands = (rawHands as string[][]).map((hand, seatIdx) => {
+      const prev = Array.isArray(baseline?.[seatIdx]) ? baseline[seatIdx] as string[] : [];
+      const reserved = snapshotSuitUsage(freshUsage);
+      const decorated = reconcileHandFromRaw(hand, prev, reserved);
+      registerSuitUsage(freshUsage, ownerKeyForSeat(seatIdx), decorated);
+      return decorated;
+    }) as string[][];
+    suitUsageRef.current = freshUsage;
+    nextHands = decoratedHands;
+    if (resetForStage) {
+      updateDeckAuditSnapshot(decoratedHands, nextBottom);
+    }
+  }
+  const seatLines = seatParts.map(part => `  ${part}`);
+  nextLog = [...nextLog, header, ...seatLines];
   continue;
 }
 if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double')) {
@@ -5607,6 +5865,8 @@ const handleAllSaveInner = () => {
           {[0,1,2].map(i => {
             const isHumanTurn = !!(humanRequest && humanRequest.seat === i && humanRequest.phase === 'play');
             const seatInteractive = isHumanTurn && !humanExpired;
+            const revealActive = handRevealRef.current[i] > Date.now();
+            const faceDown = revealActive ? false : (hasHumanSeat ? !isHumanSeat(i) : false);
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, position:'relative' }}>
                 <div
@@ -5633,7 +5893,7 @@ const handleAllSaveInner = () => {
                   selectedIndices={humanRequest && humanRequest.seat === i ? humanSelectedSet : undefined}
                   onToggle={seatInteractive ? toggleHumanCard : undefined}
                   disabled={humanSubmitting || humanExpired}
-                  faceDown={hasHumanSeat ? !isHumanSeat(i) : false}
+                  faceDown={faceDown}
                 />
               </div>
             );
@@ -5700,6 +5960,17 @@ const handleAllSaveInner = () => {
                 ? `Seat ${humanSeatLabel} · ${humanPhaseText}`
                 : `${humanSeatLabel} ｜ ${humanPhaseText}`}
             </div>
+            {humanCountdownText && (
+              <div style={{ fontSize:12, color: humanExpired ? '#dc2626' : '#1d4ed8' }}>
+                {humanCountdownText}
+              </div>
+            )}
+            {humanLagDisplay && (
+              <div style={{ fontSize:12, color:'#6b7280' }}>{humanLagDisplay}</div>
+            )}
+            {humanExpirationNotice && (
+              <div style={{ fontSize:12, color:'#dc2626' }}>{humanExpirationNotice}</div>
+            )}
             {humanPhase === 'play' && (
               <>
                 <div style={{ fontSize:12, color:'#6b7280' }}>
@@ -5707,29 +5978,11 @@ const handleAllSaveInner = () => {
                     ? `Requirement: ${humanRequireText} · Can pass: ${humanCanPass ? 'Yes' : 'No'} · Selected: ${humanSelectedCount}`
                     : `需求：${humanRequireText} ｜ 可过：${humanCanPass ? '是' : '否'} ｜ 已选：${humanSelectedCount}`}
                 </div>
-                {humanSecondsRemaining != null && (
-                  <div style={{ fontSize:12, color: humanExpired ? '#dc2626' : '#1d4ed8' }}>
-                    {lang === 'en'
-                      ? `Time left: ${humanSecondsRemaining}s`
-                      : `剩余时间：${humanSecondsRemaining}秒`}
-                  </div>
-                )}
-                {humanLagDisplay && (
-                  <div style={{ fontSize:12, color:'#6b7280' }}>{humanLagDisplay}</div>
-                )}
                 {humanMustPass && (
                   <div style={{ fontSize:12, color:'#dc2626' }}>
                     {lang === 'en'
                       ? 'No playable cards available. Please pass this turn.'
                       : '无牌可出，请选择过牌。'}
-                  </div>
-                )}
-
-                {humanExpired && !humanMustPass && (
-                  <div style={{ fontSize:12, color:'#dc2626' }}>
-                    {lang === 'en'
-                      ? 'This prompt has expired. Please wait for the system to act.'
-                      : '该回合请求已失效，请等待系统处理。'}
                   </div>
                 )}
                 {humanHint && (
@@ -5833,13 +6086,13 @@ const handleAllSaveInner = () => {
               <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                 <button
                   onClick={() => handleHumanBid(true)}
-                  disabled={humanSubmitting}
-                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting ? '#e5e7eb' : '#2563eb', color: humanSubmitting ? '#6b7280' : '#fff' }}
+                  disabled={humanSubmitting || humanExpired}
+                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting || humanExpired ? '#e5e7eb' : '#2563eb', color: humanSubmitting || humanExpired ? '#6b7280' : '#fff' }}
                 >{lang === 'en' ? 'Bid' : '抢地主'}</button>
                 <button
                   onClick={() => handleHumanBid(false)}
-                  disabled={humanSubmitting}
-                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                  disabled={humanSubmitting || humanExpired}
+                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background: humanSubmitting || humanExpired ? '#f3f4f6' : '#fff', color:'#1f2937' }}
                 >{lang === 'en' ? 'Pass' : '不抢'}</button>
               </div>
             )}
@@ -5847,13 +6100,13 @@ const handleAllSaveInner = () => {
               <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                 <button
                   onClick={() => handleHumanDouble(true)}
-                  disabled={humanSubmitting}
-                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting ? '#e5e7eb' : '#2563eb', color: humanSubmitting ? '#6b7280' : '#fff' }}
+                  disabled={humanSubmitting || humanExpired}
+                  style={{ padding:'6px 12px', border:'1px solid #2563eb', borderRadius:8, background: humanSubmitting || humanExpired ? '#e5e7eb' : '#2563eb', color: humanSubmitting || humanExpired ? '#6b7280' : '#fff' }}
                 >{lang === 'en' ? 'Double' : '加倍'}</button>
                 <button
                   onClick={() => handleHumanDouble(false)}
-                  disabled={humanSubmitting}
-                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background:'#fff', color:'#1f2937' }}
+                  disabled={humanSubmitting || humanExpired}
+                  style={{ padding:'6px 12px', border:'1px solid #d1d5db', borderRadius:8, background: humanSubmitting || humanExpired ? '#f3f4f6' : '#fff', color:'#1f2937' }}
                 >{lang === 'en' ? 'No double' : '不加倍'}</button>
               </div>
             )}
