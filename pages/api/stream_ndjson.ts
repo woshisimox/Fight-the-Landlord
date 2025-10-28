@@ -444,6 +444,16 @@ function traceWrap(
     const upperBounded = Math.min(30_000, lowerBounded);
     return upperBounded;
   })();
+  const minIntervalMs = Math.max(0, Math.floor(Number.isFinite(startDelayMs) ? startDelayMs : 0));
+  let lastDecisionSettledAt = 0;
+  const ensureMinInterval = async () => {
+    if (!minIntervalMs) return;
+    if (lastDecisionSettledAt <= 0) return;
+    const elapsed = Date.now() - lastDecisionSettledAt;
+    const waitMs = minIntervalMs - elapsed;
+    if (waitMs <= 0) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(60_000, waitMs)));
+  };
   const timeoutSecondsLabel = Math.max(1, Math.round(sanitizedTimeoutMs / 1000));
 
   const sanitizeCtx = (ctx:any) => {
@@ -532,9 +542,7 @@ function traceWrap(
     });
 
   const wrapped = async (ctx:any) => {
-    if (startDelayMs && startDelayMs>0) {
-      await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
-    }
+    await ensureMinInterval();
     const phase = ctx?.phase || 'play';
     const callIssuedAt = Date.now();
     const callExpiresAt = callIssuedAt + sanitizedTimeoutMs;
@@ -547,6 +555,7 @@ function traceWrap(
         model: spec?.model||'',
         phase,
         timeoutMs: sanitizedTimeoutMs,
+        minIntervalMs,
         issuedAt: callIssuedAt,
         expiresAt: callExpiresAt,
       });
@@ -556,6 +565,7 @@ function traceWrap(
     const t0 = Date.now();
     try {
       const ctxWithSeen = { ...ctx, seen: (globalThis as any).__DDZ_SEEN ?? [], seenBySeat: (globalThis as any).__DDZ_SEEN_BY_SEAT ?? [[],[],[]] };
+      const fallbackCtx = sanitizeCtx(ctxWithSeen);
       try { console.debug('[CTX]', `seat=${ctxWithSeen.seat}`, `landlord=${ctxWithSeen.landlord}`, `leader=${ctxWithSeen.leader}`, `trick=${ctxWithSeen.trick}`, `seen=${ctxWithSeen.seen?.length||0}`, `seatSeen=${(ctxWithSeen.seenBySeat||[]).map((a:any)=>Array.isArray(a)?a.length:0).join('/')}`); } catch {}
 
       if (isHuman) {
@@ -603,7 +613,8 @@ function traceWrap(
             phase,
             ctx: payloadCtx,
             timeoutMs: sanitizedTimeoutMs,
-            delayMs: startDelayMs,
+            delayMs: minIntervalMs,
+            minIntervalMs,
             sessionId: sessionKey,
             hint: hintPayload || undefined,
             issuedAt,
@@ -614,7 +625,7 @@ function traceWrap(
           () => {
             expireHumanRequest(sessionKey, requestId, new Error('timeout'));
           },
-          () => buildAutoTimeoutMove(ctxWithSeen),
+          () => buildAutoTimeoutMove(fallbackCtx),
         );
         try {
           result = await Promise.race([humanPromise, timeout]);
@@ -622,11 +633,13 @@ function traceWrap(
           result = { move:'pass', reason:`error:${err?.message||String(err)}` };
         }
       } else {
-        const timeout = makeTimeout();
+        const timeout = makeTimeout(undefined, () => buildAutoTimeoutMove(fallbackCtx));
         result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
       }
     } catch (e:any) {
       result = { move:'pass', reason:`error:${e?.message||String(e)}` };
+    } finally {
+      lastDecisionSettledAt = Date.now();
     }
 
     const resPhase = (result && typeof result.phase === 'string') ? result.phase : phase;
