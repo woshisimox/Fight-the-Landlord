@@ -1394,22 +1394,33 @@ export async function* runOneGame(opts: {
   const coopEnabled = !!(opts.rule?.farmerCoop);
   const seatLabels = ['甲', '乙', '丙'];
 
-  const logHandsToConsole = (stage: string, snapshot: Label[][], landlordSeat: number) => {
+  const logHandsToConsole = (stage: string, snapshot: Label[][], landlordSeat: number, bottomCards?: Label[]) => {
     if (typeof console === 'undefined' || typeof console.log !== 'function') return;
     if (!Array.isArray(snapshot) || snapshot.length !== 3) return;
+
     const label = stage === 'pre-play'
       ? '开局手牌'
       : stage === 'post-game'
         ? '结算手牌'
         : stage;
-    const parts = snapshot.map((hand, idx) => {
+
+    const seatLines = snapshot.map((hand, idx) => {
       const base = seatLabels[idx] ?? `Seat${idx}`;
       const role = idx === landlordSeat ? '地主' : '农民';
       const cards = Array.isArray(hand) && hand.length ? hand.join(' ') : '（无）';
-      return `${base}(${role})：${cards}`;
+      return `  ${base}(${role})：${cards}`;
     });
+
+    const bottomLine = Array.isArray(bottomCards) && bottomCards.length
+      ? `  底牌：${bottomCards.join(' ')}`
+      : null;
+
+    const lines = bottomLine && stage === 'pre-play'
+      ? [...seatLines, bottomLine]
+      : seatLines;
+
     try {
-      console.log(`[DDZ][${label}] ${parts.join(' ｜ ')}`);
+      console.log(`[DDZ][${label}]\n${lines.join('\n')}`);
     } catch {}
   };
 
@@ -1844,7 +1855,7 @@ try { yield { type:'event', kind:'double-summary', landlord:Lseat, yi:Yseat, bin
       landlord,
     };
   } catch {}
-  logHandsToConsole('pre-play', hands, landlord);
+  logHandsToConsole('pre-play', hands, landlord, bottom);
 
 
   // 历史与记牌数据
