@@ -1450,6 +1450,45 @@ function LogLine({ text }: { text:string }) {
   );
 }
 
+/* ===== 思考耗时（thoughtMs）累计均值存档 ===== */
+type ThoughtStore = { schema:'ddz-latency@1'; updatedAt:string; mean:number; count:number };
+const THOUGHT_KEY = 'ddz_latency_store_v1';
+const THOUGHT_EMPTY: ThoughtStore = { schema:'ddz-latency@1', updatedAt:new Date().toISOString(), mean:0, count:0 };
+
+function ensureThoughtStore(raw: any): ThoughtStore {
+  const meanRaw = Number(raw?.mean);
+  const countRaw = Number(raw?.count);
+  return {
+    schema: 'ddz-latency@1',
+    updatedAt: typeof raw?.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
+    mean: Number.isFinite(meanRaw) ? meanRaw : 0,
+    count: Number.isFinite(countRaw) && countRaw >= 0 ? countRaw : 0,
+  };
+}
+
+function readThoughtStore(): ThoughtStore {
+  if (typeof window === 'undefined') {
+    return { ...THOUGHT_EMPTY, updatedAt: new Date().toISOString() };
+  }
+  try {
+    const raw = localStorage.getItem(THOUGHT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.schema === 'ddz-latency@1') {
+        return ensureThoughtStore(parsed);
+      }
+    }
+  } catch {}
+  return { ...THOUGHT_EMPTY, updatedAt: new Date().toISOString(), mean: 0, count: 0 };
+}
+
+function writeThoughtStore(store: ThoughtStore): ThoughtStore {
+  if (typeof window === 'undefined') return { ...store };
+  const next = { ...store, updatedAt: new Date().toISOString() };
+  try { localStorage.setItem(THOUGHT_KEY, JSON.stringify(next)); } catch {}
+  return next;
+}
+
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
 function LadderPanel() {
   const { t } = useI18n();
@@ -1528,6 +1567,30 @@ function LadderPanel() {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+type ThoughtSummaryPanelProps = { stats: ThoughtStore | null; lastMs: number | null; lang: Lang };
+
+function ThoughtSummaryPanel({ stats, lastMs, lang }: ThoughtSummaryPanelProps) {
+  const mean = Number(stats?.mean) || 0;
+  const count = Math.max(0, Number(stats?.count) || 0);
+  const fmt = (v:number) => (v >= 1000 ? v.toFixed(0) : v.toFixed(1));
+  const avgText = `${fmt(count > 0 ? mean : 0)} ms`;
+  const lastText = typeof lastMs === 'number' ? `${fmt(lastMs)} ms` : (lang === 'en' ? '—' : '—');
+  const title = lang === 'en' ? 'Thought time tracker' : '思考耗时统计';
+  const avgLabel = lang === 'en' ? 'Average' : '平均值';
+  const countLabel = lang === 'en' ? 'Samples' : '统计次数';
+  const lastLabel = lang === 'en' ? 'Latest' : '最近一次';
+  return (
+    <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:'8px 12px', marginBottom:12, background:'#f9fafb' }}>
+      <div style={{ fontWeight:700, marginBottom:4 }}>{title}</div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:12, fontSize:12, color:'#374151' }}>
+        <span>{`${avgLabel}：${avgText}`}</span>
+        <span>{`${countLabel}：${count}`}</span>
+        <span>{`${lastLabel}：${lastText}`}</span>
       </div>
     </div>
   );
@@ -3311,6 +3374,11 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const [deckAudit, setDeckAudit] = useState<DeckAuditReport | null>(null);
   const deckAuditRef = useRef<DeckAuditReport | null>(null);
   useEffect(() => { deckAuditRef.current = deckAudit; }, [deckAudit]);
+  const [thoughtStore, setThoughtStore] = useState<ThoughtStore>(() => readThoughtStore());
+  const thoughtStoreRef = useRef<ThoughtStore>(thoughtStore);
+  useEffect(() => { thoughtStoreRef.current = thoughtStore; }, [thoughtStore]);
+  const [lastThoughtMs, setLastThoughtMs] = useState<number | null>(null);
+  const botCallIssuedAtRef = useRef<Record<number, number>>({});
   const humanTraceRef = useRef<string>('');
   const handRevealRef = useRef<[number, number, number]>([0, 0, 0]);
   const [, setHandRevealTick] = useState(0);
@@ -3841,6 +3909,33 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   // 每局结束或数据变化时刷新统计
   useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
 ;
+
+  const recordThought = useCallback((seat:number, ms:number, appendLog?: (line:string) => void) => {
+    if (!Number.isFinite(ms) || ms < 0) return;
+    const prev = thoughtStoreRef.current || THOUGHT_EMPTY;
+    const prevCount = Math.max(0, Number(prev.count) || 0);
+    const prevMean = Number(prev.mean) || 0;
+    const nextCount = prevCount + 1;
+    const nextMean = (prevMean * prevCount + ms) / nextCount;
+    const nextStore: ThoughtStore = {
+      schema: 'ddz-latency@1',
+      updatedAt: new Date().toISOString(),
+      mean: nextMean,
+      count: nextCount,
+    };
+    const persisted = writeThoughtStore(nextStore);
+    thoughtStoreRef.current = persisted;
+    setThoughtStore(persisted);
+    setLastThoughtMs(ms);
+    const fmt = (v:number) => (v >= 1000 ? v.toFixed(0) : v.toFixed(1));
+    const seatDisplay = seatLabel(seat, lang);
+    const logLine = lang === 'en'
+      ? `【Latency】${seatDisplay}｜thought=${fmt(ms)}ms｜avg=${fmt(persisted.mean)}ms｜n=${persisted.count}`
+      : `【Latency】${seatDisplay}｜思考=${fmt(ms)}ms｜均值=${fmt(persisted.mean)}ms｜次数=${persisted.count}`;
+    if (appendLog) appendLog(logLine);
+    else setLog(l => [...l, logLine]);
+  }, [lang, setLog]);
+
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
   const tsRef = useRef(tsArr); useEffect(()=>{ tsRef.current=tsArr; }, [tsArr]);
@@ -4100,7 +4195,8 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     writeLadder(st);
     try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
   }
-    const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
+
+  const applyRadarFromStoreByRole = (lord: number | null, why: string) => {
     const ids = [0,1,2].map(seatIdentity);
     const s3 = [0,1,2].map(i=>{
       const role = (lord==null) ? undefined : (i===lord ? 'landlord' : 'farmer');
@@ -4326,6 +4422,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
     setBotTimers([null, null, null]);
+    botCallIssuedAtRef.current = {};
     setBotClockTs(Date.now());
     const base = initialTotalsRef.current;
     setTotals([base[0], base[1], base[2]] as [number, number, number]);
@@ -4871,6 +4968,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     };
                     return next;
                   });
+                  botCallIssuedAtRef.current[seatIdx] = clientIssuedAt;
                   setBotClockTs(clientIssuedAt);
                 }
                 nextLog = [...nextLog, `${prefix}调用｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜阶段=${m.phase || 'unknown'}${m.need ? `｜需求=${m.need}` : ''}`];
@@ -4894,6 +4992,17 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   `${prefix}完成｜${seatName(m.seat)}｜${m.by ?? agentIdForIndex(m.seat)}${m.model ? `(${m.model})` : ''}｜耗时=${m.tookMs}ms`,
                   ...(showReason ? [`${prefix}理由｜${seatName(m.seat)}：${rawReason}`] : []),
                 ];
+                if (!isHumanSeat(m.seat)) {
+                  const tookMsRaw = Number((m as any).tookMs ?? (m as any).latencyMs ?? (m as any).delayMs ?? NaN);
+                  const startAt = botCallIssuedAtRef.current[seatIdx];
+                  const measured = Number.isFinite(tookMsRaw) && tookMsRaw >= 0
+                    ? tookMsRaw
+                    : (typeof startAt === 'number' ? Math.max(0, Date.now() - startAt) : null);
+                  if (typeof measured === 'number') {
+                    recordThought(seatIdx, measured, line => { nextLog = [...nextLog, line]; });
+                  }
+                  delete botCallIssuedAtRef.current[seatIdx];
+                }
                 if (isHumanSeat(m.seat)) {
                   setHumanSubmitting(false);
                   setHumanRequest(prev => (prev && prev.seat === m.seat ? null : prev));
@@ -5441,6 +5550,7 @@ nextTotals     = [
       resetHumanState();
       humanTraceRef.current = '';
       setBotTimers([null, null, null]);
+      botCallIssuedAtRef.current = {};
       setBotClockTs(Date.now());
       const totalsSnap = (() => {
         const value = totalsRef.current;
@@ -5469,6 +5579,7 @@ nextTotals     = [
     resetHumanState();
     humanTraceRef.current = '';
     setBotTimers([null, null, null]);
+    botCallIssuedAtRef.current = {};
     setBotClockTs(Date.now());
   };
 
@@ -5496,6 +5607,7 @@ type AllBundle = {
   trueskill?: TsStore;
   /* radar?: RadarStore;  // disabled */
   ladder?: { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, any> };
+  latency?: ThoughtStore;
 };
 
 const buildAllBundle = (): AllBundle => {
@@ -5505,6 +5617,7 @@ const buildAllBundle = (): AllBundle => {
     const raw = localStorage.getItem('ddz_ladder_store_v1');
     ladder = raw ? JSON.parse(raw) : null;
   } catch {}
+  const latency = thoughtStoreRef.current ? ensureThoughtStore(thoughtStoreRef.current) : ensureThoughtStore(THOUGHT_EMPTY);
   return {
     schema: 'ddz-all@1',
     createdAt: new Date().toISOString(),
@@ -5512,6 +5625,7 @@ const buildAllBundle = (): AllBundle => {
     trueskill: tsStoreRef.current,
     /* radar excluded */
     ladder,
+    latency,
   };
 };
 
@@ -5526,7 +5640,14 @@ const applyAllBundleInner = (obj:any) => {
     if (obj?.ladder?.schema === 'ddz-ladder@1') {
       try { localStorage.setItem('ddz_ladder_store_v1', JSON.stringify(obj.ladder)); } catch {}
     }
-    setLog(l => [...l, '【ALL】统一上传完成（TS / 画像 / 天梯）。']);
+    if (obj?.latency?.schema === 'ddz-latency@1') {
+      const sanitized = ensureThoughtStore(obj.latency);
+      const persisted = writeThoughtStore(sanitized);
+      thoughtStoreRef.current = persisted;
+      setThoughtStore(persisted);
+      setLastThoughtMs(null);
+    }
+    setLog(l => [...l, '【ALL】统一上传完成（TS / 画像 / 天梯 / 思考时延）。']);
   } catch (e:any) {
     setLog(l => [...l, `【ALL】统一上传失败：${e?.message || e}`]);
   }
@@ -5549,6 +5670,10 @@ const handleAllSaveInner = () => {
     setScoreBreaks(prev => [...prev]);
     setRoundCuts(prev => [...prev]);
     setRoundLords(prev => [...prev]);
+    const refreshedLatency = readThoughtStore();
+    thoughtStoreRef.current = refreshedLatency;
+    setThoughtStore(refreshedLatency);
+    setLastThoughtMs(null);
     setLog(l => [...l, '【ALL】已刷新面板数据。']);
   };
 
@@ -5617,6 +5742,8 @@ const handleAllSaveInner = () => {
         </span>
       </div>
       )}
+
+      <ThoughtSummaryPanel stats={thoughtStore} lastMs={lastThoughtMs} lang={lang} />
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
@@ -6259,6 +6386,7 @@ const [lang, setLang] = useState<Lang>(() => {
     setSeatModels([...DEFAULTS.seatModels]); setSeatKeys(DEFAULTS.seatKeys.map((x:any)=>({ ...x })));
     setLiveLog([]); setResetKey(k => k + 1);
     try { localStorage.removeItem('ddz_ladder_store_v1'); } catch {}
+    try { localStorage.removeItem('ddz_latency_store_v1'); } catch {}
     try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
   };
   // —— 统一统计（TS + Radar + 出牌评分 + 评分统计）外层上传入口 ——
