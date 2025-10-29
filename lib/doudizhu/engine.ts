@@ -270,6 +270,48 @@ function consumeCardToken(raw: any, pool: Label[]): Label | null {
   return null;
 }
 
+function inferMultiplicityFromTokens(tokens: any[]): number | null {
+  if (!Array.isArray(tokens) || tokens.length === 0) return null;
+  const normalized = tokens
+    .map(t => stripCardToken(String(t ?? '')))
+    .filter(Boolean);
+  if (!normalized.length) return null;
+  const normalizedLower = normalized.map(tok => tok.toLowerCase());
+  const joined = normalizedLower.join(' ');
+
+  const matchFrom = (patterns: RegExp[]) =>
+    patterns.some(rx => rx.test(joined) || normalizedLower.some(tok => rx.test(tok)));
+
+  const quadruplePatterns = [
+    /四张|四個|四个|四枚|四連|四连|炸弹|炸彈|bomb|quad|four\s*of|fourkind|fourcard|四带|四帶/i,
+  ];
+  if (matchFrom(quadruplePatterns)) return 4;
+
+  const triplePatterns = [
+    /三张|三張|三个|三個|三枚|三連|trip|triple|three\s*of|threekind|三带|三帶/i, // triplet hints
+  ];
+  if (matchFrom(triplePatterns)) return 3;
+
+  const pairPatterns = [
+    /对子|對子|一对|一對|pair|double|两个|兩個|两张|兩張|俩|倆|pair\s*of/i,
+    /对([3-9TJQKA2xX]|三|四|五|六|七|八|九|十|杰|勾|骑|國|王|二)?$/i,
+  ];
+  if (matchFrom(pairPatterns)) return 2;
+
+  return null;
+}
+
+function drainByRank(pool: Label[], rank: string, count: number): Label[] {
+  const taken: Label[] = [];
+  while (count-- > 0) {
+    const idx = pool.findIndex(card => rankOf(card) === rank);
+    if (idx < 0) break;
+    const [card] = pool.splice(idx, 1);
+    taken.push(card);
+  }
+  return taken;
+}
+
 function remainingCountByRank(seen: Label[], hand: Label[]): Record<string, number> {
   const total: Record<string, number> = {};
   for (const r of RANKS) total[r] = (r === 'x' || r === 'X') ? 1 : 4;
@@ -2094,6 +2136,30 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
         const match = consumeCardToken(token, pool);
         if (match) picked.push(match);
       }
+
+      const implied = inferMultiplicityFromTokens(xs);
+      const joinAll = xs.map(t => String(t ?? '')).join(' ');
+      const rankCandidates: string[] = [];
+      if (picked.length) rankCandidates.push(rankOf(picked[0]));
+      const joinRank = detectRankFromToken(joinAll);
+      if (joinRank) rankCandidates.push(joinRank);
+      for (const token of xs) {
+        const rawRank = detectRankFromToken(String(token ?? ''));
+        if (rawRank) rankCandidates.push(rawRank);
+        const strippedRank = detectRankFromToken(stripCardToken(String(token ?? '')));
+        if (strippedRank) rankCandidates.push(strippedRank);
+      }
+      const rankHintOrder = Array.from(new Set(rankCandidates.filter(Boolean)));
+
+      if (implied && picked.length < implied) {
+        for (const rank of rankHintOrder) {
+          if (!rank) continue;
+          const extra = drainByRank(pool, rank, implied - picked.length);
+          picked.push(...extra);
+          if (picked.length >= implied) break;
+        }
+      }
+
       return picked;
     };
 
