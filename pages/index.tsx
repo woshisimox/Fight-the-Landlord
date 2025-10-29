@@ -1451,37 +1451,39 @@ function LogLine({ text }: { text:string }) {
 }
 
 /* ===== 思考耗时（thoughtMs）累计均值存档 ===== */
-type ThoughtSeatStats = { mean:number; count:number };
-type ThoughtStore = { schema:'ddz-latency@2'; updatedAt:string; seats:ThoughtSeatStats[] };
+type ThoughtPlayerStats = { mean:number; count:number; label?:string };
+type ThoughtStore = { schema:'ddz-latency@3'; updatedAt:string; players:Record<string, ThoughtPlayerStats> };
 const THOUGHT_KEY = 'ddz_latency_store_v1';
-const emptyThoughtSeats = (): ThoughtSeatStats[] => [0,1,2].map(()=>({ mean:0, count:0 }));
-const THOUGHT_EMPTY: ThoughtStore = { schema:'ddz-latency@2', updatedAt:new Date().toISOString(), seats:emptyThoughtSeats() };
+const THOUGHT_EMPTY: ThoughtStore = { schema:'ddz-latency@3', updatedAt:new Date().toISOString(), players:{} };
 
-const ensureSeatStats = (raw:any): ThoughtSeatStats => {
+const ensurePlayerStats = (raw:any): ThoughtPlayerStats => {
   const meanRaw = Number(raw?.mean);
   const countRaw = Number(raw?.count);
+  const labelRaw = typeof raw?.label === 'string' ? raw.label : undefined;
+  const label = labelRaw ? labelRaw.slice(0, 160) : undefined;
   return {
     mean: Number.isFinite(meanRaw) ? meanRaw : 0,
     count: Number.isFinite(countRaw) && countRaw >= 0 ? countRaw : 0,
+    ...(label ? { label } : {}),
   };
 };
 
 function ensureThoughtStore(raw: any): ThoughtStore {
   const updatedAt = typeof raw?.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString();
-  if (raw?.schema === 'ddz-latency@2' && Array.isArray(raw?.seats)) {
-    const seats = [0,1,2].map(i => ensureSeatStats(raw.seats[i]));
-    return { schema:'ddz-latency@2', updatedAt, seats };
+  if (raw?.schema === 'ddz-latency@3' && raw?.players && typeof raw.players === 'object') {
+    const players: Record<string, ThoughtPlayerStats> = {};
+    for (const key of Object.keys(raw.players)) {
+      players[key] = ensurePlayerStats(raw.players[key]);
+    }
+    return { schema:'ddz-latency@3', updatedAt, players };
   }
-  if (raw?.schema === 'ddz-latency@1') {
-    // 旧版仅存总体均值，无法映射到具体座位，退化为清零以免误导
-    return { schema:'ddz-latency@2', updatedAt, seats: emptyThoughtSeats() };
-  }
-  return { schema:'ddz-latency@2', updatedAt, seats: emptyThoughtSeats() };
+  // 旧版（按座位）数据无法映射至具体身份，避免误导直接清空
+  return { schema:'ddz-latency@3', updatedAt, players:{} };
 }
 
 function readThoughtStore(): ThoughtStore {
   if (typeof window === 'undefined') {
-    return { ...THOUGHT_EMPTY, updatedAt: new Date().toISOString(), seats: emptyThoughtSeats() };
+    return { ...THOUGHT_EMPTY, updatedAt: new Date().toISOString(), players:{} };
   }
   try {
     const raw = localStorage.getItem(THOUGHT_KEY);
@@ -1490,7 +1492,7 @@ function readThoughtStore(): ThoughtStore {
       return ensureThoughtStore(parsed);
     }
   } catch {}
-  return { ...THOUGHT_EMPTY, updatedAt: new Date().toISOString(), seats: emptyThoughtSeats() };
+  return { ...THOUGHT_EMPTY, updatedAt: new Date().toISOString(), players:{} };
 }
 
 function writeThoughtStore(store: ThoughtStore): ThoughtStore {
@@ -1499,6 +1501,38 @@ function writeThoughtStore(store: ThoughtStore): ThoughtStore {
   const next = { ...base, updatedAt: new Date().toISOString() };
   try { localStorage.setItem(THOUGHT_KEY, JSON.stringify(next)); } catch {}
   return next;
+}
+
+const THOUGHT_CATALOG_CHOICES: BotChoice[] = [
+  'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
+  'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http','human',
+];
+const DEFAULT_THOUGHT_CATALOG_IDS = THOUGHT_CATALOG_CHOICES.map(choice => makeThoughtIdentity(choice));
+
+function makeThoughtIdentity(choice: BotChoice, model?: string, base?: string): string {
+  const normalizedModel = (model ?? defaultModelFor(choice) ?? '').trim();
+  const normalizedBase = choice === 'http' ? (base ?? '').trim() : '';
+  return `${choice}|${normalizedModel}|${normalizedBase}`;
+}
+
+function parseThoughtIdentity(id: string): { choice: BotChoice | string; model: string; base: string } {
+  const [choiceRaw, modelRaw = '', baseRaw = ''] = String(id || '').split('|');
+  return { choice: choiceRaw as BotChoice | string, model: modelRaw || '', base: baseRaw || '' };
+}
+
+function thoughtLabelForIdentity(id: string): string {
+  const { choice, model, base } = parseThoughtIdentity(id);
+  const label = choiceLabel(choice as BotChoice);
+  if (typeof choice === 'string' && choice.startsWith('ai:')) {
+    const fallbackModel = defaultModelFor(choice as BotChoice);
+    const displayModel = model || fallbackModel || '';
+    return displayModel ? `${label}:${displayModel}` : label;
+  }
+  if (choice === 'http') {
+    const trimmed = (base || '').trim();
+    return trimmed ? `${label}:${trimmed}` : label;
+  }
+  return label;
 }
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
@@ -1522,21 +1556,8 @@ function LadderPanel() {
     }
   } catch {}
 
-  const CATALOG = [
-    'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
-    'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http','human'
-  ];
-  const catalogIds = CATALOG.map((choice)=>{
-    const model = defaultModelFor(choice as any) || '';
-    const base  = (choice === 'http') ? '' : '';
-    return `${choice}|${model}|${base}`;
-  });
-  const catalogLabels = (id:string)=>{
-    const [choice, model] = id.split('|');
-    const label = choiceLabel(choice as any);
-    if (choice.startsWith('ai:')) return `${label}:${model||defaultModelFor(choice as any)}`;
-    return label;
-  };
+  const catalogIds = DEFAULT_THOUGHT_CATALOG_IDS;
+  const catalogLabels = (id:string)=> thoughtLabelForIdentity(id);
 
   const players: Record<string, any> = (store?.players)||{};
   const keys = Array.from(new Set([...Object.keys(players), ...catalogIds]));
@@ -1584,22 +1605,45 @@ function LadderPanel() {
   );
 }
 
-type ThoughtSummaryPanelProps = { stats: ThoughtStore | null; lastMs: (number | null)[]; lang: Lang };
+type ThoughtSummaryPanelProps = { stats: ThoughtStore | null; lastMs: (number | null)[]; identities: string[]; lang: Lang };
 
-function ThoughtSummaryPanel({ stats, lastMs, lang }: ThoughtSummaryPanelProps) {
-  const seats = [0,1,2].map(i => {
-    const s = stats?.seats?.[i];
-    const mean = Number(s?.mean) || 0;
-    const count = Math.max(0, Number(s?.count) || 0);
-    const last = Array.isArray(lastMs) ? lastMs[i] ?? null : null;
-    return { mean, count, last };
+function ThoughtSummaryPanel({ stats, lastMs, identities, lang }: ThoughtSummaryPanelProps) {
+  const latest = new Map<string, { ms: number | null; seat: number }>();
+  identities.forEach((id, idx) => {
+    if (!id) return;
+    const val = Array.isArray(lastMs) ? lastMs[idx] ?? null : null;
+    latest.set(id, { ms: val, seat: idx });
   });
-  const maxMean = Math.max(0, ...seats.map(s => (s.count > 0 ? s.mean : 0)));
+
+  const players = stats?.players || {};
+  const identityList = Array.from(new Set([...(stats ? Object.keys(players) : []), ...DEFAULT_THOUGHT_CATALOG_IDS]));
+  const items = identityList.map(id => {
+    const raw = players[id];
+    const mean = Number(raw?.mean) || 0;
+    const count = Math.max(0, Number(raw?.count) || 0);
+    const label = (typeof raw?.label === 'string' && raw.label.trim()) ? raw.label.trim() : thoughtLabelForIdentity(id);
+    const lastEntry = latest.get(id) || null;
+    return { id, label, mean, count, lastEntry };
+  });
+
+  items.sort((a, b) => {
+    const aHas = a.count > 0;
+    const bHas = b.count > 0;
+    if (aHas && bHas) {
+      if (a.mean !== b.mean) return a.mean - b.mean;
+      return a.label.localeCompare(b.label);
+    }
+    if (aHas) return -1;
+    if (bHas) return 1;
+    return a.label.localeCompare(b.label);
+  });
+
+  const maxMean = Math.max(0, ...items.filter(it => it.count > 0).map(it => it.mean));
   const scale = maxMean > 0 ? maxMean : 1;
-  const title = lang === 'en' ? 'Thought time by seat' : '思考耗时（按座位）';
+  const title = lang === 'en' ? 'Thought time by identity' : '思考耗时（按身份）';
   const subtitle = lang === 'en'
-    ? 'X-axis = running average thought time (ms)'
-    : '横轴=累计平均思考时长（毫秒）';
+    ? 'X-axis = running average thought time (ms); sorted by shortest first'
+    : '横轴=累计平均思考时长（毫秒），按耗时从短到长排序';
   const fmt = (v:number|null) => {
     if (typeof v !== 'number' || !Number.isFinite(v)) return '—';
     if (v >= 1000) return v.toFixed(0);
@@ -1607,26 +1651,38 @@ function ThoughtSummaryPanel({ stats, lastMs, lang }: ThoughtSummaryPanelProps) 
   };
   const countLabel = lang === 'en' ? 'n=' : '次数=';
   const lastLabel = lang === 'en' ? 'Latest' : '最近';
+  const seatLabelPrefix = lang === 'en' ? 'Seat ' : '座位';
   const colon = lang === 'en' ? ': ' : '：';
   const barColor = '#60a5fa';
+  const layoutStyle = { display:'grid', gridTemplateColumns:'200px 1fr 80px 140px', gap:8, rowGap:10 } as const;
+  const wrapSeatTag = (tag:string) => {
+    if (!tag) return '';
+    return lang === 'en' ? ` (${seatLabelPrefix}${tag})` : `（${seatLabelPrefix}${tag}）`;
+  };
+
   return (
     <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:'12px 14px', marginBottom:12, background:'#f9fafb' }}>
       <div style={{ fontWeight:700, marginBottom:2 }}>{title}</div>
       <div style={{ fontSize:12, color:'#6b7280', marginBottom:8 }}>{subtitle}</div>
-      <div style={{ display:'grid', gridTemplateColumns:'120px 1fr 64px 90px', gap:8, rowGap:10 }}>
-        {[0,1,2].map(i => {
-          const seat = seats[i];
-          const pct = seat.count > 0 ? Math.min(1, seat.mean / scale || 0) : 0;
+      <div style={layoutStyle}>
+        {items.map(item => {
+          const pct = item.count > 0 ? Math.min(1, item.mean / scale || 0) : 0;
+          const last = item.lastEntry;
+          const seatTag = last ? `${seatLabel(last.seat, lang)}` : '';
+          const lastValue = last ? last.ms : null;
           return (
-            <div key={i} style={{ display:'contents' }}>
-              <div style={{ fontWeight:600 }}>{seatLabel(i, lang)}</div>
+            <div key={item.id} style={{ display:'contents' }}>
+              <div style={{ fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{item.label}</div>
               <div style={{ position:'relative', height:18, background:'#e5e7eb33', borderRadius:9999, overflow:'hidden', border:'1px solid #e5e7eb' }}>
                 <div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${pct*100}%`, background:barColor, transition:'width 0.3s ease', borderRadius:9999 }} />
               </div>
-              <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right' }}>{seat.count > 0 ? `${fmt(seat.mean)} ms` : '—'}</div>
+              <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right' }}>{item.count > 0 ? `${fmt(item.mean)} ms` : '—'}</div>
               <div style={{ fontSize:12, color:'#374151' }}>
-                <div>{countLabel}{seat.count}</div>
-                <div>{lastLabel}{colon}{seat.last != null ? `${fmt(seat.last)} ms` : '—'}</div>
+                <div>{countLabel}{item.count}</div>
+                <div>
+                  {lastLabel}{colon}{lastValue != null ? `${fmt(lastValue)} ms` : '—'}
+                  {wrapSeatTag(seatTag)}
+                </div>
               </div>
             </div>
           );
@@ -3418,6 +3474,13 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const thoughtStoreRef = useRef<ThoughtStore>(thoughtStore);
   useEffect(() => { thoughtStoreRef.current = thoughtStore; }, [thoughtStore]);
   const [lastThoughtMs, setLastThoughtMs] = useState<(number | null)[]>([null, null, null]);
+  const seatIdentity = useCallback((i:number) => {
+    const choice = props.seats[i] as BotChoice;
+    const modelInput = Array.isArray(props.seatModels) ? props.seatModels[i] : undefined;
+    const normalizedModel = normalizeModelForProvider(choice, modelInput || '') || defaultModelFor(choice);
+    const base = choice === 'http' ? (props.seatKeys?.[i]?.httpBase || '') : '';
+    return makeThoughtIdentity(choice, normalizedModel, base);
+  }, [props.seats, props.seatModels, props.seatKeys]);
   const botCallIssuedAtRef = useRef<Record<number, number>>({});
   const humanTraceRef = useRef<string>('');
   const handRevealRef = useRef<[number, number, number]>([0, 0, 0]);
@@ -3953,18 +4016,25 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const recordThought = useCallback((seat:number, ms:number, appendLog?: (line:string) => void) => {
     if (!Number.isFinite(ms) || ms < 0) return;
     if (!(seat === 0 || seat === 1 || seat === 2)) return;
-    const prev = thoughtStoreRef.current ? ensureThoughtStore(thoughtStoreRef.current) : THOUGHT_EMPTY;
-    const prevSeats = prev.seats.map(s => ({ ...s }));
-    const prevStats = prevSeats[seat] || { mean:0, count:0 };
-    const prevCount = Math.max(0, Number(prevStats.count) || 0);
-    const prevMean = Number(prevStats.mean) || 0;
+    const identity = seatIdentity(seat);
+    if (!identity) return;
+    const baseStore = thoughtStoreRef.current ? ensureThoughtStore(thoughtStoreRef.current) : THOUGHT_EMPTY;
+    const prevPlayers = { ...(baseStore.players || {}) };
+    const sanitizedPrev = ensurePlayerStats(prevPlayers[identity]);
+    const prevCount = Math.max(0, Number(sanitizedPrev.count) || 0);
+    const prevMean = Number(sanitizedPrev.mean) || 0;
     const nextCount = prevCount + 1;
     const nextMean = (prevMean * prevCount + ms) / nextCount;
-    prevSeats[seat] = { mean: nextMean, count: nextCount };
+    const displayLabel = sanitizedPrev.label && sanitizedPrev.label.trim() ? sanitizedPrev.label.trim() : thoughtLabelForIdentity(identity);
+    prevPlayers[identity] = {
+      mean: nextMean,
+      count: nextCount,
+      ...(displayLabel ? { label: displayLabel } : {}),
+    };
     const nextStore: ThoughtStore = {
-      schema: 'ddz-latency@2',
+      schema: 'ddz-latency@3',
       updatedAt: new Date().toISOString(),
-      seats: prevSeats,
+      players: prevPlayers,
     };
     const persisted = writeThoughtStore(nextStore);
     thoughtStoreRef.current = persisted;
@@ -3976,13 +4046,18 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     });
     const fmt = (v:number) => (v >= 1000 ? v.toFixed(0) : v.toFixed(1));
     const seatDisplay = seatLabel(seat, lang);
-    const seatStats = persisted.seats?.[seat] || { mean:0, count:0 };
+    const stats = persisted.players?.[identity];
+    const avgLabel = stats ? fmt(Number(stats.mean) || 0) : fmt(nextMean);
+    const countValue = stats ? Number(stats.count) || nextCount : nextCount;
+    const identityLabel = displayLabel || thoughtLabelForIdentity(identity);
     const logLine = lang === 'en'
-      ? `【Latency】${seatDisplay}｜thought=${fmt(ms)}ms｜avg=${fmt(seatStats.mean)}ms｜n=${seatStats.count}`
-      : `【Latency】${seatDisplay}｜思考=${fmt(ms)}ms｜均值=${fmt(seatStats.mean)}ms｜次数=${seatStats.count}`;
+      ? `【Latency】${identityLabel}｜${seatDisplay}｜thought=${fmt(ms)}ms｜avg=${avgLabel}ms｜n=${countValue}`
+      : `【Latency】${identityLabel}｜${seatDisplay}｜思考=${fmt(ms)}ms｜均值=${avgLabel}ms｜次数=${countValue}`;
     if (appendLog) appendLog(logLine);
     else setLog(l => [...l, logLine]);
-  }, [lang, setLog]);
+  }, [lang, seatIdentity, setLog]);
+
+  const seatIdentitiesMemo = useMemo(() => [0,1,2].map(seatIdentity), [seatIdentity]);
 
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -3993,13 +4068,6 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const tsStoreRef = useRef<TsStore>(emptyStore());
   useEffect(()=>{ try { tsStoreRef.current = readStore(); } catch {} }, []);
   const fileRef = useRef<HTMLInputElement|null>(null);
-
-  const seatIdentity = (i:number) => {
-    const choice = props.seats[i];
-    const model = normalizeModelForProvider(choice, props.seatModels[i] || '') || defaultModelFor(choice);
-    const base = choice === 'http' ? (props.seatKeys[i]?.httpBase || '') : '';
-    return `${choice}|${model}|${base}`; // 身份锚定
-  };
 
   const resolveRatingForIdentity = (id: string, role?: TsRole): Rating | null => {
     const p = tsStoreRef.current.players[id]; if (!p) return null;
@@ -5791,7 +5859,7 @@ const handleAllSaveInner = () => {
       </div>
       )}
 
-      <ThoughtSummaryPanel stats={thoughtStore} lastMs={lastThoughtMs} lang={lang} />
+      <ThoughtSummaryPanel stats={thoughtStore} lastMs={lastThoughtMs} identities={seatIdentitiesMemo} lang={lang} />
 
       {/* ========= TrueSkill（实时） ========= */}
       <Section title="TrueSkill（实时）">
