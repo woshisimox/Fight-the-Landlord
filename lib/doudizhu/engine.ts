@@ -82,6 +82,7 @@ export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 
 // ========== 牌面与工具 ==========
 const SUITS = ['♠', '♥', '♦', '♣'] as const;
+const ASCII_SUITS: Record<string, typeof SUITS[number]> = { S: '♠', H: '♥', D: '♦', C: '♣' };
 const RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','x','X'] as const; // x=小王 X=大王
 const ORDER: Record<string, number> = Object.fromEntries(RANKS.map((r, i) => [r, i]));
 const RANK_LABELS: Record<string, string> = {
@@ -142,6 +143,131 @@ function rankOf(label: Label): string {
   }
   // 'x' / 'X'
   return s;
+}
+
+function suitOf(label: Label): typeof SUITS[number] | null {
+  if (!label) return null;
+  const ch = String(label)[0];
+  return SUITS.includes(ch as any) ? (ch as typeof SUITS[number]) : null;
+}
+
+const SUIT_KEYWORDS: Array<{ suit: typeof SUITS[number]; hints: string[] }> = [
+  { suit: '♠', hints: ['♠', '♤', '黑桃', 'spade'] },
+  { suit: '♥', hints: ['♥', '♡', '红桃', 'heart'] },
+  { suit: '♦', hints: ['♦', '♢', '方块', 'diamond'] },
+  { suit: '♣', hints: ['♣', '♧', '梅花', 'club'] },
+];
+
+const RANK_CHINESE_HINTS: Array<{ regex: RegExp; rank: string }> = [
+  { regex: /三|叁/, rank: '3' },
+  { regex: /四|肆/, rank: '4' },
+  { regex: /五|伍/, rank: '5' },
+  { regex: /六|陆/, rank: '6' },
+  { regex: /七|柒/, rank: '7' },
+  { regex: /八|捌/, rank: '8' },
+  { regex: /九|玖/, rank: '9' },
+  { regex: /十|拾/, rank: 'T' },
+  { regex: /杰|勾|騎|骑/, rank: 'J' },
+  { regex: /后|皇|娘|妃/, rank: 'Q' },
+  { regex: /国王|国|王/, rank: 'K' },
+  { regex: /二|贰|两|俩/, rank: '2' },
+  { regex: /Ａ|Ａ牌/, rank: 'A' },
+];
+
+function stripCardToken(raw: string): string {
+  return String(raw ?? '')
+    .replace(/[\uFE0E\uFE0F]/g, '')
+    .replace(/[\s_\-]+/g, '')
+    .trim();
+}
+
+function detectSuitFromToken(raw: string): typeof SUITS[number] | null {
+  if (!raw) return null;
+  const compact = stripCardToken(raw);
+  if (!compact) return null;
+  const firstKey = compact[0] ? compact[0].toUpperCase() : undefined;
+  if (firstKey && Object.prototype.hasOwnProperty.call(ASCII_SUITS, firstKey)) {
+    return ASCII_SUITS[firstKey];
+  }
+  const lastChar = compact[compact.length - 1];
+  const lastKey = lastChar ? lastChar.toUpperCase() : undefined;
+  if (lastKey && Object.prototype.hasOwnProperty.call(ASCII_SUITS, lastKey)) {
+    return ASCII_SUITS[lastKey];
+  }
+  const lower = compact.toLowerCase();
+  for (const { suit, hints } of SUIT_KEYWORDS) {
+    if (hints.some(hint => lower.includes(hint))) {
+      return suit;
+    }
+  }
+  return null;
+}
+
+function detectRankFromToken(raw: string): string | null {
+  if (!raw) return null;
+  const compact = stripCardToken(raw);
+  if (!compact) return null;
+  const lower = compact.toLowerCase();
+  if (/^pass$/i.test(compact)) return null;
+  const smallJokerHint = lower.includes('小王') || lower.includes('小joker') || lower.includes('jokerx') || (lower.includes('joker') && (lower.includes('small') || lower.includes('little') || lower.includes('lower')));
+  const bigJokerHint = lower.includes('大王') || lower.includes('大joker') || lower.includes('jokery') || (lower.includes('joker') && (lower.includes('big') || lower.includes('large') || lower.includes('upper')));
+  if (smallJokerHint || compact === 'x') {
+    return 'x';
+  }
+  if (bigJokerHint || compact === 'X') {
+    return 'X';
+  }
+  if (lower === 'joker') {
+    return 'X';
+  }
+  let cleaned = compact
+    .replace(/[♠♤♣♧♥♡♦♢]/g, '')
+    .replace(/黑桃|红桃|方块|梅花|spades?|hearts?|diamonds?|clubs?/gi, '');
+  cleaned = cleaned.replace(/^[SHDC]/i, '');
+  cleaned = cleaned.replace(/[SHDC]$/i, '');
+  if (/10/.test(cleaned)) return 'T';
+  for (const ch of cleaned) {
+    if (ch === 'x') return 'x';
+    if (ch === 'X') return 'X';
+    const up = ch.toUpperCase();
+    if (RANKS.includes(up as any)) {
+      return up === '0' ? 'T' : up;
+    }
+  }
+  for (const { regex, rank } of RANK_CHINESE_HINTS) {
+    if (regex.test(cleaned)) return rank;
+  }
+  return null;
+}
+
+function consumeCardToken(raw: any, pool: Label[]): Label | null {
+  if (raw == null) return null;
+  const rawStr = String(raw);
+  const trimmed = stripCardToken(rawStr);
+  const directCandidates = [rawStr.trim(), trimmed];
+  for (const cand of directCandidates) {
+    if (!cand) continue;
+    const idx = pool.indexOf(cand as Label);
+    if (idx >= 0) {
+      const [card] = pool.splice(idx, 1);
+      return card;
+    }
+  }
+  const rank = detectRankFromToken(trimmed);
+  if (!rank) return null;
+  const suit = detectSuitFromToken(trimmed);
+  let idx = -1;
+  if (suit) {
+    idx = pool.findIndex(card => suitOf(card) === suit && rankOf(card) === rank);
+  }
+  if (idx < 0) {
+    idx = pool.findIndex(card => rankOf(card) === rank);
+  }
+  if (idx >= 0) {
+    const [card] = pool.splice(idx, 1);
+    return card;
+  }
+  return null;
 }
 
 function remainingCountByRank(seen: Label[], hand: Label[]): Record<string, number> {
@@ -1961,14 +2087,14 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
 
     // 清洗 + 校验
     const pickFromHand = (xs?: Label[]) => {
-      const rs: Label[] = [];
-      if (!Array.isArray(xs)) return rs;
+      if (!Array.isArray(xs)) return [] as Label[];
       const pool = [...hands[turn]];
-      for (const c of xs) {
-        const i = pool.indexOf(c);
-        if (i >= 0) { rs.push(c); pool.splice(i,1); }
+      const picked: Label[] = [];
+      for (const token of xs) {
+        const match = consumeCardToken(token, pool);
+        if (match) picked.push(match);
       }
-      return rs;
+      return picked;
     };
 
     const decidePlay = (): { kind: 'pass' } | { kind: 'play', pick: Label[], cc: Combo } => {
