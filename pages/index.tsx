@@ -955,6 +955,13 @@ const snapshotSuitUsage = (usage: RankSuitUsage, excludeOwner?: SuitUsageOwner):
   }
   return out;
 };
+const cloneReservedMap = (reserved: Map<string, Set<string>>): Map<string, Set<string>> => {
+  const out = new Map<string, Set<string>>();
+  reserved.forEach((set, rank) => {
+    out.set(rank, new Set(set));
+  });
+  return out;
+};
 const unregisterSuitUsage = (usage: RankSuitUsage, owner: SuitUsageOwner, labels: string[]) => {
   if (!labels?.length) return;
   for (const label of labels) {
@@ -978,6 +985,47 @@ const registerSuitUsage = (usage: RankSuitUsage, owner: SuitUsageOwner, labels: 
     if (!usage.has(rank)) usage.set(rank, new Map());
     usage.get(rank)!.set(key, owner);
   }
+};
+type SeatSuitPrefs = Array<Map<string, Set<string>> | undefined>;
+const extractSeatSuitPrefs = (hand: string[] | undefined): Map<string, Set<string>> | undefined => {
+  if (!Array.isArray(hand)) return undefined;
+  let map: Map<string, Set<string>> | undefined;
+  for (const rawCard of hand) {
+    if (rawCard == null) continue;
+    const label = displayLabelFromRaw(String(rawCard));
+    const rank = rankOf(label);
+    const suitKey = suitKeyForLabel(label);
+    if (!rank || !suitKey) continue;
+    if (!map) map = new Map<string, Set<string>>();
+    if (!map.has(rank)) map.set(rank, new Set());
+    map.get(rank)!.add(suitKey);
+  }
+  return map;
+};
+const extractAllSeatSuitPrefs = (hands: string[][] | undefined): SeatSuitPrefs | null => {
+  if (!Array.isArray(hands)) return null;
+  const out: SeatSuitPrefs = [];
+  hands.forEach((hand, idx) => {
+    out[idx] = extractSeatSuitPrefs(hand);
+  });
+  return out;
+};
+const mergeReservedWithForeign = (
+  base: Map<string, Set<string>>,
+  seat: number,
+  prefs: SeatSuitPrefs | null,
+): Map<string, Set<string>> => {
+  if (!prefs || !prefs.length) return base;
+  const merged = cloneReservedMap(base);
+  prefs.forEach((perSeat, idx) => {
+    if (!perSeat || idx === seat) return;
+    perSeat.forEach((suits, rank) => {
+      if (!merged.has(rank)) merged.set(rank, new Set());
+      const target = merged.get(rank)!;
+      suits.forEach(suitKey => target.add(suitKey));
+    });
+  });
+  return merged;
 };
 const ownerKeyForSeat = (seat: number) => `seat-${seat}`;
 function candDecorations(l: string): string[] {
@@ -1068,6 +1116,7 @@ function reconcileHandFromRaw(
   raw: string[] | undefined,
   prev: string[],
   reservedByRank?: Map<string, Set<string>>,
+  preferredByRank?: Map<string, Set<string>>,
 ): string[] {
   if (!Array.isArray(raw)) return prev;
   const pool = prev.slice();
@@ -1093,6 +1142,15 @@ function reconcileHandFromRaw(
     const used = usedByRank.get(rank);
     return !(used && used.has(key));
   };
+  const isPreferred = (label: string) => {
+    if (!preferredByRank) return false;
+    const rank = rankOf(label);
+    if (!rank) return false;
+    const key = suitKeyForLabel(label);
+    if (!key) return false;
+    const set = preferredByRank.get(rank);
+    return !!(set && set.has(key));
+  };
   const decorated: string[] = [];
 
   for (const label of raw) {
@@ -1105,6 +1163,13 @@ function reconcileHandFromRaw(
         usedPrev[idx] = true;
         chosen = opt;
         break;
+      }
+    }
+
+    if (!chosen && preferredByRank) {
+      const preferredOpt = options.find(opt => isPreferred(opt) && !decorated.includes(opt));
+      if (preferredOpt) {
+        chosen = preferredOpt;
       }
     }
 
@@ -4840,9 +4905,12 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   nextDelta = null;
                   nextMultiplier = 1; // 仅开局重置；后续“抢”只做×2
                   const freshUsage: RankSuitUsage = new Map();
+                  const seatPrefs = extractAllSeatSuitPrefs(rh as string[][]);
                   nextHands = (rh as string[][]).map((hand, seatIdx) => {
-                    const reserved = snapshotSuitUsage(freshUsage);
-                    const decorated = reconcileHandFromRaw(hand, [], reserved);
+                    const reservedBase = snapshotSuitUsage(freshUsage);
+                    const reserved = mergeReservedWithForeign(reservedBase, seatIdx, seatPrefs);
+                    const preferred = seatPrefs?.[seatIdx];
+                    const decorated = reconcileHandFromRaw(hand, [], reserved, preferred);
                     registerSuitUsage(freshUsage, ownerKeyForSeat(seatIdx), decorated);
                     return decorated;
                   });
@@ -4898,9 +4966,12 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 const rh0 = m.hands ?? m.payload?.hands ?? m.state?.hands ?? m.init?.hands;
                 if ((!nextHands || !(nextHands[0]?.length)) && Array.isArray(rh0) && rh0.length === 3 && Array.isArray(rh0[0])) {
                   const freshUsage: RankSuitUsage = new Map();
+                  const seatPrefs = extractAllSeatSuitPrefs(rh0 as string[][]);
                   nextHands = (rh0 as string[][]).map((hand, seatIdx) => {
-                    const reserved = snapshotSuitUsage(freshUsage);
-                    const decorated = reconcileHandFromRaw(hand, [], reserved);
+                    const reservedBase = snapshotSuitUsage(freshUsage);
+                    const reserved = mergeReservedWithForeign(reservedBase, seatIdx, seatPrefs);
+                    const preferred = seatPrefs?.[seatIdx];
+                    const decorated = reconcileHandFromRaw(hand, [], reserved, preferred);
                     registerSuitUsage(freshUsage, ownerKeyForSeat(seatIdx), decorated);
                     return decorated;
                   });
@@ -5322,13 +5393,16 @@ if (m.type === 'event' && m.kind === 'hand-snapshot') {
   if (hasRawHands) {
     const resetForStage = stageRaw === 'pre-play';
     const freshUsage = new Map<string, Map<string, SuitUsageOwner>>() as RankSuitUsage;
+    const seatPrefs = extractAllSeatSuitPrefs(rawHands as string[][]);
     const baseline = resetForStage
       ? [[], [], []]
       : (Array.isArray(nextHands) ? nextHands : [[], [], []]);
     const decoratedHands = (rawHands as string[][]).map((hand, seatIdx) => {
       const prev = Array.isArray(baseline?.[seatIdx]) ? baseline[seatIdx] as string[] : [];
-      const reserved = snapshotSuitUsage(freshUsage);
-      const decorated = reconcileHandFromRaw(hand, prev, reserved);
+      const reservedBase = snapshotSuitUsage(freshUsage);
+      const reserved = mergeReservedWithForeign(reservedBase, seatIdx, seatPrefs);
+      const preferred = seatPrefs?.[seatIdx];
+      const decorated = reconcileHandFromRaw(hand, prev, reserved, preferred);
       registerSuitUsage(freshUsage, ownerKeyForSeat(seatIdx), decorated);
       return decorated;
     }) as string[][];
@@ -5396,8 +5470,9 @@ if (m.type === 'event' && (m.kind === 'extra-double' || m.kind === 'post-double'
                     const usage = suitUsageRef.current;
                     const ownerKey = ownerKeyForSeat(s);
                     unregisterSuitUsage(usage, ownerKey, prevHand);
-                    const reserved = snapshotSuitUsage(usage);
-                    const updatedHand = reconcileHandFromRaw(m.hand as string[], prevHand, reserved);
+                    const reservedBase = snapshotSuitUsage(usage);
+                    const preferred = extractSeatSuitPrefs(m.hand as string[]);
+                    const updatedHand = reconcileHandFromRaw(m.hand as string[], prevHand, reservedBase, preferred);
                     registerSuitUsage(usage, ownerKey, updatedHand);
                     suitUsageRef.current = usage;
                     nextHands = Object.assign([], nextHands, { [s]: updatedHand });
