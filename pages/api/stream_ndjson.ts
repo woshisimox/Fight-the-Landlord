@@ -174,7 +174,7 @@ function buildAutoTimeoutMove(ctx: any): BotMove {
         }
         score += info.rank;
         score += cards.length * 0.01;
-        score -= singleDangerPenalty(ctxWithSeen as any, cards, four2Policy);
+        score -= singleDangerPenalty(ctx as any, cards, policy);
       }
       return { cards, info, score };
     });
