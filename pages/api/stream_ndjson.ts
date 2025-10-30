@@ -9,6 +9,7 @@ import {
   EndgameRush,
   generateMoves,
   classify,
+  singleDangerPenalty,
 } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
@@ -173,6 +174,7 @@ function buildAutoTimeoutMove(ctx: any): BotMove {
         }
         score += info.rank;
         score += cards.length * 0.01;
+        score -= singleDangerPenalty(ctxWithSeen as any, cards, four2Policy);
       }
       return { cards, info, score };
     });
@@ -262,7 +264,11 @@ function unifiedScore(ctx:any, mv:string[]): number {
   const bombPenalty = isBomb || isRocket ? 1.2 : 0;
   const outReward = mv.length * 0.4;
   const shape = outReward - singles*1.0 - lowSingles*0.3 + pairs*0.4 + triples*0.5 + bombs*0.6 + jokers*0.2 + chain*0.25 + pairSeq*0.25 - breakPenalty - bombPenalty;
-  const score = shape + (-risk * seatRiskFactor) * 0.35;
+  const four2Policy = ((ctx?.policy?.four2) === '2singles' || (ctx?.policy?.four2) === '2pairs' || (ctx?.policy?.four2) === 'both')
+    ? (ctx.policy.four2 as Four2Policy)
+    : 'both';
+  const guard = singleDangerPenalty(ctx as any, mv, four2Policy);
+  const score = shape + (-risk * seatRiskFactor) * 0.35 - guard;
   return score;
 }
 /* ========== 小工具 ========== */

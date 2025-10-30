@@ -506,6 +506,44 @@ function removeLabels(hand: Label[], pick: Label[]) {
 }
 
 
+function nextSeatIndex(seat: number): number {
+  return (seat + 1) % 3;
+}
+
+function isOpponentSeat(ctx: BotCtx | null | undefined, seat: number): boolean {
+  if (!ctx) return false;
+  const opponents = Array.isArray(ctx.opponents) ? ctx.opponents : [];
+  return opponents.includes(seat);
+}
+
+function handCountForSeat(ctx: BotCtx | null | undefined, seat: number): number | null {
+  if (!ctx) return null;
+  const counts = Array.isArray(ctx.handsCount) ? ctx.handsCount : null;
+  if (!counts || seat < 0 || seat >= counts.length) return null;
+  const value = counts[seat];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function singleDangerPenalty(ctx: BotCtx, move: Label[], four2: Four2Policy): number {
+  try {
+    if (!ctx || !Array.isArray(move) || move.length !== 1) return 0;
+    if (ctx.require != null) return 0;
+    const myHandSize = Array.isArray(ctx.hands) ? ctx.hands.length : 0;
+    if (myHandSize === move.length) return 0;
+    const nextSeat = nextSeatIndex(ctx.seat ?? 0);
+    if (!isOpponentSeat(ctx, nextSeat)) return 0;
+    const nextCount = handCountForSeat(ctx, nextSeat);
+    if (nextCount !== 1) return 0;
+    const info = classify(move, four2);
+    if (!info || info.type !== 'single') return 0;
+    if (info.rank === ORDER['X']) return 0;
+    return 6;
+  } catch {
+    return 0;
+  }
+}
+
+
 // ========== 牌型判定 ==========
 type ComboType =
   | 'single'
@@ -1100,7 +1138,7 @@ export const RandomLegal: BotFunc = (ctx) => {
   const scoreMove=(mv:string[])=>{
     const sShape=shapeScore(ctx.hands,mv);
     const sRisk = - baseOvertakeRisk(mv) * seatRiskFactor;
-    return sShape + sRisk * 0.35;
+    return sShape + sRisk * 0.35 - singleDangerPenalty(ctx, mv, four2);
   };
 
   // —— softmax 加权随机选择（保持“随机”风格，但受策略影响）
@@ -1365,7 +1403,7 @@ export const GreedyMax: BotFunc = (ctx) => {
     const sShape=shapeScore(ctx.hands,mv);
     const sRisk = - baseOvertakeRisk(mv) * seatRiskFactor;
     const bias  = keyPosOfMove(mv) * (+0.05);
-    return sShape + sRisk * 0.35 + bias;
+    return sShape + sRisk * 0.35 + bias - singleDangerPenalty(ctx, mv, four2);
   };
 
   if (legal.length) {
@@ -1456,7 +1494,7 @@ export const AllySupport: BotFunc = (ctx) => {
   const scoreMove=(mv:string[], riskWeight=0.35)=>{
     const sShape=shapeScore(ctx.hands,mv);
     const sRisk = - baseOvertakeRisk(mv) * seatRiskFactor;
-    return sShape + sRisk * riskWeight;
+    return sShape + sRisk * riskWeight - singleDangerPenalty(ctx, mv, four2);
   };
 
   // ========= 决策 =========
@@ -1622,7 +1660,7 @@ export const EndgameRush: BotFunc = (ctx) => {
     const sShape=shapeScore(ctx.hands,mv);
     const sRisk = - baseOvertakeRisk(mv) * seatRiskFactor;
     const riskW = inEndgame ? 0.20 : 0.35; // 收官时适当降低对被压的恐惧
-    return sShape + sRisk * riskW;
+    return sShape + sRisk * riskW - singleDangerPenalty(ctx, mv, four2);
   };
 
   // ========= 决策 =========
