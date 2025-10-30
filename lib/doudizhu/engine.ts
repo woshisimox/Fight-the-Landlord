@@ -270,6 +270,8 @@ function consumeCardToken(raw: any, pool: Label[]): Label | null {
   return null;
 }
 
+type AttachmentHint = 'triple_one' | 'triple_pair' | 'plane_single' | 'plane_pair';
+
 function inferMultiplicityFromTokens(tokens: any[]): number | null {
   if (!Array.isArray(tokens) || tokens.length === 0) return null;
   const normalized = tokens
@@ -301,6 +303,40 @@ function inferMultiplicityFromTokens(tokens: any[]): number | null {
   return null;
 }
 
+function inferAttachmentHintFromTokens(tokens: any[]): AttachmentHint | null {
+  if (!Array.isArray(tokens) || tokens.length === 0) return null;
+  const normalized = tokens
+    .map(t => String(t ?? '').toLowerCase())
+    .filter(Boolean);
+  if (!normalized.length) return null;
+  const joined = normalized.join(' ');
+
+  const matchesAny = (patterns: RegExp[]) =>
+    patterns.some(rx => rx.test(joined) || normalized.some(tok => rx.test(tok)));
+
+  const planePairPatterns = [
+    /飞机带对|飞机带两对|飞机带双|plane\s*(with|and)\s*(pairs?|double)|plane\s*pairs?|pair\s*wings|带对翼|双对翼|带两对|带对牌/i,
+  ];
+  if (matchesAny(planePairPatterns)) return 'plane_pair';
+
+  const planeSinglePatterns = [
+    /飞机带|飞机拖|plane\s*(with|and)|带翅|带翼|带单|带一张|带两个单|带两张牌|带两张小牌|with\s*wings|single\s*wings|wing\s*cards/i,
+  ];
+  if (matchesAny(planeSinglePatterns)) return 'plane_single';
+
+  const triplePairPatterns = [
+    /三带对|三带二|三带俩|three\s*(with|and)\s*(pairs?|double)|triple\s*(with|and)\s*(pairs?|double)|带一对|带一雙|带一雙牌|带两张相同/i,
+  ];
+  if (matchesAny(triplePairPatterns)) return 'triple_pair';
+
+  const tripleSinglePatterns = [
+    /三带一|三带单|三带一张|three\s*(with|and)\s*(one|single)|triple\s*(with|and)\s*(one|single)|带单牌|带一张牌/i,
+  ];
+  if (matchesAny(tripleSinglePatterns)) return 'triple_one';
+
+  return null;
+}
+
 function drainByRank(pool: Label[], rank: string, count: number): Label[] {
   const taken: Label[] = [];
   while (count-- > 0) {
@@ -310,6 +346,126 @@ function drainByRank(pool: Label[], rank: string, count: number): Label[] {
     taken.push(card);
   }
   return taken;
+}
+
+function cardsByRank(labels: Label[]): Map<string, Label[]> {
+  const map = new Map<string, Label[]>();
+  for (const card of labels) {
+    const rk = rankOf(card);
+    const arr = map.get(rk);
+    if (arr) {
+      arr.push(card);
+    } else {
+      map.set(rk, [card]);
+    }
+  }
+  for (const arr of map.values()) arr.sort(byValueAsc);
+  return map;
+}
+
+function takeSingles(map: Map<string, Label[]>, count: number, banned: Set<string>): Label[] | null {
+  if (count <= 0) return [];
+  const ranks = Array.from(map.keys()).sort((a, b) => (ORDER[a] ?? 0) - (ORDER[b] ?? 0));
+  const result: Label[] = [];
+  for (const rk of ranks) {
+    if (banned.has(rk)) continue;
+    const arr = map.get(rk);
+    if (!arr?.length) continue;
+    while (arr.length && result.length < count) {
+      result.push(arr.shift()!);
+    }
+    if (!arr.length) map.delete(rk);
+    if (result.length >= count) break;
+  }
+  return result.length >= count ? result : null;
+}
+
+function takePairs(map: Map<string, Label[]>, count: number, banned: Set<string>): Label[] | null {
+  if (count <= 0) return [];
+  const ranks = Array.from(map.keys()).sort((a, b) => (ORDER[a] ?? 0) - (ORDER[b] ?? 0));
+  const result: Label[] = [];
+  let used = 0;
+  for (const rk of ranks) {
+    if (banned.has(rk)) continue;
+    const arr = map.get(rk);
+    if (!arr?.length) continue;
+    while (arr.length >= 2 && used < count) {
+      result.push(arr.shift()!, arr.shift()!);
+      used += 1;
+    }
+    if (!arr.length) map.delete(rk);
+    if (used >= count) break;
+  }
+  return used >= count ? result : null;
+}
+
+function augmentWithAttachments(picked: Label[], leftover: Label[], hint: AttachmentHint): { cards: Label[]; ok: boolean } {
+  const rankMap = cardsByRank(picked);
+  const tripleEntries = Array.from(rankMap.entries())
+    .filter(([, arr]) => arr.length >= 3)
+    .map(([rank, arr]) => ({ rank, count: arr.length }))
+    .sort((a, b) => (ORDER[a.rank] ?? 0) - (ORDER[b.rank] ?? 0));
+
+  if (!tripleEntries.length) {
+    return { cards: picked, ok: false };
+  }
+
+  let anchorRanks: string[] = [];
+  let wingSlots = 0;
+  let wingSize = 1;
+
+  switch (hint) {
+    case 'triple_one':
+      anchorRanks = [tripleEntries[0].rank];
+      wingSlots = anchorRanks.length ? 1 : 0;
+      wingSize = 1;
+      break;
+    case 'triple_pair':
+      anchorRanks = [tripleEntries[0].rank];
+      wingSlots = anchorRanks.length ? 1 : 0;
+      wingSize = 2;
+      break;
+    case 'plane_single':
+      if (tripleEntries.length < 2) return { cards: picked, ok: false };
+      anchorRanks = tripleEntries.map(t => t.rank);
+      wingSlots = anchorRanks.length;
+      wingSize = 1;
+      break;
+    case 'plane_pair':
+      if (tripleEntries.length < 2) return { cards: picked, ok: false };
+      anchorRanks = tripleEntries.map(t => t.rank);
+      wingSlots = anchorRanks.length;
+      wingSize = 2;
+      break;
+    default:
+      return { cards: picked, ok: false };
+  }
+
+  if (!anchorRanks.length || wingSlots <= 0) {
+    return { cards: picked, ok: false };
+  }
+
+  const tripleCardCount = anchorRanks.reduce((sum, rk) => sum + Math.min(3, rankMap.get(rk)?.length ?? 0), 0);
+  const requiredWingCards = wingSlots * wingSize;
+  const expectedTotal = tripleCardCount + requiredWingCards;
+  if (picked.length >= expectedTotal) {
+    return { cards: picked, ok: true };
+  }
+
+  const banned = new Set(anchorRanks);
+  const leftoverMap = cardsByRank(leftover);
+  let wings: Label[] | null = null;
+  if (wingSize === 1) {
+    wings = takeSingles(leftoverMap, wingSlots, banned);
+  } else {
+    wings = takePairs(leftoverMap, wingSlots, banned);
+  }
+
+  if (!wings) {
+    return { cards: picked, ok: false };
+  }
+
+  return { cards: sorted([...picked, ...wings]), ok: true };
 }
 
 function remainingCountByRank(seen: Label[], hand: Label[]): Record<string, number> {
@@ -2129,8 +2285,10 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
 
     // 清洗 + 校验
     const pickFromHand = (xs?: Label[]) => {
-      if (!Array.isArray(xs)) return [] as Label[];
       const pool = [...hands[turn]];
+      if (!Array.isArray(xs)) {
+        return { picked: [] as Label[], leftover: pool, missing: false };
+      }
       const picked: Label[] = [];
       for (const token of xs) {
         const match = consumeCardToken(token, pool);
@@ -2151,6 +2309,7 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
       }
       const rankHintOrder = Array.from(new Set(rankCandidates.filter(Boolean)));
 
+      let missing = false;
       if (implied && picked.length < implied) {
         for (const rank of rankHintOrder) {
           if (!rank) continue;
@@ -2158,9 +2317,12 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
           picked.push(...extra);
           if (picked.length >= implied) break;
         }
+        if (picked.length < implied) {
+          missing = true;
+        }
       }
 
-      return picked;
+      return { picked, leftover: pool, missing };
     };
 
     const decidePlay = (): { kind: 'pass' } | { kind: 'play', pick: Label[], cc: Combo } => {
@@ -2174,7 +2336,24 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
         return { kind:'pass' };
       }
 
-      const cleaned = pickFromHand((mv as any)?.cards);
+      const tokens = (mv as any)?.cards;
+      const { picked, leftover, missing } = pickFromHand(tokens);
+
+      let cleaned = picked;
+      if (missing) {
+        cleaned = [];
+      } else {
+        const attachmentHint = inferAttachmentHintFromTokens(tokens);
+        if (attachmentHint) {
+          const augmented = augmentWithAttachments(picked, leftover, attachmentHint);
+          if (augmented.ok) {
+            cleaned = augmented.cards;
+          } else {
+            cleaned = [];
+          }
+        }
+      }
+
       const cc = classify(cleaned, four2);
 
       // require 为空 => 只要是合法牌型即可
