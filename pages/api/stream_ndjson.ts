@@ -665,6 +665,19 @@ function traceWrap(
     }
     try {
       const payload: any = { type:'event', kind:'bot-done', seat: seatIndex, by: label, model: spec?.model||'', tookMs: Date.now()-t0, reason: reasonText, score: unified, phase: resPhase };
+      try {
+        const rawUsage = result && typeof result === 'object' ? (result as any).usage : undefined;
+        if (rawUsage && typeof rawUsage === 'object') {
+          const total = Number((rawUsage as any).totalTokens ?? (rawUsage as any).total_tokens ?? NaN);
+          const prompt = Number((rawUsage as any).promptTokens ?? (rawUsage as any).prompt_tokens ?? NaN);
+          const completion = Number((rawUsage as any).completionTokens ?? (rawUsage as any).completion_tokens ?? NaN);
+          const normalized: any = {};
+          if (Number.isFinite(total) && total > 0) normalized.totalTokens = total;
+          if (Number.isFinite(prompt) && prompt >= 0) normalized.promptTokens = prompt;
+          if (Number.isFinite(completion) && completion >= 0) normalized.completionTokens = completion;
+          if (Object.keys(normalized).length) payload.usage = normalized;
+        }
+      } catch {}
       if (resPhase === 'bid') payload.bid = typeof result?.bid === 'boolean' ? !!result.bid : (result?.move === 'pass' ? false : true);
       if (resPhase === 'double') payload.double = typeof result?.double === 'boolean' ? !!result.double : (result?.move === 'pass' ? false : true);
       writeLine(res, payload);

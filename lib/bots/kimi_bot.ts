@@ -29,6 +29,8 @@ function fallbackMove(ctx: BotCtx, reason: string): BotMove {
 }
 
 
+type UsagePayload = { totalTokens: number; promptTokens?: number; completionTokens?: number };
+
 let _next = 0;
 const sleep = (ms:number)=>new Promise(r=>setTimeout(r,ms));
 async function throttle(){
@@ -37,6 +39,23 @@ async function throttle(){
   if (wait > 0) await sleep(wait);
   _next = Date.now() + 2200;
 }
+
+function parseUsage(raw: any): UsagePayload | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const total = Number((raw.total_tokens ?? raw.totalTokens ?? NaN));
+  if (!Number.isFinite(total) || total <= 0) return undefined;
+  const prompt = Number((raw.prompt_tokens ?? raw.promptTokens ?? NaN));
+  const completion = Number((raw.completion_tokens ?? raw.completionTokens ?? NaN));
+  const usage: UsagePayload = { totalTokens: total };
+  if (Number.isFinite(prompt) && prompt >= 0) usage.promptTokens = prompt;
+  if (Number.isFinite(completion) && completion >= 0) usage.completionTokens = completion;
+  return usage;
+}
+
+const attachUsage = <T extends BotMove>(move: T, usage?: UsagePayload): T => {
+  if (usage) (move as any).usage = usage;
+  return move;
+};
 
 export const KimiBot=(o:{apiKey:string,model?:string,baseUrl?:string}):BotFunc=>async (ctx:BotCtx)=>{
   try{
@@ -109,31 +128,37 @@ export const KimiBot=(o:{apiKey:string,model?:string,baseUrl?:string}):BotFunc=>
     });
     if(!r.ok) throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,200));
     const j:any = await r.json();
+    const usage = parseUsage(j?.usage);
     const t = j?.choices?.[0]?.message?.content || '';
     const p:any = extractFirstJsonObject(String(t)) || {};
     if (phase === 'bid') {
       if (typeof p.bid === 'boolean') {
-        return { phase: 'bid', bid: !!p.bid, reason: nonEmptyReason(p.reason,'Kimi') };
+        return attachUsage({ phase: 'bid', bid: !!p.bid, reason: nonEmptyReason(p.reason,'Kimi') }, usage);
       }
-      if (p.move === 'pass') return { phase: 'bid', bid: false, reason: nonEmptyReason(p.reason,'Kimi') };
-      if (p.move === 'play') return { phase: 'bid', bid: true, reason: nonEmptyReason(p.reason,'Kimi') };
+      if (p.move === 'pass') return attachUsage({ phase: 'bid', bid: false, reason: nonEmptyReason(p.reason,'Kimi') }, usage);
+      if (p.move === 'play') return attachUsage({ phase: 'bid', bid: true, reason: nonEmptyReason(p.reason,'Kimi') }, usage);
       throw new Error('invalid bid response');
     }
     if (phase === 'double') {
       if (typeof p.double === 'boolean') {
-        return { phase: 'double', double: !!p.double, reason: nonEmptyReason(p.reason,'Kimi') };
+        return attachUsage({ phase: 'double', double: !!p.double, reason: nonEmptyReason(p.reason,'Kimi') }, usage);
       }
       if (typeof p.bid === 'boolean') {
-        return { phase: 'double', double: !!p.bid, reason: nonEmptyReason(p.reason,'Kimi') };
+        return attachUsage({ phase: 'double', double: !!p.bid, reason: nonEmptyReason(p.reason,'Kimi') }, usage);
       }
-      if (p.move === 'pass') return { phase: 'double', double: false, reason: nonEmptyReason(p.reason,'Kimi') };
-      if (p.move === 'play') return { phase: 'double', double: true, reason: nonEmptyReason(p.reason,'Kimi') };
+      if (p.move === 'pass') return attachUsage({ phase: 'double', double: false, reason: nonEmptyReason(p.reason,'Kimi') }, usage);
+      if (p.move === 'play') return attachUsage({ phase: 'double', double: true, reason: nonEmptyReason(p.reason,'Kimi') }, usage);
       throw new Error('invalid double response');
     }
     const m = p.move==='pass' ? 'pass' : 'play';
     const cds:string[] = Array.isArray(p.cards)?p.cards:[];
     const reason = nonEmptyReason(p.reason,'Kimi');
-    return m==='pass'?{phase:'play',move:'pass',reason}:{phase:'play',move:'play',cards:cds,reason};
+    return attachUsage(
+      m==='pass'
+        ? {phase:'play',move:'pass',reason}
+        : {phase:'play',move:'play',cards:cds,reason},
+      usage
+    );
   }catch(e:any){
     const reason=`Kimi 调用失败：${e?.message||e}，已回退`;
     return fallbackMove(ctx, reason);

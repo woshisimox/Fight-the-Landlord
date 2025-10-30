@@ -3482,6 +3482,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     return makeThoughtIdentity(choice, normalizedModel, base);
   }, [props.seats, props.seatModels, props.seatKeys]);
   const botCallIssuedAtRef = useRef<Record<number, number>>({});
+  const kimiTpmRef = useRef<{ count: number; avg: number; totalTokens: number; last?: number }>({ count: 0, avg: 0, totalTokens: 0 });
   const humanTraceRef = useRef<string>('');
   const handRevealRef = useRef<[number, number, number]>([0, 0, 0]);
   const [, setHandRevealTick] = useState(0);
@@ -4539,6 +4540,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setLog([]); setFinishedCount(0);
     setBotTimers([null, null, null]);
     botCallIssuedAtRef.current = {};
+    kimiTpmRef.current = { count: 0, avg: 0, totalTokens: 0, last: undefined };
     setBotClockTs(Date.now());
     const base = initialTotalsRef.current;
     setTotals([base[0], base[1], base[2]] as [number, number, number]);
@@ -5111,11 +5113,38 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 if (!isHumanSeat(m.seat)) {
                   const tookMsRaw = Number((m as any).tookMs ?? (m as any).latencyMs ?? (m as any).delayMs ?? NaN);
                   const startAt = botCallIssuedAtRef.current[seatIdx];
-                  const measured = Number.isFinite(tookMsRaw) && tookMsRaw >= 0
-                    ? tookMsRaw
-                    : (typeof startAt === 'number' ? Math.max(0, Date.now() - startAt) : null);
+                  let measured: number | null = null;
+                  if (Number.isFinite(tookMsRaw) && tookMsRaw >= 0) {
+                    measured = tookMsRaw;
+                  } else if (typeof startAt === 'number') {
+                    measured = Math.max(0, Date.now() - startAt);
+                  }
                   if (typeof measured === 'number') {
                     recordThought(seatIdx, measured, line => { nextLog = [...nextLog, line]; });
+                  }
+                  const usageRaw = (m as any)?.usage;
+                  const totalTokens = Number((usageRaw?.totalTokens ?? usageRaw?.total_tokens ?? NaN));
+                  if (
+                    typeof measured === 'number' && measured > 0 &&
+                    typeof m.by === 'string' && m.by === 'ai:kimi' &&
+                    Number.isFinite(totalTokens) && totalTokens > 0
+                  ) {
+                    const promptTokens = Number((usageRaw?.promptTokens ?? usageRaw?.prompt_tokens ?? NaN));
+                    const completionTokens = Number((usageRaw?.completionTokens ?? usageRaw?.completion_tokens ?? NaN));
+                    const perCallTpm = (totalTokens * 60_000) / measured;
+                    const prev = kimiTpmRef.current || { count: 0, avg: 0, totalTokens: 0, last: undefined };
+                    const prevCount = Number.isFinite(prev.count) && prev.count > 0 ? prev.count : 0;
+                    const nextCount = prevCount + 1;
+                    const nextAvg = (prev.avg * prevCount + perCallTpm) / nextCount;
+                    const nextTotal = (prev.totalTokens || 0) + totalTokens;
+                    kimiTpmRef.current = { count: nextCount, avg: nextAvg, totalTokens: nextTotal, last: perCallTpm };
+                    const fmtRate = (value: number) => (value >= 1000 ? value.toFixed(0) : value.toFixed(1));
+                    const promptLabel = Number.isFinite(promptTokens) && promptTokens >= 0 ? `｜prompt=${promptTokens.toFixed(0)}` : '';
+                    const completionLabel = Number.isFinite(completionTokens) && completionTokens >= 0 ? `｜completion=${completionTokens.toFixed(0)}` : '';
+                    nextLog = [
+                      ...nextLog,
+                      `【Kimi】tokens=${totalTokens.toFixed(0)}${promptLabel}${completionLabel}｜TPM≈${fmtRate(perCallTpm)}｜avg≈${fmtRate(nextAvg)}｜calls=${nextCount}`,
+                    ];
                   }
                   delete botCallIssuedAtRef.current[seatIdx];
                 }
@@ -5667,6 +5696,7 @@ nextTotals     = [
       humanTraceRef.current = '';
       setBotTimers([null, null, null]);
       botCallIssuedAtRef.current = {};
+      kimiTpmRef.current = { count: 0, avg: 0, totalTokens: 0, last: undefined };
       setBotClockTs(Date.now());
       const totalsSnap = (() => {
         const value = totalsRef.current;
@@ -5696,6 +5726,7 @@ nextTotals     = [
     humanTraceRef.current = '';
     setBotTimers([null, null, null]);
     botCallIssuedAtRef.current = {};
+    kimiTpmRef.current = { count: 0, avg: 0, totalTokens: 0, last: undefined };
     setBotClockTs(Date.now());
   };
 
