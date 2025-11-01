@@ -7,6 +7,7 @@ import {
   RandomLegal,
   AllySupport,
   EndgameRush,
+  AdvancedHybrid,
   generateMoves,
   classify,
   singleDangerPenalty,
@@ -355,6 +356,7 @@ type BotChoice =
   | 'built-in:random-legal'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
+  | 'built-in:advanced-hybrid'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http'
   | 'human';
@@ -389,6 +391,7 @@ function providerLabel(choice: BotChoice) {
     case 'built-in:random-legal': return 'RandomLegal';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'built-in:advanced-hybrid': return 'AdvancedHybrid';
     case 'human': return 'Human';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
@@ -407,6 +410,7 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
     case 'built-in:random-legal': return RandomLegal;
     case 'built-in:ally-support': return AllySupport;
     case 'built-in:endgame-rush': return EndgameRush;
+    case 'built-in:advanced-hybrid': return AdvancedHybrid;
     case 'human': {
       const stub = async () => ({ move: 'pass', reason: 'human-stub' });
       (stub as any).phaseAware = true;
