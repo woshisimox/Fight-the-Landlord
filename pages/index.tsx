@@ -3414,6 +3414,54 @@ function mergeScore(prev: Score5, curr: Score5, mode: 'mean'|'ewma', count:numbe
   };
 }
 
+/* Radar chart component (0~5) */
+function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
+  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.bid];
+  const labels = ['配合','激进','保守','效率','抢地主'];
+  const size = 180;
+  const R = 70;
+  const cx = size/2;
+  const cy = size/2;
+
+  const ang = (i:number)=> (-90 + i*(360/5)) * Math.PI/180;
+
+  const ringPoints = (r:number)=> Array.from({length:5}, (_,i)=> (
+    `${cx + r * Math.cos(ang(i))},${cy + r * Math.sin(ang(i))}`
+  )).join(' ');
+
+  const valuePoints = Array.from({length:5}, (_,i)=> {
+    const r = Math.max(0, Math.min(5, vals[i] ?? 0)) / 5 * R;
+    return `${cx + r * Math.cos(ang(i))},${cy + r * Math.sin(ang(i))}`;
+  }).join(' ');
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', gap:8 }}>
+      <div style={{ width:'100%', display:'flex', justifyContent:'center' }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow:'visible' }}>
+          {/* 环形网格 */}
+          {[1,2,3,4].map(k=>{
+            const r = (k/4) * R;
+            return <polygon key={k} points={ringPoints(r)} fill="none" stroke="#e5e7eb"/>;
+          })}
+          {/* 轴线 */}
+          {Array.from({length:5}, (_,i)=> (
+            <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang(i))} y2={cy + R * Math.sin(ang(i))} stroke="#e5e7eb"/>
+          ))}
+          {/* 值多边形 */}
+          <polygon points={valuePoints} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
+          {/* 标签 */}
+          {labels.map((lab, i)=>{
+            const lx = cx + (R + 14) * Math.cos(ang(i));
+            const ly = cy + (R + 14) * Math.sin(ang(i));
+            return <text key={i} x={lx} y={ly} fontSize={11} textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
+          })}
+        </svg>
+      </div>
+      <div style={{ fontSize:12, color:'#374151' }}>{title}</div>
+    </div>
+  );
+}
+
 type RadarPanelProps = {
   aggStats: Score5[] | null;
   aggCount: number;
@@ -6668,6 +6716,7 @@ const handleAllSaveInner = () => {
 </Section>
       </div>
     </div>
+    </SeatInfoContext.Provider>
   );
 });
 
@@ -7358,47 +7407,3 @@ function ScoreTimeline(
   );
 }
 
-/* ================ 雷达图（0~5） ================= */
-function RadarChart({ title, scores }: { title: string; scores: Score5 }) {
-  const vals = [scores.coop, scores.agg, scores.cons, scores.eff, scores.bid];
-  const labels = ['配合','激进','保守','效率','抢地主'];
-  const size = 180, R = 70, cx = size/2, cy = size/2;
-
-  const ang = (i:number)=> (-90 + i*(360/5)) * Math.PI/180;
-
-  const ringPoints = (r:number)=> Array.from({length:5}, (_,i)=> {
-    return `${cx + r * Math.cos(ang(i))},${cy + r * Math.sin(ang(i))}`;
-  }).join(' ');
-
-  const valuePoints = Array.from({length:5}, (_,i)=> {
-    const r = Math.max(0, Math.min(5, vals[i] ?? 0)) / 5 * R;
-    return `${cx + r * Math.cos(ang(i))},${cy + r * Math.sin(ang(i))}`;
-  }).join(' ');
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', gap:8 }}>
-      <div style={{ width:'100%', display:'flex', justifyContent:'center' }}>
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow:'visible' }}>
-          {/* 环形网格 */}
-          {[1,2,3,4].map(k=>{
-            const r = (k/4) * R;
-            return <polygon key={k} points={ringPoints(r)} fill="none" stroke="#e5e7eb"/>;
-          })}
-        {/* 轴线 */}
-        {Array.from({length:5}, (_,i)=>{
-          return <line key={i} x1={cx} y1={cy} x2={cx + R * Math.cos(ang(i))} y2={cy + R * Math.sin(ang(i))} stroke="#e5e7eb"/>;
-        })}
-        {/* 值多边形 */}
-        <polygon points={valuePoints} fill="rgba(59,130,246,0.25)" stroke="#3b82f6" strokeWidth={2}/>
-        {/* 标签 */}
-        {labels.map((lab, i)=>{
-          const lx = cx + (R + 14) * Math.cos(ang(i));
-          const ly = cy + (R + 14) * Math.sin(ang(i));
-          return <text key={i} x={lx} y={ly} fontSize={11} textAnchor="middle" dominantBaseline="middle" fill="#374151">{lab}</text>;
-        })}
-        </svg>
-      </div>
-      <div style={{ fontSize:12, color:'#374151' }}>{title}</div>
-    </div>
-  );
-}

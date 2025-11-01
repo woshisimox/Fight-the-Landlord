@@ -83,8 +83,8 @@ const formatHistoryLine = (ctx: any, mode: PromptMode, limit = 6) => {
   if (!history.length) return mode === 'safe' ? 'History: none' : '历史出牌：无';
   const recent = history.slice(-limit);
   const rendered = recent
-    .map((entry) => describeHistoryEntry(entry, mode))
-    .filter((v): v is string => !!v && v.trim().length > 0);
+    .map((entry: any) => describeHistoryEntry(entry, mode))
+    .filter((v: unknown): v is string => typeof v === 'string' && v.trim().length > 0);
   if (!rendered.length) return null;
   return mode === 'safe'
     ? `History: ${rendered.join(' | ')}`
@@ -95,8 +95,8 @@ const formatCurrentTrickLine = (ctx: any, mode: PromptMode) => {
   const trickEntries = Array.isArray(ctx?.currentTrick) ? ctx.currentTrick : [];
   if (!trickEntries.length) return null;
   const rendered = trickEntries
-    .map((entry) => describeHistoryEntry(entry, mode))
-    .filter((v): v is string => !!v && v.trim().length > 0);
+    .map((entry: any) => describeHistoryEntry(entry, mode))
+    .filter((v: unknown): v is string => typeof v === 'string' && v.trim().length > 0);
   if (!rendered.length) return null;
   return mode === 'safe'
     ? `CurrentTrick: ${rendered.join(' | ')}`
