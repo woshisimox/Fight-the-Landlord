@@ -447,7 +447,7 @@ function traceWrap(
   const sanitizedTimeoutMs = (() => {
     const raw = Number.isFinite(turnTimeoutMs) ? Math.floor(turnTimeoutMs) : 30_000;
     const lowerBounded = Math.max(1_000, raw);
-    const upperBounded = Math.min(30_000, lowerBounded);
+    const upperBounded = Math.min(120_000, lowerBounded); // allow slower external bots while keeping a hard ceiling (120s)
     return upperBounded;
   })();
   const timeoutSecondsLabel = Math.max(1, Math.round(sanitizedTimeoutMs / 1000));
