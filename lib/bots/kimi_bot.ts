@@ -35,9 +35,11 @@ let _next = 0;
 const sleep = (ms:number)=>new Promise(r=>setTimeout(r,ms));
 async function throttle(){
   const now = Date.now();
-  const wait = _next - now;
+  const wait = Math.max(_next - now, _cooldownUntil - now);
   if (wait > 0) await sleep(wait);
-  _next = Date.now() + 2200;
+  const jitter = DELAY_JITTER_MS > 0 ? Math.floor(Math.random() * DELAY_JITTER_MS) : 0;
+  const base = Date.now() < _riskModeUntil ? BASE_DELAY_MS * RISK_DELAY_MULTIPLIER : BASE_DELAY_MS;
+  _next = Date.now() + base + jitter;
 }
 
 function parseUsage(raw: any): UsagePayload | undefined {
@@ -57,9 +59,9 @@ const attachUsage = <T extends BotMove>(move: T, usage?: UsagePayload): T => {
   return move;
 };
 
-type PromptMode = 'normal' | 'safe';
+type PromptMode = 'normal' | 'safe' | 'minimal';
 
-const trimSeen = (value: string[], max = 180) => {
+const trimSeen = (value: string[], max = 150) => {
   if (!Array.isArray(value) || !value.length) return '无';
   const joined = value.join('');
   return joined.length > max ? `${joined.slice(0, max)}…` : joined;
@@ -76,6 +78,34 @@ function buildUserPrompt(
   const seatLineNormal = `座位：我=${(ctx as any).seat} 地主=${(ctx as any).landlord} 首家=${(ctx as any).leader} 轮次=${(ctx as any).trick}`;
   const seatLineSafe = `Seat info: self=${(ctx as any).seat} landlord=${(ctx as any).landlord} lead=${(ctx as any).leader} turn=${(ctx as any).trick}`;
   const seatLine = mode === 'safe' ? seatLineSafe : seatLineNormal;
+
+  if (mode === 'minimal') {
+    const handsStr = Array.isArray(ctx?.hands) ? ctx.hands.join('') : '';
+    if (phase === 'bid') {
+      return [
+        'Reply with strict JSON only: {"phase":"bid","bid":true|false,"reason":"note"}.',
+        `Hand:${handsStr}`,
+        'Stay concise and family friendly.'
+      ].join('\n');
+    }
+    if (phase === 'double') {
+      const role = (ctx as any)?.double?.role || 'farmer';
+      return [
+        'Reply with strict JSON only: {"phase":"double","double":true|false,"reason":"note"}.',
+        `Role:${role}`,
+        `Hand:${handsStr}`,
+        'Stay concise and family friendly.'
+      ].join('\n');
+    }
+    const requirement = ctx.require ? JSON.stringify(ctx.require) : 'null';
+    return [
+      'Reply with strict JSON only: {"move":"play|pass","cards":["3"],"reason":"note"}.',
+      `Hand:${handsStr}`,
+      `Required:${requirement}`,
+      `CanPass:${ctx.canPass ? 'true' : 'false'}`,
+      'Keep it family friendly and concise.'
+    ].join('\n');
+  }
 
   if (phase === 'bid') {
     const info = (ctx as any)?.bid || {};
@@ -177,6 +207,15 @@ const isContentFilterError = (error: any): boolean => {
   return /content[_-]?filter/.test(message) || /high risk/.test(message) || /content[_-]?filter/.test(body) || /high risk/.test(body);
 };
 
+const BASE_DELAY_MS = 2200;
+const DELAY_JITTER_MS = 800;
+const RISK_DELAY_MULTIPLIER = 2;
+const HIGH_RISK_BACKOFF_MS = 12000;
+const HIGH_RISK_WINDOW_MS = 5 * 60 * 1000;
+
+let _cooldownUntil = 0;
+let _riskModeUntil = 0;
+
 async function requestKimi(
   o: { apiKey: string; model?: string; baseUrl?: string },
   ctx: BotCtx,
@@ -189,6 +228,8 @@ async function requestKimi(
   const systemPrompt =
     mode === 'safe'
       ? 'You are a safe assistant for a friendly Dou Dizhu card game. Only reply with a strict JSON object describing the move.'
+      : mode === 'minimal'
+      ? 'Return only a JSON object with the requested move. Avoid any sensitive content.'
       : 'Only reply with a strict JSON object for the move.';
   const r = await fetch(url, {
     method: 'POST',
@@ -218,23 +259,36 @@ async function requestKimi(
 
 export const KimiBot = (o: { apiKey: string; model?: string; baseUrl?: string }): BotFunc => async (ctx: BotCtx) => {
   let flagged = false;
+  let usedMode: PromptMode = 'normal';
   try {
     if (!o.apiKey) throw new Error('Missing Kimi API Key');
     const phase = ((ctx as any)?.phase || 'play') as 'bid' | 'double' | 'play';
 
     const exec = async (mode: PromptMode) => requestKimi(o, ctx, phase, mode);
 
+    const preferSafe = Date.now() < _riskModeUntil;
+    const attempts: PromptMode[] = preferSafe ? ['safe', 'minimal'] : ['normal', 'safe', 'minimal'];
+    let lastErr: any;
     let result;
-    try {
-      result = await exec('normal');
-    } catch (err) {
-      if (isContentFilterError(err)) {
-        flagged = true;
-        result = await exec('safe');
-      } else {
+    for (const mode of attempts) {
+      try {
+        const r = await exec(mode);
+        usedMode = mode;
+        result = r;
+        break;
+      } catch (err) {
+        if (isContentFilterError(err)) {
+          flagged = true;
+          lastErr = err;
+          const now = Date.now();
+          _cooldownUntil = Math.max(_cooldownUntil, now + HIGH_RISK_BACKOFF_MS);
+          _riskModeUntil = Math.max(_riskModeUntil, now + HIGH_RISK_WINDOW_MS);
+          continue;
+        }
         throw err;
       }
     }
+    if (!result) throw lastErr || new Error('Kimi 请求失败');
 
     const { payload: p, usage } = result;
 
@@ -264,7 +318,10 @@ export const KimiBot = (o: { apiKey: string; model?: string; baseUrl?: string })
       m === 'pass'
         ? { phase: 'play', move: 'pass', reason }
         : { phase: 'play', move: 'play', cards: cds, reason };
-    if (flagged) (move as any).warning = 'content-filter-retry';
+    if (flagged) {
+      const warn = usedMode === 'safe' ? 'content-filter-safe' : usedMode === 'minimal' ? 'content-filter-minimal' : 'content-filter-retry';
+      (move as any).warning = warn;
+    }
     return attachUsage(move as any, usage);
   } catch (e: any) {
     const message = e?.message || e;
