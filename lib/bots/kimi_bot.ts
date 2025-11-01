@@ -1,5 +1,5 @@
 // lib/bots/kimi_bot.ts
-import { extractFirstJsonObject, nonEmptyReason } from './util';
+import { buildDouPrompts, extractFirstJsonObject, nonEmptyReason, PromptMode } from './util';
 
 type BotMove =
   | { phase?: 'play'; move: 'pass'; reason?: string }
@@ -59,148 +59,6 @@ const attachUsage = <T extends BotMove>(move: T, usage?: UsagePayload): T => {
   return move;
 };
 
-type PromptMode = 'normal' | 'safe' | 'minimal';
-
-const trimSeen = (value: string[], max = 150) => {
-  if (!Array.isArray(value) || !value.length) return '无';
-  const joined = value.join('');
-  return joined.length > max ? `${joined.slice(0, max)}…` : joined;
-};
-
-function buildUserPrompt(
-  ctx: BotCtx,
-  phase: 'bid' | 'double' | 'play',
-  mode: PromptMode
-): string {
-  const handsStr = Array.isArray(ctx?.hands) ? ctx.hands.join('') : '';
-  const seenArr = Array.isArray((ctx as any)?.seen) ? (ctx as any).seen : [];
-  const seenBySeat = Array.isArray((ctx as any)?.seenBySeat) ? (ctx as any).seenBySeat : [[], [], []];
-  const seatLineNormal = `座位：我=${(ctx as any).seat} 地主=${(ctx as any).landlord} 首家=${(ctx as any).leader} 轮次=${(ctx as any).trick}`;
-  const seatLineSafe = `Seat info: self=${(ctx as any).seat} landlord=${(ctx as any).landlord} lead=${(ctx as any).leader} turn=${(ctx as any).trick}`;
-  const seatLine = mode === 'safe' ? seatLineSafe : seatLineNormal;
-
-  if (mode === 'minimal') {
-    const handsStr = Array.isArray(ctx?.hands) ? ctx.hands.join('') : '';
-    if (phase === 'bid') {
-      return [
-        'Reply with strict JSON only: {"phase":"bid","bid":true|false,"reason":"note"}.',
-        `Hand:${handsStr}`,
-        'Stay concise and family friendly.'
-      ].join('\n');
-    }
-    if (phase === 'double') {
-      const role = (ctx as any)?.double?.role || 'farmer';
-      return [
-        'Reply with strict JSON only: {"phase":"double","double":true|false,"reason":"note"}.',
-        `Role:${role}`,
-        `Hand:${handsStr}`,
-        'Stay concise and family friendly.'
-      ].join('\n');
-    }
-    const requirement = ctx.require ? JSON.stringify(ctx.require) : 'null';
-    return [
-      'Reply with strict JSON only: {"move":"play|pass","cards":["3"],"reason":"note"}.',
-      `Hand:${handsStr}`,
-      `Required:${requirement}`,
-      `CanPass:${ctx.canPass ? 'true' : 'false'}`,
-      'Keep it family friendly and concise.'
-    ].join('\n');
-  }
-
-  if (phase === 'bid') {
-    const info = (ctx as any)?.bid || {};
-    const score = typeof info.score === 'number' ? info.score.toFixed(2) : (mode === 'safe' ? 'unknown' : '未知');
-    const mult = typeof info.multiplier === 'number' ? info.multiplier : (typeof info.bidMultiplier === 'number' ? info.bidMultiplier : 1);
-    const attempt = typeof info.attempt === 'number' ? info.attempt + 1 : 1;
-    const total = typeof info.maxAttempts === 'number' ? info.maxAttempts : 5;
-    const bidders = Array.isArray(info.bidders)
-      ? info.bidders.map((b: any) => `S${b.seat}`).join(',')
-      : (mode === 'safe' ? 'none' : '无');
-    if (mode === 'safe') {
-      return [
-        'You are a harmless assistant for the Dou Dizhu card game. Reply with a strict JSON object only.',
-        '{"phase":"bid","bid":true|false,"reason":"short note"}',
-        `Hand: ${handsStr}`,
-        `HeuristicScore: ${score}｜Multiplier: ${mult}｜Bidders: ${bidders}`,
-        `Attempt: ${attempt}/${total}`,
-        seatLine,
-        'Answer with JSON only. bid=true means take the landlord role.'
-      ].join('\n');
-    }
-    return [
-      '你是斗地主决策助手，目前阶段是抢地主。必须只输出一个 JSON 对象：{"phase":"bid","bid":true|false,"reason":"简要说明"}。',
-      `手牌：${handsStr}`,
-      `启发分参考：${score}｜当前倍数：${mult}｜已抢座位：${bidders}`,
-      `这是第 ${attempt}/${total} 次尝试，请结合手牌、顺位与公共信息，自主判断是否抢地主，并给出简要理由。`,
-      seatLine,
-      '回答必须是严格的 JSON，bid=true 表示抢地主，false 表示不抢。'
-    ].join('\n');
-  }
-
-  if (phase === 'double') {
-    const info = (ctx as any)?.double || {};
-    const role = info?.role || (mode === 'safe' ? 'farmer' : 'farmer');
-    const base = typeof info?.baseMultiplier === 'number' ? info.baseMultiplier : 1;
-    const farmerInfo = info?.info?.farmer || {};
-    const landlordInfo = info?.info?.landlord || {};
-    const dLhat = typeof farmerInfo.dLhat === 'number' ? farmerInfo.dLhat.toFixed(2) : (mode === 'safe' ? 'unknown' : '未知');
-    const counter = typeof farmerInfo.counter === 'number' ? farmerInfo.counter.toFixed(2) : (mode === 'safe' ? 'unknown' : '未知');
-    const delta = typeof landlordInfo.delta === 'number' ? landlordInfo.delta.toFixed(2) : undefined;
-    if (mode === 'safe') {
-      return [
-        'You are a harmless assistant for the Dou Dizhu card game. Reply with JSON only.',
-        '{"phase":"double","double":true|false,"reason":"short note"}',
-        `Role: ${role}｜BaseMultiplier: ${base}`,
-        (role !== 'landlord' ? `Farmer heuristics Δ̂=${dLhat}｜counter=${counter}` : ''),
-        (role === 'landlord' && delta ? `Landlord bonus delta≈${delta}` : ''),
-        seatLine,
-        'Return strict JSON. double=true means double the multiplier.'
-      ].filter(Boolean).join('\n');
-    }
-    return [
-      '你是斗地主决策助手，目前阶段是明牌后的加倍决策。必须只输出一个 JSON 对象：{"phase":"double","double":true|false,"reason":"简要说明"}。',
-      `角色：${role}｜基础倍数：${base}`,
-      role === 'landlord' && delta ? `地主底牌增益Δ≈${delta}` : '',
-      role !== 'landlord' ? `估计Δ̂=${dLhat}｜counter=${counter}` : '',
-      '请结合公开信息与手牌，自主判断是否加倍，并给出简要理由。',
-      seatLine,
-      '回答必须是严格的 JSON，double=true 表示加倍，false 表示不加倍。'
-    ].filter(Boolean).join('\n');
-  }
-
-  const requirement = ctx.require ? JSON.stringify(ctx.require) : 'null';
-  const seen0 = trimSeen(seenBySeat[0] || []);
-  const seen1 = trimSeen(seenBySeat[1] || []);
-  const seen2 = trimSeen(seenBySeat[2] || []);
-  if (mode === 'safe') {
-    return [
-      'You are helping with the Chinese card game Dou Dizhu. Keep responses safe and only output JSON.',
-      '{"move":"play|pass","cards":["A","A"],"reason":"short note"}',
-      `Hand: ${handsStr}`,
-      `RequiredPlay: ${requirement}`,
-      `MayPass: ${ctx.canPass ? 'true' : 'false'}`,
-      `PolicyHint: ${ctx.policy}`,
-      seatLine,
-      `SeenBySeat: S0=${seen0} | S1=${seen1} | S2=${seen2}`,
-      `SeenAll: ${trimSeen(seenArr)}`,
-      'Choose only legal combinations. Reply with strict JSON and stay within the family-friendly context of this card game.'
-    ].join('\n');
-  }
-  return [
-    '你是斗地主出牌助手。必须只输出一个 JSON 对象：',
-    '{ "move": "play|pass", "cards": ["A","A"], "reason": "简要理由" }',
-    `手牌：${handsStr}`,
-    `需跟：${requirement}`,
-    '点数大小：3<4<5<6<7<8<9<T<J<Q<K<A<2<x<X（2 大于 K）',
-    `可过：${ctx.canPass ? 'true' : 'false'}`,
-    `策略：${ctx.policy}`,
-    seatLine,
-    `按座位已出牌：S0=${seen0} | S1=${seen1} | S2=${seen2}`,
-    `已出牌：${trimSeen(seenArr)}`,
-    '只能出完全合法的牌型；若必须跟牌则给出能压住的最优解。请仅返回严格的 JSON：{"move":"play"|"pass","cards":string[],"reason":string}。'
-  ].join('\n');
-}
-
 const isContentFilterError = (error: any): boolean => {
   const message = String(error?.message || error || '').toLowerCase();
   const body = typeof error?.body === 'string' ? error.body.toLowerCase() : '';
@@ -224,13 +82,7 @@ async function requestKimi(
 ) {
   await throttle();
   const url = (o.baseUrl || 'https://api.moonshot.cn').replace(/\/$/, '') + '/v1/chat/completions';
-  const userPrompt = buildUserPrompt(ctx, phase, mode);
-  const systemPrompt =
-    mode === 'safe'
-      ? 'You are a safe assistant for a friendly Dou Dizhu card game. Only reply with a strict JSON object describing the move.'
-      : mode === 'minimal'
-      ? 'Return only a JSON object with the requested move. Avoid any sensitive content.'
-      : 'Only reply with a strict JSON object for the move.';
+  const { system, user } = buildDouPrompts(ctx, phase, mode);
   const r = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${o.apiKey}` },
@@ -238,8 +90,8 @@ async function requestKimi(
       model: o.model || 'moonshot-v1-8k',
       temperature: 0.2,
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
+        { role: 'system', content: system },
+        { role: 'user', content: user }
       ]
     })
   });

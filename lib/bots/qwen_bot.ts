@@ -1,5 +1,5 @@
 // lib/bots/qwen_bot.ts
-import { extractFirstJsonObject, nonEmptyReason } from './util';
+import { buildDouPrompts, extractFirstJsonObject, nonEmptyReason, PromptMode } from './util';
 
 type BotMove =
   | { phase?: 'play'; move: 'pass'; reason?: string }
@@ -9,9 +9,6 @@ type BotMove =
 type BotCtx = { hands: string[]; require?: any; canPass: boolean; policy?: any; phase?: 'play'|'bid'|'double'; bid?: any; double?: any };
 type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 
-// 简易兜底（当上游 API 出错时）：
-// - 若允许过牌：直接过牌
-// - 否则：打出第一张手牌（可能不是最优，但可让引擎继续运行）
 function fallbackMove(ctx: BotCtx, reason: string): BotMove {
   if ((ctx as any)?.phase === 'bid') {
     const info: any = (ctx as any)?.bid || {};
@@ -28,104 +25,147 @@ function fallbackMove(ctx: BotCtx, reason: string): BotMove {
   return { phase: 'play', move: 'play', cards: [first], reason };
 }
 
+const BASE_DELAY_MS = 1900;
+const DELAY_JITTER_MS = 650;
+const RISK_DELAY_MULTIPLIER = 2;
+const HIGH_RISK_BACKOFF_MS = 10000;
+const RATE_LIMIT_BACKOFF_MS = 6000;
+const HIGH_RISK_WINDOW_MS = 4 * 60 * 1000;
 
-export const QwenBot=(o:{apiKey:string,model?:string}):BotFunc=>async (ctx:BotCtx)=>{
-  try{
-    if(!o.apiKey) throw new Error('Missing Qwen API Key');
-    const url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
-    const phase = (ctx as any)?.phase || 'play';
-    const handsStr = Array.isArray(ctx?.hands) ? ctx.hands.join('') : '';
-    const seenArr = Array.isArray((ctx as any)?.seen) ? (ctx as any).seen : [];
-    const seenBySeat = Array.isArray((ctx as any)?.seenBySeat) ? (ctx as any).seenBySeat : [[],[],[]];
-    const seatLine = `座位：我=${(ctx as any).seat} 地主=${(ctx as any).landlord} 首家=${(ctx as any).leader} 轮次=${(ctx as any).trick}`;
-    let userPrompt = '';
-    if (phase === 'bid') {
-      const info = (ctx as any)?.bid || {};
-      const score = typeof info.score === 'number' ? info.score.toFixed(2) : '未知';
-      const mult = typeof info.multiplier === 'number' ? info.multiplier : (typeof info.bidMultiplier === 'number' ? info.bidMultiplier : 1);
-      const attempt = typeof info.attempt === 'number' ? info.attempt + 1 : 1;
-      const total = typeof info.maxAttempts === 'number' ? info.maxAttempts : 5;
-      const bidders = Array.isArray(info.bidders) ? info.bidders.map((b:any)=>`S${b.seat}`).join(',') : '无';
-      userPrompt =
-        `你是斗地主决策助手，目前阶段是抢地主。必须只输出一个 JSON 对象：{"phase":"bid","bid":true|false,"reason":"简要说明"}。\n`+
-        `手牌：${handsStr}\n`+
-        `启发分参考：${score}｜当前倍数：${mult}｜已抢座位：${bidders}\n`+
-        `这是第 ${attempt}/${total} 次尝试，请根据手牌、顺位与公共信息自主判断是否抢地主，并给出简要理由。\n`+
-        `${seatLine}\n`+
-        `回答必须是严格的 JSON，bid=true 表示抢地主，false 表示不抢。`;
-    } else if (phase === 'double') {
-      const info = (ctx as any)?.double || {};
-      const role = info?.role || 'farmer';
-      const base = typeof info?.baseMultiplier === 'number' ? info.baseMultiplier : 1;
-      const farmerInfo = info?.info?.farmer || {};
-      const landlordInfo = info?.info?.landlord || {};
-      const dLhat = typeof farmerInfo.dLhat === 'number' ? farmerInfo.dLhat.toFixed(2) : '未知';
-      const counter = typeof farmerInfo.counter === 'number' ? farmerInfo.counter.toFixed(2) : '未知';
-      const delta = typeof landlordInfo.delta === 'number' ? landlordInfo.delta.toFixed(2) : undefined;
-      userPrompt =
-        `你是斗地主决策助手，目前阶段是明牌后的加倍决策。必须只输出一个 JSON 对象：{"phase":"double","double":true|false,"reason":"简要说明"}。\n`+
-        `角色：${role}｜基础倍数：${base}\n`+
-        (role==='landlord' && delta ? `地主底牌增益Δ≈${delta}\n` : '')+
-        (role!=='landlord' ? `估计Δ̂=${dLhat}｜counter=${counter}\n` : '')+
-        `请结合公开信息、手牌与局面，自主判断是否加倍并说明理由。\n`+
-        `${seatLine}\n`+
-        `回答必须是严格的 JSON，double=true 表示加倍，false 表示不加倍。`;
-    } else {
-      userPrompt =
-        `你是斗地主出牌助手。必须只输出一个 JSON 对象：\n`+
-        `{ "move": "play|pass", "cards": ["A","A"], "reason": "简要理由" }\n\n`+
-        `手牌：${handsStr}\n`+
-        `需跟：${ctx.require?JSON.stringify(ctx.require):'null'}\n`+
-        `点数大小：3<4<5<6<7<8<9<T<J<Q<K<A<2<x<X（2 大于 K）\n`+
-        `可过：${ctx.canPass?'true':'false'}\n`+
-        `策略：${ctx.policy}\n`+
-        `${seatLine}\n`+
-        `按座位已出牌：S0=${(seenBySeat[0]?.join('')) || ''} | S1=${(seenBySeat[1]?.join('')) || ''} | S2=${(seenBySeat[2]?.join('')) || ''}\n`+
-        `已出牌：${seenArr.length ? seenArr.join('') : '无'}\n`+
-        `只能出完全合法的牌型；若必须跟牌则给出能压住的最优解。请仅返回严格的 JSON：{"move":"play"|"pass","cards":string[],"reason":string}。`;
+let _next = 0;
+let _cooldownUntil = 0;
+let _riskModeUntil = 0;
+
+const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+async function throttle() {
+  const now = Date.now();
+  const wait = Math.max(_next - now, _cooldownUntil - now);
+  if (wait > 0) await sleep(wait);
+  const jitter = DELAY_JITTER_MS > 0 ? Math.floor(Math.random() * DELAY_JITTER_MS) : 0;
+  const base = Date.now() < _riskModeUntil ? BASE_DELAY_MS * RISK_DELAY_MULTIPLIER : BASE_DELAY_MS;
+  _next = Date.now() + base + jitter;
+}
+
+type RetryKind = 'safety' | 'rate-limit';
+
+function classifyError(error: any): RetryKind | null {
+  const message = String(error?.message || error || '').toLowerCase();
+  const body = typeof error?.body === 'string' ? error.body.toLowerCase() : '';
+  if (/rate limit|too many requests|429|quota/.test(message) || /rate limit|too many requests|429|quota/.test(body)) {
+    return 'rate-limit';
+  }
+  if (
+    /content[_-]?filter|risk|security|sensitive|illegal|moderation/.test(message) ||
+    /content[_-]?filter|risk|security|sensitive|illegal|moderation/.test(body)
+  ) {
+    return 'safety';
+  }
+  return null;
+}
+
+async function requestQwen(
+  o: { apiKey: string; model?: string },
+  ctx: BotCtx,
+  phase: 'bid' | 'double' | 'play',
+  mode: PromptMode
+) {
+  await throttle();
+  const url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+  const { system, user } = buildDouPrompts(ctx, phase, mode);
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${o.apiKey}` },
+    body: JSON.stringify({
+      model: o.model || 'qwen-plus',
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ]
+    })
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    const err: any = new Error(`HTTP ${resp.status} ${text.slice(0, 200)}`);
+    err.status = resp.status;
+    err.body = text;
+    throw err;
+  }
+  const j: any = await resp.json();
+  const txt = j?.choices?.[0]?.message?.content || '';
+  const p: any = extractFirstJsonObject(String(txt)) || {};
+  return { payload: p };
+}
+
+export const QwenBot = (o: { apiKey: string; model?: string }): BotFunc => async (ctx: BotCtx) => {
+  let flagged: RetryKind | null = null;
+  let usedMode: PromptMode = 'normal';
+  try {
+    if (!o.apiKey) throw new Error('Missing Qwen API Key');
+    const phase = ((ctx as any)?.phase || 'play') as 'bid' | 'double' | 'play';
+    const exec = (mode: PromptMode) => requestQwen(o, ctx, phase, mode);
+    const preferSafe = Date.now() < _riskModeUntil;
+    const attempts: PromptMode[] = preferSafe ? ['safe', 'minimal'] : ['normal', 'safe', 'minimal'];
+    let lastErr: any;
+    let result: { payload: any } | undefined;
+    for (const mode of attempts) {
+      try {
+        const r = await exec(mode);
+        usedMode = mode;
+        result = r;
+        break;
+      } catch (err) {
+        const kind = classifyError(err);
+        if (kind) {
+          flagged = kind;
+          lastErr = err;
+          const now = Date.now();
+          const backoff = kind === 'rate-limit' ? RATE_LIMIT_BACKOFF_MS : HIGH_RISK_BACKOFF_MS;
+          _cooldownUntil = Math.max(_cooldownUntil, now + backoff);
+          _riskModeUntil = Math.max(_riskModeUntil, now + HIGH_RISK_WINDOW_MS);
+          continue;
+        }
+        throw err;
+      }
     }
+    if (!result) throw lastErr || new Error('Qwen 请求失败');
 
-    const r = await fetch(url, {
-      method:'POST',
-      headers:{'content-type':'application/json', authorization:`Bearer ${o.apiKey}`},
-      body: JSON.stringify({
-        model:o.model||'qwen-plus',
-        temperature:0.2,
-        messages:[
-          {role:'system',content:'Only reply with a strict JSON object for the move.'},
-          {role:'user',content:userPrompt}
-        ]
-      })
-    });
-    if(!r.ok) throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,200));
-    const j:any = await r.json();
-    const t = j?.choices?.[0]?.message?.content || '';
-    const p:any = extractFirstJsonObject(String(t)) || {};
+    const p = result.payload;
     if (phase === 'bid') {
       if (typeof p.bid === 'boolean') {
-        return { phase: 'bid', bid: !!p.bid, reason: nonEmptyReason(p.reason,'Qwen') };
+        return { phase: 'bid', bid: !!p.bid, reason: nonEmptyReason(p.reason, 'Qwen') };
       }
-      if (p.move === 'pass') return { phase: 'bid', bid: false, reason: nonEmptyReason(p.reason,'Qwen') };
-      if (p.move === 'play') return { phase: 'bid', bid: true, reason: nonEmptyReason(p.reason,'Qwen') };
+      if (p.move === 'pass') return { phase: 'bid', bid: false, reason: nonEmptyReason(p.reason, 'Qwen') };
+      if (p.move === 'play') return { phase: 'bid', bid: true, reason: nonEmptyReason(p.reason, 'Qwen') };
       throw new Error('invalid bid response');
     }
     if (phase === 'double') {
       if (typeof p.double === 'boolean') {
-        return { phase: 'double', double: !!p.double, reason: nonEmptyReason(p.reason,'Qwen') };
+        return { phase: 'double', double: !!p.double, reason: nonEmptyReason(p.reason, 'Qwen') };
       }
       if (typeof p.bid === 'boolean') {
-        return { phase: 'double', double: !!p.bid, reason: nonEmptyReason(p.reason,'Qwen') };
+        return { phase: 'double', double: !!p.bid, reason: nonEmptyReason(p.reason, 'Qwen') };
       }
-      if (p.move === 'pass') return { phase: 'double', double: false, reason: nonEmptyReason(p.reason,'Qwen') };
-      if (p.move === 'play') return { phase: 'double', double: true, reason: nonEmptyReason(p.reason,'Qwen') };
+      if (p.move === 'pass') return { phase: 'double', double: false, reason: nonEmptyReason(p.reason, 'Qwen') };
+      if (p.move === 'play') return { phase: 'double', double: true, reason: nonEmptyReason(p.reason, 'Qwen') };
       throw new Error('invalid double response');
     }
-    const m = p.move==='pass' ? 'pass' : 'play';
-    const cds:string[] = Array.isArray(p.cards)?p.cards:[];
-    const reason = nonEmptyReason(p.reason,'Qwen');
-    return m==='pass'?{phase:'play',move:'pass',reason}:{phase:'play',move:'play',cards:cds,reason};
-  }catch(e:any){
-    const reason=`Qwen 调用失败：${e?.message||e}，已回退`;
+    const mv = p.move === 'pass' ? 'pass' : 'play';
+    const cards: string[] = Array.isArray(p.cards) ? p.cards : [];
+    const reason = nonEmptyReason(p.reason, 'Qwen');
+    const move = mv === 'pass'
+      ? { phase: 'play', move: 'pass', reason }
+      : { phase: 'play', move: 'play', cards, reason };
+    if (flagged) {
+      (move as any).warning = flagged === 'rate-limit' ? 'qwen-rate-limit' : 'qwen-safety';
+      if (usedMode !== 'normal') (move as any).promptMode = usedMode;
+    }
+    return move as BotMove;
+  } catch (e: any) {
+    const message = e?.message || e;
+    const note = flagged ? (flagged === 'rate-limit' ? '（触发限流后重试仍失败）' : '（触发安全审查后重试仍失败）') : '';
+    const reason = `Qwen 调用失败${note}：${message}，已回退`;
     return fallbackMove(ctx, reason);
   }
 };
