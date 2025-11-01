@@ -5818,7 +5818,10 @@ if (m.type === 'event' && m.kind === 'play') {
         if (pauseRef.current) await waitWhilePaused();
       }
 
-          if (dogId) { try { clearInterval(dogId); } catch {} }
+    if (dogId) { try { clearInterval(dogId); } catch {} }
+    if (roundFinishedRef.current) {
+      setFinishedCount(prev => Math.max(prev, labelRoundNo));
+    }
     setLog((l:any)=>{
   const __snapshot = [...(Array.isArray(l)?l:[]), `—— 本局流结束 ——`];
   (logRef as any).current = __snapshot;
