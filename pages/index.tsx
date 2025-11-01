@@ -4498,6 +4498,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const handsRef = useRef(hands); useEffect(() => { handsRef.current = hands; }, [hands]);
   const playsRef = useRef(plays); useEffect(() => { playsRef.current = plays; }, [plays]);
   const totalsRef = useRef(totals); useEffect(() => { totalsRef.current = totals; }, [totals]);
+  const roundBaseTotalsRef = useRef<[number, number, number] | null>(null);
   const finishedRef = useRef(finishedCount); useEffect(() => { finishedRef.current = finishedCount; }, [finishedCount]);
   const logRef = useRef(log); useEffect(() => { logRef.current = log; }, [log]);
   const landlordRef = useRef(landlord); useEffect(() => { landlordRef.current = landlord; }, [landlord]);
@@ -4626,6 +4627,12 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setBottomInfo({ landlord: null, cards: [], revealed: false });
     setWinner(null); setDelta(null); setMultiplier(1);
     setLog([]); setFinishedCount(0);
+    const startTotals = totalsRef.current;
+    if (Array.isArray(startTotals) && startTotals.length === 3) {
+      roundBaseTotalsRef.current = [startTotals[0], startTotals[1], startTotals[2]] as [number, number, number];
+    } else {
+      roundBaseTotalsRef.current = null;
+    }
     setBotTimers([null, null, null]);
     botCallIssuedAtRef.current = {};
     humanCallIssuedAtRef.current = {};
@@ -4718,6 +4725,10 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
 
       roundFinishedRef.current = false;
       seenStatsRef.current = false;
+      const preRoundTotals = totalsRef.current;
+      if (Array.isArray(preRoundTotals) && preRoundTotals.length === 3) {
+        roundBaseTotalsRef.current = [preRoundTotals[0], preRoundTotals[1], preRoundTotals[2]] as [number, number, number];
+      }
 
       const r = await fetch('/api/stream_ndjson', {
         method: 'POST',
@@ -4886,6 +4897,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                 resetHumanState();
                 resetHandReveal();
                 suitUsageRef.current = new Map();
+                roundBaseTotalsRef.current = [nextTotals[0], nextTotals[1], nextTotals[2]] as [number, number, number];
 
                 nextLog = [...nextLog, `【边界】round-start #${m.round}`];
                 continue;
@@ -5580,9 +5592,46 @@ if (m.type === 'event' && m.kind === 'play') {
                 (m.type === 'result') || (m.type === 'game-over') || (m.type === 'game_end');
               if (isWinLike) {
                 const L = (nextLandlord ?? 0) as number;
-                const ds = (Array.isArray(m.deltaScores) ? m.deltaScores
-                          : Array.isArray(m.delta) ? m.delta
-                          : [0,0,0]) as [number,number,number];
+                const prevTotals = (() => {
+                  const stored = roundBaseTotalsRef.current;
+                  if (stored && stored.length === 3) {
+                    return [stored[0], stored[1], stored[2]] as [number, number, number];
+                  }
+                  return [nextTotals[0], nextTotals[1], nextTotals[2]] as [number, number, number];
+                })();
+
+                const totalsMsgRaw = Array.isArray(m.totals)
+                  ? (m.totals as any[])
+                  : Array.isArray((m as any)?.payload?.totals)
+                    ? ((m as any).payload.totals as any[])
+                    : null;
+                const totalsFromMsg = (() => {
+                  if (!totalsMsgRaw || totalsMsgRaw.length !== 3) return null;
+                  return totalsMsgRaw.map((value, idx) => {
+                    const num = Number(value);
+                    if (Number.isFinite(num)) return num;
+                    const fallback = prevTotals[idx];
+                    return Number.isFinite(fallback) ? fallback : 0;
+                  }) as [number, number, number];
+                })();
+
+                const rawDelta = (Array.isArray(m.deltaScores) ? m.deltaScores
+                  : Array.isArray(m.delta) ? m.delta
+                  : null) as [number, number, number] | null;
+                let ds = rawDelta ? rawDelta.map(v => Number(v) || 0) as [number, number, number] : null;
+
+                if ((!ds || !Number.isFinite(ds[0])) && totalsFromMsg && L >= 0 && L < 3) {
+                  const seatDiff = totalsFromMsg.map((val, idx) => val - prevTotals[idx]) as [number, number, number];
+                  ds = [
+                    seatDiff[L] ?? 0,
+                    seatDiff[(L + 1) % 3] ?? 0,
+                    seatDiff[(L + 2) % 3] ?? 0,
+                  ];
+                }
+
+                if (!ds) {
+                  ds = [0,0,0];
+                }
 
                 // 将“以地主为基准”的增减分旋转成“按座位顺序”的展示
                 const rot: [number,number,number] = [
@@ -5592,19 +5641,25 @@ if (m.type === 'event' && m.kind === 'play') {
                 ];
                 let nextWinnerLocal     = m.winner ?? nextWinner ?? null;
                 const effMult = (m.multiplier ?? (nextMultiplier ?? 1));
-// 判定 rot 是否已经按倍数放大：基分 |-2|+|+1|+|+1| = 4
-const sumAbs = Math.abs(rot[0]) + Math.abs(rot[1]) + Math.abs(rot[2]);
-const needScale = effMult > 1 && (sumAbs === 4 || (sumAbs % effMult !== 0));
-const rot2 = needScale
-  ? (rot.map(v => (typeof v === 'number' ? v * effMult : v)) as [number, number, number])
-  : rot;
-nextMultiplier = effMult;
-nextDelta      = rot2;
-nextTotals     = [
-  nextTotals[0] + rot2[0],
-  nextTotals[1] + rot2[1],
-  nextTotals[2] + rot2[2]
-] as any;
+                const sumAbs = Math.abs(rot[0]) + Math.abs(rot[1]) + Math.abs(rot[2]);
+                const needScale = effMult > 1 && (sumAbs === 4 || (sumAbs % effMult !== 0));
+                const rot2 = needScale
+                  ? (rot.map(v => (typeof v === 'number' ? v * effMult : v)) as [number, number, number])
+                  : rot;
+                nextMultiplier = effMult;
+                nextDelta      = rot2;
+
+                if (Array.isArray(totalsFromMsg)) {
+                  nextTotals = totalsFromMsg as [number, number, number];
+                } else {
+                  nextTotals = [
+                    nextTotals[0] + rot2[0],
+                    nextTotals[1] + rot2[1],
+                    nextTotals[2] + rot2[2]
+                  ] as any;
+                }
+
+                roundBaseTotalsRef.current = [nextTotals[0], nextTotals[1], nextTotals[2]] as [number, number, number];
                 {
                   const mYi  = Number(((m as any).multiplierYi ?? 0));
                   const mBing= Number(((m as any).multiplierBing ?? 0));
@@ -5616,11 +5671,13 @@ nextTotals     = [
 
                 // 若后端没给 winner，依据“地主增减”推断胜负：ds[0] > 0 => 地主胜
                 if (nextWinnerLocal == null) {
-                  const landlordDelta = ds[0] ?? 0;
-                  if (landlordDelta > 0) nextWinnerLocal = L;
-                  else if (landlordDelta < 0) {
-                    const farmer = [0,1,2].find(x => x !== L)!;
-                    nextWinnerLocal = farmer;
+                  const landlordDeltaSeat = rot2[L] ?? 0;
+                  if (landlordDeltaSeat > 0) nextWinnerLocal = L;
+                  else if (landlordDeltaSeat < 0) {
+                    const farmer = [0,1,2].find(x => x !== L && (rot2[x] ?? 0) > 0);
+                    if (typeof farmer === 'number') {
+                      nextWinnerLocal = farmer;
+                    }
                   }
                 }
                 nextWinner = nextWinnerLocal;
