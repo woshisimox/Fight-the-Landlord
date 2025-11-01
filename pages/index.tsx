@@ -3548,6 +3548,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   }, [props.seats, props.seatModels, props.seatKeys]);
   const botCallIssuedAtRef = useRef<Record<number, number>>({});
   const humanCallIssuedAtRef = useRef<Record<number, number>>({});
+  const humanActiveRequestRef = useRef<Record<number, string>>({});
   const kimiTpmRef = useRef<{ count: number; avg: number; totalTokens: number; last?: number }>({ count: 0, avg: 0, totalTokens: 0 });
   const humanTraceRef = useRef<string>('');
   const handRevealRef = useRef<[number, number, number]>([0, 0, 0]);
@@ -3670,12 +3671,18 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const humanExpiresAt = humanRequest?.expiresAt ?? undefined;
   const humanExpired = useMemo(() => {
     if (!humanRequest) return false;
+    const seat = humanRequest.seat;
+    const activeId = seat != null ? humanActiveRequestRef.current[seat] : undefined;
+    if (activeId && activeId !== humanRequest.requestId) return false;
     if (humanRequest.stale) return true;
     if (typeof humanExpiresAt !== 'number') return false;
     return humanClockTs >= humanExpiresAt - 100;
   }, [humanRequest, humanExpiresAt, humanClockTs]);
   const humanMsRemaining = useMemo(() => {
     if (!humanRequest) return null;
+    const seat = humanRequest.seat;
+    const activeId = seat != null ? humanActiveRequestRef.current[seat] : undefined;
+    if (activeId && activeId !== humanRequest.requestId) return null;
     if (humanRequest.stale) return 0;
     if (typeof humanExpiresAt !== 'number') return null;
     return Math.max(0, humanExpiresAt - humanClockTs);
@@ -3735,6 +3742,7 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     setHumanError(null);
     setHumanClockTs(Date.now());
     humanCallIssuedAtRef.current = {};
+    humanActiveRequestRef.current = {};
   }, []);
 
   const toggleHumanCard = useCallback((idx: number) => {
@@ -3764,6 +3772,14 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       setHumanError(lang === 'en' ? 'Client trace missing' : '缺少客户端标识');
       return;
     }
+    const seat = humanRequest.seat;
+    const activeId = seat != null ? humanActiveRequestRef.current[seat] : undefined;
+    if (activeId && activeId !== humanRequest.requestId) {
+      setHumanError(lang === 'en'
+        ? 'Request replaced. Please act on the latest prompt.'
+        : '请求已被新的提示取代，请按照最新提示操作。');
+      return;
+    }
     if (humanRequest.stale) {
       setHumanError(lang === 'en'
         ? 'Request already expired. Please wait for the next prompt.'
@@ -3774,7 +3790,9 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       setHumanError(lang === 'en'
         ? 'Request expired. Waiting for auto-action or the next prompt…'
         : '请求已超时，请等待系统自动处理或下一次提示…');
-      setHumanRequest(prev => (prev ? { ...prev, stale: true } : prev));
+      if (seat != null && humanActiveRequestRef.current[seat] === humanRequest.requestId) {
+        setHumanRequest(prev => (prev ? { ...prev, stale: true } : prev));
+      }
       setHumanSelectedIdx([]);
       return;
     }
@@ -3803,7 +3821,10 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       const msg = err?.message || String(err);
       setHumanError(msg);
       if (/request expired/i.test(msg)) {
-        setHumanRequest(prev => (prev ? { ...prev, stale: true } : prev));
+        const seatIdx = humanRequest?.seat;
+        if (seatIdx != null && humanActiveRequestRef.current[seatIdx] === humanRequest.requestId) {
+          setHumanRequest(prev => (prev ? { ...prev, stale: true } : prev));
+        }
         setHumanSelectedIdx([]);
       }
     }
@@ -4608,6 +4629,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
     setBotTimers([null, null, null]);
     botCallIssuedAtRef.current = {};
     humanCallIssuedAtRef.current = {};
+    humanActiveRequestRef.current = {};
     kimiTpmRef.current = { count: 0, avg: 0, totalTokens: 0, last: undefined };
     setBotClockTs(Date.now());
     const base = initialTotalsRef.current;
@@ -5100,6 +5122,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   }
                   const clientExpiresAt = clientIssuedAt + resolvedWindowMs;
                   humanCallIssuedAtRef.current[seat] = clientIssuedAt;
+                  humanActiveRequestRef.current[seat] = requestId;
                   setHumanRequest({
                     seat,
                     requestId,
@@ -5202,6 +5225,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                   }
                   if (isHuman) {
                     delete humanCallIssuedAtRef.current[seatIdx];
+                    delete humanActiveRequestRef.current[seatIdx];
                   } else {
                     const usageRaw = (m as any)?.usage;
                     const totalTokens = Number((usageRaw?.totalTokens ?? usageRaw?.total_tokens ?? NaN));
@@ -5783,6 +5807,7 @@ nextTotals     = [
       setBotTimers([null, null, null]);
       botCallIssuedAtRef.current = {};
       humanCallIssuedAtRef.current = {};
+      humanActiveRequestRef.current = {};
       kimiTpmRef.current = { count: 0, avg: 0, totalTokens: 0, last: undefined };
       setBotClockTs(Date.now());
       const totalsSnap = (() => {
@@ -5814,6 +5839,7 @@ nextTotals     = [
     setBotTimers([null, null, null]);
     botCallIssuedAtRef.current = {};
     humanCallIssuedAtRef.current = {};
+    humanActiveRequestRef.current = {};
     kimiTpmRef.current = { count: 0, avg: 0, totalTokens: 0, last: undefined };
     setBotClockTs(Date.now());
   };
