@@ -34,9 +34,14 @@ export function nonEmptyReason(r?: string, provider?: string): string {
 
 export type PromptMode = 'normal' | 'safe' | 'minimal';
 
+const joinCards = (value: string[]) => {
+  if (!Array.isArray(value) || !value.length) return '';
+  return value.map((v) => String(v ?? '')).filter(Boolean).join(' ');
+};
+
 const trimSeen = (value: string[], max = 150) => {
   if (!Array.isArray(value) || !value.length) return '无';
-  const joined = value.join('');
+  const joined = joinCards(value);
   return joined.length > max ? `${joined.slice(0, max)}…` : joined;
 };
 
@@ -44,6 +49,67 @@ const DEFAULT_SYSTEM_PROMPTS: Record<PromptMode, string> = {
   normal: 'Only reply with a strict JSON object for the move.',
   safe: 'You are a safe assistant for a friendly Dou Dizhu card game. Only reply with a strict JSON object describing the move.',
   minimal: 'Return only a JSON object with the requested move. Avoid any sensitive content.'
+};
+
+const seatNames = ['甲', '乙', '丙'];
+
+const labelSeat = (seat: any, mode: PromptMode) => {
+  if (!Number.isInteger(seat) || seat < 0) return mode === 'safe' ? 'S?' : '座位?';
+  if (seat > 2) return mode === 'safe' ? `S${seat}` : `座位${seat}`;
+  return mode === 'safe' ? `S${seat}` : seatNames[seat];
+};
+
+const describeHistoryEntry = (entry: any, mode: PromptMode) => {
+  if (!entry) return null;
+  const seat = labelSeat(entry.seat, mode);
+  const trickTag = Number.isFinite(entry?.trick) ? `#${entry.trick}` : '';
+  const prefix = `${seat}${trickTag}`;
+  if (entry.move === 'play') {
+    const cards = joinCards(Array.isArray(entry.cards) ? entry.cards : []);
+    if (mode === 'safe') return `${prefix}:${cards || 'play []'}`;
+    return `${prefix}:${cards || '出空'}`;
+  }
+  if (entry.move === 'pass') {
+    return mode === 'safe' ? `${prefix}:pass` : `${prefix}:过`;
+  }
+  if (typeof entry.move === 'string') {
+    return `${prefix}:${entry.move}`;
+  }
+  return null;
+};
+
+const formatHistoryLine = (ctx: any, mode: PromptMode, limit = 6) => {
+  const history = Array.isArray(ctx?.history) ? ctx.history : [];
+  if (!history.length) return mode === 'safe' ? 'History: none' : '历史出牌：无';
+  const recent = history.slice(-limit);
+  const rendered = recent
+    .map((entry) => describeHistoryEntry(entry, mode))
+    .filter((v): v is string => !!v && v.trim().length > 0);
+  if (!rendered.length) return null;
+  return mode === 'safe'
+    ? `History: ${rendered.join(' | ')}`
+    : `历史出牌：${rendered.join('｜')}`;
+};
+
+const formatCurrentTrickLine = (ctx: any, mode: PromptMode) => {
+  const trickEntries = Array.isArray(ctx?.currentTrick) ? ctx.currentTrick : [];
+  if (!trickEntries.length) return null;
+  const rendered = trickEntries
+    .map((entry) => describeHistoryEntry(entry, mode))
+    .filter((v): v is string => !!v && v.trim().length > 0);
+  if (!rendered.length) return null;
+  return mode === 'safe'
+    ? `CurrentTrick: ${rendered.join(' | ')}`
+    : `当前出牌：${rendered.join('｜')}`;
+};
+
+const formatHandCounts = (ctx: any, mode: PromptMode) => {
+  const counts = Array.isArray(ctx?.handsCount) ? ctx.handsCount : [];
+  if (counts.length < 3) return null;
+  if (mode === 'safe') {
+    return `HandCounts: S0=${counts[0]} S1=${counts[1]} S2=${counts[2]}`;
+  }
+  return `剩余手牌数：甲=${counts[0]} 乙=${counts[1]} 丙=${counts[2]}`;
 };
 
 export function buildDouPrompts(
@@ -54,7 +120,7 @@ export function buildDouPrompts(
     system?: Partial<Record<PromptMode, string>>;
   }
 ): { system: string; user: string } {
-  const handsStr = Array.isArray(ctx?.hands) ? ctx.hands.join('') : '';
+  const handsStr = Array.isArray(ctx?.hands) ? joinCards(ctx.hands) : '';
   const seenArr = Array.isArray(ctx?.seen) ? ctx.seen : [];
   const seenBySeat = Array.isArray(ctx?.seenBySeat) ? ctx.seenBySeat : [[], [], []];
   const seatLineNormal = `座位：我=${ctx?.seat} 地主=${ctx?.landlord} 首家=${ctx?.leader} 轮次=${ctx?.trick}`;
@@ -62,6 +128,9 @@ export function buildDouPrompts(
   const seatLine = mode === 'safe' ? seatLineSafe : seatLineNormal;
 
   const requirement = ctx?.require ? JSON.stringify(ctx.require) : 'null';
+  const historyLine = formatHistoryLine(ctx, mode);
+  const trickLine = formatCurrentTrickLine(ctx, mode);
+  const countsLine = formatHandCounts(ctx, mode);
 
   const buildBidPrompt = () => {
     const info = ctx?.bid || {};
@@ -163,6 +232,9 @@ export function buildDouPrompts(
         `MayPass: ${ctx?.canPass ? 'true' : 'false'}`,
         `PolicyHint: ${ctx?.policy}`,
         seatLine,
+        historyLine || undefined,
+        countsLine || undefined,
+        trickLine || undefined,
         `SeenBySeat: S0=${seen0} | S1=${seen1} | S2=${seen2}`,
         `SeenAll: ${trimSeen(seenArr)}`,
         'Choose only legal combinations. Reply with strict JSON and stay within the family-friendly context of this card game.'
@@ -177,6 +249,9 @@ export function buildDouPrompts(
       `可过：${ctx?.canPass ? 'true' : 'false'}`,
       `策略：${ctx?.policy}`,
       seatLine,
+      historyLine || undefined,
+      countsLine || undefined,
+      trickLine || undefined,
       `按座位已出牌：S0=${seen0} | S1=${seen1} | S2=${seen2}`,
       `已出牌：${trimSeen(seenArr)}`,
       '只能出完全合法的牌型；若必须跟牌则给出能压住的最优解。请仅返回严格的 JSON：{"move":"play"|"pass","cards":string[],"reason":string}。'
