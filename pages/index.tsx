@@ -808,13 +808,31 @@ type BotTimer = {
   provider?: string;
 };
 
-function SeatTitle({ i }: { i:number }) {
+function SeatTitle({
+  i,
+  landlord = false,
+  showDetail = true,
+  align = 'flex-start',
+}: { i:number; landlord?: boolean; showDetail?: boolean; align?: CSSProperties['alignItems'] }) {
   const { lang } = useI18n();
   const details = useContext(SeatInfoContext);
   const label = seatLabel(i, lang);
-  const detail = details?.[i];
-  const suffix = detail && detail.trim() ? ` · ${detail.trim()}` : '';
-  return <span style={{ fontWeight:700 }}>{`${label}${suffix}`}</span>;
+  const detailRaw = details?.[i];
+  const detail = detailRaw && detailRaw.trim() ? detailRaw.trim() : '';
+  const landlordLabel = lang === 'en' ? '(Landlord)' : '（地主）';
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:align, lineHeight:1.2 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:6, fontWeight:700 }}>
+        <span>{label}</span>
+        {landlord && (
+          <span style={{ color:'#bf7f00', fontWeight:600 }}>{landlordLabel}</span>
+        )}
+      </div>
+      {showDetail && detail && (
+        <div style={{ fontSize:12, color:'#4b5563', fontWeight:500 }}>{detail}</div>
+      )}
+    </div>
+  );
 }
 
 
@@ -1500,10 +1518,17 @@ function Hand({ cards, interactive = false, selectedIndices, onToggle, disabled 
 }
 function PlayRow({ seat, move, cards, reason, showReason = true }:{ seat:number; move:'play'|'pass'; cards?:string[]; reason?:string; showReason?:boolean }) {
   const { t, lang } = useI18n();
+  const details = useContext(SeatInfoContext);
+  const detailRaw = details?.[seat];
+  const detail = detailRaw && detailRaw.trim() ? detailRaw.trim() : '';
+  const labelWidth = detail ? 120 : 40;
 
   return (
     <div style={{ display:'flex', gap:8, alignItems:'center', padding:'6px 0' }}>
-      <div style={{ width:32, textAlign:'right', opacity:0.8 }}>{seatLabel(seat, lang)}</div>
+      <div style={{ width:labelWidth, textAlign:'right', opacity:0.9, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:2 }}>
+        <span style={{ fontWeight:700 }}>{seatLabel(seat, lang)}</span>
+        {detail && <span style={{ fontSize:11, color:'#4b5563', fontWeight:500 }}>{detail}</span>}
+      </div>
       <div style={{ width:56, fontWeight:700 }}>{move === 'pass' ? t('Pass') : t('Play')}</div>
       <div style={{ flex:1 }}>
         {move === 'pass' ? <span style={{ opacity:0.6 }}>过</span> : <Hand cards={cards || []} />}
@@ -6115,8 +6140,8 @@ const handleAllSaveInner = () => {
             }
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                  <div><SeatTitle i={i}/> {landlord===i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}</div>
+                <div style={{ marginBottom:6 }}>
+                  <SeatTitle i={i} landlord={landlord === i} />
                 </div>
                 {timerDisplay}
                 <div style={{ fontSize:13, color:'#374151' }}>
@@ -6192,7 +6217,7 @@ const handleAllSaveInner = () => {
             const st = scoreStats[i];
             return (
               <div key={i} style={{ border:'1px solid #eee', borderRadius:8, padding:8, background:'#fff' }}>
-                <div style={{ fontWeight:700, marginBottom:6 }}><SeatTitle i={i} /></div>
+                <div style={{ marginBottom:6 }}><SeatTitle i={i} /></div>
                 <div style={{ fontSize:12, color:'#6b7280' }}>局数：{st.rounds}</div>
                 <div style={{ fontSize:12, color:'#6b7280' }}>总体均值：{st.overallAvg.toFixed(3)}</div>
                 <div style={{ fontSize:12, color:'#6b7280' }}>最近一局均值：{st.lastAvg.toFixed(3)}</div>
@@ -6343,7 +6368,7 @@ const handleAllSaveInner = () => {
                   {totals[i]}
                 </div>
                 <div style={{ marginBottom:6 }}>
-                  <SeatTitle i={i} /> {landlord === i && <span style={{ marginLeft:6, color:'#bf7f00' }}>（地主）</span>}
+                  <SeatTitle i={i} landlord={landlord === i} />
                 </div>
                 <Hand
                   cards={hands[i]}
@@ -6610,7 +6635,15 @@ const handleAllSaveInner = () => {
           </div>
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
             <div>胜者</div>
-            <div style={{ fontSize:24, fontWeight:800 }}>{winner == null ? '—' : seatName(winner)}</div>
+            <div style={{ marginTop:6 }}>
+              {winner == null ? (
+                <div style={{ fontSize:24, fontWeight:800 }}>—</div>
+              ) : (
+                <div style={{ fontSize:18 }}>
+                  <SeatTitle i={winner} landlord={landlord === winner} />
+                </div>
+              )}
+            </div>
           </div>
           <div style={{ border:'1px solid #eee', borderRadius:8, padding:10 }}>
             <div>本局加减分</div>
@@ -6895,7 +6928,7 @@ const [lang, setLang] = useState<Lang>(() => {
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
             {[0,1,2].map(i=>(
               <div key={i} style={{ border:'1px dashed #ccc', borderRadius:8, padding:10 }}>
-                <div style={{ fontWeight:700, marginBottom:8 }}><SeatTitle i={i} /></div>
+                <div style={{ marginBottom:8 }}><SeatTitle i={i} /></div>
 
                 <label style={{ display:'block', marginBottom:6 }}>
                   选择
