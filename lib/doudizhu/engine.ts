@@ -80,6 +80,698 @@ export type BotCtx = {
 
 export type BotFunc = (ctx: BotCtx) => Promise<BotMove> | BotMove;
 
+// ========== 机器学习辅助（逻辑回归 / GBDT） ==========
+type FeatureSnapshot = Record<string, number>;
+
+type LogisticModel = {
+  intercept: number;
+  weights: Record<string, number>;
+};
+
+type GBDTNode =
+  | { value: number }
+  | { feature: string; threshold: number; left: GBDTNode; right: GBDTNode };
+
+type GBDTModel = {
+  baseScore: number;
+  trees: Array<{ weight: number; root: GBDTNode }>;
+};
+
+const BID_LOGISTIC_MODEL: LogisticModel = {
+  intercept: -2.35,
+  weights: {
+    robScore: 1.25,
+    bombCount: 0.55,
+    rocket: 1.1,
+    twos: 0.38,
+    aces: 0.22,
+    handCount: -0.04,
+  },
+};
+
+const DOUBLE_LANDLORD_MODEL: LogisticModel = {
+  intercept: -1.4,
+  weights: {
+    robScore: 0.95,
+    bombCount: 0.45,
+    rocket: 0.75,
+    twos: 0.32,
+    aces: 0.25,
+  },
+};
+
+const DOUBLE_FARMER_MODEL: LogisticModel = {
+  intercept: -0.9,
+  weights: {
+    robScore: 0.6,
+    counterScore: 0.35,
+    bombCount: 0.35,
+    rocket: 0.6,
+    twos: 0.25,
+    aces: 0.12,
+  },
+};
+
+const FOLLOW_LOGISTIC_MODEL: LogisticModel = {
+  intercept: -0.35,
+  weights: {
+    robScore: 0.32,
+    bombCount: 0.2,
+    rocket: 0.4,
+    twos: 0.18,
+    aces: 0.08,
+    handCount: -0.05,
+    requireGap: 0.3,
+    teammateRelay: 0.4,
+    oppBeat: -0.45,
+  },
+};
+
+const PLAY_GBDT_MODEL: GBDTModel = {
+  baseScore: 0.1,
+  trees: [
+    {
+      weight: 0.7,
+      root: {
+        feature: 'shapeScore',
+        threshold: 1.2,
+        left: { value: -0.25 },
+        right: {
+          feature: 'bombRetention',
+          threshold: 0.6,
+          left: { value: 0.1 },
+          right: { value: 0.45 },
+        },
+      },
+    },
+    {
+      weight: 0.45,
+      root: {
+        feature: 'teammateRelay',
+        threshold: 0.35,
+        left: { value: -0.1 },
+        right: { value: 0.3 },
+      },
+    },
+    {
+      weight: 0.35,
+      root: {
+        feature: 'oppBeat',
+        threshold: 0.4,
+        left: { value: 0.15 },
+        right: { value: -0.3 },
+      },
+    },
+  ],
+};
+
+function sigmoid(x: number): number {
+  if (!Number.isFinite(x)) return x > 0 ? 1 : 0;
+  if (x >= 20) return 1;
+  if (x <= -20) return 0;
+  return 1 / (1 + Math.exp(-x));
+}
+
+function logisticPredict(model: LogisticModel, features: FeatureSnapshot): number {
+  let z = model.intercept;
+  for (const [name, weight] of Object.entries(model.weights)) {
+    z += weight * (features[name] ?? 0);
+  }
+  return sigmoid(z);
+}
+
+function evalGBDTNode(node: GBDTNode, features: FeatureSnapshot): number {
+  if ('value' in node) return node.value;
+  const value = features[node.feature] ?? 0;
+  return value <= node.threshold
+    ? evalGBDTNode(node.left, features)
+    : evalGBDTNode(node.right, features);
+}
+
+function evalGBDT(model: GBDTModel, features: FeatureSnapshot): number {
+  let acc = model.baseScore;
+  for (const tree of model.trees) {
+    acc += tree.weight * evalGBDTNode(tree.root, features);
+  }
+  return acc;
+}
+
+function handStatsFromCounts(hand: Label[]): FeatureSnapshot {
+  const stats: FeatureSnapshot = {
+    handCount: hand.length,
+    robScore: evalRobScore(hand),
+    bombCount: 0,
+    rocket: 0,
+    twos: 0,
+    aces: 0,
+  };
+  const map = countByRank(hand);
+  for (const [rv, arr] of map.entries()) {
+    if (arr.length === 4) stats.bombCount += 1;
+  }
+  if (map.get(ORDER['x'])?.length && map.get(ORDER['X'])?.length) stats.rocket = 1;
+  stats.twos = map.get(ORDER['2'])?.length ?? 0;
+  stats.aces = map.get(ORDER['A'])?.length ?? 0;
+  return stats;
+}
+
+function mixFeatures(base: FeatureSnapshot, extra: FeatureSnapshot): FeatureSnapshot {
+  const merged: FeatureSnapshot = { ...base };
+  for (const [k, v] of Object.entries(extra)) merged[k] = v;
+  return merged;
+}
+
+function followFeatures(
+  ctx: BotCtx,
+  move: Label[] | null,
+  teammateRelay: number,
+  oppBeat: number,
+  shapeScore: number,
+  bombRetention: number,
+): FeatureSnapshot {
+  const base = handStatsFromCounts(ctx.hands);
+  const features: FeatureSnapshot = {
+    ...base,
+    teammateRelay,
+    oppBeat,
+    shapeScore,
+    bombRetention,
+  };
+  if (move && ctx.require) {
+    try {
+      const info = ctx.require;
+      const chosen = classify(move, ctx?.policy?.four2 || 'both');
+      if (info && chosen) {
+        features.requireGap = (chosen.rank ?? 0) - (info.rank ?? 0);
+      }
+    } catch {}
+  }
+  return features;
+}
+
+function removeLabelsClone(hand: Label[], pick: Label[]): Label[] {
+  const clone = hand.slice();
+  removeLabels(clone, pick);
+  return clone;
+}
+
+// ========== 粒子滤波（手牌采样） ==========
+type ParticleResult = {
+  assignments: Label[][][];
+  marginals: Array<Record<string, number>>;
+};
+
+function createRng(seed?: number) {
+  let state = (seed ?? Date.now()) >>> 0;
+  const step = () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0xffffffff;
+  };
+  return { next: step };
+}
+
+function shuffleWith<T>(arr: T[], rng: { next: () => number }): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng.next() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function sampleOpponentHands(
+  ctx: BotCtx,
+  samples = 240,
+  seed?: number,
+): ParticleResult {
+  const counts = Array.isArray(ctx.handsCount) ? ctx.handsCount.slice() : [0, 0, 0];
+  const assignments: Label[][][] = [];
+  const marginals = [new Map<string, number>(), new Map<string, number>(), new Map<string, number>()];
+  const rng = createRng(seed);
+  const deck = freshDeck();
+  const known = new Set<string>([...ctx.hands, ...ctx.seen].map(String));
+  const unknownBase = deck.filter(card => !known.has(String(card)));
+  const seat = ctx.seat ?? 0;
+  const otherSeats = [0, 1, 2].filter(s => s !== seat);
+
+  const needTotal = otherSeats.reduce((acc, s) => acc + Math.max(0, counts[s] ?? 0), 0);
+  if (unknownBase.length < needTotal) {
+    return { assignments: [], marginals: marginals.map(() => ({})) };
+  }
+
+  for (let i = 0; i < samples; i++) {
+    const perm = shuffleWith(unknownBase.slice(), rng);
+    let cursor = 0;
+    const sampleHands: Label[][] = [[], [], []];
+    let ok = true;
+    for (const s of otherSeats) {
+      const want = Math.max(0, counts[s] ?? 0);
+      if (cursor + want > perm.length) {
+        ok = false;
+        break;
+      }
+      sampleHands[s] = perm.slice(cursor, cursor + want);
+      cursor += want;
+    }
+    if (!ok) break;
+    sampleHands[seat] = ctx.hands.slice();
+    assignments.push(sampleHands.map(h => h.slice()));
+    for (let s = 0; s < 3; s++) {
+      const table = marginals[s];
+      for (const card of sampleHands[s]) {
+        const key = String(card);
+        table.set(key, (table.get(key) ?? 0) + 1);
+      }
+    }
+  }
+
+  const denom = assignments.length || 1;
+  const marginalsOut = marginals.map((map) => {
+    const obj: Record<string, number> = {};
+    for (const [card, count] of map.entries()) {
+      obj[card] = count / denom;
+    }
+    return obj;
+  });
+
+  return { assignments, marginals: marginalsOut };
+}
+
+function probabilitySeatCanBeat(
+  assignments: Label[][][],
+  seat: number,
+  move: Label[],
+  four2: Four2Policy,
+  require: Combo | null,
+  actorSeat: number,
+): number {
+  if (!assignments.length) return 0;
+  let success = 0;
+  let total = 0;
+  const target = classify(move, four2);
+  if (!target) return 0;
+  for (const sample of assignments) {
+    const hands = sample.map(hand => hand.slice());
+    if (hands[actorSeat]) removeLabels(hands[actorSeat], move);
+    const legal = generateMoves(hands[seat] || [], target, four2);
+    if (require == null) {
+      // 领先情况：可跟同型或炸弹
+      if (legal.length > 0) success++;
+      else {
+        const bombs = generateMoves(hands[seat] || [], null, four2).filter(mv => {
+          const cc = classify(mv, four2);
+          return cc && (cc.type === 'bomb' || cc.type === 'rocket');
+        });
+        if (bombs.length > 0) success++;
+      }
+    } else if (legal.length > 0) {
+      success++;
+    }
+    total++;
+  }
+  return total ? success / total : 0;
+}
+
+function handStepEstimate(hand: Label[]): number {
+  const cnt = countByRank(hand);
+  let singles = 0;
+  let pairs = 0;
+  let triples = 0;
+  let bombs = 0;
+  for (const arr of cnt.values()) {
+    if (arr.length === 1) singles += 1;
+    else if (arr.length === 2) pairs += 1;
+    else if (arr.length === 3) triples += 1;
+    else if (arr.length === 4) bombs += 1;
+  }
+  const coreSteps = bombs + triples + pairs + singles;
+  return coreSteps;
+}
+
+function simpleShapeScore(before: Label[], picked: Label[]): number {
+  const after = removeLabelsClone(before, picked);
+  const beforeSteps = handStepEstimate(before);
+  const afterSteps = handStepEstimate(after);
+  const delta = beforeSteps - afterSteps;
+  const removal = picked.length * 0.35;
+  const finishBonus = after.length === 0 ? 5 : 0;
+  return delta + removal + finishBonus;
+}
+
+function bombRetentionScore(before: Label[], after: Label[]): number {
+  const count = (cards: Label[]) => {
+    const map = countByRank(cards);
+    let bombs = 0;
+    let rocket = 0;
+    for (const [rv, arr] of map.entries()) {
+      if (arr.length === 4) bombs += 1;
+    }
+    if ((map.get(ORDER['x'])?.length ?? 0) && (map.get(ORDER['X'])?.length ?? 0)) rocket = 1;
+    return bombs + rocket;
+  };
+  const beforeCount = count(before);
+  const afterCount = count(after);
+  if (beforeCount === 0) return 0;
+  return afterCount / beforeCount;
+}
+
+type BeamNode = {
+  hands: Label[];
+  score: number;
+  path: Label[][];
+  depth: number;
+};
+
+function enumerateSimpleMoves(hand: Label[], four2: Four2Policy): Label[][] {
+  const all = generateMoves(hand, null, four2);
+  return all.filter(mv => {
+    const info = classify(mv, four2);
+    if (!info) return false;
+    return info.type === 'single' || info.type === 'pair' || info.type === 'straight';
+  });
+}
+
+function beamSearchDecision(
+  ctx: BotCtx,
+  legal: Label[][],
+  assignments: Label[][][],
+  options: { width: number; depth: number },
+): { move: Label[]; score: number; follow: number; gbdt: number; teammateRelay: number; oppBeat: number } | null {
+  if (!legal.length) return null;
+  const four2 = ctx?.policy?.four2 || 'both';
+  const width = Math.max(1, options.width);
+  const depthLimit = Math.max(1, options.depth);
+  const initial: BeamNode = { hands: ctx.hands.slice(), score: 0, path: [], depth: 0 };
+  let frontier: BeamNode[] = [initial];
+
+  const expand = (node: BeamNode, moves: Label[][], require: Combo | null) => {
+    const next: BeamNode[] = [];
+    for (const mv of moves) {
+      const after = removeLabelsClone(node.hands, mv);
+      const teammateSeat = ctx.teammates?.[0] ?? null;
+      const teammateRelay = typeof teammateSeat === 'number'
+        ? probabilitySeatCanBeat(assignments, teammateSeat, mv, four2, require, ctx.seat)
+        : 0;
+      const oppSeat = (ctx.seat + 1) % 3;
+      const oppBeat = probabilitySeatCanBeat(assignments, oppSeat, mv, four2, require, ctx.seat);
+      const shapeScore = simpleShapeScore(node.hands, mv);
+      const bombRetention = bombRetentionScore(node.hands, after);
+      const fakeCtx: BotCtx = { ...ctx, hands: node.hands.slice(), require: require };
+      const features = followFeatures(fakeCtx, mv, teammateRelay, oppBeat, shapeScore, bombRetention);
+      const follow = logisticPredict(FOLLOW_LOGISTIC_MODEL, features);
+      const gbdt = evalGBDT(PLAY_GBDT_MODEL, features);
+      const remaining = handStepEstimate(after);
+      const stepScore = -remaining * 0.35;
+      const totalScore = node.score + follow * 1.4 + gbdt + stepScore + bombRetention * 0.3;
+      next.push({ hands: after, score: totalScore, path: [...node.path, mv], depth: node.depth + 1 });
+    }
+    next.sort((a, b) => b.score - a.score);
+    return next.slice(0, width);
+  };
+
+  let bestNode: BeamNode | null = null;
+  let bestMeta: { follow: number; gbdt: number; teammateRelay: number; oppBeat: number } | null = null;
+
+  for (let depth = 0; depth < depthLimit; depth++) {
+    const newFrontier: BeamNode[] = [];
+    for (const node of frontier) {
+      const require = depth === 0 ? ctx.require : null;
+      const moves = depth === 0
+        ? legal
+        : enumerateSimpleMoves(node.hands, four2);
+      const expanded = expand(node, moves, require);
+      newFrontier.push(...expanded);
+    }
+    frontier = newFrontier.slice(0, width);
+    if (!frontier.length) break;
+    const candidate = frontier[0];
+    if (!candidate.path.length) continue;
+    const mv = candidate.path[0];
+    const after = removeLabelsClone(ctx.hands, mv);
+    const teammateSeat = ctx.teammates?.[0] ?? null;
+    const teammateRelay = typeof teammateSeat === 'number'
+      ? probabilitySeatCanBeat(assignments, teammateSeat, mv, four2, ctx.require, ctx.seat)
+      : 0;
+    const oppSeat = (ctx.seat + 1) % 3;
+    const oppBeat = probabilitySeatCanBeat(assignments, oppSeat, mv, four2, ctx.require, ctx.seat);
+    const shapeScore = simpleShapeScore(ctx.hands, mv);
+    const bombRetention = bombRetentionScore(ctx.hands, after);
+    const fakeCtx: BotCtx = { ...ctx };
+    const features = followFeatures(fakeCtx, mv, teammateRelay, oppBeat, shapeScore, bombRetention);
+    const follow = logisticPredict(FOLLOW_LOGISTIC_MODEL, features);
+    const gbdt = evalGBDT(PLAY_GBDT_MODEL, features);
+    if (!bestNode || candidate.score > bestNode.score) {
+      bestNode = candidate;
+      bestMeta = { follow, gbdt, teammateRelay, oppBeat };
+    }
+  }
+
+  if (!bestNode || !bestNode.path.length || !bestMeta) return null;
+  return {
+    move: bestNode.path[0],
+    score: bestNode.score,
+    follow: bestMeta.follow,
+    gbdt: bestMeta.gbdt,
+    teammateRelay: bestMeta.teammateRelay,
+    oppBeat: bestMeta.oppBeat,
+  };
+}
+
+function trailingPasses(trick: PlayEvent[]): number {
+  if (!Array.isArray(trick) || !trick.length) return 0;
+  let count = 0;
+  for (let i = trick.length - 1; i >= 0; i--) {
+    if (trick[i].move === 'pass') count += 1;
+    else break;
+  }
+  return count;
+}
+
+function lastPlayedSeat(trick: PlayEvent[], fallback: number): number {
+  if (Array.isArray(trick)) {
+    for (let i = trick.length - 1; i >= 0; i--) {
+      if (trick[i].move === 'play') return trick[i].seat;
+    }
+  }
+  return fallback;
+}
+
+type EndgameState = {
+  hands: Label[][];
+  seat: number;
+  leader: number;
+  lastPlayed: number;
+  require: Combo | null;
+  passes: number;
+  landlord: number;
+  four2: Four2Policy;
+};
+
+type EndgameMemo = Map<string, number>;
+
+function encodeEndgameState(state: EndgameState): string {
+  const handKey = state.hands.map(h => sorted(h).join(',')).join('#');
+  const requireKey = state.require
+    ? `${state.require.type}:${state.require.rank}:${state.require.len ?? 0}`
+    : 'none';
+  return [state.seat, state.leader, state.lastPlayed, state.passes, requireKey, state.landlord, handKey].join('|');
+}
+
+function endgameDFS(state: EndgameState, memo: EndgameMemo): number {
+  const key = encodeEndgameState(state);
+  if (memo.has(key)) return memo.get(key)!;
+
+  const { hands, seat, leader, lastPlayed: lp, require, passes, landlord, four2 } = state;
+  if (hands[landlord].length === 0) {
+    memo.set(key, 1);
+    return 1;
+  }
+  for (let s = 0; s < 3; s++) {
+    if (s !== landlord && hands[s].length === 0) {
+      memo.set(key, -1);
+      return -1;
+    }
+  }
+
+  const currentHand = hands[seat];
+  const legal = generateMoves(currentHand, require, four2);
+  const leaderTurn = require == null || seat === leader;
+  const canPass = require != null && !(leaderTurn && passes === 0);
+
+  const actions: Array<{ kind: 'play'; move: Label[]; combo: Combo } | { kind: 'pass' }> = [];
+  for (const mv of legal) {
+    const combo = classify(mv, four2);
+    if (combo) actions.push({ kind: 'play', move: mv, combo });
+  }
+  if (canPass || actions.length === 0) actions.push({ kind: 'pass' });
+
+  const isLandlord = seat === landlord;
+  let best = isLandlord ? -Infinity : Infinity;
+
+  for (const action of actions) {
+    if (action.kind === 'pass') {
+      if (!canPass) continue;
+      const nextState: EndgameState = {
+        hands: hands.map(h => h.slice()),
+        seat: (seat + 1) % 3,
+        leader,
+        lastPlayed: lp,
+        require,
+        passes: passes + 1,
+        landlord,
+        four2,
+      };
+      if (require == null) {
+        continue;
+      }
+      if (nextState.passes >= 2) {
+        nextState.seat = lp;
+        nextState.leader = lp;
+        nextState.require = null;
+        nextState.passes = 0;
+      }
+      const val = endgameDFS(nextState, memo);
+      if (isLandlord) {
+        if (val > best) best = val;
+      } else if (val < best) {
+        best = val;
+      }
+      continue;
+    }
+
+    const nextHands = hands.map(h => h.slice());
+    removeLabels(nextHands[seat], action.move);
+    if (nextHands[seat].length === 0) {
+      const immediate = isLandlord ? 1 : -1;
+      memo.set(key, immediate);
+      return immediate;
+    }
+    const nextState: EndgameState = {
+      hands: nextHands,
+      seat: (seat + 1) % 3,
+      leader: seat,
+      lastPlayed: seat,
+      require: action.combo,
+      passes: 0,
+      landlord,
+      four2,
+    };
+    const val = endgameDFS(nextState, memo);
+    if (isLandlord) {
+      if (val > best) best = val;
+    } else if (val < best) {
+      best = val;
+    }
+  }
+
+  if (best === Infinity) best = 1;
+  if (best === -Infinity) best = -1;
+  memo.set(key, best);
+  return best;
+}
+
+function approximateEndgameMove(
+  ctx: BotCtx,
+  legal: Label[][],
+  assignments: Label[][][],
+): { move: Label[] | null; value: number; follow: number } | null {
+  if (!assignments.length) return null;
+  const four2 = ctx?.policy?.four2 || 'both';
+  const allowPass = ctx.require != null && ctx.canPass;
+  const options: Array<{ move: Label[] | null; combo: Combo | null }> = [];
+  for (const mv of legal) {
+    const combo = classify(mv, four2);
+    if (combo) options.push({ move: mv, combo });
+  }
+  if (allowPass) options.push({ move: null, combo: null });
+
+  const passCount = trailingPasses(ctx.currentTrick || []);
+  const lastSeat = lastPlayedSeat(ctx.currentTrick || [], ctx.leader);
+
+  let bestMove: Label[] | null = null;
+  let bestValue = ctx.role === 'landlord' ? -Infinity : Infinity;
+  let bestFollow = 0;
+
+  for (const opt of options) {
+    let acc = 0;
+    let seen = 0;
+    for (const sample of assignments) {
+      const hands = sample.map(hand => hand.slice());
+      hands[ctx.seat] = ctx.hands.slice();
+      const baseState: EndgameState = {
+        hands,
+        seat: ctx.seat,
+        leader: ctx.leader,
+        lastPlayed: lastSeat,
+        require: ctx.require,
+        passes: passCount,
+        landlord: ctx.landlord,
+        four2,
+      };
+      const memo: EndgameMemo = new Map();
+      let val: number;
+      if (!opt.move) {
+        if (!allowPass || ctx.require == null) continue;
+        const nextState: EndgameState = { ...baseState, seat: (ctx.seat + 1) % 3, passes: passCount + 1 };
+        if (ctx.require != null && nextState.passes >= 2) {
+          nextState.seat = lastSeat;
+          nextState.leader = lastSeat;
+          nextState.require = null;
+          nextState.passes = 0;
+        }
+        val = endgameDFS(nextState, memo);
+      } else {
+        const combo = classify(opt.move, four2);
+        if (!combo) continue;
+        removeLabels(baseState.hands[ctx.seat], opt.move);
+        if (baseState.hands[ctx.seat].length === 0) {
+          val = ctx.role === 'landlord' ? 1 : -1;
+        } else {
+          const nextState: EndgameState = {
+            hands: baseState.hands,
+            seat: (ctx.seat + 1) % 3,
+            leader: ctx.seat,
+            lastPlayed: ctx.seat,
+            require: combo,
+            passes: 0,
+            landlord: ctx.landlord,
+            four2,
+          };
+          val = endgameDFS(nextState, memo);
+        }
+      }
+      acc += val;
+      seen += 1;
+    }
+    if (!seen) continue;
+    const avg = acc / seen;
+    const better = ctx.role === 'landlord' ? avg > bestValue : avg < bestValue;
+    if (better) {
+      bestValue = avg;
+      bestMove = opt.move ? opt.move.slice() : null;
+      const fakeCtx: BotCtx = { ...ctx };
+      const mv = opt.move ? opt.move.slice() : [];
+      const teammateSeat = ctx.teammates?.[0] ?? null;
+      const teammateRelay = opt.move && typeof teammateSeat === 'number'
+        ? probabilitySeatCanBeat(assignments, teammateSeat, mv, four2, ctx.require, ctx.seat)
+        : 0;
+      const oppSeat = (ctx.seat + 1) % 3;
+      const oppBeat = opt.move
+        ? probabilitySeatCanBeat(assignments, oppSeat, mv, four2, ctx.require, ctx.seat)
+        : 0;
+      const shapeScore = opt.move ? simpleShapeScore(ctx.hands, mv) : 0;
+      const bombRetention = opt.move ? bombRetentionScore(ctx.hands, removeLabelsClone(ctx.hands, mv)) : 0;
+      const features = followFeatures(fakeCtx, opt.move, teammateRelay, oppBeat, shapeScore, bombRetention);
+      bestFollow = logisticPredict(FOLLOW_LOGISTIC_MODEL, features);
+    }
+  }
+
+  if (bestMove === null && !allowPass) return null;
+  return { move: bestMove, value: bestValue, follow: bestFollow };
+}
+
+
+
+
 // ========== 牌面与工具 ==========
 const SUITS = ['♠', '♥', '♦', '♣'] as const;
 const ASCII_SUITS: Record<string, typeof SUITS[number]> = { S: '♠', H: '♥', D: '♦', C: '♣' };
@@ -1693,6 +2385,83 @@ export const EndgameRush: BotFunc = (ctx) => {
 };
 
 
+export const AdvancedHybrid: BotFunc = async (ctx) => {
+  const coopMove = maybeFollowCoop(ctx);
+  if (coopMove) return coopMove;
+
+  const four2 = ctx?.policy?.four2 || 'both';
+  const legal = generateMoves(ctx.hands, ctx.require, four2);
+  if (ctx.require && ctx.canPass && !legal.length) {
+    return { move: 'pass', reason: 'AdvancedHybrid: 需跟无可接' };
+  }
+
+  const particles = sampleOpponentHands(ctx, 320);
+  const assignments = particles.assignments;
+
+  if (assignments.length && ctx.require && ctx.canPass && legal.length) {
+    let bestFollow = 0;
+    for (const mv of legal) {
+      const after = removeLabelsClone(ctx.hands, mv);
+      const teammateSeat = ctx.teammates?.[0] ?? null;
+      const teammateRelay = typeof teammateSeat === 'number'
+        ? probabilitySeatCanBeat(assignments, teammateSeat, mv, four2, ctx.require, ctx.seat)
+        : 0;
+      const oppSeat = (ctx.seat + 1) % 3;
+      const oppBeat = probabilitySeatCanBeat(assignments, oppSeat, mv, four2, ctx.require, ctx.seat);
+      const shapeScore = simpleShapeScore(ctx.hands, mv);
+      const bombRetention = bombRetentionScore(ctx.hands, after);
+      const features = followFeatures(ctx, mv, teammateRelay, oppBeat, shapeScore, bombRetention);
+      const follow = logisticPredict(FOLLOW_LOGISTIC_MODEL, features);
+      if (follow > bestFollow) bestFollow = follow;
+    }
+    if (bestFollow < 0.35) {
+      return { move: 'pass', reason: `AdvancedHybrid: logisticFollow=${bestFollow.toFixed(2)} → pass` };
+    }
+  }
+
+  if (ctx.handsCount?.every(cnt => cnt <= 7)) {
+    const endgame = approximateEndgameMove(ctx, legal, assignments);
+    if (endgame) {
+      if (endgame.move === null) {
+        return { move: 'pass', reason: `AdvancedHybrid:endgame value=${endgame.value.toFixed(2)} follow=${endgame.follow.toFixed(2)}` };
+      }
+      return {
+        move: 'play',
+        cards: endgame.move,
+        reason: `AdvancedHybrid:endgame value=${endgame.value.toFixed(2)} follow=${endgame.follow.toFixed(2)}`,
+      };
+    }
+  }
+
+  if (!legal.length) {
+    return ctx.canPass
+      ? { move: 'pass', reason: 'AdvancedHybrid: 无合法可出' }
+      : { move: 'play', cards: [ctx.hands[0] ?? '♠3'], reason: 'AdvancedHybrid: 强制兜底' };
+  }
+
+  const beam = beamSearchDecision(ctx, legal, assignments, { width: 4, depth: 3 });
+  if (beam) {
+    const reason = [
+      'AdvancedHybrid',
+      `beamScore=${beam.score.toFixed(2)}`,
+      `follow=${beam.follow.toFixed(2)}`,
+      `gbdt=${beam.gbdt.toFixed(2)}`,
+      `relay=${beam.teammateRelay.toFixed(2)}`,
+      `opp=${beam.oppBeat.toFixed(2)}`,
+    ].join(' | ');
+    return { move: 'play', cards: beam.move, reason };
+  }
+
+  const fallback = await Promise.resolve(GreedyMin(ctx));
+  if (fallback.move === 'play') {
+    fallback.reason = (fallback.reason ? `${fallback.reason} | ` : '') + 'AdvancedHybrid:fallback';
+  } else {
+    fallback.reason = (fallback.reason ? `${fallback.reason} | ` : '') + 'AdvancedHybrid:fallback';
+  }
+  return fallback;
+};
+
+
 // ========== 发牌 / 抢地主 ==========
 function freshDeck(): Label[] {
   const d: Label[] = [];
@@ -1863,7 +2632,9 @@ export async function* runOneGame(opts: {
         };
         const meta = seatMeta[seat];
         const threshold = (__thMapChoice[meta.choice] ?? __thMap[meta.name] ?? 1.8);
-        const recommended = (sc >= threshold);
+        const bidFeatures = handStatsFromCounts(hands[seat]);
+        const bidMlProb = logisticPredict(BID_LOGISTIC_MODEL, bidFeatures);
+        const recommended = (sc >= threshold) || (bidMlProb >= 0.5);
 
         const prevBidders = Array.from(bidderMap.values()).map(b => ({ seat:b.seat, score:b.score, threshold:b.threshold, margin:b.margin, doubled:b.doubled }));
         const forcedPass = perSeatBidCount[seat] >= 2;
@@ -1883,6 +2654,7 @@ export async function* runOneGame(opts: {
             attempt,
             maxAttempts: MAX_BID_ATTEMPTS,
             bidders: prevBidders,
+            mlProbability: bidMlProb,
           },
           seat,
           landlord: -1,
@@ -1929,7 +2701,7 @@ export async function* runOneGame(opts: {
         }
 
         const decisionLabel = decision ? 'bid' : 'pass';
-        yield { type:'event', kind:'bid-eval', seat, score: sc, threshold, decision: decisionLabel, bidMult: bidMultiplier, mult: multiplier, forced: forcedPass, bidCount: perSeatBidCount[seat], maxBidCount: 2 };
+        yield { type:'event', kind:'bid-eval', seat, score: sc, threshold, decision: decisionLabel, bidMult: bidMultiplier, mult: multiplier, forced: forcedPass, bidCount: perSeatBidCount[seat], maxBidCount: 2, mlProbability: bidMlProb };
 
         if (decision) {
           const margin = sc - threshold;
@@ -2087,6 +2859,9 @@ const lordDecision = __decideLandlordDouble(__lordBefore, hands[Lseat]);
 const yBase = __decideFarmerDoubleBase(hands[Yseat], bottom, __DOUBLE_CFG.mcSamples);
 let bBase = __decideFarmerDoubleBase(hands[Bseat], bottom, __DOUBLE_CFG.mcSamples);
 let F_b = bBase.F;
+const lordMlProb = logisticPredict(DOUBLE_LANDLORD_MODEL, handStatsFromCounts(hands[Lseat]));
+const farmerYMlProb = logisticPredict(DOUBLE_FARMER_MODEL, mixFeatures(handStatsFromCounts(hands[Yseat]), { counterScore: yBase.counter }));
+const farmerBMlProb = logisticPredict(DOUBLE_FARMER_MODEL, mixFeatures(handStatsFromCounts(hands[Bseat]), { counterScore: bBase.counter }));
 if (bBase.F === 1 && (bBase.dLhat > 0 && Math.abs(bBase.counter - __DOUBLE_CFG.counterHi) <= 0.6)) {
   let effectiveHi = __DOUBLE_CFG.counterHi;
   if (lordDecision.L === 1) effectiveHi += __DOUBLE_CFG.bayes.landlordRaiseHi;
@@ -2150,10 +2925,13 @@ const parseDoubleResult = (res:any): boolean | null => {
 let Lflag = lordDecision.L ? 1 : 0;
 let farmerYFlag = yBase.F ? 1 : 0;
 let farmerBFlag = F_b ? 1 : 0;
+if (!Lflag && lordMlProb >= 0.55) Lflag = 1;
+if (!farmerYFlag && farmerYMlProb >= 0.55) farmerYFlag = 1;
+if (!farmerBFlag && farmerBMlProb >= 0.55) farmerBFlag = 1;
 
 if (seatMeta[Lseat]?.phaseAware) {
   try {
-    const ctx = buildDoubleCtx(Lseat, 'landlord', !!lordDecision.L, { landlord: { delta: lordDecision.delta, reason: lordDecision.reason } });
+    const ctx = buildDoubleCtx(Lseat, 'landlord', !!Lflag, { landlord: { delta: lordDecision.delta, reason: lordDecision.reason, ml: lordMlProb } });
     const ctxForBot: any = clone(ctx);
     if (ctxForBot?.double) {
       const def = !!ctxForBot.double.recommended;
@@ -2168,7 +2946,7 @@ if (seatMeta[Lseat]?.phaseAware) {
 
 if (seatMeta[Yseat]?.phaseAware) {
   try {
-    const ctx = buildDoubleCtx(Yseat, 'farmer', !!yBase.F, { farmer: { dLhat: yBase.dLhat, counter: yBase.counter } });
+    const ctx = buildDoubleCtx(Yseat, 'farmer', !!farmerYFlag, { farmer: { dLhat: yBase.dLhat, counter: yBase.counter, ml: farmerYMlProb } });
     const ctxForBot: any = clone(ctx);
     if (ctxForBot?.double) {
       const def = !!ctxForBot.double.recommended;
@@ -2183,7 +2961,7 @@ if (seatMeta[Yseat]?.phaseAware) {
 
 if (seatMeta[Bseat]?.phaseAware) {
   try {
-    const ctx = buildDoubleCtx(Bseat, 'farmer', !!F_b, { farmer: { dLhat: bBase.dLhat, counter: bBase.counter }, bayes:{ landlord: lordDecision.L, farmerY: yBase.F } });
+    const ctx = buildDoubleCtx(Bseat, 'farmer', !!farmerBFlag, { farmer: { dLhat: bBase.dLhat, counter: bBase.counter, ml: farmerBMlProb }, bayes:{ landlord: lordDecision.L, farmerY: yBase.F } });
     const ctxForBot: any = clone(ctx);
     if (ctxForBot?.double) {
       const def = !!ctxForBot.double.recommended;
@@ -2196,9 +2974,9 @@ if (seatMeta[Bseat]?.phaseAware) {
   } catch {}
 }
 
-try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason }; } catch{}
-try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!farmerYFlag, dLhat:yBase.dLhat, counter:yBase.counter }; } catch{}
-try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!farmerBFlag, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord: Lflag, farmerY: farmerYFlag } }; } catch{}
+try { yield { type:'event', kind:'double-decision', role:'landlord', seat:Lseat, double:!!Lflag, delta: lordDecision.delta, reason: lordDecision.reason, mlProbability: lordMlProb }; } catch{}
+try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Yseat, double:!!farmerYFlag, dLhat:yBase.dLhat, counter:yBase.counter, mlProbability: farmerYMlProb }; } catch{}
+try { yield { type:'event', kind:'double-decision', role:'farmer', seat:Bseat, double:!!farmerBFlag, dLhat:bBase.dLhat, counter:bBase.counter, bayes:{ landlord: Lflag, farmerY: farmerYFlag }, mlProbability: farmerBMlProb }; } catch{}
 
 let __doubleMulY = (1 << Lflag) * (1 << farmerYFlag);
 let __doubleMulB = (1 << Lflag) * (1 << farmerBFlag);

@@ -272,6 +272,7 @@ type BotChoice =
   | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
+  | 'built-in:advanced-hybrid'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http'
   | 'human';
@@ -361,6 +362,7 @@ const KO_DEFAULT_CHOICES: BotChoice[] = [
   'built-in:greedy-min',
   'built-in:random-legal',
   'built-in:mininet',
+  'built-in:advanced-hybrid',
 ];
 const KO_ALL_CHOICES: BotChoice[] = [
   'built-in:greedy-max',
@@ -369,6 +371,7 @@ const KO_ALL_CHOICES: BotChoice[] = [
   'built-in:mininet',
   'built-in:ally-support',
   'built-in:endgame-rush',
+  'built-in:advanced-hybrid',
   'ai:openai',
   'ai:gemini',
   'ai:grok',
@@ -1599,7 +1602,7 @@ function writeThoughtStore(store: ThoughtStore): ThoughtStore {
 }
 
 const THOUGHT_CATALOG_CHOICES: BotChoice[] = [
-  'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
+  'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush','built-in:advanced-hybrid',
   'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http','human',
 ];
 const DEFAULT_THOUGHT_CATALOG_IDS = THOUGHT_CATALOG_CHOICES.map(choice => makeThoughtIdentity(choice));
@@ -2751,6 +2754,7 @@ function KnockoutPanel() {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:advanced-hybrid">Advanced Hybrid</option>
                     </optgroup>
                     <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
@@ -3365,6 +3369,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:mininet':      return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'built-in:advanced-hybrid': return 'Advanced Hybrid';
     case 'ai:openai':             return 'OpenAI';
     case 'ai:gemini':             return 'Gemini';
     case 'ai:grok':               return 'Grok';
@@ -6998,6 +7003,7 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:advanced-hybrid">Advanced Hybrid</option>
                     </optgroup>
                     <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>

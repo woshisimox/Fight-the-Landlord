@@ -1,7 +1,7 @@
 // pages/api/stream_ndjson.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 // 依据你的工程结构，直接从 doudizhu 引擎导入：
-import { runOneGame, GreedyMax, GreedyMin, RandomLegal } from '../../lib/doudizhu/engine';
+import { runOneGame, GreedyMax, GreedyMin, RandomLegal, AdvancedHybrid } from '../../lib/doudizhu/engine';
 import { OpenAIBot } from '../../lib/bots/openai_bot';
 import { GeminiBot } from '../../lib/bots/gemini_bot';
 import { GrokBot } from '../../lib/bots/grok_bot';
@@ -13,6 +13,7 @@ type BotChoice =
   | 'built-in:greedy-max'
   | 'built-in:greedy-min'
   | 'built-in:random-legal'
+  | 'built-in:advanced-hybrid'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen'
   | 'http';
 
@@ -46,6 +47,7 @@ function makeBot(name: BotChoice, model: string|undefined, keybag: any): EngineB
     case 'built-in:greedy-max': return GreedyMax;
     case 'built-in:greedy-min': return GreedyMin;
     case 'built-in:random-legal': return RandomLegal;
+    case 'built-in:advanced-hybrid': return AdvancedHybrid;
     case 'ai:openai': return OpenAIBot({ apiKey: k.openai||'', model: m||'gpt-4o-mini' });
     case 'ai:gemini': return GeminiBot({ apiKey: k.gemini||'', model: m||'gemini-1.5-flash' });
     case 'ai:grok':   return GrokBot({ apiKey: k.grok||'', model: m||'grok-2-latest' });
