@@ -4,6 +4,7 @@ import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
+const SeatInfoContext = createContext<string[] | null>(null);
 
 const I18N: Record<Lang, Record<string, string>> = {
   zh: {
@@ -809,7 +810,11 @@ type BotTimer = {
 
 function SeatTitle({ i }: { i:number }) {
   const { lang } = useI18n();
-  return <span style={{ fontWeight:700 }}>{seatLabel(i, lang)}</span>;
+  const details = useContext(SeatInfoContext);
+  const label = seatLabel(i, lang);
+  const detail = details?.[i];
+  const suffix = detail && detail.trim() ? ` · ${detail.trim()}` : '';
+  return <span style={{ fontWeight:700 }}>{`${label}${suffix}`}</span>;
 }
 
 
@@ -4147,6 +4152,10 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   }, [lang, seatIdentity, setLog]);
 
   const seatIdentitiesMemo = useMemo(() => [0,1,2].map(seatIdentity), [seatIdentity]);
+  const seatDisplayNames = useMemo(
+    () => seatIdentitiesMemo.map(id => (id ? thoughtLabelForIdentity(id) : '')),
+    [seatIdentitiesMemo],
+  );
 
   // —— TrueSkill（前端实时） —— //
   const [tsArr, setTsArr] = useState<Rating[]>([{...TS_DEFAULT},{...TS_DEFAULT},{...TS_DEFAULT}]);
@@ -6013,7 +6022,8 @@ const handleAllSaveInner = () => {
   }, []);
 
   return (
-    <div>
+    <SeatInfoContext.Provider value={seatDisplayNames}>
+      <div>
       {!props.controlsHidden && (
       <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
         <button
@@ -6695,6 +6705,20 @@ const [lang, setLang] = useState<Lang>(() => {
   const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
 
+  const seatInfoLabels = useMemo(() => {
+    return [0,1,2].map(i => {
+      const choice = seats[i] as BotChoice;
+      if (!choice) return '';
+      const modelInput = Array.isArray(seatModels) ? seatModels[i] : '';
+      const normalizedModel = normalizeModelForProvider(choice, modelInput || '')
+        || (modelInput || defaultModelFor(choice));
+      const base = choice === 'http' ? (seatKeys?.[i]?.httpBase || '') : '';
+      const identity = makeThoughtIdentity(choice, normalizedModel, base);
+      const label = thoughtLabelForIdentity(identity);
+      return label || '';
+    });
+  }, [seats, seatModels, seatKeys]);
+
   const [liveLog, setLiveLog] = useState<string[]>([]);
 
   const doResetAll = () => {
@@ -6727,11 +6751,12 @@ const [lang, setLang] = useState<Lang>(() => {
   const isRegularMode = matchMode === 'regular';
   const regularLabel = lang === 'en' ? 'Regular match' : '常规赛';
   const knockoutLabel = lang === 'en' ? 'Knockout' : '淘汰赛';
-  return (<> 
+  return (<>
     <LangContext.Provider value={lang}>
-    <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
-      <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
-      <div style={{ marginLeft:'auto', marginBottom:24, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:12 }} data-i18n-ignore>
+      <SeatInfoContext.Provider value={seatInfoLabels}>
+        <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
+          <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
+          <div style={{ marginLeft:'auto', marginBottom:24, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:12 }} data-i18n-ignore>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
           <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
@@ -7091,7 +7116,8 @@ const [lang, setLang] = useState<Lang>(() => {
       ) : (
         <KnockoutPanel />
       )}
-    </div>
+        </div>
+      </SeatInfoContext.Provider>
     </LangContext.Provider>
   </>);
 }
@@ -7290,7 +7316,7 @@ function ScoreTimeline(
             <span>{labels?.[i] ?? ['甲','乙','丙'][i]}</span>
           </div>
         ))}
-        <div style={{ marginLeft:'auto', color:'#6b7280' }}>横轴：第几手牌 ｜ 纵轴：score</div>
+      <div style={{ marginLeft:'auto', color:'#6b7280' }}>横轴：第几手牌 ｜ 纵轴：score</div>
       </div>
     </div>
   );
