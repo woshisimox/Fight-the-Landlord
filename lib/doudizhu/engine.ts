@@ -97,6 +97,14 @@ type GBDTModel = {
   trees: Array<{ weight: number; root: GBDTNode }>;
 };
 
+type RandomForestNode =
+  | { value: number }
+  | { feature: string; threshold: number; left: RandomForestNode; right: RandomForestNode };
+
+type RandomForestModel = {
+  trees: Array<{ weight?: number; root: RandomForestNode }>;
+};
+
 const BID_LOGISTIC_MODEL: LogisticModel = {
   intercept: -2.35,
   weights: {
@@ -185,6 +193,55 @@ const PLAY_GBDT_MODEL: GBDTModel = {
   ],
 };
 
+const FOLLOW_FOREST_MODEL: RandomForestModel = {
+  trees: [
+    {
+      root: {
+        feature: 'oppBeat',
+        threshold: 0.35,
+        left: { value: 0.68 },
+        right: { value: 0.18 },
+      },
+    },
+    {
+      root: {
+        feature: 'teammateRelay',
+        threshold: 0.45,
+        left: {
+          feature: 'shapeScore',
+          threshold: 0.45,
+          left: { value: 0.22 },
+          right: {
+            feature: 'bombRetention',
+            threshold: 0.25,
+            left: { value: 0.48 },
+            right: { value: 0.62 },
+          },
+        },
+        right: {
+          feature: 'bombRetention',
+          threshold: 0.3,
+          left: { value: 0.66 },
+          right: { value: 0.78 },
+        },
+      },
+    },
+    {
+      root: {
+        feature: 'requireGap',
+        threshold: 0.5,
+        left: {
+          feature: 'handCount',
+          threshold: 8,
+          left: { value: 0.41 },
+          right: { value: 0.32 },
+        },
+        right: { value: 0.19 },
+      },
+    },
+  ],
+};
+
 function sigmoid(x: number): number {
   if (!Number.isFinite(x)) return x > 0 ? 1 : 0;
   if (x >= 20) return 1;
@@ -214,6 +271,26 @@ function evalGBDT(model: GBDTModel, features: FeatureSnapshot): number {
     acc += tree.weight * evalGBDTNode(tree.root, features);
   }
   return acc;
+}
+
+function evalForestNode(node: RandomForestNode, features: FeatureSnapshot): number {
+  if ('value' in node) return node.value;
+  const value = features[node.feature] ?? 0;
+  return value <= node.threshold
+    ? evalForestNode(node.left, features)
+    : evalForestNode(node.right, features);
+}
+
+function evalRandomForest(model: RandomForestModel, features: FeatureSnapshot): number {
+  if (!model.trees.length) return 0;
+  let acc = 0;
+  let weightSum = 0;
+  for (const tree of model.trees) {
+    const weight = tree.weight ?? 1;
+    acc += weight * evalForestNode(tree.root, features);
+    weightSum += weight;
+  }
+  return weightSum === 0 ? 0 : acc / weightSum;
 }
 
 function handStatsFromCounts(hand: Label[]): FeatureSnapshot {
@@ -267,6 +344,21 @@ function followFeatures(
     } catch {}
   }
   return features;
+}
+
+type FollowModelScores = {
+  logistic: number;
+  gbdt: number;
+  forest: number;
+  blended: number;
+};
+
+function scoreFollowModels(features: FeatureSnapshot): FollowModelScores {
+  const logistic = logisticPredict(FOLLOW_LOGISTIC_MODEL, features);
+  const gbdt = evalGBDT(PLAY_GBDT_MODEL, features);
+  const forest = evalRandomForest(FOLLOW_FOREST_MODEL, features);
+  const blended = logistic * 0.6 + forest * 0.4;
+  return { logistic, gbdt, forest, blended };
 }
 
 function removeLabelsClone(hand: Label[], pick: Label[]): Label[] {
@@ -455,7 +547,16 @@ function beamSearchDecision(
   legal: Label[][],
   assignments: Label[][][],
   options: { width: number; depth: number },
-): { move: Label[]; score: number; follow: number; gbdt: number; teammateRelay: number; oppBeat: number } | null {
+): {
+  move: Label[];
+  score: number;
+  follow: number;
+  logistic: number;
+  forest: number;
+  gbdt: number;
+  teammateRelay: number;
+  oppBeat: number;
+} | null {
   if (!legal.length) return null;
   const four2 = ctx?.policy?.four2 || 'both';
   const width = Math.max(1, options.width);
@@ -477,11 +578,10 @@ function beamSearchDecision(
       const bombRetention = bombRetentionScore(node.hands, after);
       const fakeCtx: BotCtx = { ...ctx, hands: node.hands.slice(), require: require };
       const features = followFeatures(fakeCtx, mv, teammateRelay, oppBeat, shapeScore, bombRetention);
-      const follow = logisticPredict(FOLLOW_LOGISTIC_MODEL, features);
-      const gbdt = evalGBDT(PLAY_GBDT_MODEL, features);
+      const scores = scoreFollowModels(features);
       const remaining = handStepEstimate(after);
       const stepScore = -remaining * 0.35;
-      const totalScore = node.score + follow * 1.4 + gbdt + stepScore + bombRetention * 0.3;
+      const totalScore = node.score + scores.blended * 1.4 + scores.gbdt + stepScore + bombRetention * 0.3;
       next.push({ hands: after, score: totalScore, path: [...node.path, mv], depth: node.depth + 1 });
     }
     next.sort((a, b) => b.score - a.score);
@@ -489,7 +589,7 @@ function beamSearchDecision(
   };
 
   let bestNode: BeamNode | null = null;
-  let bestMeta: { follow: number; gbdt: number; teammateRelay: number; oppBeat: number } | null = null;
+  let bestMeta: { scores: FollowModelScores; teammateRelay: number; oppBeat: number } | null = null;
 
   for (let depth = 0; depth < depthLimit; depth++) {
     const newFrontier: BeamNode[] = [];
@@ -517,11 +617,10 @@ function beamSearchDecision(
     const bombRetention = bombRetentionScore(ctx.hands, after);
     const fakeCtx: BotCtx = { ...ctx };
     const features = followFeatures(fakeCtx, mv, teammateRelay, oppBeat, shapeScore, bombRetention);
-    const follow = logisticPredict(FOLLOW_LOGISTIC_MODEL, features);
-    const gbdt = evalGBDT(PLAY_GBDT_MODEL, features);
+    const scores = scoreFollowModels(features);
     if (!bestNode || candidate.score > bestNode.score) {
       bestNode = candidate;
-      bestMeta = { follow, gbdt, teammateRelay, oppBeat };
+      bestMeta = { scores, teammateRelay, oppBeat };
     }
   }
 
@@ -529,8 +628,10 @@ function beamSearchDecision(
   return {
     move: bestNode.path[0],
     score: bestNode.score,
-    follow: bestMeta.follow,
-    gbdt: bestMeta.gbdt,
+    follow: bestMeta.scores.blended,
+    logistic: bestMeta.scores.logistic,
+    forest: bestMeta.scores.forest,
+    gbdt: bestMeta.scores.gbdt,
     teammateRelay: bestMeta.teammateRelay,
     oppBeat: bestMeta.oppBeat,
   };
@@ -673,7 +774,7 @@ function approximateEndgameMove(
   ctx: BotCtx,
   legal: Label[][],
   assignments: Label[][][],
-): { move: Label[] | null; value: number; follow: number } | null {
+): { move: Label[] | null; value: number; follow: number; logistic: number; forest: number } | null {
   if (!assignments.length) return null;
   const four2 = ctx?.policy?.four2 || 'both';
   const allowPass = ctx.require != null && ctx.canPass;
@@ -689,6 +790,7 @@ function approximateEndgameMove(
 
   let bestMove: Label[] | null = null;
   let bestValue = ctx.role === 'landlord' ? -Infinity : Infinity;
+  let bestScores: FollowModelScores | null = null;
   let bestFollow = 0;
 
   for (const opt of options) {
@@ -761,12 +863,20 @@ function approximateEndgameMove(
       const shapeScore = opt.move ? simpleShapeScore(ctx.hands, mv) : 0;
       const bombRetention = opt.move ? bombRetentionScore(ctx.hands, removeLabelsClone(ctx.hands, mv)) : 0;
       const features = followFeatures(fakeCtx, opt.move, teammateRelay, oppBeat, shapeScore, bombRetention);
-      bestFollow = logisticPredict(FOLLOW_LOGISTIC_MODEL, features);
+      const scores = scoreFollowModels(features);
+      bestScores = scores;
+      bestFollow = scores.blended;
     }
   }
 
   if (bestMove === null && !allowPass) return null;
-  return { move: bestMove, value: bestValue, follow: bestFollow };
+  return {
+    move: bestMove,
+    value: bestValue,
+    follow: bestFollow,
+    logistic: bestScores?.logistic ?? 0,
+    forest: bestScores?.forest ?? 0,
+  };
 }
 
 
@@ -2400,6 +2510,8 @@ export const AdvancedHybrid: BotFunc = async (ctx) => {
 
   if (assignments.length && ctx.require && ctx.canPass && legal.length) {
     let bestFollow = 0;
+    let bestLogistic = 0;
+    let bestForest = 0;
     for (const mv of legal) {
       const after = removeLabelsClone(ctx.hands, mv);
       const teammateSeat = ctx.teammates?.[0] ?? null;
@@ -2411,11 +2523,18 @@ export const AdvancedHybrid: BotFunc = async (ctx) => {
       const shapeScore = simpleShapeScore(ctx.hands, mv);
       const bombRetention = bombRetentionScore(ctx.hands, after);
       const features = followFeatures(ctx, mv, teammateRelay, oppBeat, shapeScore, bombRetention);
-      const follow = logisticPredict(FOLLOW_LOGISTIC_MODEL, features);
-      if (follow > bestFollow) bestFollow = follow;
+      const scores = scoreFollowModels(features);
+      if (scores.blended > bestFollow) {
+        bestFollow = scores.blended;
+        bestLogistic = scores.logistic;
+        bestForest = scores.forest;
+      }
     }
     if (bestFollow < 0.35) {
-      return { move: 'pass', reason: `AdvancedHybrid: logisticFollow=${bestFollow.toFixed(2)} → pass` };
+      return {
+        move: 'pass',
+        reason: `AdvancedHybrid: followBlend=${bestFollow.toFixed(2)} logit=${bestLogistic.toFixed(2)} rf=${bestForest.toFixed(2)} → pass`,
+      };
     }
   }
 
@@ -2423,12 +2542,15 @@ export const AdvancedHybrid: BotFunc = async (ctx) => {
     const endgame = approximateEndgameMove(ctx, legal, assignments);
     if (endgame) {
       if (endgame.move === null) {
-        return { move: 'pass', reason: `AdvancedHybrid:endgame value=${endgame.value.toFixed(2)} follow=${endgame.follow.toFixed(2)}` };
+        return {
+          move: 'pass',
+          reason: `AdvancedHybrid:endgame value=${endgame.value.toFixed(2)} follow=${endgame.follow.toFixed(2)} logit=${endgame.logistic.toFixed(2)} rf=${endgame.forest.toFixed(2)}`,
+        };
       }
       return {
         move: 'play',
         cards: endgame.move,
-        reason: `AdvancedHybrid:endgame value=${endgame.value.toFixed(2)} follow=${endgame.follow.toFixed(2)}`,
+        reason: `AdvancedHybrid:endgame value=${endgame.value.toFixed(2)} follow=${endgame.follow.toFixed(2)} logit=${endgame.logistic.toFixed(2)} rf=${endgame.forest.toFixed(2)}`,
       };
     }
   }
@@ -2444,7 +2566,9 @@ export const AdvancedHybrid: BotFunc = async (ctx) => {
     const reason = [
       'AdvancedHybrid',
       `beamScore=${beam.score.toFixed(2)}`,
-      `follow=${beam.follow.toFixed(2)}`,
+      `followBlend=${beam.follow.toFixed(2)}`,
+      `logit=${beam.logistic.toFixed(2)}`,
+      `rf=${beam.forest.toFixed(2)}`,
       `gbdt=${beam.gbdt.toFixed(2)}`,
       `relay=${beam.teammateRelay.toFixed(2)}`,
       `opp=${beam.oppBeat.toFixed(2)}`,

@@ -2,12 +2,12 @@
 
 This roadmap collects implementation notes for four strength upgrades to the Dou Dizhu bot stack.  Each section summarises the intended use cases, integration points, and an MVP cut that can be tackled incrementally.
 
-## Logistic Regression / GBDT Classifiers
+## Logistic Regression / GBDT / Random Forest Classifiers
 
 **Use cases**
 
 * Bid / double binary decisions (`phase === 'bid' | 'double'`).
-* Play-phase follow-up such as "follow vs pass" classification or scoring of a short candidate list prior to greedy resolution.
+* Play-phase follow-up such as "follow vs pass" classification or scoring of a short candidate list prior to greedy resolution; blend outputs from logistic, gradient boosted, and random forest ensembles for stability.
 
 **Integration hooks**
 
@@ -16,9 +16,9 @@ This roadmap collects implementation notes for four strength upgrades to the Dou
 
 **MVP delivery**
 
-1. Export an offline-trained model (logistic regression coefficients or GBDT leaf table) into a JSON/TypeScript module consumable by the front-end runtime.
-2. Implement a pure-JS inference helper that reconstructs the dot product / tree walk using only standard library math.
-3. Add unit tests that feed recorded contexts through the helper to verify parity with the offline evaluation notebook.
+1. Export an offline-trained model (logistic regression coefficients, GBDT leaf table, or random forest trees) into a JSON/TypeScript module consumable by the front-end runtime.
+2. Implement pure-JS inference helpers that reconstruct the dot product / tree walk using only standard library math; keep tree walkers generic enough to evaluate both boosted and bagged ensembles.
+3. Add unit tests that feed recorded contexts through the helper to verify parity with the offline evaluation notebook and to validate that ensemble blending behaves as expected.
 
 ## Heuristic Beam Search (Width 3–5)
 
