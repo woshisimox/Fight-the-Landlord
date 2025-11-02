@@ -2905,12 +2905,17 @@ export async function* runOneGame(opts: {
       multiplier = 1;
       let passesSinceLastBid = 0;
       let passesNoBid = 0;
-      let seat = 0;
       let actions = 0;
       const perSeatBidCount: [number, number, number] = [0, 0, 0];
       let hasAnyBid = false;
+      const firstRoundPass: [boolean, boolean, boolean] = [false, false, false];
+      const roundOrder = [0, 1, 2] as const;
+      let activeOrder: readonly number[] = roundOrder;
+      let round = 1;
+      let seatIdx = 0;
 
       while (true) {
+        const seat = activeOrder[seatIdx];
         const sc = evalRobScore(hands[seat]);
 
         const __thMap: Record<string, number> = {
@@ -3025,12 +3030,14 @@ export async function* runOneGame(opts: {
             multiplier = Math.max(1, multiplier || 1);
           }
           bidMultiplier = multiplier;
+          if (round === 1) firstRoundPass[seat] = false;
           last = seat;
           passesSinceLastBid = 0;
           passesNoBid = 0;
           hasAnyBid = true;
           yield { type:'event', kind:'bid', seat, bid:true, score: sc, bidMult: bidMultiplier, mult: multiplier, doubled: isRob, bidCount: perSeatBidCount[seat] };
         } else {
+          if (round === 1) firstRoundPass[seat] = true;
           if (last === -1) {
             passesNoBid++;
           } else {
@@ -3041,13 +3048,28 @@ export async function* runOneGame(opts: {
         if (opts.delayMs) await wait(opts.delayMs);
 
         const reachedActionCap = (++actions) >= 12;
-        const everyonePassed = (last === -1 && passesNoBid >= 3);
+        const everyonePassed = (last === -1 && passesNoBid >= roundOrder.length);
         const biddingSettled = (last !== -1 && passesSinceLastBid >= 2);
         if (reachedActionCap || everyonePassed || biddingSettled) {
           break;
         }
 
-        seat = (seat + 1) % 3;
+        if (round === 1 && seatIdx + 1 >= activeOrder.length) {
+          const eligible = roundOrder.filter(s => !firstRoundPass[s]);
+          if (eligible.length <= 1) {
+            break;
+          }
+          activeOrder = eligible;
+          round = 2;
+          seatIdx = 0;
+          continue;
+        }
+
+        if (round === 2 && seatIdx + 1 >= activeOrder.length) {
+          break;
+        }
+
+        seatIdx = (seatIdx + 1) % activeOrder.length;
       }
 
       if (bidHistory.length > 0) {
