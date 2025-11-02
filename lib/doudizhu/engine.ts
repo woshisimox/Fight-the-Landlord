@@ -1010,6 +1010,12 @@ function detectRankFromToken(raw: string): string | null {
   const compact = stripCardToken(raw);
   if (!compact) return null;
   const lower = compact.toLowerCase();
+  if (compact.startsWith('🃏')) {
+    const tail = compact.slice(1);
+    if (!tail) return 'X';
+    if (/^[xX]$/.test(tail)) return 'x';
+    if (/^[yY]$/.test(tail)) return 'X';
+  }
   if (/^pass$/i.test(compact)) return null;
   const smallJokerHint = lower.includes('小王') || lower.includes('小joker') || lower.includes('jokerx') || (lower.includes('joker') && (lower.includes('small') || lower.includes('little') || lower.includes('lower')));
   const bigJokerHint = lower.includes('大王') || lower.includes('大joker') || lower.includes('jokery') || (lower.includes('joker') && (lower.includes('big') || lower.includes('large') || lower.includes('upper')));
