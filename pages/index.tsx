@@ -5173,6 +5173,24 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
                     hint = { move, cards, score, reason, label, by: byHint };
                   }
+                  const ctxHandsRaw = Array.isArray((m as any)?.ctx?.hands)
+                    ? ((m as any).ctx.hands as any[]).map(card => String(card))
+                    : null;
+                  if (ctxHandsRaw && ctxHandsRaw.length > 0) {
+                    const prevHand = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : [];
+                    const usage = suitUsageRef.current;
+                    const ownerKey = ownerKeyForSeat(seat);
+                    unregisterSuitUsage(usage, ownerKey, prevHand);
+                    const reservedBase = snapshotSuitUsage(usage, ownerKey);
+                    const seatPrefsSingle: SeatSuitPrefs = [];
+                    const preferred = extractSeatSuitPrefs(ctxHandsRaw);
+                    seatPrefsSingle[seat] = preferred;
+                    const reserved = mergeReservedWithForeign(reservedBase, seat, seatPrefsSingle);
+                    const decorated = reconcileHandFromRaw(ctxHandsRaw, prevHand, reserved, preferred);
+                    nextHands = Object.assign([], nextHands, { [seat]: decorated });
+                    registerSuitUsage(usage, ownerKey, decorated);
+                    suitUsageRef.current = usage;
+                  }
                   if (hint && hint.move === 'play' && Array.isArray(hint.cards)) {
                     const seatHandSnapshot = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : [];
                     if (seatHandSnapshot.length > 0) {
