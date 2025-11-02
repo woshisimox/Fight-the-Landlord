@@ -4019,6 +4019,48 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     : humanPhase === 'double'
       ? (lang === 'en' ? 'Double' : '加倍')
       : (lang === 'en' ? 'Play cards' : '出牌');
+
+  useEffect(() => {
+    const request = humanRequest;
+    if (!request) return;
+    if (!['bid', 'double', 'play'].includes(request.phase)) return;
+    const seat = request.seat;
+    if (typeof seat !== 'number' || seat < 0 || seat > 2) return;
+    if (!isHumanSeat(seat)) return;
+    const ctxObj: any = request.ctx || {};
+    const rawHand = Array.isArray(ctxObj.hands)
+      ? ctxObj.hands.map((card: any) => String(card))
+      : Array.isArray(ctxObj.hand)
+        ? ctxObj.hand.map((card: any) => String(card))
+        : null;
+    if (!rawHand || rawHand.length === 0) return;
+
+    const usage = suitUsageRef.current;
+    const ownerKey = ownerKeyForSeat(seat);
+    const prevHand = Array.isArray(handsRef.current?.[seat])
+      ? (handsRef.current[seat] as string[])
+      : [];
+
+    unregisterSuitUsage(usage, ownerKey, prevHand);
+    const reservedBase = snapshotSuitUsage(usage, ownerKey);
+    const seatPrefsSingle: SeatSuitPrefs = [];
+    const preferred = extractSeatSuitPrefs(rawHand);
+    seatPrefsSingle[seat] = preferred;
+    const reserved = mergeReservedWithForeign(reservedBase, seat, seatPrefsSingle);
+    const decorated = reconcileHandFromRaw(rawHand, prevHand, reserved, preferred);
+    registerSuitUsage(usage, ownerKey, decorated);
+    suitUsageRef.current = usage;
+
+    const unchanged = decorated.length === prevHand.length
+      && decorated.every((label, idx) => label === prevHand[idx]);
+    if (unchanged) return;
+
+    setHands(prev => {
+      const base = Array.isArray(prev) ? [...prev] : [[], [], []];
+      base[seat] = decorated;
+      return base as string[][];
+    });
+  }, [humanRequest, isHumanSeat]);
   const humanRequireText = (() => {
     if (humanPhase !== 'play') return '';
     const req = humanRequest?.ctx?.require;
