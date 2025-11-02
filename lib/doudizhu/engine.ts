@@ -22,6 +22,31 @@ export type BotMove =
 
 type CoopRecommendation = (BotMove & { via?: string });
 
+type ComboRuleDoc = {
+  label: string;
+  summary: string;
+  minCards: number;
+  maxCards?: number;
+  chain?: {
+    minGroups: number;
+    groupSize: number;
+    maxRankSymbol: string;
+    maxRankLabel?: string;
+    example?: string;
+  };
+  notes?: string;
+  examples?: string[];
+};
+
+export type RulesReference = {
+  rankOrder: string[];
+  rankOrderLabel: string[];
+  orderHint: string;
+  orderHintLabel: string;
+  chainMin: { straight: number; pair_seq: number; plane: number };
+  combos: Record<string, ComboRuleDoc>;
+};
+
 export type PlayEvent = {
   seat: number;
   move: 'play' | 'pass';
@@ -60,6 +85,8 @@ export type BotCtx = {
     seenByRank: Record<string, number>;
     remainingByRank: Record<string, number>; // 54 张减去 seen 与自己手牌后的估计余量
   };
+
+  rules?: RulesReference;
 
   coop?: {
     enabled: boolean;
@@ -1715,6 +1742,138 @@ function describeFollowRequirement(combo: Combo): Combo {
   return copy;
 }
 
+function buildRulesReference(): RulesReference {
+  const maxSeqSymbol = rankSymbolOf(MAX_SEQ_VALUE) ?? 'A';
+  const maxSeqLabel = readableRank(maxSeqSymbol) ?? maxSeqSymbol;
+  const combos: Record<string, ComboRuleDoc> = {
+    single: {
+      label: '单张',
+      summary: '任意一张牌，可含 3 至 大王 的任意点数。',
+      minCards: 1,
+      examples: ['♠3'],
+    },
+    pair: {
+      label: '对子',
+      summary: '两张点数相同的牌，大小王不能配成对子。',
+      minCards: 2,
+      examples: ['♠3 ♣3'],
+    },
+    triple: {
+      label: '三张',
+      summary: '三张点数相同的牌。',
+      minCards: 3,
+      examples: ['♠3 ♣3 ♥3'],
+    },
+    triple_one: {
+      label: '三带一',
+      summary: '三张相同点数 + 任意一张单牌。',
+      minCards: 4,
+      examples: ['♠3 ♣3 ♥3 ♠9'],
+    },
+    triple_pair: {
+      label: '三带一对',
+      summary: '三张相同点数 + 任意一对牌。',
+      minCards: 5,
+      examples: ['♠3 ♣3 ♥3 ♠9 ♣9'],
+    },
+    straight: {
+      label: '顺子',
+      summary: '点数连续的单牌序列，不含 2 与大小王。',
+      minCards: CHAIN_MIN.straight,
+      chain: {
+        minGroups: CHAIN_MIN.straight,
+        groupSize: 1,
+        maxRankSymbol: maxSeqSymbol,
+        maxRankLabel: maxSeqLabel,
+      },
+      examples: ['♠3 ♣4 ♦5 ♠6 ♣7'],
+      notes: '长度至少 5 张，例如 3-4-5-6-7。',
+    },
+    pair_seq: {
+      label: '连对',
+      summary: '由 N 个点数连续的对子组成，至少 3 对，不含 2 与大小王。',
+      minCards: CHAIN_MIN.pair_seq * 2,
+      chain: {
+        minGroups: CHAIN_MIN.pair_seq,
+        groupSize: 2,
+        maxRankSymbol: maxSeqSymbol,
+        maxRankLabel: maxSeqLabel,
+        example: '♠3 ♣3 ♠4 ♣4 ♠5 ♣5',
+      },
+      notes: '常见示例：对3、对4、对5 组成的三连对。',
+    },
+    plane: {
+      label: '飞机',
+      summary: '由 N 组三张连续点数组成，不含 2 与大小王。',
+      minCards: CHAIN_MIN.plane * 3,
+      chain: {
+        minGroups: CHAIN_MIN.plane,
+        groupSize: 3,
+        maxRankSymbol: maxSeqSymbol,
+        maxRankLabel: maxSeqLabel,
+        example: '♠3 ♣3 ♥3 ♠4 ♣4 ♥4',
+      },
+      notes: '基础飞机不带翅膀，每组三张。',
+    },
+    plane_single: {
+      label: '飞机带单',
+      summary: '连续三张组 + 同数量的单牌翅膀。',
+      minCards: CHAIN_MIN.plane * 4,
+      chain: {
+        minGroups: CHAIN_MIN.plane,
+        groupSize: 3,
+        maxRankSymbol: maxSeqSymbol,
+        maxRankLabel: maxSeqLabel,
+      },
+      notes: '每组三张需配一张额外单牌。',
+    },
+    plane_pair: {
+      label: '飞机带对',
+      summary: '连续三张组 + 同数量的对子翅膀。',
+      minCards: CHAIN_MIN.plane * 5,
+      chain: {
+        minGroups: CHAIN_MIN.plane,
+        groupSize: 3,
+        maxRankSymbol: maxSeqSymbol,
+        maxRankLabel: maxSeqLabel,
+      },
+      notes: '每组三张需配一个对子。',
+    },
+    four_two_singles: {
+      label: '四带两单',
+      summary: '四张相同点数 + 任意两张单牌。',
+      minCards: 6,
+    },
+    four_two_pairs: {
+      label: '四带两对',
+      summary: '四张相同点数 + 两个对子。',
+      minCards: 8,
+    },
+    bomb: {
+      label: '炸弹',
+      summary: '四张点数相同的牌，可压制除更大炸弹与王炸外的任何组合。',
+      minCards: 4,
+    },
+    rocket: {
+      label: '王炸',
+      summary: '大小王组合，为全场最大牌型。',
+      minCards: 2,
+      examples: ['🃏x 🃏X'],
+    },
+  };
+
+  return {
+    rankOrder: [...RANKS],
+    rankOrderLabel: RANKS.map(r => readableRank(r) ?? r),
+    orderHint: ORDER_HINT_RAW,
+    orderHintLabel: ORDER_HINT_LABEL,
+    chainMin: { ...CHAIN_MIN },
+    combos,
+  };
+}
+
+const RULES_REFERENCE = buildRulesReference();
+
 // ========== 可跟/可出 生成 ==========
 function* singlesFrom(map: Map<number, Label[]>) {
   for (const [rv, arr] of [...map.entries()].sort((a,b)=>a[0]-b[0])) {
@@ -2792,6 +2951,7 @@ export async function* runOneGame(opts: {
           require: null,
           canPass: true,
           policy: { four2 },
+          rules: RULES_REFERENCE,
           phase: 'bid',
           bid: {
             score: sc,
@@ -3031,6 +3191,7 @@ const buildDoubleCtx = (seat:number, role:'landlord'|'farmer', recommended:boole
     require: null,
     canPass: true,
     policy: { four2 },
+    rules: RULES_REFERENCE,
     phase: 'double' as const,
     double: {
       baseMultiplier: multiplier,
@@ -3195,6 +3356,7 @@ function __computeSeenBySeat(history: PlayEvent[], bottom: Label[], landlord: nu
       require: requireForBot,
       canPass: !isLeader,
       policy: { four2 },
+      rules: RULES_REFERENCE,
       seat: turn,
       landlord,
       leader,
