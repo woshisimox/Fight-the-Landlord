@@ -5204,20 +5204,41 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     : rawPhase === 'double'
                       ? 'double'
                       : rawPhase;
-                  const effectiveTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
-                    ? timeoutParsed
-                    : 30_000;
                   const issuedAtRaw = (m as any).issuedAt ?? (m as any).issued_at;
                   const expiresAtRaw = (m as any).expiresAt ?? (m as any).expires_at;
                   const issuedAtParsed = typeof issuedAtRaw === 'number' ? issuedAtRaw : Number(issuedAtRaw);
                   const expiresAtParsed = typeof expiresAtRaw === 'number' ? expiresAtRaw : Number(expiresAtRaw);
+                  const serverIssuedAt = Number.isFinite(issuedAtParsed) ? issuedAtParsed : undefined;
+                  const serverExpiresAt = Number.isFinite(expiresAtParsed) ? expiresAtParsed : undefined;
+                  const serverWindowMs = (typeof serverExpiresAt === 'number' && typeof serverIssuedAt === 'number')
+                    ? Math.max(0, Math.floor(serverExpiresAt - serverIssuedAt))
+                    : undefined;
+                  const fallbackTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
+                    ? timeoutParsed
+                    : 30_000;
                   const clientIssuedAt = Date.now();
                   const upstreamLagMs = Number.isFinite(issuedAtParsed)
                     ? Math.max(0, clientIssuedAt - issuedAtParsed)
                     : 0;
-                  let resolvedWindowMs = Math.max(0, effectiveTimeoutMs);
+                  let totalWindowMs = Math.max(0, fallbackTimeoutMs);
+                  if (typeof serverWindowMs === 'number' && serverWindowMs > 0) {
+                    totalWindowMs = serverWindowMs;
+                  }
                   if (normalizedPhase === 'bid' || normalizedPhase === 'double') {
-                    resolvedWindowMs = 30_000;
+                    totalWindowMs = 30_000;
+                  }
+                  let elapsedSinceIssued = typeof serverIssuedAt === 'number'
+                    ? Math.max(0, clientIssuedAt - serverIssuedAt)
+                    : upstreamLagMs;
+                  if (typeof serverIssuedAt === 'number' && elapsedSinceIssued > totalWindowMs * 2) {
+                    elapsedSinceIssued = upstreamLagMs;
+                  }
+                  let resolvedWindowMs = Math.max(0, totalWindowMs - elapsedSinceIssued);
+                  if (typeof serverExpiresAt === 'number') {
+                    const serverRemaining = Math.max(0, Math.floor(serverExpiresAt - clientIssuedAt));
+                    if (serverRemaining > 0 || resolvedWindowMs === 0) {
+                      resolvedWindowMs = Math.min(resolvedWindowMs, serverRemaining);
+                    }
                   }
                   const clientExpiresAt = clientIssuedAt + resolvedWindowMs;
                   humanCallIssuedAtRef.current[seat] = clientIssuedAt;
@@ -5228,7 +5249,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     phase: normalizedPhase,
                     ctx: m.ctx ?? {},
                     timeoutMs: resolvedWindowMs,
-                    totalTimeoutMs: resolvedWindowMs,
+                    totalTimeoutMs: totalWindowMs,
                     latencyMs: upstreamLagMs,
                     remainingMs: resolvedWindowMs,
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
