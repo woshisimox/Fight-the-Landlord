@@ -922,14 +922,33 @@ function normalizeMove(move: any): BotMove | null {
 function maybeFollowCoop(ctx: BotCtx): BotMove | null {
   const coop = ctx?.coop;
   if (!coop?.enabled || ctx.role !== 'farmer') return null;
-  if (!coop.recommended) return null;
-  if (coop.recommended.move === 'pass') {
-    const baseReason = coop.recommended.reason || `FarmerCoop${coop.recommended.via ? `(${coop.recommended.via})` : ''}`;
+  const rec = coop.recommended;
+  if (!rec) return null;
+
+  const via = rec.via ? `(${rec.via})` : '';
+  const baseReason = rec.reason || `FarmerCoop${via}`;
+
+  if (rec.move === 'pass') {
+    if (!ctx.canPass) return null;
     return { move: 'pass', reason: baseReason };
   }
-  if (coop.recommended.move === 'play') {
-    const cards = Array.isArray(coop.recommended.cards) ? coop.recommended.cards.slice() : [];
-    const baseReason = coop.recommended.reason || `FarmerCoop${coop.recommended.via ? `(${coop.recommended.via})` : ''}`;
+
+  if (rec.move === 'play') {
+    const cards = Array.isArray(rec.cards) ? rec.cards.slice() : [];
+    if (!cards.length) return null;
+
+    const pool = ctx.hands.slice();
+    for (const label of cards) {
+      const idx = pool.indexOf(label);
+      if (idx < 0) return null;
+      pool.splice(idx, 1);
+    }
+
+    const four2 = ctx?.policy?.four2 || 'both';
+    const combo = classify(cards, four2);
+    if (!combo) return null;
+    if (ctx.require && !beats(ctx.require, combo)) return null;
+
     return { move: 'play', cards, reason: baseReason };
   }
   return null;
