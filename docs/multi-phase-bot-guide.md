@@ -43,6 +43,7 @@ During **play**, the engine attaches the follow-up requirement as a rich `ctx.re
 * `type`, `rank`, and `len` continue to mirror the tabled combo, so scripted bots can keep comparing ranks numerically.
 * For LLM or HTTP services, the engine now supplements the combo with `label`, `rankLabel`, `minRankLabel`, `maxRankLabel`, and a short `description`, making rules such as “需跟大于对3的对子” explicit in the payload.【F:lib/doudizhu/engine.ts†L1765-L1789】【F:lib/doudizhu/engine.ts†L200-L282】
 * The helper object also exposes the full Dou Dizhu ordering via `rankOrder` and its condensed `orderHint` string (`"3<4<5<6<7<8<9<T<J<Q<K<A<2<x<X"`), so external bots can confirm that `2` outranks `K` without hard-coding suit logic.【F:lib/doudizhu/engine.ts†L200-L282】
+* `ctx.rules` summarises every legal combo, including the minimum length of sequences (e.g. `pair_seq` requires at least three consecutive pairs) and example layouts, so external services can validate shapes before constructing a move.【F:lib/doudizhu/engine.ts†L1794-L1923】
 
 When the front-end toggles **Farmer cooperation**, every play-phase context also carries `ctx.coop`:
 

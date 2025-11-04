@@ -3,6 +3,7 @@ import {
   GreedyMax,
   GreedyMin,
   RandomLegal,
+  AdvancedHybrid,
 } from './engine';
 
 import { OpenAIBot } from './bots/openai_bot';
@@ -27,7 +28,7 @@ const asBot = (fn: IBot, meta?: { choice?: string; phaseAware?: boolean }): IBot
 };
 
 export type BotSpec =
-  | { kind: 'builtin'; name: 'greedy-max' | 'greedy-min' | 'random-legal' }
+  | { kind: 'builtin'; name: 'greedy-max' | 'greedy-min' | 'random-legal' | 'advanced-hybrid' }
   | { kind: 'ai'; name: 'openai' | 'gemini' | 'grok' | 'kimi' | 'qwen'; model?: string; apiKey?: string }
   | { kind: 'http'; baseUrl: string; token?: string };
 
@@ -37,7 +38,8 @@ export function getBot(spec: BotSpec, seatIdx: number): IBot {
   if (spec.kind === 'builtin') {
     if (spec.name === 'greedy-max') return asBot(GreedyMax, { choice: 'built-in:greedy-max' });
     if (spec.name === 'greedy-min') return asBot(GreedyMin, { choice: 'built-in:greedy-min' });
-    return asBot(RandomLegal, { choice: 'built-in:random-legal' });
+    if (spec.name === 'random-legal') return asBot(RandomLegal, { choice: 'built-in:random-legal' });
+    if (spec.name === 'advanced-hybrid') return asBot(AdvancedHybrid, { choice: 'built-in:advanced-hybrid', phaseAware: true });
   }
 
   if (spec.kind === 'ai') {

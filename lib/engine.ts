@@ -7,6 +7,7 @@ import {
   GreedyMax,
   GreedyMin,
   RandomLegal,
+  AdvancedHybrid,
   type Four2Policy,
   type Label,
   type BotMove,
@@ -16,13 +17,14 @@ import {
 
 export type IBot = BotFunc;
 
-export { runOneGame, GreedyMax, GreedyMin, RandomLegal };
+export { runOneGame, GreedyMax, GreedyMin, RandomLegal, AdvancedHybrid };
 export type { Four2Policy, Label, BotMove, BotCtx };
 
 // 兼容别名
 export const BotGreedyMax = GreedyMax;
 export const BotGreedyMin = GreedyMin;
 export const BotRandomLegal = RandomLegal;
+export const BotAdvancedHybrid = AdvancedHybrid;
 
 type EngineOpts = {
   four2?: Four2Policy;
