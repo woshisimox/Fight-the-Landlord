@@ -176,6 +176,28 @@ const TRANSLATIONS: TransRule[] = [
 ];
 function hasChinese(s: string) { return /[\u4e00-\u9fff]/.test(s); }
 
+let cachedCreatePortal: ((children: ReactNode, container: Element | DocumentFragment) => ReactNode) | null = null;
+const renderViaPortal = (children: ReactNode, container: HTMLElement | null): ReactNode => {
+  if (!container) return null;
+  if (typeof window === 'undefined') return children;
+  if (!cachedCreatePortal) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const mod = require('react-dom');
+      const fn = mod?.createPortal;
+      if (typeof fn === 'function') {
+        cachedCreatePortal = fn;
+      }
+    } catch {
+      cachedCreatePortal = null;
+    }
+  }
+  if (cachedCreatePortal) {
+    return cachedCreatePortal(children, container);
+  }
+  return children;
+};
+
 function translateTextLiteral(s: string): string {
   let out = s;
   for (const r of TRANSLATIONS) {
@@ -754,7 +776,9 @@ type LiveProps = {
   onFinished?: (result: LivePanelFinishPayload) => void;
   controlsHidden?: boolean;
   initialTotals?: [number, number, number] | null;
-  turnTimeoutSecs?: number[];};
+  turnTimeoutSecs?: number[];
+  controlsPortal?: HTMLElement | null;
+};
 
 type LivePanelHandle = {
   start: () => Promise<void>;
@@ -1634,7 +1658,7 @@ function thoughtLabelForIdentity(id: string): string {
 }
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
-function LadderPanel() {
+function LadderPanel({ controlsHostRef }: { controlsHostRef?: (el: HTMLDivElement | null) => void }) {
   const { t } = useI18n();
   const [tick, setTick] = useState(0);
   useEffect(()=>{
@@ -1683,6 +1707,9 @@ function LadderPanel() {
         <div style={{ fontWeight:700 }}>{t('LadderTitle')}</div>
         <div style={{ fontSize:12, color:'#6b7280' }}>{t('LadderRange', { K })}</div>
       </div>
+      {controlsHostRef && (
+        <div ref={controlsHostRef} />
+      )}
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
         {items.map((it:any)=>{
           const pct = Math.min(1, Math.abs(it.val)/K);
@@ -6114,6 +6141,62 @@ if (m.type === 'event' && m.kind === 'play') {
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
+  const controlsContent = (
+    <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
+      <button
+        onClick={start}
+        disabled={running}
+        style={{
+          padding:'8px 12px',
+          borderRadius:8,
+          border:'1px solid #d1d5db',
+          background: running ? '#f3f4f6' : '#2563eb',
+          color: running ? '#9ca3af' : '#fff',
+          cursor: running ? 'not-allowed' : 'pointer',
+          fontWeight:600,
+        }}
+      >开始</button>
+      <button
+        onClick={togglePause}
+        disabled={!running}
+        style={{
+          padding:'8px 12px',
+          borderRadius:8,
+          border:'1px solid #d1d5db',
+          background: !running ? '#f3f4f6' : (paused ? '#bfdbfe' : '#fde68a'),
+          color: !running ? '#9ca3af' : (paused ? '#1e3a8a' : '#92400e'),
+          cursor: !running ? 'not-allowed' : 'pointer',
+          fontWeight:600,
+        }}
+      >{paused ? '继续' : '暂停'}</button>
+      <button
+        onClick={stop}
+        disabled={!running}
+        style={{
+          padding:'8px 12px',
+          borderRadius:8,
+          border:'1px solid #d1d5db',
+          background: running ? '#fee2e2' : '#f3f4f6',
+          color: running ? '#b91c1c' : '#9ca3af',
+          cursor: running ? 'pointer' : 'not-allowed',
+          fontWeight:600,
+        }}
+      >停止</button>
+      <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
+        剩余局数：{remainingGames}
+      </span>
+    </div>
+  );
+
+  let controlsNode: ReactNode = null;
+  if (!props.controlsHidden) {
+    if (props.controlsPortal) {
+      controlsNode = renderViaPortal(controlsContent, props.controlsPortal);
+    } else if (typeof props.controlsPortal === 'undefined') {
+      controlsNode = controlsContent;
+    }
+  }
+
   // ===== 统一统计打包（All-in-One） =====
 type AllBundle = {
   schema: 'ddz-all@1';
@@ -6212,52 +6295,7 @@ const handleAllSaveInner = () => {
   return (
     <SeatInfoContext.Provider value={seatDisplayNames}>
       <div>
-      {!props.controlsHidden && (
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-        <button
-          onClick={start}
-          disabled={running}
-          style={{
-            padding:'8px 12px',
-            borderRadius:8,
-            border:'1px solid #d1d5db',
-            background: running ? '#f3f4f6' : '#2563eb',
-            color: running ? '#9ca3af' : '#fff',
-            cursor: running ? 'not-allowed' : 'pointer',
-            fontWeight:600,
-          }}
-        >开始</button>
-        <button
-          onClick={togglePause}
-          disabled={!running}
-          style={{
-            padding:'8px 12px',
-            borderRadius:8,
-            border:'1px solid #d1d5db',
-            background: !running ? '#f3f4f6' : (paused ? '#bfdbfe' : '#fde68a'),
-            color: !running ? '#9ca3af' : (paused ? '#1e3a8a' : '#92400e'),
-            cursor: !running ? 'not-allowed' : 'pointer',
-            fontWeight:600,
-          }}
-        >{paused ? '继续' : '暂停'}</button>
-        <button
-          onClick={stop}
-          disabled={!running}
-          style={{
-            padding:'8px 12px',
-            borderRadius:8,
-            border:'1px solid #d1d5db',
-            background: running ? '#fee2e2' : '#f3f4f6',
-            color: running ? '#b91c1c' : '#9ca3af',
-            cursor: running ? 'pointer' : 'not-allowed',
-            fontWeight:600,
-          }}
-        >停止</button>
-        <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
-          剩余局数：{remainingGames}
-        </span>
-      </div>
-      )}
+      {controlsNode}
 
       <ThoughtSummaryPanel stats={thoughtStore} lastMs={lastThoughtMs} identities={seatIdentitiesMemo} lang={lang} />
 
@@ -6917,6 +6955,7 @@ const [lang, setLang] = useState<Lang>(() => {
   }, [seats, seatModels, seatKeys]);
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
+  const [ladderControlsHost, setLadderControlsHost] = useState<HTMLDivElement | null>(null);
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
@@ -7291,7 +7330,7 @@ const [lang, setLang] = useState<Lang>(() => {
 
         <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
           {/* —— 天梯图 —— */}
-          <LadderPanel />
+          <LadderPanel controlsHostRef={setLadderControlsHost} />
           <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
           <LivePanel
             key={resetKey}
@@ -7308,6 +7347,7 @@ const [lang, setLang] = useState<Lang>(() => {
             onLog={setLiveLog}
 
             turnTimeoutSecs={turnTimeoutSecs}
+            controlsPortal={ladderControlsHost}
           />
         </div>
         </>
