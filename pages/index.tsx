@@ -1830,6 +1830,18 @@ function KnockoutPanel() {
     return makeDefaultKnockoutEntries();
   });
   const [rounds, setRounds] = useState<KnockoutRound[]>([]);
+  const applyRoundsUpdate = useCallback((update: KnockoutRound[] | ((prev: KnockoutRound[]) => KnockoutRound[])) => {
+    if (typeof update === 'function') {
+      setRounds(prev => {
+        const next = (update as (prev: KnockoutRound[]) => KnockoutRound[])(prev);
+        roundsRef.current = next;
+        return next;
+      });
+    } else {
+      roundsRef.current = update;
+      setRounds(update);
+    }
+  }, [setRounds]);
   const [currentMatch, setCurrentMatch] = useState<KnockoutMatchContext | null>(null);
   const currentMatchRef = useRef<KnockoutMatchContext | null>(null);
   useEffect(() => { currentMatchRef.current = currentMatch; }, [currentMatch]);
@@ -1871,7 +1883,7 @@ function KnockoutPanel() {
       if (storedRounds) {
         const parsed = JSON.parse(storedRounds);
         if (Array.isArray(parsed)) {
-          setRounds(normalizeKnockoutRounds(parsed as KnockoutRound[]));
+          applyRoundsUpdate(normalizeKnockoutRounds(parsed as KnockoutRound[]));
         }
       }
       localStorage.removeItem('ddz_knockout_seed');
@@ -1985,7 +1997,7 @@ function KnockoutPanel() {
     if (roster.length < 3) {
       setError(lang === 'en' ? 'Add at least three participants.' : '请至少添加三名参赛选手。');
       setNotice(null);
-      setRounds([]);
+      applyRoundsUpdate([]);
       if (typeof window !== 'undefined') {
         try { localStorage.removeItem('ddz_knockout_rounds'); } catch {}
       }
@@ -2001,11 +2013,11 @@ function KnockoutPanel() {
     const firstRoundMatches = buildMatchesFromPool(shuffled, 0);
     if (!firstRoundMatches.length) {
       setError(lang === 'en' ? 'Unable to build initial groups.' : '无法生成首轮对阵，请重试。');
-      setRounds([]);
+      applyRoundsUpdate([]);
       return;
     }
     const firstRound: KnockoutRound = { matches: firstRoundMatches };
-    setRounds([firstRound]);
+    applyRoundsUpdate([firstRound]);
     setError(null);
     setNotice(lang === 'en'
       ? `Participants shuffled into groups of three where possible. Each trio plays ${roundsPerGroup} game(s).`
@@ -2023,7 +2035,7 @@ function KnockoutPanel() {
     setSeriesRounds(settings.roundsPerGroup);
     setOvertimeCount(0);
     setFinalStandings(null);
-    setRounds([]);
+    applyRoundsUpdate([]);
     setError(null);
     setNotice(null);
     if (typeof window !== 'undefined') {
@@ -2045,7 +2057,7 @@ function KnockoutPanel() {
     setSettings(defaultKnockoutSettings());
     setEntries(makeDefaultKnockoutEntries());
     setFinalStandings(null);
-    setRounds([]);
+    applyRoundsUpdate([]);
     setError(null);
     setNotice(null);
     if (typeof window !== 'undefined') {
@@ -2062,7 +2074,7 @@ function KnockoutPanel() {
       return;
     }
     setFinalStandings(null);
-    setRounds(prev => {
+    applyRoundsUpdate(prev => {
       const draft = cloneKnockoutRounds(prev);
       const match = draft[roundIdx]?.matches?.[matchIdx];
       if (!match) return prev;
@@ -2254,7 +2266,7 @@ function KnockoutPanel() {
       setSeriesRounds(roundsPerGroup);
       setOvertimeCount(0);
       setOvertimeReason('lowest');
-      setRounds(prev => {
+      applyRoundsUpdate(prev => {
         const draft = cloneKnockoutRounds(prev);
         applyEliminationToDraft(draft, next.roundIdx, next.matchIdx, byeToken);
         return draft;
@@ -2377,7 +2389,7 @@ function KnockoutPanel() {
       return;
     }
     const label = displayName(eliminatedToken);
-    setRounds(prev => {
+    applyRoundsUpdate(prev => {
       const draft = cloneKnockoutRounds(prev);
       applyEliminationToDraft(draft, ctx.roundIdx, ctx.matchIdx, eliminatedToken);
       return draft;
