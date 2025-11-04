@@ -15,6 +15,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     EnableHint: '关闭后不可开始/继续对局；再次勾选即可恢复。',
     LadderTitle: '天梯图（活动积分 ΔR）',
     LadderRange: '范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）',
+    LadderPlaysTitle: '天梯图（参赛牌局数）',
     Pass: '过',
     Play: '出牌',
     Empty: '（空）',
@@ -30,6 +31,7 @@ const I18N: Record<Lang, Record<string, string>> = {
     EnableHint: 'Disabled matches cannot start/continue; tick again to restore.',
     LadderTitle: 'Ladder (ΔR)',
     LadderRange: 'Range ±K (weighted by situation, current K≈{K}; no-participation = history or 0)',
+    LadderPlaysTitle: 'Ladder (matches played)',
     Pass: 'Pass',
     Play: 'Play',
     Empty: '(empty)',
@@ -1659,7 +1661,7 @@ function thoughtLabelForIdentity(id: string): string {
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
 function LadderPanel() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [tick, setTick] = useState(0);
   useEffect(()=>{
     const onAny = () => setTick(k=>k+1);
@@ -1697,9 +1699,12 @@ function LadderPanel() {
   const maxAbs = Math.max(Math.abs(minVal), Math.abs(maxVal));
   const K = Math.max(1, maxAbs * 1.1);
 
-  const items = arr.sort((a,b)=> b.val - a.val);
+  const itemsByScore = [...arr].sort((a,b)=> b.val - a.val);
+  const itemsByPlays = [...arr].sort((a,b)=> b.n - a.n);
+  const maxPlays = itemsByPlays.reduce((m, it) => Math.max(m, it.n || 0), 0);
 
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
+  const playsUnit = lang === 'en' ? 'hands' : '局';
 
   return (
     <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
@@ -1708,7 +1713,7 @@ function LadderPanel() {
         <div style={{ fontSize:12, color:'#6b7280' }}>{t('LadderRange', { K })}</div>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
-        {items.map((it:any)=>{
+        {itemsByScore.map((it:any)=>{
           const pct = Math.min(1, Math.abs(it.val)/K);
           const pos = it.val >= 0;
           return (
@@ -1719,6 +1724,28 @@ function LadderPanel() {
                 <div style={{ position:'absolute', left: pos ? '50%' : `${50 - pct*50}%`, width: `${pct*50}%`, top:2, bottom:2, background: pos ? '#16a34a' : '#ef4444', borderRadius:6 }}/>
               </div>
               <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right' }}>{it.val.toFixed(2)}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontWeight:700, marginTop:16 }}>{t('LadderPlaysTitle')}</div>
+      <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 96px', gap:8, marginTop:6 }}>
+        {itemsByPlays.map((it:any)=>{
+          const pct = maxPlays > 0 ? Math.min(1, (it.n || 0) / maxPlays) : 0;
+          const countText = (() => {
+            const count = typeof it.n === 'number' && isFinite(it.n) ? it.n : 0;
+            const formatted = count > 0 ? count.toLocaleString() : '0';
+            return `${formatted} ${playsUnit}`;
+          })();
+          return (
+            <div key={`plays-${it.id}`} style={{ display:'contents' }}>
+              <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.label}</div>
+              <div style={{ position:'relative', height:16, background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:8 }}>
+                <div style={{ position:'absolute', left:0, top:2, bottom:2, width:`${pct*100}%`, background:'#2563eb', borderRadius:6 }} />
+              </div>
+              <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right', whiteSpace:'nowrap' }}>
+                {countText}
+              </div>
             </div>
           );
         })}
