@@ -1658,7 +1658,7 @@ function thoughtLabelForIdentity(id: string): string {
 }
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
-function LadderPanel({ controlsHostRef }: { controlsHostRef?: (el: HTMLDivElement | null) => void }) {
+function LadderPanel() {
   const { t } = useI18n();
   const [tick, setTick] = useState(0);
   useEffect(()=>{
@@ -1707,9 +1707,6 @@ function LadderPanel({ controlsHostRef }: { controlsHostRef?: (el: HTMLDivElemen
         <div style={{ fontWeight:700 }}>{t('LadderTitle')}</div>
         <div style={{ fontSize:12, color:'#6b7280' }}>{t('LadderRange', { K })}</div>
       </div>
-      {controlsHostRef && (
-        <div ref={controlsHostRef} />
-      )}
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
         {items.map((it:any)=>{
           const pct = Math.min(1, Math.abs(it.val)/K);
@@ -6956,6 +6953,9 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
   const [ladderControlsHost, setLadderControlsHost] = useState<HTMLDivElement | null>(null);
+  const ladderControlsHostRef = useCallback((el: HTMLDivElement | null) => {
+    setLadderControlsHost(el);
+  }, []);
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
@@ -7328,9 +7328,11 @@ const [lang, setLang] = useState<Lang>(() => {
           </div>
         </div>
 
+        <div ref={ladderControlsHostRef} style={{ margin:'16px 0' }} />
+
         <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
           {/* —— 天梯图 —— */}
-          <LadderPanel controlsHostRef={setLadderControlsHost} />
+          <LadderPanel />
           <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
           <LivePanel
             key={resetKey}
