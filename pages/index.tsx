@@ -272,6 +272,7 @@ type BotChoice =
   | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
+  | 'built-in:advanced-hybrid'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http'
   | 'human';
@@ -361,6 +362,7 @@ const KO_DEFAULT_CHOICES: BotChoice[] = [
   'built-in:greedy-min',
   'built-in:random-legal',
   'built-in:mininet',
+  'built-in:advanced-hybrid',
 ];
 const KO_ALL_CHOICES: BotChoice[] = [
   'built-in:greedy-max',
@@ -369,6 +371,7 @@ const KO_ALL_CHOICES: BotChoice[] = [
   'built-in:mininet',
   'built-in:ally-support',
   'built-in:endgame-rush',
+  'built-in:advanced-hybrid',
   'ai:openai',
   'ai:gemini',
   'ai:grok',
@@ -1599,7 +1602,7 @@ function writeThoughtStore(store: ThoughtStore): ThoughtStore {
 }
 
 const THOUGHT_CATALOG_CHOICES: BotChoice[] = [
-  'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
+  'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush','built-in:advanced-hybrid',
   'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http','human',
 ];
 const DEFAULT_THOUGHT_CATALOG_IDS = THOUGHT_CATALOG_CHOICES.map(choice => makeThoughtIdentity(choice));
@@ -1827,6 +1830,18 @@ function KnockoutPanel() {
     return makeDefaultKnockoutEntries();
   });
   const [rounds, setRounds] = useState<KnockoutRound[]>([]);
+  const applyRoundsUpdate = useCallback((update: KnockoutRound[] | ((prev: KnockoutRound[]) => KnockoutRound[])) => {
+    if (typeof update === 'function') {
+      setRounds(prev => {
+        const next = (update as (prev: KnockoutRound[]) => KnockoutRound[])(prev);
+        roundsRef.current = next;
+        return next;
+      });
+    } else {
+      roundsRef.current = update;
+      setRounds(update);
+    }
+  }, [setRounds]);
   const [currentMatch, setCurrentMatch] = useState<KnockoutMatchContext | null>(null);
   const currentMatchRef = useRef<KnockoutMatchContext | null>(null);
   useEffect(() => { currentMatchRef.current = currentMatch; }, [currentMatch]);
@@ -1868,7 +1883,7 @@ function KnockoutPanel() {
       if (storedRounds) {
         const parsed = JSON.parse(storedRounds);
         if (Array.isArray(parsed)) {
-          setRounds(normalizeKnockoutRounds(parsed as KnockoutRound[]));
+          applyRoundsUpdate(normalizeKnockoutRounds(parsed as KnockoutRound[]));
         }
       }
       localStorage.removeItem('ddz_knockout_seed');
@@ -1901,6 +1916,20 @@ function KnockoutPanel() {
     setLivePaused(false);
     setFinalStandings(null);
   }, [rounds.length]);
+
+  useEffect(() => {
+    if (!automationActive) return;
+    if (!autoRunRef.current) return;
+    if (livePanelRef.current?.isRunning()) return;
+    if (liveRunning) return;
+    if (!roundsRef.current?.length) return;
+    const pending = findNextPlayableMatch(roundsRef.current || []);
+    if (!pending) {
+      setAutomation(false);
+      return;
+    }
+    scheduleNextMatch();
+  }, [automationActive, liveRunning, rounds]);
 
   const participantLabel = (idx: number) => (lang === 'en' ? `Player ${idx + 1}` : `选手${idx + 1}`);
   const updateSettings = (patch: Partial<KnockoutSettings>) => {
@@ -1982,7 +2011,7 @@ function KnockoutPanel() {
     if (roster.length < 3) {
       setError(lang === 'en' ? 'Add at least three participants.' : '请至少添加三名参赛选手。');
       setNotice(null);
-      setRounds([]);
+      applyRoundsUpdate([]);
       if (typeof window !== 'undefined') {
         try { localStorage.removeItem('ddz_knockout_rounds'); } catch {}
       }
@@ -1998,11 +2027,11 @@ function KnockoutPanel() {
     const firstRoundMatches = buildMatchesFromPool(shuffled, 0);
     if (!firstRoundMatches.length) {
       setError(lang === 'en' ? 'Unable to build initial groups.' : '无法生成首轮对阵，请重试。');
-      setRounds([]);
+      applyRoundsUpdate([]);
       return;
     }
     const firstRound: KnockoutRound = { matches: firstRoundMatches };
-    setRounds([firstRound]);
+    applyRoundsUpdate([firstRound]);
     setError(null);
     setNotice(lang === 'en'
       ? `Participants shuffled into groups of three where possible. Each trio plays ${roundsPerGroup} game(s).`
@@ -2020,7 +2049,7 @@ function KnockoutPanel() {
     setSeriesRounds(settings.roundsPerGroup);
     setOvertimeCount(0);
     setFinalStandings(null);
-    setRounds([]);
+    applyRoundsUpdate([]);
     setError(null);
     setNotice(null);
     if (typeof window !== 'undefined') {
@@ -2042,7 +2071,7 @@ function KnockoutPanel() {
     setSettings(defaultKnockoutSettings());
     setEntries(makeDefaultKnockoutEntries());
     setFinalStandings(null);
-    setRounds([]);
+    applyRoundsUpdate([]);
     setError(null);
     setNotice(null);
     if (typeof window !== 'undefined') {
@@ -2059,7 +2088,7 @@ function KnockoutPanel() {
       return;
     }
     setFinalStandings(null);
-    setRounds(prev => {
+    applyRoundsUpdate(prev => {
       const draft = cloneKnockoutRounds(prev);
       const match = draft[roundIdx]?.matches?.[matchIdx];
       if (!match) return prev;
@@ -2251,7 +2280,7 @@ function KnockoutPanel() {
       setSeriesRounds(roundsPerGroup);
       setOvertimeCount(0);
       setOvertimeReason('lowest');
-      setRounds(prev => {
+      applyRoundsUpdate(prev => {
         const draft = cloneKnockoutRounds(prev);
         applyEliminationToDraft(draft, next.roundIdx, next.matchIdx, byeToken);
         return draft;
@@ -2374,7 +2403,7 @@ function KnockoutPanel() {
       return;
     }
     const label = displayName(eliminatedToken);
-    setRounds(prev => {
+    applyRoundsUpdate(prev => {
       const draft = cloneKnockoutRounds(prev);
       applyEliminationToDraft(draft, ctx.roundIdx, ctx.matchIdx, eliminatedToken);
       return draft;
@@ -2751,6 +2780,7 @@ function KnockoutPanel() {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:advanced-hybrid">Advanced Hybrid</option>
                     </optgroup>
                     <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
@@ -3365,6 +3395,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:mininet':      return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'built-in:advanced-hybrid': return 'Advanced Hybrid';
     case 'ai:openai':             return 'OpenAI';
     case 'ai:gemini':             return 'Gemini';
     case 'ai:grok':               return 'Grok';
@@ -4014,6 +4045,48 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     : humanPhase === 'double'
       ? (lang === 'en' ? 'Double' : '加倍')
       : (lang === 'en' ? 'Play cards' : '出牌');
+
+  useEffect(() => {
+    const request = humanRequest;
+    if (!request) return;
+    if (!['bid', 'double', 'play'].includes(request.phase)) return;
+    const seat = request.seat;
+    if (typeof seat !== 'number' || seat < 0 || seat > 2) return;
+    if (!isHumanSeat(seat)) return;
+    const ctxObj: any = request.ctx || {};
+    const rawHand = Array.isArray(ctxObj.hands)
+      ? ctxObj.hands.map((card: any) => String(card))
+      : Array.isArray(ctxObj.hand)
+        ? ctxObj.hand.map((card: any) => String(card))
+        : null;
+    if (!rawHand || rawHand.length === 0) return;
+
+    const usage = suitUsageRef.current;
+    const ownerKey = ownerKeyForSeat(seat);
+    const prevHand = Array.isArray(handsRef.current?.[seat])
+      ? (handsRef.current[seat] as string[])
+      : [];
+
+    unregisterSuitUsage(usage, ownerKey, prevHand);
+    const reservedBase = snapshotSuitUsage(usage, ownerKey);
+    const seatPrefsSingle: SeatSuitPrefs = [];
+    const preferred = extractSeatSuitPrefs(rawHand);
+    seatPrefsSingle[seat] = preferred;
+    const reserved = mergeReservedWithForeign(reservedBase, seat, seatPrefsSingle);
+    const decorated = reconcileHandFromRaw(rawHand, prevHand, reserved, preferred);
+    registerSuitUsage(usage, ownerKey, decorated);
+    suitUsageRef.current = usage;
+
+    const unchanged = decorated.length === prevHand.length
+      && decorated.every((label, idx) => label === prevHand[idx]);
+    if (unchanged) return;
+
+    setHands(prev => {
+      const base = Array.isArray(prev) ? [...prev] : [[], [], []];
+      base[seat] = decorated;
+      return base as string[][];
+    });
+  }, [humanRequest, isHumanSeat]);
   const humanRequireText = (() => {
     if (humanPhase !== 'play') return '';
     const req = humanRequest?.ctx?.require;
@@ -5168,6 +5241,24 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
                     hint = { move, cards, score, reason, label, by: byHint };
                   }
+                  const ctxHandsRaw = Array.isArray((m as any)?.ctx?.hands)
+                    ? ((m as any).ctx.hands as any[]).map(card => String(card))
+                    : null;
+                  if (ctxHandsRaw && ctxHandsRaw.length > 0) {
+                    const prevHand = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : [];
+                    const usage = suitUsageRef.current;
+                    const ownerKey = ownerKeyForSeat(seat);
+                    unregisterSuitUsage(usage, ownerKey, prevHand);
+                    const reservedBase = snapshotSuitUsage(usage, ownerKey);
+                    const seatPrefsSingle: SeatSuitPrefs = [];
+                    const preferred = extractSeatSuitPrefs(ctxHandsRaw);
+                    seatPrefsSingle[seat] = preferred;
+                    const reserved = mergeReservedWithForeign(reservedBase, seat, seatPrefsSingle);
+                    const decorated = reconcileHandFromRaw(ctxHandsRaw, prevHand, reserved, preferred);
+                    nextHands = Object.assign([], nextHands, { [seat]: decorated });
+                    registerSuitUsage(usage, ownerKey, decorated);
+                    suitUsageRef.current = usage;
+                  }
                   if (hint && hint.move === 'play' && Array.isArray(hint.cards)) {
                     const seatHandSnapshot = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : [];
                     if (seatHandSnapshot.length > 0) {
@@ -5199,20 +5290,41 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     : rawPhase === 'double'
                       ? 'double'
                       : rawPhase;
-                  const effectiveTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
-                    ? timeoutParsed
-                    : 30_000;
                   const issuedAtRaw = (m as any).issuedAt ?? (m as any).issued_at;
                   const expiresAtRaw = (m as any).expiresAt ?? (m as any).expires_at;
                   const issuedAtParsed = typeof issuedAtRaw === 'number' ? issuedAtRaw : Number(issuedAtRaw);
                   const expiresAtParsed = typeof expiresAtRaw === 'number' ? expiresAtRaw : Number(expiresAtRaw);
+                  const serverIssuedAt = Number.isFinite(issuedAtParsed) ? issuedAtParsed : undefined;
+                  const serverExpiresAt = Number.isFinite(expiresAtParsed) ? expiresAtParsed : undefined;
+                  const serverWindowMs = (typeof serverExpiresAt === 'number' && typeof serverIssuedAt === 'number')
+                    ? Math.max(0, Math.floor(serverExpiresAt - serverIssuedAt))
+                    : undefined;
+                  const fallbackTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
+                    ? timeoutParsed
+                    : 30_000;
                   const clientIssuedAt = Date.now();
                   const upstreamLagMs = Number.isFinite(issuedAtParsed)
                     ? Math.max(0, clientIssuedAt - issuedAtParsed)
                     : 0;
-                  let resolvedWindowMs = Math.max(0, effectiveTimeoutMs);
+                  let totalWindowMs = Math.max(0, fallbackTimeoutMs);
+                  if (typeof serverWindowMs === 'number' && serverWindowMs > 0) {
+                    totalWindowMs = serverWindowMs;
+                  }
                   if (normalizedPhase === 'bid' || normalizedPhase === 'double') {
-                    resolvedWindowMs = 30_000;
+                    totalWindowMs = 30_000;
+                  }
+                  let elapsedSinceIssued = typeof serverIssuedAt === 'number'
+                    ? Math.max(0, clientIssuedAt - serverIssuedAt)
+                    : upstreamLagMs;
+                  if (typeof serverIssuedAt === 'number' && elapsedSinceIssued > totalWindowMs * 2) {
+                    elapsedSinceIssued = upstreamLagMs;
+                  }
+                  let resolvedWindowMs = Math.max(0, totalWindowMs - elapsedSinceIssued);
+                  if (typeof serverExpiresAt === 'number') {
+                    const serverRemaining = Math.max(0, Math.floor(serverExpiresAt - clientIssuedAt));
+                    if (serverRemaining > 0 || resolvedWindowMs === 0) {
+                      resolvedWindowMs = Math.min(resolvedWindowMs, serverRemaining);
+                    }
                   }
                   const clientExpiresAt = clientIssuedAt + resolvedWindowMs;
                   humanCallIssuedAtRef.current[seat] = clientIssuedAt;
@@ -5223,7 +5335,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     phase: normalizedPhase,
                     ctx: m.ctx ?? {},
                     timeoutMs: resolvedWindowMs,
-                    totalTimeoutMs: resolvedWindowMs,
+                    totalTimeoutMs: totalWindowMs,
                     latencyMs: upstreamLagMs,
                     remainingMs: resolvedWindowMs,
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
@@ -6998,6 +7110,7 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:advanced-hybrid">Advanced Hybrid</option>
                     </optgroup>
                     <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
