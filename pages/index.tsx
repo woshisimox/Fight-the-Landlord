@@ -1923,6 +1923,8 @@ function KnockoutPanel() {
   const overtimeCountRef = useRef(overtimeCount);
   useEffect(() => { overtimeCountRef.current = overtimeCount; }, [overtimeCount]);
   const [liveRunning, setLiveRunning] = useState(false);
+  const liveRunningRef = useRef(liveRunning);
+  useEffect(() => { liveRunningRef.current = liveRunning; }, [liveRunning]);
   const [livePaused, setLivePaused] = useState(false);
   const [automationActive, setAutomationActive] = useState(false);
   const [finalStandings, setFinalStandings] = useState<KnockoutFinalStandings | null>(null);
@@ -1932,6 +1934,7 @@ function KnockoutPanel() {
   const entriesRef = useRef<KnockoutEntry[]>(entries);
   useEffect(() => { entriesRef.current = entries; }, [entries]);
   const autoRunRef = useRef(false);
+  const autoScheduleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const allFileRef = useRef<HTMLInputElement|null>(null);
@@ -1982,19 +1985,12 @@ function KnockoutPanel() {
     setFinalStandings(null);
   }, [rounds.length]);
 
-  useEffect(() => {
-    if (!automationActive) return;
-    if (!autoRunRef.current) return;
-    if (livePanelRef.current?.isRunning()) return;
-    if (liveRunning) return;
-    if (!roundsRef.current?.length) return;
-    const pending = findNextPlayableMatch(roundsRef.current || []);
-    if (!pending) {
-      setAutomation(false);
-      return;
+  useEffect(() => () => {
+    if (autoScheduleTimer.current != null) {
+      clearTimeout(autoScheduleTimer.current);
+      autoScheduleTimer.current = null;
     }
-    scheduleNextMatch();
-  }, [automationActive, liveRunning, rounds]);
+  }, []);
 
   const participantLabel = (idx: number) => (lang === 'en' ? `Player ${idx + 1}` : `选手${idx + 1}`);
   const updateSettings = (patch: Partial<KnockoutSettings>) => {
@@ -2002,10 +1998,14 @@ function KnockoutPanel() {
   };
   const { enabled, roundsPerGroup, startScore, bid, four2, farmerCoop } = settings;
 
-  const setAutomation = (active: boolean) => {
+  const setAutomation = useCallback((active: boolean) => {
     autoRunRef.current = active;
+    if (!active && autoScheduleTimer.current != null) {
+      clearTimeout(autoScheduleTimer.current);
+      autoScheduleTimer.current = null;
+    }
     setAutomationActive(active);
-  };
+  }, []);
 
   const handleAllFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2307,7 +2307,7 @@ function KnockoutPanel() {
     return true;
   };
 
-  const scheduleNextMatch = () => {
+  const scheduleNextMatch = useCallback(() => {
     if (!autoRunRef.current) return;
     if (livePanelRef.current?.isRunning()) return;
     const pendingContext = currentMatchRef.current;
@@ -2357,9 +2357,41 @@ function KnockoutPanel() {
     if (!launched) {
       setAutomation(false);
     }
-  };
+  }, [applyRoundsUpdate, launchMatch, roundsPerGroup, setAutomation, setNotice]);
+
+  useEffect(() => {
+    if (!automationActive) return;
+    if (!autoRunRef.current) return;
+    if (!roundsRef.current?.length) return;
+    if (livePanelRef.current?.isRunning()) return;
+    if (liveRunningRef.current) return;
+    const pending = findNextPlayableMatch(roundsRef.current || []);
+    if (!pending) {
+      setAutomation(false);
+      return;
+    }
+    const ctx = currentMatchRef.current;
+    if (ctx && ctx.roundIdx === pending.roundIdx && ctx.matchIdx === pending.matchIdx && overtimeCountRef.current === 0) {
+      return;
+    }
+    if (autoScheduleTimer.current != null) return;
+    autoScheduleTimer.current = setTimeout(() => {
+      autoScheduleTimer.current = null;
+      if (!autoRunRef.current) return;
+      if (livePanelRef.current?.isRunning()) return;
+      if (liveRunningRef.current) return;
+      const next = findNextPlayableMatch(roundsRef.current || []);
+      if (!next) {
+        setAutomation(false);
+        return;
+      }
+      scheduleNextMatch();
+    }, 0);
+  }, [automationActive, rounds, scheduleNextMatch, setAutomation]);
 
   const handleLiveFinished = (result: LivePanelFinishPayload) => {
+    setLiveRunning(false);
+    setLivePaused(false);
     if (result.aborted) {
       setAutomation(false);
       return;
