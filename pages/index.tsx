@@ -2163,6 +2163,18 @@ function KnockoutPanel() {
     });
   };
 
+  const mergeAliasAndProvider = (alias: string, providerLabel: string) => {
+    const trimmedAlias = alias.trim();
+    const trimmedProvider = providerLabel.trim();
+    if (trimmedAlias && trimmedProvider) {
+      if (trimmedAlias.toLowerCase() === trimmedProvider.toLowerCase()) {
+        return trimmedAlias;
+      }
+      return `${trimmedAlias} · ${trimmedProvider}`;
+    }
+    return trimmedAlias || trimmedProvider;
+  };
+
   const displayName = (value: KnockoutPlayer | null) => {
     if (value === KO_BYE) return lang === 'en' ? 'BYE' : '轮空';
     if (!value) return lang === 'en' ? 'TBD' : '待定';
@@ -2192,9 +2204,8 @@ function KnockoutPanel() {
               providerLabel = providerSummary(normalized, model, base, lang);
             }
           }
-          if (alias && providerLabel) return `${alias} · ${providerLabel}`;
-          if (alias) return alias;
-          if (providerLabel) return providerLabel;
+          const merged = mergeAliasAndProvider(alias, providerLabel);
+          if (merged) return merged;
         }
       } catch {}
     }
@@ -2228,9 +2239,8 @@ function KnockoutPanel() {
               lang,
             )
           : '';
-        if (alias && providerLabel) return `${alias} · ${providerLabel}`;
-        if (alias) return alias;
-        if (providerLabel) return providerLabel;
+        const merged = mergeAliasAndProvider(alias, providerLabel);
+        if (merged) return merged;
       } catch {}
     }
     return displayName(value);
