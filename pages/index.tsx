@@ -683,6 +683,15 @@ function normalizeKnockoutRounds(base: KnockoutRound[]): KnockoutRound[] {
   return rounds;
 }
 
+function encodeRoundsSignature(rounds: KnockoutRound[]): string {
+  return JSON.stringify(rounds.map(round => ({
+    matches: round.matches.map(match => ({
+      players: match.players,
+      eliminated: match.eliminated ?? null,
+    })),
+  })));
+}
+
 function applyEliminationToDraft(
   draft: KnockoutRound[],
   roundIdx: number,
@@ -2370,8 +2379,14 @@ function KnockoutPanel() {
         }
       }
     }
-    const next = findNextPlayableMatch(roundsRef.current || []);
+    const currentRounds = roundsRef.current || [];
+    const next = findNextPlayableMatch(currentRounds);
     if (!next) {
+      const normalized = normalizeKnockoutRounds(currentRounds);
+      if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(currentRounds)) {
+        applyRoundsUpdate(normalized);
+        return;
+      }
       setAutomation(false);
       setNotice(lang === 'en' ? 'All scheduled rounds are complete.' : '当前所有轮次的对局均已完成。');
       return;
@@ -2410,8 +2425,14 @@ function KnockoutPanel() {
     if (!roundsRef.current?.length) return;
     if (livePanelRef.current?.isRunning()) return;
     if (liveRunningRef.current) return;
-    const pending = findNextPlayableMatch(roundsRef.current || []);
+    const currentRounds = roundsRef.current || [];
+    const pending = findNextPlayableMatch(currentRounds);
     if (!pending) {
+      const normalized = normalizeKnockoutRounds(currentRounds);
+      if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(currentRounds)) {
+        applyRoundsUpdate(normalized);
+        return;
+      }
       setAutomation(false);
       return;
     }
@@ -2425,14 +2446,20 @@ function KnockoutPanel() {
       if (!autoRunRef.current) return;
       if (livePanelRef.current?.isRunning()) return;
       if (liveRunningRef.current) return;
-      const next = findNextPlayableMatch(roundsRef.current || []);
+      const snapshot = roundsRef.current || [];
+      const next = findNextPlayableMatch(snapshot);
       if (!next) {
+        const normalized = normalizeKnockoutRounds(snapshot);
+        if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(snapshot)) {
+          applyRoundsUpdate(normalized);
+          return;
+        }
         setAutomation(false);
         return;
       }
       scheduleNextMatch();
     }, 0);
-  }, [automationActive, rounds, scheduleNextMatch, setAutomation]);
+  }, [applyRoundsUpdate, automationActive, rounds, scheduleNextMatch, setAutomation]);
 
   const handleLiveFinished = (result: LivePanelFinishPayload) => {
     setLiveRunning(false);
