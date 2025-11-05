@@ -1690,7 +1690,16 @@ function LadderPanel() {
     const val = ent?.current?.deltaR ?? 0;
     const n   = ent?.current?.n ?? 0;
     const label = ent?.label || catalogLabels(id) || id;
-    return { id, label, val, n };
+    const rawMatches = ent?.current?.matches;
+    const fallbackMatches = ent?.current?.n;
+    const matches = (() => {
+      const direct = Number(rawMatches);
+      if (Number.isFinite(direct)) return Math.max(0, direct);
+      const approx = Number(fallbackMatches);
+      if (Number.isFinite(approx)) return Math.max(0, Math.round(approx));
+      return 0;
+    })();
+    return { id, label, val, n, matches };
   });
 
   const valsForRange = (arr.some(x=> x.n>0) ? arr.filter(x=> x.n>0) : arr);
@@ -1700,11 +1709,11 @@ function LadderPanel() {
   const K = Math.max(1, maxAbs * 1.1);
 
   const itemsByScore = [...arr].sort((a,b)=> b.val - a.val);
-  const itemsByPlays = [...arr].sort((a,b)=> b.n - a.n);
-  const maxPlays = itemsByPlays.reduce((m, it) => Math.max(m, it.n || 0), 0);
+  const itemsByPlays = [...arr].sort((a,b)=> b.matches - a.matches);
+  const maxPlays = itemsByPlays.reduce((m, it) => Math.max(m, it.matches || 0), 0);
 
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
-  const playsUnit = lang === 'en' ? 'hands' : '局';
+  const playsUnit = lang === 'en' ? 'games' : '局';
 
   return (
     <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
@@ -1731,10 +1740,11 @@ function LadderPanel() {
       <div style={{ fontWeight:700, marginTop:16 }}>{t('LadderPlaysTitle')}</div>
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 96px', gap:8, marginTop:6 }}>
         {itemsByPlays.map((it:any)=>{
-          const pct = maxPlays > 0 ? Math.min(1, (it.n || 0) / maxPlays) : 0;
+          const pct = maxPlays > 0 ? Math.min(1, (it.matches || 0) / maxPlays) : 0;
           const countText = (() => {
-            const count = typeof it.n === 'number' && isFinite(it.n) ? it.n : 0;
-            const formatted = count > 0 ? count.toLocaleString() : '0';
+            const count = typeof it.matches === 'number' && isFinite(it.matches) ? it.matches : 0;
+            const rounded = Math.round(count);
+            const formatted = rounded > 0 ? rounded.toLocaleString() : '0';
             return `${formatted} ${playsUnit}`;
           })();
           return (
@@ -4575,12 +4585,12 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   /** 根据当前地主身份（已知/未知）把存档套到 UI 的 aggStats/aggCount */
   
   /* ===== 天梯（活动积分 ΔR_event）本地存档（localStorage 直接读写） ===== */
-  type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number };
+  type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number; matches:number };
   type LadderEntry = { id:string; label:string; current:LadderAgg; history?: { when:string; n:number; delta:number; deltaR:number }[] };
   type LadderStore = { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, LadderEntry> };
   const LADDER_KEY = 'ddz_ladder_store_v1';
   const LADDER_EMPTY: LadderStore = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-  const LADDER_DEFAULT: LadderAgg = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20 };
+  const LADDER_DEFAULT: LadderAgg = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20, matches:0 };
 
   function readLadder(): LadderStore {
     try { const raw = localStorage.getItem(LADDER_KEY); if (raw) { const j = JSON.parse(raw); if (j?.schema==='ddz-ladder@1') return j as LadderStore; } } catch {}
@@ -4589,16 +4599,22 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   function writeLadder(s: LadderStore) {
     try { s.updatedAt = new Date().toISOString(); localStorage.setItem(LADDER_KEY, JSON.stringify(s)); } catch {}
   }
-  function ladderUpdateLocal(id:string, label:string, sWin:number, pExp:number, weight:number=1) {
+  function ladderUpdateLocal(id:string, label:string, sWin:number, pExp:number, weight:number=1, matchIncrement:number=1) {
     const st = readLadder();
     const ent = st.players[id] || { id, label, current: { ...LADDER_DEFAULT }, history: [] };
     if (!ent.current) ent.current = { ...LADDER_DEFAULT };
     if (!ent.label) ent.label = label;
     const w = Math.max(0, Number(weight) || 0);
+    const matchInc = Math.max(0, Number(matchIncrement) || 0);
     ent.current.n += w;
     ent.current.sum += w * (sWin - pExp);
     const N0 = ent.current.N0 ?? 20;
     const K  = ent.current.K  ?? 20;
+    if (typeof ent.current.matches !== 'number' || !Number.isFinite(ent.current.matches)) {
+      const fallback = Number(ent.current.n) || 0;
+      ent.current.matches = Math.max(0, Math.round(fallback));
+    }
+    ent.current.matches += matchInc;
     ent.current.delta = ent.current.n > 0 ? (ent.current.sum / ent.current.n) : 0;
     const shrink = Math.sqrt(ent.current.n / (ent.current.n + Math.max(1, N0)));
     ent.current.deltaR = K * ent.current.delta * shrink;
@@ -5959,7 +5975,7 @@ if (m.type === 'event' && m.kind === 'play') {
                     const scale    = (i === L) ? 1 : 0.5;  // 地主记一份，两个农民各记半份
                     const id = seatIdentity(i);
                     const label = agentIdForIndex(i);
-                    ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, weight);
+                    ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, weight, 1);
                   }
                 } catch {}
 // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
