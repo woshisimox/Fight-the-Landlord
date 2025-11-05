@@ -2201,6 +2201,41 @@ function KnockoutPanel() {
     return value;
   };
 
+  const podiumDisplayName = (value: KnockoutPlayer | null) => {
+    if (!value || value === KO_BYE) return displayName(value);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        const entryId = typeof (parsed as any)?.id === 'string' ? (parsed as any).id : '';
+        const entry = entryId ? entries.find(item => item.id === entryId) : null;
+        const aliasFromEntry = (entry?.name || '').trim();
+        const aliasFromToken = typeof (parsed as any)?.name === 'string' ? ((parsed as any).name as string).trim() : '';
+        const alias = aliasFromEntry || aliasFromToken;
+        const choiceFromEntry = entry?.choice;
+        const choiceFromToken = typeof (parsed as any)?.choice === 'string' ? (parsed as any).choice as string : '';
+        const normalizedChoice = KO_ALL_CHOICES.includes((choiceFromEntry || choiceFromToken) as BotChoice)
+          ? (choiceFromEntry || choiceFromToken) as BotChoice
+          : null;
+        const modelFromEntry = entry?.model || '';
+        const modelFromToken = typeof (parsed as any)?.model === 'string' ? (parsed as any).model as string : '';
+        const httpFromEntry = entry?.keys?.httpBase || '';
+        const httpFromToken = typeof (parsed as any)?.httpBase === 'string' ? (parsed as any).httpBase as string : '';
+        const providerLabel = normalizedChoice
+          ? providerSummary(
+              normalizedChoice,
+              (normalizedChoice.startsWith('ai:') ? (modelFromEntry || modelFromToken) : modelFromEntry) || '',
+              normalizedChoice === 'http' ? (httpFromEntry || httpFromToken) : httpFromEntry,
+              lang,
+            )
+          : '';
+        if (alias && providerLabel) return `${alias} · ${providerLabel}`;
+        if (alias) return alias;
+        if (providerLabel) return providerLabel;
+      } catch {}
+    }
+    return displayName(value);
+  };
+
   const playerMeta = (value: KnockoutPlayer | null): { label: string; provider: string } => {
     const label = displayName(value);
     if (!value || value === KO_BYE) return { label, provider: '' };
@@ -2451,7 +2486,7 @@ function KnockoutPanel() {
       if (tiedFinalTokens.size > 0) {
         const tiedLabels = ctx.tokens
           .filter(token => tiedFinalTokens.has(String(token)))
-          .map(token => displayName(token))
+          .map(token => podiumDisplayName(token))
           .join(lang === 'en' ? ', ' : '、');
         const nextAttempt = overtimeCountRef.current + 1;
         setOvertimeCount(nextAttempt);
@@ -2519,9 +2554,9 @@ function KnockoutPanel() {
         setFinalStandings(null);
       }
       if (ordered.length >= 3) {
-        const championLabel = displayName(ordered[0].token);
-        const runnerUpLabel = displayName(ordered[1].token);
-        const thirdLabel = displayName(ordered[2].token);
+        const championLabel = podiumDisplayName(ordered[0].token);
+        const runnerUpLabel = podiumDisplayName(ordered[1].token);
+        const thirdLabel = podiumDisplayName(ordered[2].token);
         setNotice(lang === 'en'
           ? `Final standings — Champion: ${championLabel}, Runner-up: ${runnerUpLabel}, Third: ${thirdLabel}.`
           : `最终排名：冠军 ${championLabel}，亚军 ${runnerUpLabel}，季军 ${thirdLabel}。`);
@@ -3216,8 +3251,8 @@ function KnockoutPanel() {
                                   ? (lang === 'en' ? 'Runner-up' : '亚军')
                                   : (lang === 'en' ? 'Third place' : '季军');
                               const baseText = lang === 'en'
-                                ? `${labelText}: ${displayName(playerToken)}`
-                                : `${labelText}：${displayName(playerToken)}`;
+                                ? `${labelText}: ${podiumDisplayName(playerToken)}`
+                                : `${labelText}：${podiumDisplayName(playerToken)}`;
                               const scoreText = placement.total != null
                                 ? (lang === 'en'
                                   ? ` (Points: ${placement.total})`
