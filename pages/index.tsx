@@ -9,6 +9,7 @@ const SeatInfoContext = createContext<string[] | null>(null);
 const I18N: Record<Lang, Record<string, string>> = {
   zh: {
     Title: '斗地主 · Fight the Landlord',
+    TotalMatches: '所有参赛选手累计局数',
     Settings: '对局设置',
     Enable: '启用对局',
     Reset: '清空',
@@ -26,6 +27,7 @@ const I18N: Record<Lang, Record<string, string>> = {
   },
   en: {
     Title: 'Fight the Landlord',
+    TotalMatches: 'Total games played by all participants',
     Settings: 'Match settings',
     Enable: 'Enable match',
     Reset: 'Reset',
@@ -7086,6 +7088,49 @@ const [lang, setLang] = useState<Lang>(() => {
   const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
   const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
+  const [totalMatches, setTotalMatches] = useState<number | null>(null);
+
+  const computeTotalMatches = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('ddz_ladder_store_v1');
+      if (!raw) {
+        setTotalMatches(0);
+        return;
+      }
+      const store = JSON.parse(raw) || {};
+      const players = (store?.players && typeof store.players === 'object') ? store.players as Record<string, any> : {};
+      let total = 0;
+      for (const key of Object.keys(players)) {
+        const entry = players[key];
+        if (!entry) continue;
+        const matches = entry?.current?.matches;
+        if (typeof matches === 'number' && Number.isFinite(matches)) {
+          total += Math.max(0, Math.round(matches));
+          continue;
+        }
+        const fallback = entry?.current?.n;
+        if (typeof fallback === 'number' && Number.isFinite(fallback)) {
+          total += Math.max(0, Math.round(fallback));
+        }
+      }
+      setTotalMatches(total);
+    } catch {
+      setTotalMatches(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => { computeTotalMatches(); };
+    handler();
+    window.addEventListener('ddz-all-refresh', handler as any);
+    const interval = window.setInterval(handler, 2000);
+    return () => {
+      window.removeEventListener('ddz-all-refresh', handler as any);
+      window.clearInterval(interval);
+    };
+  }, [computeTotalMatches]);
 
   const seatInfoLabels = useMemo(() => {
     return [0,1,2].map(i => {
@@ -7141,7 +7186,25 @@ const [lang, setLang] = useState<Lang>(() => {
     <LangContext.Provider value={lang}>
       <SeatInfoContext.Provider value={seatInfoLabels}>
         <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
-          <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
+          <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 8px', textAlign:'center' }}>斗地主 · Fight the Landlord</h1>
+          <div style={{ textAlign:'center', marginBottom:16 }}>
+            <span
+              style={{
+                display:'inline-block',
+                padding:'4px 12px',
+                borderBottom:'2px solid #ef4444',
+                fontSize:16,
+                fontWeight:700,
+              }}
+            >
+              {(() => {
+                const formatted = totalMatches != null ? totalMatches.toLocaleString() : '—';
+                return lang === 'en'
+                  ? `${I18N.en.TotalMatches}: ${formatted}`
+                  : `${I18N.zh.TotalMatches}：${formatted}`;
+              })()}
+            </span>
+          </div>
           <div style={{ marginLeft:'auto', marginBottom:24, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:12 }} data-i18n-ignore>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
