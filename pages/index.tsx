@@ -2387,6 +2387,11 @@ function KnockoutPanel() {
       const normalized = normalizeKnockoutRounds(currentRounds);
       if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(currentRounds)) {
         applyRoundsUpdate(normalized);
+        if (autoRunRef.current) {
+          setTimeout(() => {
+            if (autoRunRef.current) scheduleNextMatch();
+          }, 0);
+        }
         return;
       }
       setAutomation(false);
@@ -2433,6 +2438,11 @@ function KnockoutPanel() {
       const normalized = normalizeKnockoutRounds(currentRounds);
       if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(currentRounds)) {
         applyRoundsUpdate(normalized);
+        if (autoRunRef.current) {
+          setTimeout(() => {
+            if (autoRunRef.current) scheduleNextMatch();
+          }, 0);
+        }
         return;
       }
       setAutomation(false);
