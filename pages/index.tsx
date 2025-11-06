@@ -6080,10 +6080,9 @@ if (m.type === 'event' && m.kind === 'play') {
                   for (let i=0;i<3;i++) {
                     const sWinTeam = teamWin(i) ? 1 : 0;
                     const pExpTeam = teamP(i);
-                    const scale    = (i === L) ? 1 : 0.5;  // 地主记一份，两个农民各记半份
                     const id = seatIdentity(i);
                     const label = agentIdForIndex(i);
-                    ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, weight, 1);
+                    ladderUpdateLocal(id, label, sWinTeam, pExpTeam, weight, 1);
                   }
                 } catch {}
 // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
