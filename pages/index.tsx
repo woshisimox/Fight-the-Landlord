@@ -9,12 +9,15 @@ const SeatInfoContext = createContext<string[] | null>(null);
 const I18N: Record<Lang, Record<string, string>> = {
   zh: {
     Title: '斗地主 · Fight the Landlord',
+    TotalMatches: '所有参赛选手累计局数',
     Settings: '对局设置',
     Enable: '启用对局',
     Reset: '清空',
     EnableHint: '关闭后不可开始/继续对局；再次勾选即可恢复。',
-    LadderTitle: '天梯图（活动积分 ΔR）',
-    LadderRange: '范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）',
+    LadderTitle: '积分',
+    LadderSubtitle: '活动积分 ΔR',
+    LadderRange: '范围 ±K，按局面权重加权，当前 K≈{K}；未参赛=历史或0',
+    LadderPlaysTitle: '累计局数',
     Pass: '过',
     Play: '出牌',
     Empty: '（空）',
@@ -24,12 +27,15 @@ const I18N: Record<Lang, Record<string, string>> = {
   },
   en: {
     Title: 'Fight the Landlord',
+    TotalMatches: 'Total games played by all participants',
     Settings: 'Match settings',
     Enable: 'Enable match',
     Reset: 'Reset',
     EnableHint: 'Disabled matches cannot start/continue; tick again to restore.',
-    LadderTitle: 'Ladder (ΔR)',
-    LadderRange: 'Range ±K (weighted by situation, current K≈{K}; no-participation = history or 0)',
+    LadderTitle: 'Points',
+    LadderSubtitle: 'Activity ΔR',
+    LadderRange: 'Range ±K, weighted by situation; current K≈{K}; no participation uses history or 0',
+    LadderPlaysTitle: 'Games played',
     Pass: 'Pass',
     Play: 'Play',
     Empty: '(empty)',
@@ -176,6 +182,28 @@ const TRANSLATIONS: TransRule[] = [
 ];
 function hasChinese(s: string) { return /[\u4e00-\u9fff]/.test(s); }
 
+let cachedCreatePortal: ((children: ReactNode, container: Element | DocumentFragment) => ReactNode) | null = null;
+const renderViaPortal = (children: ReactNode, container: HTMLElement | null): ReactNode => {
+  if (!container) return null;
+  if (typeof window === 'undefined') return children;
+  if (!cachedCreatePortal) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const mod = require('react-dom');
+      const fn = mod?.createPortal;
+      if (typeof fn === 'function') {
+        cachedCreatePortal = fn;
+      }
+    } catch {
+      cachedCreatePortal = null;
+    }
+  }
+  if (cachedCreatePortal) {
+    return cachedCreatePortal(children, container);
+  }
+  return children;
+};
+
 function translateTextLiteral(s: string): string {
   let out = s;
   for (const r of TRANSLATIONS) {
@@ -272,6 +300,7 @@ type BotChoice =
   | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
+  | 'built-in:advanced-hybrid'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http'
   | 'human';
@@ -361,6 +390,7 @@ const KO_DEFAULT_CHOICES: BotChoice[] = [
   'built-in:greedy-min',
   'built-in:random-legal',
   'built-in:mininet',
+  'built-in:advanced-hybrid',
 ];
 const KO_ALL_CHOICES: BotChoice[] = [
   'built-in:greedy-max',
@@ -369,6 +399,7 @@ const KO_ALL_CHOICES: BotChoice[] = [
   'built-in:mininet',
   'built-in:ally-support',
   'built-in:endgame-rush',
+  'built-in:advanced-hybrid',
   'ai:openai',
   'ai:gemini',
   'ai:grok',
@@ -654,6 +685,15 @@ function normalizeKnockoutRounds(base: KnockoutRound[]): KnockoutRound[] {
   return rounds;
 }
 
+function encodeRoundsSignature(rounds: KnockoutRound[]): string {
+  return JSON.stringify(rounds.map(round => ({
+    matches: round.matches.map(match => ({
+      players: match.players,
+      eliminated: match.eliminated ?? null,
+    })),
+  })));
+}
+
 function applyEliminationToDraft(
   draft: KnockoutRound[],
   roundIdx: number,
@@ -751,7 +791,9 @@ type LiveProps = {
   onFinished?: (result: LivePanelFinishPayload) => void;
   controlsHidden?: boolean;
   initialTotals?: [number, number, number] | null;
-  turnTimeoutSecs?: number[];};
+  turnTimeoutSecs?: number[];
+  controlsPortal?: HTMLElement | null;
+};
 
 type LivePanelHandle = {
   start: () => Promise<void>;
@@ -1599,7 +1641,7 @@ function writeThoughtStore(store: ThoughtStore): ThoughtStore {
 }
 
 const THOUGHT_CATALOG_CHOICES: BotChoice[] = [
-  'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
+  'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush','built-in:advanced-hybrid',
   'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http','human',
 ];
 const DEFAULT_THOUGHT_CATALOG_IDS = THOUGHT_CATALOG_CHOICES.map(choice => makeThoughtIdentity(choice));
@@ -1632,7 +1674,7 @@ function thoughtLabelForIdentity(id: string): string {
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
 function LadderPanel() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [tick, setTick] = useState(0);
   useEffect(()=>{
     const onAny = () => setTick(k=>k+1);
@@ -1661,7 +1703,16 @@ function LadderPanel() {
     const val = ent?.current?.deltaR ?? 0;
     const n   = ent?.current?.n ?? 0;
     const label = ent?.label || catalogLabels(id) || id;
-    return { id, label, val, n };
+    const rawMatches = ent?.current?.matches;
+    const fallbackMatches = ent?.current?.n;
+    const matches = (() => {
+      const direct = Number(rawMatches);
+      if (Number.isFinite(direct)) return Math.max(0, direct);
+      const approx = Number(fallbackMatches);
+      if (Number.isFinite(approx)) return Math.max(0, Math.round(approx));
+      return 0;
+    })();
+    return { id, label, val, n, matches };
   });
 
   const valsForRange = (arr.some(x=> x.n>0) ? arr.filter(x=> x.n>0) : arr);
@@ -1670,18 +1721,23 @@ function LadderPanel() {
   const maxAbs = Math.max(Math.abs(minVal), Math.abs(maxVal));
   const K = Math.max(1, maxAbs * 1.1);
 
-  const items = arr.sort((a,b)=> b.val - a.val);
+  const itemsByScore = [...arr].sort((a,b)=> b.val - a.val);
+  const itemsByPlays = [...arr].sort((a,b)=> b.matches - a.matches);
+  const maxPlays = itemsByPlays.reduce((m, it) => Math.max(m, it.matches || 0), 0);
 
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
+  const playsUnit = lang === 'en' ? 'games' : '局';
 
   return (
     <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
         <div style={{ fontWeight:700 }}>{t('LadderTitle')}</div>
-        <div style={{ fontSize:12, color:'#6b7280' }}>{t('LadderRange', { K })}</div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>
+          {`${t('LadderSubtitle')} · ${t('LadderRange', { K })}`}
+        </div>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
-        {items.map((it:any)=>{
+        {itemsByScore.map((it:any)=>{
           const pct = Math.min(1, Math.abs(it.val)/K);
           const pos = it.val >= 0;
           return (
@@ -1692,6 +1748,29 @@ function LadderPanel() {
                 <div style={{ position:'absolute', left: pos ? '50%' : `${50 - pct*50}%`, width: `${pct*50}%`, top:2, bottom:2, background: pos ? '#16a34a' : '#ef4444', borderRadius:6 }}/>
               </div>
               <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right' }}>{it.val.toFixed(2)}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontWeight:700, marginTop:16 }}>{t('LadderPlaysTitle')}</div>
+      <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 96px', gap:8, marginTop:6 }}>
+        {itemsByPlays.map((it:any)=>{
+          const pct = maxPlays > 0 ? Math.min(1, (it.matches || 0) / maxPlays) : 0;
+          const countText = (() => {
+            const count = typeof it.matches === 'number' && isFinite(it.matches) ? it.matches : 0;
+            const rounded = Math.round(count);
+            const formatted = rounded > 0 ? rounded.toLocaleString() : '0';
+            return `${formatted} ${playsUnit}`;
+          })();
+          return (
+            <div key={`plays-${it.id}`} style={{ display:'contents' }}>
+              <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.label}</div>
+              <div style={{ position:'relative', height:16, background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:8 }}>
+                <div style={{ position:'absolute', left:0, top:2, bottom:2, width:`${pct*100}%`, background:'#2563eb', borderRadius:6 }} />
+              </div>
+              <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right', whiteSpace:'nowrap' }}>
+                {countText}
+              </div>
             </div>
           );
         })}
@@ -1827,6 +1906,18 @@ function KnockoutPanel() {
     return makeDefaultKnockoutEntries();
   });
   const [rounds, setRounds] = useState<KnockoutRound[]>([]);
+  const applyRoundsUpdate = useCallback((update: KnockoutRound[] | ((prev: KnockoutRound[]) => KnockoutRound[])) => {
+    if (typeof update === 'function') {
+      setRounds(prev => {
+        const next = (update as (prev: KnockoutRound[]) => KnockoutRound[])(prev);
+        roundsRef.current = next;
+        return next;
+      });
+    } else {
+      roundsRef.current = update;
+      setRounds(update);
+    }
+  }, [setRounds]);
   const [currentMatch, setCurrentMatch] = useState<KnockoutMatchContext | null>(null);
   const currentMatchRef = useRef<KnockoutMatchContext | null>(null);
   useEffect(() => { currentMatchRef.current = currentMatch; }, [currentMatch]);
@@ -1843,6 +1934,8 @@ function KnockoutPanel() {
   const overtimeCountRef = useRef(overtimeCount);
   useEffect(() => { overtimeCountRef.current = overtimeCount; }, [overtimeCount]);
   const [liveRunning, setLiveRunning] = useState(false);
+  const liveRunningRef = useRef(liveRunning);
+  useEffect(() => { liveRunningRef.current = liveRunning; }, [liveRunning]);
   const [livePaused, setLivePaused] = useState(false);
   const [automationActive, setAutomationActive] = useState(false);
   const [finalStandings, setFinalStandings] = useState<KnockoutFinalStandings | null>(null);
@@ -1852,6 +1945,7 @@ function KnockoutPanel() {
   const entriesRef = useRef<KnockoutEntry[]>(entries);
   useEffect(() => { entriesRef.current = entries; }, [entries]);
   const autoRunRef = useRef(false);
+  const autoScheduleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const allFileRef = useRef<HTMLInputElement|null>(null);
@@ -1868,7 +1962,7 @@ function KnockoutPanel() {
       if (storedRounds) {
         const parsed = JSON.parse(storedRounds);
         if (Array.isArray(parsed)) {
-          setRounds(normalizeKnockoutRounds(parsed as KnockoutRound[]));
+          applyRoundsUpdate(normalizeKnockoutRounds(parsed as KnockoutRound[]));
         }
       }
       localStorage.removeItem('ddz_knockout_seed');
@@ -1902,16 +1996,27 @@ function KnockoutPanel() {
     setFinalStandings(null);
   }, [rounds.length]);
 
+  useEffect(() => () => {
+    if (autoScheduleTimer.current != null) {
+      clearTimeout(autoScheduleTimer.current);
+      autoScheduleTimer.current = null;
+    }
+  }, []);
+
   const participantLabel = (idx: number) => (lang === 'en' ? `Player ${idx + 1}` : `选手${idx + 1}`);
   const updateSettings = (patch: Partial<KnockoutSettings>) => {
     setSettings(prev => sanitizeKnockoutSettings({ ...prev, ...patch }));
   };
   const { enabled, roundsPerGroup, startScore, bid, four2, farmerCoop } = settings;
 
-  const setAutomation = (active: boolean) => {
+  const setAutomation = useCallback((active: boolean) => {
     autoRunRef.current = active;
+    if (!active && autoScheduleTimer.current != null) {
+      clearTimeout(autoScheduleTimer.current);
+      autoScheduleTimer.current = null;
+    }
     setAutomationActive(active);
-  };
+  }, []);
 
   const handleAllFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1982,7 +2087,7 @@ function KnockoutPanel() {
     if (roster.length < 3) {
       setError(lang === 'en' ? 'Add at least three participants.' : '请至少添加三名参赛选手。');
       setNotice(null);
-      setRounds([]);
+      applyRoundsUpdate([]);
       if (typeof window !== 'undefined') {
         try { localStorage.removeItem('ddz_knockout_rounds'); } catch {}
       }
@@ -1998,11 +2103,11 @@ function KnockoutPanel() {
     const firstRoundMatches = buildMatchesFromPool(shuffled, 0);
     if (!firstRoundMatches.length) {
       setError(lang === 'en' ? 'Unable to build initial groups.' : '无法生成首轮对阵，请重试。');
-      setRounds([]);
+      applyRoundsUpdate([]);
       return;
     }
     const firstRound: KnockoutRound = { matches: firstRoundMatches };
-    setRounds([firstRound]);
+    applyRoundsUpdate([firstRound]);
     setError(null);
     setNotice(lang === 'en'
       ? `Participants shuffled into groups of three where possible. Each trio plays ${roundsPerGroup} game(s).`
@@ -2020,7 +2125,7 @@ function KnockoutPanel() {
     setSeriesRounds(settings.roundsPerGroup);
     setOvertimeCount(0);
     setFinalStandings(null);
-    setRounds([]);
+    applyRoundsUpdate([]);
     setError(null);
     setNotice(null);
     if (typeof window !== 'undefined') {
@@ -2042,7 +2147,7 @@ function KnockoutPanel() {
     setSettings(defaultKnockoutSettings());
     setEntries(makeDefaultKnockoutEntries());
     setFinalStandings(null);
-    setRounds([]);
+    applyRoundsUpdate([]);
     setError(null);
     setNotice(null);
     if (typeof window !== 'undefined') {
@@ -2059,7 +2164,7 @@ function KnockoutPanel() {
       return;
     }
     setFinalStandings(null);
-    setRounds(prev => {
+    applyRoundsUpdate(prev => {
       const draft = cloneKnockoutRounds(prev);
       const match = draft[roundIdx]?.matches?.[matchIdx];
       if (!match) return prev;
@@ -2069,6 +2174,18 @@ function KnockoutPanel() {
     });
   };
 
+  const mergeAliasAndProvider = (alias: string, providerLabel: string) => {
+    const trimmedAlias = alias.trim();
+    const trimmedProvider = providerLabel.trim();
+    if (trimmedAlias && trimmedProvider) {
+      if (trimmedAlias.toLowerCase() === trimmedProvider.toLowerCase()) {
+        return trimmedAlias;
+      }
+      return `${trimmedAlias} · ${trimmedProvider}`;
+    }
+    return trimmedAlias || trimmedProvider;
+  };
+
   const displayName = (value: KnockoutPlayer | null) => {
     if (value === KO_BYE) return lang === 'en' ? 'BYE' : '轮空';
     if (!value) return lang === 'en' ? 'TBD' : '待定';
@@ -2076,35 +2193,77 @@ function KnockoutPanel() {
       try {
         const parsed = JSON.parse(value);
         if (parsed && typeof parsed === 'object') {
+          const entryId = typeof (parsed as any).id === 'string' ? (parsed as any).id : '';
+          const entry = entryId ? entries.find(item => item.id === entryId) : null;
+          const aliasFromEntry = (entry?.name || '').trim();
+          const aliasFromToken = typeof (parsed as any).name === 'string' ? ((parsed as any).name as string).trim() : '';
+          const alias = aliasFromEntry || aliasFromToken;
+          const rawChoice = entry?.choice || (typeof (parsed as any).choice === 'string' ? (parsed as any).choice as string : '');
+          const normalizedChoice = KO_ALL_CHOICES.includes(rawChoice as BotChoice)
+            ? (rawChoice as BotChoice)
+            : null;
+          let providerLabel = '';
+          if (normalizedChoice) {
+            if (normalizedChoice === 'human') {
+              providerLabel = humanProviderLabel;
+            } else {
+              const model = (entry?.model || (typeof (parsed as any).model === 'string' ? (parsed as any).model as string : ''))
+                .trim();
+              const httpBase = (entry?.keys?.httpBase || (typeof (parsed as any).httpBase === 'string'
+                ? (parsed as any).httpBase as string
+                : ''))
+                .trim();
+              providerLabel = providerSummary(normalizedChoice, model, httpBase, lang);
+            }
+          }
+          const merged = mergeAliasAndProvider(alias, providerLabel);
+          if (merged) return merged;
           const slotNumber = Number((parsed as any).slot);
           if (Number.isFinite(slotNumber) && slotNumber >= 1) {
             return participantLabel(slotNumber - 1);
           }
-          if (typeof (parsed as any).id === 'string') {
-            const idx = entries.findIndex(entry => entry.id === (parsed as any).id);
+          if (entry) {
+            const idx = entries.findIndex(item => item.id === entry.id);
             if (idx >= 0) return participantLabel(idx);
           }
-          const alias = typeof parsed.name === 'string' ? parsed.name.trim() : '';
-          const rawChoice = typeof parsed.choice === 'string' ? parsed.choice : '';
-          const provider = KO_ALL_CHOICES.includes(rawChoice as BotChoice) ? choiceLabel(rawChoice as BotChoice) : '';
-          let providerLabel = provider;
-          if (KO_ALL_CHOICES.includes(rawChoice as BotChoice)) {
-            const normalized = rawChoice as BotChoice;
-            if (normalized === 'human') {
-              providerLabel = humanProviderLabel;
-            } else {
-              const model = typeof parsed.model === 'string' ? parsed.model : '';
-              const base = typeof parsed.httpBase === 'string' ? parsed.httpBase : '';
-              providerLabel = providerSummary(normalized, model, base, lang);
-            }
-          }
-          if (alias && providerLabel) return `${alias} · ${providerLabel}`;
-          if (alias) return alias;
-          if (providerLabel) return providerLabel;
         }
       } catch {}
     }
-    return value;
+    return String(value);
+  };
+
+  const podiumDisplayName = (value: KnockoutPlayer | null) => {
+    if (!value || value === KO_BYE) return displayName(value);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        const entryId = typeof (parsed as any)?.id === 'string' ? (parsed as any).id : '';
+        const entry = entryId ? entries.find(item => item.id === entryId) : null;
+        const aliasFromEntry = (entry?.name || '').trim();
+        const aliasFromToken = typeof (parsed as any)?.name === 'string' ? ((parsed as any).name as string).trim() : '';
+        const alias = aliasFromEntry || aliasFromToken;
+        const choiceFromEntry = entry?.choice;
+        const choiceFromToken = typeof (parsed as any)?.choice === 'string' ? (parsed as any).choice as string : '';
+        const normalizedChoice = KO_ALL_CHOICES.includes((choiceFromEntry || choiceFromToken) as BotChoice)
+          ? (choiceFromEntry || choiceFromToken) as BotChoice
+          : null;
+        const modelFromEntry = entry?.model || '';
+        const modelFromToken = typeof (parsed as any)?.model === 'string' ? (parsed as any).model as string : '';
+        const httpFromEntry = entry?.keys?.httpBase || '';
+        const httpFromToken = typeof (parsed as any)?.httpBase === 'string' ? (parsed as any).httpBase as string : '';
+        const providerLabel = normalizedChoice
+          ? providerSummary(
+              normalizedChoice,
+              (normalizedChoice.startsWith('ai:') ? (modelFromEntry || modelFromToken) : modelFromEntry) || '',
+              normalizedChoice === 'http' ? (httpFromEntry || httpFromToken) : httpFromEntry,
+              lang,
+            )
+          : '';
+        const merged = mergeAliasAndProvider(alias, providerLabel);
+        if (merged) return merged;
+      } catch {}
+    }
+    return displayName(value);
   };
 
   const playerMeta = (value: KnockoutPlayer | null): { label: string; provider: string } => {
@@ -2213,7 +2372,7 @@ function KnockoutPanel() {
     return true;
   };
 
-  const scheduleNextMatch = () => {
+  const scheduleNextMatch = useCallback(() => {
     if (!autoRunRef.current) return;
     if (livePanelRef.current?.isRunning()) return;
     const pendingContext = currentMatchRef.current;
@@ -2231,8 +2390,19 @@ function KnockoutPanel() {
         }
       }
     }
-    const next = findNextPlayableMatch(roundsRef.current || []);
+    const currentRounds = roundsRef.current || [];
+    const next = findNextPlayableMatch(currentRounds);
     if (!next) {
+      const normalized = normalizeKnockoutRounds(currentRounds);
+      if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(currentRounds)) {
+        applyRoundsUpdate(normalized);
+        if (autoRunRef.current) {
+          setTimeout(() => {
+            if (autoRunRef.current) scheduleNextMatch();
+          }, 0);
+        }
+        return;
+      }
       setAutomation(false);
       setNotice(lang === 'en' ? 'All scheduled rounds are complete.' : '当前所有轮次的对局均已完成。');
       return;
@@ -2251,7 +2421,7 @@ function KnockoutPanel() {
       setSeriesRounds(roundsPerGroup);
       setOvertimeCount(0);
       setOvertimeReason('lowest');
-      setRounds(prev => {
+      applyRoundsUpdate(prev => {
         const draft = cloneKnockoutRounds(prev);
         applyEliminationToDraft(draft, next.roundIdx, next.matchIdx, byeToken);
         return draft;
@@ -2263,20 +2433,67 @@ function KnockoutPanel() {
     if (!launched) {
       setAutomation(false);
     }
-  };
+  }, [applyRoundsUpdate, launchMatch, roundsPerGroup, setAutomation, setNotice]);
+
+  useEffect(() => {
+    if (!automationActive) return;
+    if (!autoRunRef.current) return;
+    if (!roundsRef.current?.length) return;
+    if (livePanelRef.current?.isRunning()) return;
+    if (liveRunningRef.current) return;
+    const currentRounds = roundsRef.current || [];
+    const pending = findNextPlayableMatch(currentRounds);
+    if (!pending) {
+      const normalized = normalizeKnockoutRounds(currentRounds);
+      if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(currentRounds)) {
+        applyRoundsUpdate(normalized);
+        if (autoRunRef.current) {
+          setTimeout(() => {
+            if (autoRunRef.current) scheduleNextMatch();
+          }, 0);
+        }
+        return;
+      }
+      setAutomation(false);
+      return;
+    }
+    const ctx = currentMatchRef.current;
+    if (ctx && ctx.roundIdx === pending.roundIdx && ctx.matchIdx === pending.matchIdx && overtimeCountRef.current === 0) {
+      return;
+    }
+    if (autoScheduleTimer.current != null) return;
+    autoScheduleTimer.current = setTimeout(() => {
+      autoScheduleTimer.current = null;
+      if (!autoRunRef.current) return;
+      if (livePanelRef.current?.isRunning()) return;
+      if (liveRunningRef.current) return;
+      const snapshot = roundsRef.current || [];
+      const next = findNextPlayableMatch(snapshot);
+      if (!next) {
+        const normalized = normalizeKnockoutRounds(snapshot);
+        if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(snapshot)) {
+          applyRoundsUpdate(normalized);
+          return;
+        }
+        setAutomation(false);
+        return;
+      }
+      scheduleNextMatch();
+    }, 0);
+  }, [applyRoundsUpdate, automationActive, rounds, scheduleNextMatch, setAutomation]);
 
   const handleLiveFinished = (result: LivePanelFinishPayload) => {
+    setLiveRunning(false);
+    setLivePaused(false);
     if (result.aborted) {
       setAutomation(false);
       return;
     }
     const endedEarly = !!result.endedEarlyForNegative;
     if (!result.completedAll && !endedEarly) {
-      setAutomation(false);
       setNotice(lang === 'en'
-        ? 'The trio stopped before finishing all games; automation has been paused.'
-        : '该组三人未跑完全部局数，已暂停自动流程。');
-      return;
+        ? 'The trio stopped before finishing all games; continuing with recorded scores.'
+        : '该组三人未跑完全部局数，自动流程将继续使用已有积分。');
     }
     const ctx = currentMatchRef.current;
     if (!ctx) return;
@@ -2325,7 +2542,7 @@ function KnockoutPanel() {
       if (tiedFinalTokens.size > 0) {
         const tiedLabels = ctx.tokens
           .filter(token => tiedFinalTokens.has(String(token)))
-          .map(token => displayName(token))
+          .map(token => podiumDisplayName(token))
           .join(lang === 'en' ? ', ' : '、');
         const nextAttempt = overtimeCountRef.current + 1;
         setOvertimeCount(nextAttempt);
@@ -2374,7 +2591,7 @@ function KnockoutPanel() {
       return;
     }
     const label = displayName(eliminatedToken);
-    setRounds(prev => {
+    applyRoundsUpdate(prev => {
       const draft = cloneKnockoutRounds(prev);
       applyEliminationToDraft(draft, ctx.roundIdx, ctx.matchIdx, eliminatedToken);
       return draft;
@@ -2393,9 +2610,9 @@ function KnockoutPanel() {
         setFinalStandings(null);
       }
       if (ordered.length >= 3) {
-        const championLabel = displayName(ordered[0].token);
-        const runnerUpLabel = displayName(ordered[1].token);
-        const thirdLabel = displayName(ordered[2].token);
+        const championLabel = podiumDisplayName(ordered[0].token);
+        const runnerUpLabel = podiumDisplayName(ordered[1].token);
+        const thirdLabel = podiumDisplayName(ordered[2].token);
         setNotice(lang === 'en'
           ? `Final standings — Champion: ${championLabel}, Runner-up: ${runnerUpLabel}, Third: ${thirdLabel}.`
           : `最终排名：冠军 ${championLabel}，亚军 ${runnerUpLabel}，季军 ${thirdLabel}。`);
@@ -2751,6 +2968,7 @@ function KnockoutPanel() {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:advanced-hybrid">Advanced Hybrid</option>
                     </optgroup>
                     <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
@@ -3089,8 +3307,8 @@ function KnockoutPanel() {
                                   ? (lang === 'en' ? 'Runner-up' : '亚军')
                                   : (lang === 'en' ? 'Third place' : '季军');
                               const baseText = lang === 'en'
-                                ? `${labelText}: ${displayName(playerToken)}`
-                                : `${labelText}：${displayName(playerToken)}`;
+                                ? `${labelText}: ${podiumDisplayName(playerToken)}`
+                                : `${labelText}：${podiumDisplayName(playerToken)}`;
                               const scoreText = placement.total != null
                                 ? (lang === 'en'
                                   ? ` (Points: ${placement.total})`
@@ -3365,6 +3583,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:mininet':      return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'built-in:advanced-hybrid': return 'Advanced Hybrid';
     case 'ai:openai':             return 'OpenAI';
     case 'ai:gemini':             return 'Gemini';
     case 'ai:grok':               return 'Grok';
@@ -4014,6 +4233,48 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     : humanPhase === 'double'
       ? (lang === 'en' ? 'Double' : '加倍')
       : (lang === 'en' ? 'Play cards' : '出牌');
+
+  useEffect(() => {
+    const request = humanRequest;
+    if (!request) return;
+    if (!['bid', 'double', 'play'].includes(request.phase)) return;
+    const seat = request.seat;
+    if (typeof seat !== 'number' || seat < 0 || seat > 2) return;
+    if (!isHumanSeat(seat)) return;
+    const ctxObj: any = request.ctx || {};
+    const rawHand = Array.isArray(ctxObj.hands)
+      ? ctxObj.hands.map((card: any) => String(card))
+      : Array.isArray(ctxObj.hand)
+        ? ctxObj.hand.map((card: any) => String(card))
+        : null;
+    if (!rawHand || rawHand.length === 0) return;
+
+    const usage = suitUsageRef.current;
+    const ownerKey = ownerKeyForSeat(seat);
+    const prevHand = Array.isArray(handsRef.current?.[seat])
+      ? (handsRef.current[seat] as string[])
+      : [];
+
+    unregisterSuitUsage(usage, ownerKey, prevHand);
+    const reservedBase = snapshotSuitUsage(usage, ownerKey);
+    const seatPrefsSingle: SeatSuitPrefs = [];
+    const preferred = extractSeatSuitPrefs(rawHand);
+    seatPrefsSingle[seat] = preferred;
+    const reserved = mergeReservedWithForeign(reservedBase, seat, seatPrefsSingle);
+    const decorated = reconcileHandFromRaw(rawHand, prevHand, reserved, preferred);
+    registerSuitUsage(usage, ownerKey, decorated);
+    suitUsageRef.current = usage;
+
+    const unchanged = decorated.length === prevHand.length
+      && decorated.every((label, idx) => label === prevHand[idx]);
+    if (unchanged) return;
+
+    setHands(prev => {
+      const base = Array.isArray(prev) ? [...prev] : [[], [], []];
+      base[seat] = decorated;
+      return base as string[][];
+    });
+  }, [humanRequest, isHumanSeat]);
   const humanRequireText = (() => {
     if (humanPhase !== 'play') return '';
     const req = humanRequest?.ctx?.require;
@@ -4451,12 +4712,12 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   /** 根据当前地主身份（已知/未知）把存档套到 UI 的 aggStats/aggCount */
   
   /* ===== 天梯（活动积分 ΔR_event）本地存档（localStorage 直接读写） ===== */
-  type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number };
+  type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number; matches:number };
   type LadderEntry = { id:string; label:string; current:LadderAgg; history?: { when:string; n:number; delta:number; deltaR:number }[] };
   type LadderStore = { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, LadderEntry> };
   const LADDER_KEY = 'ddz_ladder_store_v1';
   const LADDER_EMPTY: LadderStore = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-  const LADDER_DEFAULT: LadderAgg = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20 };
+  const LADDER_DEFAULT: LadderAgg = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20, matches:0 };
 
   function readLadder(): LadderStore {
     try { const raw = localStorage.getItem(LADDER_KEY); if (raw) { const j = JSON.parse(raw); if (j?.schema==='ddz-ladder@1') return j as LadderStore; } } catch {}
@@ -4465,16 +4726,22 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   function writeLadder(s: LadderStore) {
     try { s.updatedAt = new Date().toISOString(); localStorage.setItem(LADDER_KEY, JSON.stringify(s)); } catch {}
   }
-  function ladderUpdateLocal(id:string, label:string, sWin:number, pExp:number, weight:number=1) {
+  function ladderUpdateLocal(id:string, label:string, sWin:number, pExp:number, weight:number=1, matchIncrement:number=1) {
     const st = readLadder();
     const ent = st.players[id] || { id, label, current: { ...LADDER_DEFAULT }, history: [] };
     if (!ent.current) ent.current = { ...LADDER_DEFAULT };
     if (!ent.label) ent.label = label;
     const w = Math.max(0, Number(weight) || 0);
+    const matchInc = Math.max(0, Number(matchIncrement) || 0);
     ent.current.n += w;
     ent.current.sum += w * (sWin - pExp);
     const N0 = ent.current.N0 ?? 20;
     const K  = ent.current.K  ?? 20;
+    if (typeof ent.current.matches !== 'number' || !Number.isFinite(ent.current.matches)) {
+      const fallback = Number(ent.current.n) || 0;
+      ent.current.matches = Math.max(0, Math.round(fallback));
+    }
+    ent.current.matches += matchInc;
     ent.current.delta = ent.current.n > 0 ? (ent.current.sum / ent.current.n) : 0;
     const shrink = Math.sqrt(ent.current.n / (ent.current.n + Math.max(1, N0)));
     ent.current.deltaR = K * ent.current.delta * shrink;
@@ -5168,6 +5435,24 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
                     hint = { move, cards, score, reason, label, by: byHint };
                   }
+                  const ctxHandsRaw = Array.isArray((m as any)?.ctx?.hands)
+                    ? ((m as any).ctx.hands as any[]).map(card => String(card))
+                    : null;
+                  if (ctxHandsRaw && ctxHandsRaw.length > 0) {
+                    const prevHand = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : [];
+                    const usage = suitUsageRef.current;
+                    const ownerKey = ownerKeyForSeat(seat);
+                    unregisterSuitUsage(usage, ownerKey, prevHand);
+                    const reservedBase = snapshotSuitUsage(usage, ownerKey);
+                    const seatPrefsSingle: SeatSuitPrefs = [];
+                    const preferred = extractSeatSuitPrefs(ctxHandsRaw);
+                    seatPrefsSingle[seat] = preferred;
+                    const reserved = mergeReservedWithForeign(reservedBase, seat, seatPrefsSingle);
+                    const decorated = reconcileHandFromRaw(ctxHandsRaw, prevHand, reserved, preferred);
+                    nextHands = Object.assign([], nextHands, { [seat]: decorated });
+                    registerSuitUsage(usage, ownerKey, decorated);
+                    suitUsageRef.current = usage;
+                  }
                   if (hint && hint.move === 'play' && Array.isArray(hint.cards)) {
                     const seatHandSnapshot = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : [];
                     if (seatHandSnapshot.length > 0) {
@@ -5199,20 +5484,41 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     : rawPhase === 'double'
                       ? 'double'
                       : rawPhase;
-                  const effectiveTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
-                    ? timeoutParsed
-                    : 30_000;
                   const issuedAtRaw = (m as any).issuedAt ?? (m as any).issued_at;
                   const expiresAtRaw = (m as any).expiresAt ?? (m as any).expires_at;
                   const issuedAtParsed = typeof issuedAtRaw === 'number' ? issuedAtRaw : Number(issuedAtRaw);
                   const expiresAtParsed = typeof expiresAtRaw === 'number' ? expiresAtRaw : Number(expiresAtRaw);
+                  const serverIssuedAt = Number.isFinite(issuedAtParsed) ? issuedAtParsed : undefined;
+                  const serverExpiresAt = Number.isFinite(expiresAtParsed) ? expiresAtParsed : undefined;
+                  const serverWindowMs = (typeof serverExpiresAt === 'number' && typeof serverIssuedAt === 'number')
+                    ? Math.max(0, Math.floor(serverExpiresAt - serverIssuedAt))
+                    : undefined;
+                  const fallbackTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
+                    ? timeoutParsed
+                    : 30_000;
                   const clientIssuedAt = Date.now();
                   const upstreamLagMs = Number.isFinite(issuedAtParsed)
                     ? Math.max(0, clientIssuedAt - issuedAtParsed)
                     : 0;
-                  let resolvedWindowMs = Math.max(0, effectiveTimeoutMs);
+                  let totalWindowMs = Math.max(0, fallbackTimeoutMs);
+                  if (typeof serverWindowMs === 'number' && serverWindowMs > 0) {
+                    totalWindowMs = serverWindowMs;
+                  }
                   if (normalizedPhase === 'bid' || normalizedPhase === 'double') {
-                    resolvedWindowMs = 30_000;
+                    totalWindowMs = 30_000;
+                  }
+                  let elapsedSinceIssued = typeof serverIssuedAt === 'number'
+                    ? Math.max(0, clientIssuedAt - serverIssuedAt)
+                    : upstreamLagMs;
+                  if (typeof serverIssuedAt === 'number' && elapsedSinceIssued > totalWindowMs * 2) {
+                    elapsedSinceIssued = upstreamLagMs;
+                  }
+                  let resolvedWindowMs = Math.max(0, totalWindowMs - elapsedSinceIssued);
+                  if (typeof serverExpiresAt === 'number') {
+                    const serverRemaining = Math.max(0, Math.floor(serverExpiresAt - clientIssuedAt));
+                    if (serverRemaining > 0 || resolvedWindowMs === 0) {
+                      resolvedWindowMs = Math.min(resolvedWindowMs, serverRemaining);
+                    }
                   }
                   const clientExpiresAt = clientIssuedAt + resolvedWindowMs;
                   humanCallIssuedAtRef.current[seat] = clientIssuedAt;
@@ -5223,7 +5529,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     phase: normalizedPhase,
                     ctx: m.ctx ?? {},
                     timeoutMs: resolvedWindowMs,
-                    totalTimeoutMs: resolvedWindowMs,
+                    totalTimeoutMs: totalWindowMs,
                     latencyMs: upstreamLagMs,
                     remainingMs: resolvedWindowMs,
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
@@ -5793,10 +6099,9 @@ if (m.type === 'event' && m.kind === 'play') {
                   for (let i=0;i<3;i++) {
                     const sWinTeam = teamWin(i) ? 1 : 0;
                     const pExpTeam = teamP(i);
-                    const scale    = (i === L) ? 1 : 0.5;  // 地主记一份，两个农民各记半份
                     const id = seatIdentity(i);
                     const label = agentIdForIndex(i);
-                    ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, weight);
+                    ladderUpdateLocal(id, label, sWinTeam, pExpTeam, weight, 1);
                   }
                 } catch {}
 // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
@@ -6002,6 +6307,62 @@ if (m.type === 'event' && m.kind === 'play') {
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
 
+  const controlsContent = (
+    <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
+      <button
+        onClick={start}
+        disabled={running}
+        style={{
+          padding:'8px 12px',
+          borderRadius:8,
+          border:'1px solid #d1d5db',
+          background: running ? '#f3f4f6' : '#2563eb',
+          color: running ? '#9ca3af' : '#fff',
+          cursor: running ? 'not-allowed' : 'pointer',
+          fontWeight:600,
+        }}
+      >开始</button>
+      <button
+        onClick={togglePause}
+        disabled={!running}
+        style={{
+          padding:'8px 12px',
+          borderRadius:8,
+          border:'1px solid #d1d5db',
+          background: !running ? '#f3f4f6' : (paused ? '#bfdbfe' : '#fde68a'),
+          color: !running ? '#9ca3af' : (paused ? '#1e3a8a' : '#92400e'),
+          cursor: !running ? 'not-allowed' : 'pointer',
+          fontWeight:600,
+        }}
+      >{paused ? '继续' : '暂停'}</button>
+      <button
+        onClick={stop}
+        disabled={!running}
+        style={{
+          padding:'8px 12px',
+          borderRadius:8,
+          border:'1px solid #d1d5db',
+          background: running ? '#fee2e2' : '#f3f4f6',
+          color: running ? '#b91c1c' : '#9ca3af',
+          cursor: running ? 'pointer' : 'not-allowed',
+          fontWeight:600,
+        }}
+      >停止</button>
+      <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
+        剩余局数：{remainingGames}
+      </span>
+    </div>
+  );
+
+  let controlsNode: ReactNode = null;
+  if (!props.controlsHidden) {
+    if (props.controlsPortal) {
+      controlsNode = renderViaPortal(controlsContent, props.controlsPortal);
+    } else if (typeof props.controlsPortal === 'undefined') {
+      controlsNode = controlsContent;
+    }
+  }
+
   // ===== 统一统计打包（All-in-One） =====
 type AllBundle = {
   schema: 'ddz-all@1';
@@ -6100,52 +6461,7 @@ const handleAllSaveInner = () => {
   return (
     <SeatInfoContext.Provider value={seatDisplayNames}>
       <div>
-      {!props.controlsHidden && (
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-        <button
-          onClick={start}
-          disabled={running}
-          style={{
-            padding:'8px 12px',
-            borderRadius:8,
-            border:'1px solid #d1d5db',
-            background: running ? '#f3f4f6' : '#2563eb',
-            color: running ? '#9ca3af' : '#fff',
-            cursor: running ? 'not-allowed' : 'pointer',
-            fontWeight:600,
-          }}
-        >开始</button>
-        <button
-          onClick={togglePause}
-          disabled={!running}
-          style={{
-            padding:'8px 12px',
-            borderRadius:8,
-            border:'1px solid #d1d5db',
-            background: !running ? '#f3f4f6' : (paused ? '#bfdbfe' : '#fde68a'),
-            color: !running ? '#9ca3af' : (paused ? '#1e3a8a' : '#92400e'),
-            cursor: !running ? 'not-allowed' : 'pointer',
-            fontWeight:600,
-          }}
-        >{paused ? '继续' : '暂停'}</button>
-        <button
-          onClick={stop}
-          disabled={!running}
-          style={{
-            padding:'8px 12px',
-            borderRadius:8,
-            border:'1px solid #d1d5db',
-            background: running ? '#fee2e2' : '#f3f4f6',
-            color: running ? '#b91c1c' : '#9ca3af',
-            cursor: running ? 'pointer' : 'not-allowed',
-            fontWeight:600,
-          }}
-        >停止</button>
-        <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
-          剩余局数：{remainingGames}
-        </span>
-      </div>
-      )}
+      {controlsNode}
 
       <ThoughtSummaryPanel stats={thoughtStore} lastMs={lastThoughtMs} identities={seatIdentitiesMemo} lang={lang} />
 
@@ -6789,6 +7105,49 @@ const [lang, setLang] = useState<Lang>(() => {
   const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
   const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
+  const [totalMatches, setTotalMatches] = useState<number | null>(null);
+
+  const computeTotalMatches = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('ddz_ladder_store_v1');
+      if (!raw) {
+        setTotalMatches(0);
+        return;
+      }
+      const store = JSON.parse(raw) || {};
+      const players = (store?.players && typeof store.players === 'object') ? store.players as Record<string, any> : {};
+      let total = 0;
+      for (const key of Object.keys(players)) {
+        const entry = players[key];
+        if (!entry) continue;
+        const matches = entry?.current?.matches;
+        if (typeof matches === 'number' && Number.isFinite(matches)) {
+          total += Math.max(0, Math.round(matches));
+          continue;
+        }
+        const fallback = entry?.current?.n;
+        if (typeof fallback === 'number' && Number.isFinite(fallback)) {
+          total += Math.max(0, Math.round(fallback));
+        }
+      }
+      setTotalMatches(total);
+    } catch {
+      setTotalMatches(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => { computeTotalMatches(); };
+    handler();
+    window.addEventListener('ddz-all-refresh', handler as any);
+    const interval = window.setInterval(handler, 2000);
+    return () => {
+      window.removeEventListener('ddz-all-refresh', handler as any);
+      window.clearInterval(interval);
+    };
+  }, [computeTotalMatches]);
 
   const seatInfoLabels = useMemo(() => {
     return [0,1,2].map(i => {
@@ -6805,6 +7164,10 @@ const [lang, setLang] = useState<Lang>(() => {
   }, [seats, seatModels, seatKeys]);
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
+  const [ladderControlsHost, setLadderControlsHost] = useState<HTMLDivElement | null>(null);
+  const ladderControlsHostRef = useCallback((el: HTMLDivElement | null) => {
+    setLadderControlsHost(el);
+  }, []);
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
@@ -6840,7 +7203,25 @@ const [lang, setLang] = useState<Lang>(() => {
     <LangContext.Provider value={lang}>
       <SeatInfoContext.Provider value={seatInfoLabels}>
         <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
-          <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
+          <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 8px', textAlign:'center' }}>斗地主 · Fight the Landlord</h1>
+          <div style={{ textAlign:'center', marginBottom:16 }}>
+            <span
+              style={{
+                display:'inline-block',
+                padding:'4px 12px',
+                borderBottom:'2px solid #ef4444',
+                fontSize:16,
+                fontWeight:700,
+              }}
+            >
+              {(() => {
+                const formatted = totalMatches != null ? totalMatches.toLocaleString() : '—';
+                return lang === 'en'
+                  ? `${I18N.en.TotalMatches}: ${formatted}`
+                  : `${I18N.zh.TotalMatches}：${formatted}`;
+              })()}
+            </span>
+          </div>
           <div style={{ marginLeft:'auto', marginBottom:24, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:12 }} data-i18n-ignore>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
@@ -6998,6 +7379,7 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:advanced-hybrid">Advanced Hybrid</option>
                     </optgroup>
                     <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
@@ -7176,6 +7558,8 @@ const [lang, setLang] = useState<Lang>(() => {
           </div>
         </div>
 
+        <div ref={ladderControlsHostRef} style={{ margin:'16px 0' }} />
+
         <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
           {/* —— 天梯图 —— */}
           <LadderPanel />
@@ -7195,6 +7579,7 @@ const [lang, setLang] = useState<Lang>(() => {
             onLog={setLiveLog}
 
             turnTimeoutSecs={turnTimeoutSecs}
+            controlsPortal={ladderControlsHost}
           />
         </div>
         </>

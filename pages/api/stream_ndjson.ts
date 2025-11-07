@@ -7,6 +7,7 @@ import {
   RandomLegal,
   AllySupport,
   EndgameRush,
+  AdvancedHybrid,
   generateMoves,
   classify,
   singleDangerPenalty,
@@ -355,6 +356,7 @@ type BotChoice =
   | 'built-in:random-legal'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
+  | 'built-in:advanced-hybrid'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http'
   | 'human';
@@ -389,6 +391,7 @@ function providerLabel(choice: BotChoice) {
     case 'built-in:random-legal': return 'RandomLegal';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'built-in:advanced-hybrid': return 'AdvancedHybrid';
     case 'human': return 'Human';
     case 'ai:openai': return 'OpenAI';
     case 'ai:gemini': return 'Gemini';
@@ -407,6 +410,7 @@ function asBot(choice: BotChoice, spec?: SeatSpec) {
     case 'built-in:random-legal': return RandomLegal;
     case 'built-in:ally-support': return AllySupport;
     case 'built-in:endgame-rush': return EndgameRush;
+    case 'built-in:advanced-hybrid': return AdvancedHybrid;
     case 'human': {
       const stub = async () => ({ move: 'pass', reason: 'human-stub' });
       (stub as any).phaseAware = true;
@@ -450,8 +454,6 @@ function traceWrap(
     const upperBounded = Math.min(120_000, lowerBounded); // allow slower external bots while keeping a hard ceiling (120s)
     return upperBounded;
   })();
-  const timeoutSecondsLabel = Math.max(1, Math.round(sanitizedTimeoutMs / 1000));
-
   const sanitizeCtx = (ctx:any) => {
     try { return JSON.parse(JSON.stringify(ctx)); } catch { return ctx; }
   };
@@ -504,8 +506,37 @@ function traceWrap(
     return null;
   };
 
-  const makeTimeout = (onTimeout?: () => void, fallback?: () => BotMove | Promise<BotMove>) =>
-    new Promise<BotMove>((resolve) => {
+  const makeTimeout = (
+    timeoutOrOnTimeout?: number | (() => void),
+    onTimeoutOrFallback?: (() => void) | (() => BotMove | Promise<BotMove>),
+    maybeFallback?: () => BotMove | Promise<BotMove>,
+  ) => {
+    let timeoutMs = sanitizedTimeoutMs;
+    let onTimeout: (() => void) | undefined;
+    let fallback: (() => BotMove | Promise<BotMove>) | undefined;
+
+    if (typeof timeoutOrOnTimeout === 'number' && Number.isFinite(timeoutOrOnTimeout)) {
+      timeoutMs = Math.max(0, Math.floor(timeoutOrOnTimeout));
+      if (typeof maybeFallback === 'function') {
+        if (typeof onTimeoutOrFallback === 'function') {
+          onTimeout = onTimeoutOrFallback as () => void;
+        }
+        fallback = maybeFallback;
+      } else if (typeof onTimeoutOrFallback === 'function') {
+        fallback = onTimeoutOrFallback as () => BotMove | Promise<BotMove>;
+      }
+    } else {
+      if (typeof timeoutOrOnTimeout === 'function') {
+        onTimeout = timeoutOrOnTimeout as () => void;
+      }
+      if (typeof onTimeoutOrFallback === 'function') {
+        fallback = onTimeoutOrFallback as () => BotMove | Promise<BotMove>;
+      }
+    }
+
+    const timeoutSecondsLabel = Math.max(1, Math.round(timeoutMs / 1000));
+
+    return new Promise<BotMove>((resolve) => {
       setTimeout(() => {
         const defaultPayload: BotMove = { move: 'pass', reason: `timeout@${timeoutSecondsLabel}s` };
         try { onTimeout?.(); } catch {}
@@ -534,16 +565,20 @@ function traceWrap(
         } catch (err: any) {
           resolve({ move: 'pass', reason: `timeout-error:${err?.message || String(err)}` });
         }
-      }, sanitizedTimeoutMs);
+      }, timeoutMs);
     });
+  };
 
   const wrapped = async (ctx:any) => {
     if (startDelayMs && startDelayMs>0) {
       await new Promise(r => setTimeout(r, Math.min(60_000, startDelayMs)));
     }
     const phase = ctx?.phase || 'play';
+    const effectiveTimeoutMs = (isHuman && (phase === 'bid' || phase === 'double'))
+      ? Math.max(sanitizedTimeoutMs, 30_000)
+      : sanitizedTimeoutMs;
     const callIssuedAt = Date.now();
-    const callExpiresAt = callIssuedAt + sanitizedTimeoutMs;
+    const callExpiresAt = callIssuedAt + effectiveTimeoutMs;
     try {
       writeLine(res, {
         type:'event',
@@ -552,7 +587,7 @@ function traceWrap(
         by: label,
         model: spec?.model||'',
         phase,
-        timeoutMs: sanitizedTimeoutMs,
+        timeoutMs: effectiveTimeoutMs,
         issuedAt: callIssuedAt,
         expiresAt: callExpiresAt,
       });
@@ -599,7 +634,7 @@ function traceWrap(
           );
         });
         const issuedAt = Date.now();
-        const expiresAt = issuedAt + sanitizedTimeoutMs;
+        const expiresAt = issuedAt + effectiveTimeoutMs;
         try {
           writeLine(res, {
             type: 'human-request',
@@ -608,7 +643,7 @@ function traceWrap(
             requestId,
             phase,
             ctx: payloadCtx,
-            timeoutMs: sanitizedTimeoutMs,
+            timeoutMs: effectiveTimeoutMs,
             delayMs: startDelayMs,
             sessionId: sessionKey,
             hint: hintPayload || undefined,
@@ -617,6 +652,7 @@ function traceWrap(
           });
         } catch {}
         const timeout = makeTimeout(
+          effectiveTimeoutMs,
           () => {
             expireHumanRequest(sessionKey, requestId, new Error('timeout'));
           },
@@ -628,7 +664,7 @@ function traceWrap(
           result = { move:'pass', reason:`error:${err?.message||String(err)}` };
         }
       } else {
-        const timeout = makeTimeout();
+        const timeout = makeTimeout(effectiveTimeoutMs);
         result = await Promise.race([ Promise.resolve(bot(ctxWithSeen)), timeout ]);
       }
     } catch (e:any) {
