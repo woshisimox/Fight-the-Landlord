@@ -2501,6 +2501,7 @@ function KnockoutPanel() {
     const totals = result.totals || liveTotalsRef.current;
     if (!totals) return;
     const baseScore = Number.isFinite(startScore) ? startScore : 0;
+    const baseTotals = [baseScore, baseScore, baseScore] as [number, number, number];
     const totalsTuple = [0, 0, 0] as [number, number, number];
     for (let i = 0; i < 3; i++) {
       const raw = Number((totals as number[])[i]);
@@ -2547,6 +2548,8 @@ function KnockoutPanel() {
         const nextAttempt = overtimeCountRef.current + 1;
         setOvertimeCount(nextAttempt);
         setOvertimeReason('final');
+        setSeriesTotals(baseTotals);
+        setLiveTotals(baseTotals);
         setSeriesRounds(3);
         setFinalStandings(null);
         setNotice(lang === 'en'
@@ -2577,6 +2580,8 @@ function KnockoutPanel() {
       const nextAttempt = overtimeCountRef.current + 1;
       setOvertimeCount(nextAttempt);
       setOvertimeReason('lowest');
+      setSeriesTotals(baseTotals);
+      setLiveTotals(baseTotals);
       setSeriesRounds(3);
       setNotice(lang === 'en'
         ? `Round ${ctx.roundIdx + 1}${endedEarly ? ' ended early after a negative score;' : ''} lowest score tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
