@@ -2193,34 +2193,43 @@ function KnockoutPanel() {
       try {
         const parsed = JSON.parse(value);
         if (parsed && typeof parsed === 'object') {
-          const slotNumber = Number((parsed as any).slot);
-          if (Number.isFinite(slotNumber) && slotNumber >= 1) {
-            return participantLabel(slotNumber - 1);
-          }
-          if (typeof (parsed as any).id === 'string') {
-            const idx = entries.findIndex(entry => entry.id === (parsed as any).id);
-            if (idx >= 0) return participantLabel(idx);
-          }
-          const alias = typeof parsed.name === 'string' ? parsed.name.trim() : '';
-          const rawChoice = typeof parsed.choice === 'string' ? parsed.choice : '';
-          const provider = KO_ALL_CHOICES.includes(rawChoice as BotChoice) ? choiceLabel(rawChoice as BotChoice) : '';
-          let providerLabel = provider;
-          if (KO_ALL_CHOICES.includes(rawChoice as BotChoice)) {
-            const normalized = rawChoice as BotChoice;
-            if (normalized === 'human') {
+          const entryId = typeof (parsed as any).id === 'string' ? (parsed as any).id : '';
+          const entry = entryId ? entries.find(item => item.id === entryId) : null;
+          const aliasFromEntry = (entry?.name || '').trim();
+          const aliasFromToken = typeof (parsed as any).name === 'string' ? ((parsed as any).name as string).trim() : '';
+          const alias = aliasFromEntry || aliasFromToken;
+          const rawChoice = entry?.choice || (typeof (parsed as any).choice === 'string' ? (parsed as any).choice as string : '');
+          const normalizedChoice = KO_ALL_CHOICES.includes(rawChoice as BotChoice)
+            ? (rawChoice as BotChoice)
+            : null;
+          let providerLabel = '';
+          if (normalizedChoice) {
+            if (normalizedChoice === 'human') {
               providerLabel = humanProviderLabel;
             } else {
-              const model = typeof parsed.model === 'string' ? parsed.model : '';
-              const base = typeof parsed.httpBase === 'string' ? parsed.httpBase : '';
-              providerLabel = providerSummary(normalized, model, base, lang);
+              const model = (entry?.model || (typeof (parsed as any).model === 'string' ? (parsed as any).model as string : ''))
+                .trim();
+              const httpBase = (entry?.keys?.httpBase || (typeof (parsed as any).httpBase === 'string'
+                ? (parsed as any).httpBase as string
+                : ''))
+                .trim();
+              providerLabel = providerSummary(normalizedChoice, model, httpBase, lang);
             }
           }
           const merged = mergeAliasAndProvider(alias, providerLabel);
           if (merged) return merged;
+          const slotNumber = Number((parsed as any).slot);
+          if (Number.isFinite(slotNumber) && slotNumber >= 1) {
+            return participantLabel(slotNumber - 1);
+          }
+          if (entry) {
+            const idx = entries.findIndex(item => item.id === entry.id);
+            if (idx >= 0) return participantLabel(idx);
+          }
         }
       } catch {}
     }
-    return value;
+    return String(value);
   };
 
   const podiumDisplayName = (value: KnockoutPlayer | null) => {
