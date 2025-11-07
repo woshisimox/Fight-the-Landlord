@@ -2482,11 +2482,9 @@ function KnockoutPanel() {
     }
     const endedEarly = !!result.endedEarlyForNegative;
     if (!result.completedAll && !endedEarly) {
-      setAutomation(false);
       setNotice(lang === 'en'
-        ? 'The trio stopped before finishing all games; automation has been paused.'
-        : '该组三人未跑完全部局数，已暂停自动流程。');
-      return;
+        ? 'The trio stopped before finishing all games; continuing with recorded scores.'
+        : '该组三人未跑完全部局数，自动流程将继续使用已有积分。');
     }
     const ctx = currentMatchRef.current;
     if (!ctx) return;
