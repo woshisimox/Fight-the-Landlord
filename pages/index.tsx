@@ -1928,6 +1928,7 @@ function KnockoutPanel() {
   const [seriesTotals, setSeriesTotals] = useState<[number, number, number] | null>(null);
   const seriesTotalsRef = useRef<[number, number, number] | null>(seriesTotals);
   useEffect(() => { seriesTotalsRef.current = seriesTotals; }, [seriesTotals]);
+  const [nextMatchInitialTotals, setNextMatchInitialTotals] = useState<[number, number, number] | null>(null);
   const [seriesRounds, setSeriesRounds] = useState<number>(() => settings.roundsPerGroup);
   const [overtimeCount, setOvertimeCount] = useState(0);
   const [overtimeReason, setOvertimeReason] = useState<'lowest' | 'final'>('lowest');
@@ -2350,6 +2351,21 @@ function KnockoutPanel() {
     };
   };
 
+  const queueReplayStart = useCallback(() => {
+    const attemptStart = (tries: number) => {
+      const panel = livePanelRef.current;
+      if (!panel) {
+        if (tries < 20) {
+          setTimeout(() => attemptStart(tries + 1), 50);
+        }
+        return;
+      }
+      if (panel.isRunning()) return;
+      panel.start().catch(err => console.error('[knockout] auto replay start failed', err));
+    };
+    attemptStart(0);
+  }, []);
+
   const launchMatch = (roundIdx: number, matchIdx: number) => {
     const context = buildMatchContext(roundIdx, matchIdx);
     if (!context) {
@@ -2364,6 +2380,7 @@ function KnockoutPanel() {
     const baseTotals = [baseScore, baseScore, baseScore] as [number, number, number];
     setSeriesRounds(roundsPerGroup);
     setSeriesTotals(baseTotals);
+    setNextMatchInitialTotals(null);
     setOvertimeCount(0);
     setOvertimeReason('lowest');
     setLiveTotals(baseTotals);
@@ -2383,9 +2400,12 @@ function KnockoutPanel() {
         const active = match.players.filter(p => p && p !== KO_BYE);
         if (active.length >= 3) {
           if (seriesTotalsRef.current) setLiveTotals(seriesTotalsRef.current);
+          const baseScore = Number.isFinite(startScore) ? startScore : 0;
+          const baseTotals = [baseScore, baseScore, baseScore] as [number, number, number];
+          setNextMatchInitialTotals(prev => prev ?? baseTotals);
           setSeriesRounds(3);
           setMatchKey(key => key + 1);
-          setTimeout(() => { livePanelRef.current?.start(); }, 0);
+          queueReplayStart();
           return;
         }
       }
@@ -2509,6 +2529,7 @@ function KnockoutPanel() {
     }
     setLiveTotals(totalsTuple);
     setSeriesTotals(totalsTuple);
+    setNextMatchInitialTotals(null);
     const scored = ctx.tokens.map((token, idx) => {
       const val = Number(totals[idx]);
       return {
@@ -2548,15 +2569,14 @@ function KnockoutPanel() {
         const nextAttempt = overtimeCountRef.current + 1;
         setOvertimeCount(nextAttempt);
         setOvertimeReason('final');
-        setSeriesTotals(baseTotals);
-        setLiveTotals(baseTotals);
+        setNextMatchInitialTotals(baseTotals);
         setSeriesRounds(3);
         setFinalStandings(null);
         setNotice(lang === 'en'
           ? `Final round tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
           : `决赛积分出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
         setMatchKey(key => key + 1);
-        setTimeout(() => { livePanelRef.current?.start(); }, 0);
+        queueReplayStart();
         return;
       }
     }
@@ -2580,14 +2600,13 @@ function KnockoutPanel() {
       const nextAttempt = overtimeCountRef.current + 1;
       setOvertimeCount(nextAttempt);
       setOvertimeReason('lowest');
-      setSeriesTotals(baseTotals);
-      setLiveTotals(baseTotals);
+      setNextMatchInitialTotals(baseTotals);
       setSeriesRounds(3);
       setNotice(lang === 'en'
         ? `Round ${ctx.roundIdx + 1}${endedEarly ? ' ended early after a negative score;' : ''} lowest score tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
         : `第 ${ctx.roundIdx + 1} 轮${endedEarly ? '出现负分提前结束，' : ''}积分最低出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
       setMatchKey(key => key + 1);
-      setTimeout(() => { livePanelRef.current?.start(); }, 0);
+      queueReplayStart();
       return;
     }
     const eliminatedToken = tiedLowest[0]?.token;
@@ -2728,6 +2747,7 @@ function KnockoutPanel() {
     return [base, base, base] as [number, number, number];
   }, [liveTotals, seriesTotals, currentMatch, startScore]);
 
+  const initialTotalsForLive = nextMatchInitialTotals ?? seriesTotals;
   const seatsForLive = currentMatch ? currentMatch.seats : fallbackLive.seats;
   const modelsForLive = currentMatch ? currentMatch.seatModels : fallbackLive.seatModels;
   const keysForLive = currentMatch ? currentMatch.seatKeys : fallbackLive.seatKeys;
@@ -3484,7 +3504,7 @@ function KnockoutPanel() {
                 onPauseChange={setLivePaused}
                 onFinished={handleLiveFinished}
                 controlsHidden
-                initialTotals={seriesTotals}
+                initialTotals={initialTotalsForLive}
                 turnTimeoutSecs={timeoutsForLive}
               />
             </div>
