@@ -2050,7 +2050,11 @@ function KnockoutPanel() {
     setNextMatchInitialTotals(null);
     const panel = livePanelRef.current;
     if (panel?.isRunning()) {
-      panel.stop().catch(err => console.error('[knockout] stop after finals failed', err));
+      try {
+        panel.stop();
+      } catch (err) {
+        console.error('[knockout] stop after finals failed', err);
+      }
     }
     setLiveRunning(false);
     setLivePaused(false);
