@@ -2393,7 +2393,9 @@ function KnockoutPanel() {
   };
 
   const queueReplayStart = useCallback((targetKey: number) => {
+    if (finalStandingsRef.current?.placements?.length) return;
     const attemptStart = (tries: number) => {
+      if (finalStandingsRef.current?.placements?.length) return;
       const panel = livePanelRef.current;
       if (!panel) {
         if (tries < 40) {
@@ -2585,6 +2587,10 @@ function KnockoutPanel() {
   const handleLiveFinished = (result: LivePanelFinishPayload) => {
     setLiveRunning(false);
     setLivePaused(false);
+    if (finalStandingsRef.current?.placements?.length) {
+      setAutomation(false);
+      return;
+    }
     if (result.aborted) {
       setAutomation(false);
       return;
