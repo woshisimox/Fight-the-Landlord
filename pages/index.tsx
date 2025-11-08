@@ -2636,6 +2636,10 @@ function KnockoutPanel() {
         ? Math.abs(sortedTotals[0].total - sortedTotals[1].total) <= epsilon
         : false;
       if (championTie) {
+        if (finalStandingsRef.current?.placements?.length) {
+          setAutomation(false);
+          return;
+        }
         const tiedChampions = sortedTotals
           .filter(entry => Math.abs(entry.total - sortedTotals[0].total) <= epsilon)
           .map(entry => entry.token);
