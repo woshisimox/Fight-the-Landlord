@@ -2359,7 +2359,7 @@ function KnockoutPanel() {
     const attemptStart = (tries: number) => {
       const panel = livePanelRef.current;
       if (!panel) {
-        if (tries < 20) {
+        if (tries < 40) {
           setTimeout(() => attemptStart(tries + 1), 50);
         }
         return;
@@ -2367,14 +2367,22 @@ function KnockoutPanel() {
       if (typeof panel.getInstanceId === 'function') {
         const instance = panel.getInstanceId();
         if (instance !== targetKey) {
-          if (tries < 20) {
+          if (tries < 40) {
             setTimeout(() => attemptStart(tries + 1), 50);
           }
           return;
         }
       }
       if (panel.isRunning()) return;
-      panel.start().catch(err => console.error('[knockout] auto replay start failed', err));
+      panel.start()
+        .then(() => {
+          setTimeout(() => {
+            if (!panel.isRunning() && tries < 40) {
+              attemptStart(tries + 1);
+            }
+          }, 120);
+        })
+        .catch(err => console.error('[knockout] auto replay start failed', err));
     };
     setTimeout(() => attemptStart(0), 0);
   }, []);
@@ -2542,6 +2550,25 @@ function KnockoutPanel() {
       const raw = Number((totals as number[])[i]);
       totalsTuple[i] = Number.isFinite(raw) ? raw : baseScore;
     }
+    const epsilon = 1e-6;
+    const finishedCount = Number(result.finishedCount) || 0;
+    const totalsUnchanged = totalsTuple.every((total, idx) => Math.abs(total - baseTotals[idx]) <= epsilon);
+    const shouldRetry = finishedCount <= 0 || (totalsUnchanged && !result.completedAll && !endedEarly);
+    if (shouldRetry) {
+      setLiveTotals(baseTotals);
+      setSeriesTotals(baseTotals);
+      setNextMatchInitialTotals(baseTotals);
+      setOvertimeCount(0);
+      setOvertimeReason('lowest');
+      const message = lang === 'en'
+        ? 'No completed games were recorded. Restarting this trio automatically.'
+        : '未记录有效局数，正在自动重新启动该组三人对局。';
+      setNotice(message);
+      const nextKey = matchKeyRef.current + 1;
+      setMatchKey(nextKey);
+      queueReplayStart(nextKey);
+      return;
+    }
     setLiveTotals(totalsTuple);
     setSeriesTotals(totalsTuple);
     setNextMatchInitialTotals(null);
@@ -2561,7 +2588,6 @@ function KnockoutPanel() {
           .filter(entry => !!entry.token && entry.token !== KO_BYE)
           .sort((a, b) => b.total - a.total)
       : null;
-    const epsilon = 1e-6;
     if (wasFinalMatch) {
       const trioTotals = ctx.tokens.map((token, idx) => ({ token, total: totalsTuple[idx] }))
         .filter(entry => !!entry.token && entry.token !== KO_BYE);
@@ -7607,6 +7633,7 @@ const [lang, setLang] = useState<Lang>(() => {
           <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
           <LivePanel
             key={resetKey}
+            instanceId={resetKey}
             rounds={rounds}
             startScore={startScore}
             seatDelayMs={seatDelayMs}
