@@ -772,6 +772,7 @@ const writeStore = (s: TsStore) => { try { s.updatedAt=new Date().toISOString();
 type LiveProps = {
   rounds: number;
   startScore: number;
+  instanceId: number;
 
   seatDelayMs?: number[];
   enabled: boolean;
@@ -801,6 +802,7 @@ type LivePanelHandle = {
   togglePause: () => void;
   isRunning: () => boolean;
   isPaused: () => boolean;
+  getInstanceId: () => number;
 };
 
 type LivePanelFinishPayload = {
@@ -1922,6 +1924,8 @@ function KnockoutPanel() {
   const currentMatchRef = useRef<KnockoutMatchContext | null>(null);
   useEffect(() => { currentMatchRef.current = currentMatch; }, [currentMatch]);
   const [matchKey, setMatchKey] = useState(0);
+  const matchKeyRef = useRef(matchKey);
+  useEffect(() => { matchKeyRef.current = matchKey; }, [matchKey]);
   const [liveTotals, setLiveTotals] = useState<[number, number, number] | null>(null);
   const liveTotalsRef = useRef<[number, number, number] | null>(null);
   useEffect(() => { liveTotalsRef.current = liveTotals; }, [liveTotals]);
@@ -2351,7 +2355,7 @@ function KnockoutPanel() {
     };
   };
 
-  const queueReplayStart = useCallback(() => {
+  const queueReplayStart = useCallback((targetKey: number) => {
     const attemptStart = (tries: number) => {
       const panel = livePanelRef.current;
       if (!panel) {
@@ -2360,10 +2364,19 @@ function KnockoutPanel() {
         }
         return;
       }
+      if (typeof panel.getInstanceId === 'function') {
+        const instance = panel.getInstanceId();
+        if (instance !== targetKey) {
+          if (tries < 20) {
+            setTimeout(() => attemptStart(tries + 1), 50);
+          }
+          return;
+        }
+      }
       if (panel.isRunning()) return;
       panel.start().catch(err => console.error('[knockout] auto replay start failed', err));
     };
-    attemptStart(0);
+    setTimeout(() => attemptStart(0), 0);
   }, []);
 
   const launchMatch = (roundIdx: number, matchIdx: number) => {
@@ -2384,8 +2397,9 @@ function KnockoutPanel() {
     setOvertimeCount(0);
     setOvertimeReason('lowest');
     setLiveTotals(baseTotals);
-    setMatchKey(key => key + 1);
-    setTimeout(() => { livePanelRef.current?.start(); }, 0);
+    const nextKey = matchKeyRef.current + 1;
+    setMatchKey(nextKey);
+    queueReplayStart(nextKey);
     return true;
   };
 
@@ -2404,8 +2418,9 @@ function KnockoutPanel() {
           const baseTotals = [baseScore, baseScore, baseScore] as [number, number, number];
           setNextMatchInitialTotals(prev => prev ?? baseTotals);
           setSeriesRounds(3);
-          setMatchKey(key => key + 1);
-          queueReplayStart();
+          const nextKey = matchKeyRef.current + 1;
+          setMatchKey(nextKey);
+          queueReplayStart(nextKey);
           return;
         }
       }
@@ -2575,8 +2590,9 @@ function KnockoutPanel() {
         setNotice(lang === 'en'
           ? `Final round tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
           : `决赛积分出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
-        setMatchKey(key => key + 1);
-        queueReplayStart();
+        const nextKey = matchKeyRef.current + 1;
+        setMatchKey(nextKey);
+        queueReplayStart(nextKey);
         return;
       }
     }
@@ -2605,8 +2621,9 @@ function KnockoutPanel() {
       setNotice(lang === 'en'
         ? `Round ${ctx.roundIdx + 1}${endedEarly ? ' ended early after a negative score;' : ''} lowest score tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
         : `第 ${ctx.roundIdx + 1} 轮${endedEarly ? '出现负分提前结束，' : ''}积分最低出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
-      setMatchKey(key => key + 1);
-      queueReplayStart();
+      const nextKey = matchKeyRef.current + 1;
+      setMatchKey(nextKey);
+      queueReplayStart(nextKey);
       return;
     }
     const eliminatedToken = tiedLowest[0]?.token;
@@ -3489,6 +3506,7 @@ function KnockoutPanel() {
               <LivePanel
                 key={matchKey}
                 ref={livePanelRef}
+                instanceId={matchKey}
                 rounds={seriesRounds}
                 startScore={startScore}
                 seatDelayMs={delaysForLive}
@@ -3808,6 +3826,9 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const pauseRef = useRef(false);
   const pauseResolversRef = useRef<Array<() => void>>([]);
   const runningRef = useRef(running);
+  const instanceIdRef = useRef<number>(props.instanceId);
+
+  useEffect(() => { instanceIdRef.current = props.instanceId; }, [props.instanceId]);
 
   useEffect(() => { runningRef.current = running; }, [running]);
   useEffect(() => { props.onRunningChange?.(running); }, [running, props.onRunningChange]);
@@ -6322,6 +6343,7 @@ if (m.type === 'event' && m.kind === 'play') {
     togglePause,
     isRunning: () => runningRef.current,
     isPaused: () => pauseRef.current,
+    getInstanceId: () => instanceIdRef.current,
   }));
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
