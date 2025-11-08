@@ -652,6 +652,19 @@ function isFinalRoundMatch(rounds: KnockoutRound[], roundIdx: number, matchIdx: 
   return active.length === 3;
 }
 
+function isSingleTrioTournament(rounds: KnockoutRound[]): boolean {
+  if (!Array.isArray(rounds) || rounds.length !== 1) return false;
+  const first = rounds[0];
+  if (!isFinalRoundStructure(first)) return false;
+  const unique = new Set<string>();
+  for (const match of first.matches) {
+    for (const player of match.players) {
+      if (player && player !== KO_BYE) unique.add(player);
+    }
+  }
+  return unique.size > 0 && unique.size <= 3;
+}
+
 function shuffleArray<T>(input: T[]): T[] {
   const arr = [...input];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -1948,7 +1961,11 @@ function KnockoutPanel() {
   useEffect(() => { finalStandingsRef.current = finalStandings; }, [finalStandings]);
   const livePanelRef = useRef<LivePanelHandle | null>(null);
   const roundsRef = useRef<KnockoutRound[]>(rounds);
-  useEffect(() => { roundsRef.current = rounds; }, [rounds]);
+  const finalTrioOnlyRef = useRef(false);
+  useEffect(() => {
+    roundsRef.current = rounds;
+    finalTrioOnlyRef.current = isSingleTrioTournament(rounds);
+  }, [rounds]);
   const entriesRef = useRef<KnockoutEntry[]>(entries);
   useEffect(() => { entriesRef.current = entries; }, [entries]);
   const autoRunRef = useRef(false);
@@ -2597,6 +2614,7 @@ function KnockoutPanel() {
     const ranked = scored
       .filter(entry => !!entry.token)
       .sort((a, b) => a.total - b.total);
+    const finalTrioOnly = finalTrioOnlyRef.current;
     const placementsDesc = wasFinalMatch
       ? ctx.tokens
           .map((token, idx) => ({ token, total: totalsTuple[idx] }))
@@ -2645,7 +2663,8 @@ function KnockoutPanel() {
       return;
     }
     const tiedLowest = ranked.filter(entry => Math.abs(entry.total - lowest.total) <= epsilon);
-    if (tiedLowest.length !== 1) {
+    const lowestTieForcesReplay = tiedLowest.length !== 1 && (!wasFinalMatch || !finalTrioOnly);
+    if (lowestTieForcesReplay) {
       const tiedLabels = tiedLowest
         .map(entry => displayName(entry.token))
         .join(lang === 'en' ? ', ' : '、');
