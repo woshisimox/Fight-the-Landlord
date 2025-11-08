@@ -1944,6 +1944,8 @@ function KnockoutPanel() {
   const [livePaused, setLivePaused] = useState(false);
   const [automationActive, setAutomationActive] = useState(false);
   const [finalStandings, setFinalStandings] = useState<KnockoutFinalStandings | null>(null);
+  const finalStandingsRef = useRef<KnockoutFinalStandings | null>(finalStandings);
+  useEffect(() => { finalStandingsRef.current = finalStandings; }, [finalStandings]);
   const livePanelRef = useRef<LivePanelHandle | null>(null);
   const roundsRef = useRef<KnockoutRound[]>(rounds);
   useEffect(() => { roundsRef.current = rounds; }, [rounds]);
@@ -2412,6 +2414,15 @@ function KnockoutPanel() {
   };
 
   const scheduleNextMatch = useCallback(() => {
+    if (finalStandingsRef.current?.placements?.length) {
+      if (autoRunRef.current) {
+        setAutomation(false);
+        setNotice(lang === 'en'
+          ? 'Final standings are locked in. No further knockout trios will run.'
+          : '最终排名已生成，将不再继续淘汰赛对局。');
+      }
+      return;
+    }
     if (!autoRunRef.current) return;
     if (livePanelRef.current?.isRunning()) return;
     const pendingContext = currentMatchRef.current;
@@ -2476,12 +2487,16 @@ function KnockoutPanel() {
     if (!launched) {
       setAutomation(false);
     }
-  }, [applyRoundsUpdate, launchMatch, roundsPerGroup, setAutomation, setNotice]);
+  }, [applyRoundsUpdate, lang, launchMatch, roundsPerGroup, setAutomation, setNotice]);
 
   useEffect(() => {
     if (!automationActive) return;
     if (!autoRunRef.current) return;
     if (!roundsRef.current?.length) return;
+    if (finalStandingsRef.current?.placements?.length) {
+      setAutomation(false);
+      return;
+    }
     if (livePanelRef.current?.isRunning()) return;
     if (liveRunningRef.current) return;
     const currentRounds = roundsRef.current || [];
@@ -2703,6 +2718,12 @@ function KnockoutPanel() {
     if (!enabled) {
       setError(lang === 'en' ? 'Enable the tournament before starting.' : '请先启用淘汰赛再开始运行。');
       setNotice(null);
+      return;
+    }
+    if (finalStandingsRef.current?.placements?.length) {
+      setNotice(lang === 'en'
+        ? 'Final standings are already available. Reset the bracket to run a new tournament.'
+        : '最终排名已生成。如需重新比赛，请先重置对阵。');
       return;
     }
     if (!rounds.length) {
