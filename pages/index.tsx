@@ -2383,6 +2383,12 @@ function KnockoutPanel() {
         }
         return;
       }
+      if (!currentMatchRef.current) {
+        if (tries < 40) {
+          setTimeout(() => attemptStart(tries + 1), 50);
+        }
+        return;
+      }
       if (typeof panel.getInstanceId === 'function') {
         const instance = panel.getInstanceId();
         if (instance !== targetKey) {
@@ -2415,6 +2421,7 @@ function KnockoutPanel() {
         : '无法启动下一组三人对局，请检查参赛设置。');
       return false;
     }
+    currentMatchRef.current = context;
     setCurrentMatch(context);
     const baseScore = Number.isFinite(startScore) ? startScore : 0;
     const baseTotals = [baseScore, baseScore, baseScore] as [number, number, number];
