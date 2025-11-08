@@ -2606,20 +2606,15 @@ function KnockoutPanel() {
     if (wasFinalMatch) {
       const trioTotals = ctx.tokens.map((token, idx) => ({ token, total: totalsTuple[idx] }))
         .filter(entry => !!entry.token && entry.token !== KO_BYE);
-      const tiedFinalTokens = new Set<string>();
-      for (let i = 0; i < trioTotals.length; i++) {
-        for (let j = i + 1; j < trioTotals.length; j++) {
-          const a = trioTotals[i];
-          const b = trioTotals[j];
-          if (Math.abs(a.total - b.total) <= epsilon) {
-            tiedFinalTokens.add(String(a.token));
-            tiedFinalTokens.add(String(b.token));
-          }
-        }
-      }
-      if (tiedFinalTokens.size > 0) {
-        const tiedLabels = ctx.tokens
-          .filter(token => tiedFinalTokens.has(String(token)))
+      const sortedTotals = trioTotals.slice().sort((a, b) => b.total - a.total);
+      const championTie = sortedTotals.length >= 2
+        ? Math.abs(sortedTotals[0].total - sortedTotals[1].total) <= epsilon
+        : false;
+      if (championTie) {
+        const tiedChampions = sortedTotals
+          .filter(entry => Math.abs(entry.total - sortedTotals[0].total) <= epsilon)
+          .map(entry => entry.token);
+        const tiedLabels = tiedChampions
           .map(token => podiumDisplayName(token))
           .join(lang === 'en' ? ', ' : '、');
         const nextAttempt = overtimeCountRef.current + 1;
@@ -2629,8 +2624,8 @@ function KnockoutPanel() {
         setSeriesRounds(3);
         setFinalStandings(null);
         setNotice(lang === 'en'
-          ? `Final round tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
-          : `决赛积分出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
+          ? `Final round tie for champion between ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
+          : `决赛冠军积分出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
         const nextKey = matchKeyRef.current + 1;
         setMatchKey(nextKey);
         queueReplayStart(nextKey);
