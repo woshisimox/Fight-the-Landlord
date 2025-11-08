@@ -2042,6 +2042,20 @@ function KnockoutPanel() {
     setAutomationActive(active);
   }, []);
 
+  useEffect(() => {
+    if (!finalStandings?.placements?.length) return;
+    setAutomation(false);
+    setOvertimeCount(0);
+    setOvertimeReason('lowest');
+    setNextMatchInitialTotals(null);
+    const panel = livePanelRef.current;
+    if (panel?.isRunning()) {
+      panel.stop().catch(err => console.error('[knockout] stop after finals failed', err));
+    }
+    setLiveRunning(false);
+    setLivePaused(false);
+  }, [finalStandings, setAutomation]);
+
   const handleAllFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
