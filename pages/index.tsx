@@ -188,88 +188,176 @@ function hasChinese(s: string) { return /[\u4e00-\u9fff]/.test(s); }
 
 type DisclaimerSection = { title: string; paragraphs: string[] };
 
-const DISCLAIMER_TITLE = 'AI Battle Platform (Fight the Landlord) – Compliance Statement & Terms of Use Template';
-
-const DISCLAIMER_SECTIONS: DisclaimerSection[] = [
-  {
-    title: 'Scope',
-    paragraphs: [
-      'This compliance statement and terms of use apply to an AI battle website or app (the “Platform”) built around the Fight the Landlord card game. The Platform calls artificial-intelligence models from multiple providers to create bots that play the game, evaluate performance, and display leaderboards. The service is for research, testing and entertainment only. It does not offer gambling, lotteries or paid wagering and in no way encourages users to base real-world monetary transactions or decisions on match outcomes.',
+const DISCLAIMER_CONTENT: Record<Lang, { title: string; sections: DisclaimerSection[] }> = {
+  en: {
+    title: 'AI Battle Platform (Fight the Landlord) – Compliance Statement & Terms of Use Template',
+    sections: [
+      {
+        title: 'Scope',
+        paragraphs: [
+          'This compliance statement and terms of use apply to an AI battle website or app (the “Platform”) built around the Fight the Landlord card game. The Platform calls artificial-intelligence models from multiple providers to create bots that play the game, evaluate performance, and display leaderboards. The service is for research, testing and entertainment only. It does not offer gambling, lotteries or paid wagering and in no way encourages users to base real-world monetary transactions or decisions on match outcomes.',
+        ],
+      },
+      {
+        title: 'AI models & providers',
+        paragraphs: [
+          'The Platform uses AI models from third-party providers, including but not limited to OpenAI (e.g. gpt-4o-mini), Google (Gemini series), Anthropic (Claude series), Alibaba (Qwen series), Kimi, DeepSeek, Grok, and Platform-developed or open-source strategies such as Greedy Max, Greedy Min, Random Legal, MiniNet, AllySupport and others.',
+          'Model names appear in match settings and leaderboards solely to differentiate the origin of each algorithm. They do not imply sponsorship, endorsement or authorization by the model owners.',
+          'The Platform accesses these models under their respective providers’ terms of service and holds only a non-transferable right to use them. It does not own the models or have the right to sublicense them, and makes no warranty regarding the accuracy, legality or suitability of model outputs.',
+          'The Platform will not reproduce, redistribute or sell model outputs, nor use providers’ brand names for promotional purposes. Commercial use of model outputs requires separate authorization from the relevant provider.',
+        ],
+      },
+      {
+        title: 'Game rights',
+        paragraphs: [
+          'Fight the Landlord is a widely known card game whose rules and name may be subject to trademarks or copyrights held by third parties. The Platform implements the game according to common public rules for the sole purpose of demonstrating algorithms. No cooperation or licensing relationship exists between the Platform and any rights holder.',
+          'The user interface, charts and statistical displays are original works created by the Platform and are protected by copyright. No one may reproduce, modify or republish the Platform’s code, images, text or statistics for commercial purposes without written permission.',
+        ],
+      },
+      {
+        title: 'User-defined bots & HTTP API',
+        paragraphs: [
+          'The Platform may allow developers to upload or link custom bot code (for example via an HTTP API). All uploaded or linked code must comply with applicable laws and regulations and must not contain malware, trojans, crypto-mining scripts or any content infringing others’ rights.',
+          'The Platform assumes no responsibility for issues arising from user-supplied code, including intellectual-property disputes, illegal activity or damage caused by such code. Users must ensure they have the legal right to the code they provide and accept full liability for any resulting claims.',
+          'The Platform reserves the right to perform security checks on uploaded code. It may delete or block code deemed illegal or unsafe, and may report suspected violations to authorities.',
+        ],
+      },
+      {
+        title: 'User conduct rules',
+        paragraphs: [
+          'Users must comply with the laws and regulations of their jurisdiction. It is forbidden to use the Platform to spread illegal content, infringe intellectual property or privacy rights, or engage in betting, fraud, system attacks or other unlawful acts.',
+          'Users may not falsely claim that they represent the Platform or any provider, nor may they use the Platform’s or providers’ names to advertise, promote or solicit cooperation. Any implication of endorsement is strictly prohibited.',
+          'Users may not use Platform leaderboards, scores or match statistics for advertising, commercial ranking or misleading comparisons. Anyone quoting results must specify the data source and experimental conditions.',
+          'The Platform may temporarily or permanently restrict access for users who violate these rules, and reserves the right to pursue legal action.',
+        ],
+      },
+      {
+        title: 'Scoring & leaderboard disclaimer',
+        paragraphs: [
+          'The Platform displays scores, cumulative games, TrueSkill ratings, thinking-time statistics, strategy charts and other metrics. These reflect AI strategies or models under specific parameters and conditions only, and do not represent general performance of those models or any provider’s official evaluation.',
+          'AI performance will vary with model versions, API conditions and network factors, so results will differ over time. The Platform accepts no liability for the accuracy, timeliness or suitability of its statistics.',
+          'Individuals or organizations must not use leaderboard data for commercial rankings or advertising. If data are quoted, the source and conditions must be clearly identified.',
+        ],
+      },
+      {
+        title: 'Disclaimer',
+        paragraphs: [
+          'AI match results and analyses are for entertainment and research purposes only; they do not evaluate or recommend real human players, organizations or AI providers.',
+          'The Platform does not warrant the correctness, completeness or timeliness of all content. Users assume all risk and responsibility for using Platform content.',
+          'The Platform may link to third-party websites or APIs. Such links are provided for convenience and do not constitute endorsement. Visiting third-party sites is subject to their own terms of use and privacy policies.',
+        ],
+      },
+      {
+        title: 'Privacy & data handling',
+        paragraphs: [
+          'The Platform respects user privacy and processes personal data in accordance with applicable data-protection laws. Basic browsing does not require registration. Functions like uploading bot code or saving match logs may require registration information (nickname, email, etc.), collected only to provide services and improve user experience.',
+          'Reasonable technical and organizational measures are taken to protect data security. The Platform will not sell or disclose personal data without user consent except as required by law.',
+          'Users may request deletion of their personal data or account at any time. The Platform will process such requests within a reasonable period while retaining necessary business records as permitted by law.',
+        ],
+      },
+      {
+        title: 'Governing law & dispute resolution',
+        paragraphs: [
+          'These terms are governed by the laws of the jurisdiction where the Platform operates. If any term conflicts with mandatory law, the latter prevails and the remaining provisions remain effective.',
+          'Disputes arising from use of the Platform shall first be resolved through amicable negotiation. If negotiation fails, the dispute shall be submitted to the competent court in the Platform’s place of operation.',
+        ],
+      },
+      {
+        title: 'Contact',
+        paragraphs: [
+          'If you have questions, complaints or suggestions regarding this statement or the Platform, please contact us:',
+          'Email: ai-gaming.online@outlook.com',
+          'We will respond and handle your request within a reasonable time.',
+        ],
+      },
     ],
   },
-  {
-    title: 'AI models & providers',
-    paragraphs: [
-      'The Platform uses AI models from third-party providers, including but not limited to OpenAI (e.g. gpt-4o-mini), Google (Gemini series), Anthropic (Claude series), Alibaba (Qwen series), Kimi, DeepSeek, Grok, and Platform-developed or open-source strategies such as Greedy Max, Greedy Min, Random Legal, MiniNet, AllySupport and others.',
-      'Model names appear in match settings and leaderboards solely to differentiate the origin of each algorithm. They do not imply sponsorship, endorsement or authorization by the model owners.',
-      'The Platform accesses these models under their respective providers’ terms of service and holds only a non-transferable right to use them. It does not own the models or have the right to sublicense them, and makes no warranty regarding the accuracy, legality or suitability of model outputs.',
-      'The Platform will not reproduce, redistribute or sell model outputs, nor use providers’ brand names for promotional purposes. Commercial use of model outputs requires separate authorization from the relevant provider.',
+  zh: {
+    title: 'AI 对战平台（斗地主）——合规声明与使用条款模板',
+    sections: [
+      {
+        title: '一、适用范围',
+        paragraphs: [
+          '本合规声明与使用条款适用于围绕“斗地主”纸牌游戏构建的 AI 对战网站或应用（以下简称“本平台”）。',
+          '本平台通过调用多个 AI 模型服务商的人工智能模型创建游戏机器人，用于游戏对战、性能评估和排行榜展示。',
+          '该服务仅用于科研、测试与娱乐目的。平台不提供赌博、抽奖或付费下注功能，且绝不鼓励用户基于比赛结果进行任何现实中的金钱交易或决策。',
+        ],
+      },
+      {
+        title: '二、AI 模型与服务提供方',
+        paragraphs: [
+          '本平台使用来自第三方提供商的人工智能模型，包括但不限于：OpenAI（如 gpt-4o-mini）、Google（Gemini 系列）、Anthropic（Claude 系列）、阿里巴巴（Qwen 系列）、Kimi、DeepSeek、Grok，以及平台自研或开源的策略算法，如 Greedy Max、Greedy Min、Random Legal、MiniNet、AllySupport 等。',
+          '模型名称在比赛设置与排行榜中仅用于区分算法来源，不代表该模型所有者的赞助、认可或授权。',
+          '平台根据各服务商的服务条款访问这些模型，仅享有不可转让的使用权。平台不拥有这些模型，也无权转授权，亦不对模型输出的准确性、合法性或适用性作出任何保证。',
+          '平台不会复制、再分发或销售模型输出内容，也不会将服务商品牌用于推广目的。任何商业化使用模型输出的行为均需获得相应服务商的独立授权。',
+        ],
+      },
+      {
+        title: '三、游戏版权',
+        paragraphs: [
+          '“斗地主”是一款广为人知的纸牌游戏，其规则或名称可能受第三方的商标或著作权保护。本平台仅基于公开通用的规则实现该游戏，用于算法演示与研究之目的。平台与任何版权持有人之间不存在合作或授权关系。',
+          '平台的用户界面、图表与统计展示均为原创作品，受著作权保护。未经书面许可，任何人不得将平台的代码、图片、文字或统计数据用于商业再发布、修改或再传播。',
+        ],
+      },
+      {
+        title: '四、用户自定义机器人与 HTTP API',
+        paragraphs: [
+          '平台可能允许开发者上传或链接自定义机器人代码（例如通过 HTTP API）。所有上传或链接的代码必须遵守相关法律法规，且不得包含恶意软件、木马、挖矿脚本或侵犯他人权益的内容。',
+          '平台对用户提交代码引发的任何问题不承担责任，包括但不限于知识产权纠纷、违法行为或由该代码造成的损害。用户应确保对所提供代码拥有合法使用权，并对因此产生的任何索赔承担全部责任。',
+          '平台保留对上传代码进行安全检查的权利。若发现代码涉嫌违法或不安全，平台有权删除、屏蔽并向有关部门报告。',
+        ],
+      },
+      {
+        title: '五、用户行为规范',
+        paragraphs: [
+          '用户必须遵守其所在司法辖区的法律法规。严禁利用平台传播非法内容、侵犯知识产权或隐私权、从事赌博、欺诈、系统攻击等违法行为。',
+          '用户不得冒充平台或任何服务商代表，也不得使用平台或服务商名称进行广告、推广或商业合作邀约。任何暗示平台或服务商背书的行为均被严格禁止。',
+          '用户不得将平台的排行榜、得分或比赛统计用于广告、商业排名或误导性比较。如需引用数据，必须明确标注数据来源及实验条件。',
+          '平台有权对违反规则的用户暂时或永久限制访问，并保留追究法律责任的权利。',
+        ],
+      },
+      {
+        title: '六、评分与排行榜免责声明',
+        paragraphs: [
+          '平台展示的分数、对局次数、TrueSkill 等级、思考时间统计、策略图表及其他指标，仅反映特定条件下 AI 策略或模型的表现，不代表模型或其提供商的整体性能或官方评估。',
+          'AI 表现会随模型版本、API 状况及网络因素而变化，结果随时间可能不同。平台不保证其统计结果的准确性、时效性或适用性。',
+          '任何个人或机构不得将排行榜数据用于商业排名或广告宣传。若引用数据，必须注明来源及实验条件。',
+        ],
+      },
+      {
+        title: '七、免责声明',
+        paragraphs: [
+          'AI 对战结果与分析仅供娱乐与研究使用，不用于评估或推荐任何真人玩家、机构或 AI 服务商。',
+          '平台不保证内容的正确性、完整性或时效性。用户使用平台内容的风险与责任均由其自行承担。',
+          '平台可能包含指向第三方网站或 API 的链接，这些链接仅为方便访问，不代表平台的认可或推荐。访问第三方网站应遵守其各自的使用条款与隐私政策。',
+        ],
+      },
+      {
+        title: '八、隐私与数据处理',
+        paragraphs: [
+          '平台尊重用户隐私，并依据适用的数据保护法律处理个人数据。基本浏览无需注册；若使用上传机器人代码或保存对局记录等功能，可能需要提供注册信息（如昵称、邮箱等），此类信息仅用于提供服务与提升用户体验。',
+          '平台采取合理的技术与组织措施保障数据安全。除法律要求外，平台不会在未经用户同意的情况下出售或披露个人数据。',
+          '用户可随时请求删除其个人数据或账户，平台将在合理期限内处理该请求，同时保留法律允许范围内的必要业务记录。',
+        ],
+      },
+      {
+        title: '九、适用法律与争议解决',
+        paragraphs: [
+          '本条款受平台运营所在地法律管辖。若本条款与强制性法律相冲突，以强制性法律为准，其余条款仍保持有效。',
+          '因使用平台产生的争议，应首先通过友好协商解决；协商不成的，提交平台运营地有管辖权的法院处理。',
+        ],
+      },
+      {
+        title: '十、联系方式',
+        paragraphs: [
+          '如您对本声明或平台有任何疑问、投诉或建议，请联系：',
+          '邮箱：ai-gaming.online@outlook.com',
+          '平台将在合理时间内予以回复与处理。',
+        ],
+      },
     ],
   },
-  {
-    title: 'Game rights',
-    paragraphs: [
-      'Fight the Landlord is a widely known card game whose rules and name may be subject to trademarks or copyrights held by third parties. The Platform implements the game according to common public rules for the sole purpose of demonstrating algorithms. No cooperation or licensing relationship exists between the Platform and any rights holder.',
-      'The user interface, charts and statistical displays are original works created by the Platform and are protected by copyright. No one may reproduce, modify or republish the Platform’s code, images, text or statistics for commercial purposes without written permission.',
-    ],
-  },
-  {
-    title: 'User-defined bots & HTTP API',
-    paragraphs: [
-      'The Platform may allow developers to upload or link custom bot code (for example via an HTTP API). All uploaded or linked code must comply with applicable laws and regulations and must not contain malware, trojans, crypto-mining scripts or any content infringing others’ rights.',
-      'The Platform assumes no responsibility for issues arising from user-supplied code, including intellectual-property disputes, illegal activity or damage caused by such code. Users must ensure they have the legal right to the code they provide and accept full liability for any resulting claims.',
-      'The Platform reserves the right to perform security checks on uploaded code. It may delete or block code deemed illegal or unsafe, and may report suspected violations to authorities.',
-    ],
-  },
-  {
-    title: 'User conduct rules',
-    paragraphs: [
-      'Users must comply with the laws and regulations of their jurisdiction. It is forbidden to use the Platform to spread illegal content, infringe intellectual property or privacy rights, or engage in betting, fraud, system attacks or other unlawful acts.',
-      'Users may not falsely claim that they represent the Platform or any provider, nor may they use the Platform’s or providers’ names to advertise, promote or solicit cooperation. Any implication of endorsement is strictly prohibited.',
-      'Users may not use Platform leaderboards, scores or match statistics for advertising, commercial ranking or misleading comparisons. Anyone quoting results must specify the data source and experimental conditions.',
-      'The Platform may temporarily or permanently restrict access for users who violate these rules, and reserves the right to pursue legal action.',
-    ],
-  },
-  {
-    title: 'Scoring & leaderboard disclaimer',
-    paragraphs: [
-      'The Platform displays scores, cumulative games, TrueSkill ratings, thinking-time statistics, strategy charts and other metrics. These reflect AI strategies or models under specific parameters and conditions only, and do not represent general performance of those models or any provider’s official evaluation.',
-      'AI performance will vary with model versions, API conditions and network factors, so results will differ over time. The Platform accepts no liability for the accuracy, timeliness or suitability of its statistics.',
-      'Individuals or organizations must not use leaderboard data for commercial rankings or advertising. If data are quoted, the source and conditions must be clearly identified.',
-    ],
-  },
-  {
-    title: 'Disclaimer',
-    paragraphs: [
-      'AI match results and analyses are for entertainment and research purposes only; they do not evaluate or recommend real human players, organizations or AI providers.',
-      'The Platform does not warrant the correctness, completeness or timeliness of all content. Users assume all risk and responsibility for using Platform content.',
-      'The Platform may link to third-party websites or APIs. Such links are provided for convenience and do not constitute endorsement. Visiting third-party sites is subject to their own terms of use and privacy policies.',
-    ],
-  },
-  {
-    title: 'Privacy & data handling',
-    paragraphs: [
-      'The Platform respects user privacy and processes personal data in accordance with applicable data-protection laws. Basic browsing does not require registration. Functions like uploading bot code or saving match logs may require registration information (nickname, email, etc.), collected only to provide services and improve user experience.',
-      'Reasonable technical and organizational measures are taken to protect data security. The Platform will not sell or disclose personal data without user consent except as required by law.',
-      'Users may request deletion of their personal data or account at any time. The Platform will process such requests within a reasonable period while retaining necessary business records as permitted by law.',
-    ],
-  },
-  {
-    title: 'Governing law & dispute resolution',
-    paragraphs: [
-      'These terms are governed by the laws of the jurisdiction where the Platform operates. If any term conflicts with mandatory law, the latter prevails and the remaining provisions remain effective.',
-      'Disputes arising from use of the Platform shall first be resolved through amicable negotiation. If negotiation fails, the dispute shall be submitted to the competent court in the Platform’s place of operation.',
-    ],
-  },
-  {
-    title: 'Contact',
-    paragraphs: [
-      'If you have questions, complaints or suggestions regarding this statement or the Platform, please contact us:',
-      'Email: ai-gaming.online@outlook.com',
-      'We will respond and handle your request within a reasonable time.',
-    ],
-  },
-];
+};
 
 let cachedCreatePortal: ((children: ReactNode, container: Element | DocumentFragment) => ReactNode) | null = null;
 const renderViaPortal = (children: ReactNode, container: HTMLElement | null): ReactNode => {
@@ -7394,6 +7482,10 @@ const [lang, setLang] = useState<Lang>(() => {
     };
   }, []);
 
+  const disclaimerContent = useMemo(() => {
+    return DISCLAIMER_CONTENT[lang] ?? DISCLAIMER_CONTENT.zh;
+  }, [lang]);
+
   const seatInfoLabels = useMemo(() => {
     return [0,1,2].map(i => {
       const choice = seats[i] as BotChoice;
@@ -7884,7 +7976,7 @@ const [lang, setLang] = useState<Lang>(() => {
               }}
             >
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16 }}>
-                <h2 id="ddz-disclaimer-title" style={{ margin:0, fontSize:20, fontWeight:800, color:'#111827' }}>{DISCLAIMER_TITLE}</h2>
+                <h2 id="ddz-disclaimer-title" style={{ margin:0, fontSize:20, fontWeight:800, color:'#111827' }}>{disclaimerContent.title}</h2>
                 <button
                   type="button"
                   onClick={() => setDisclaimerOpen(false)}
@@ -7902,7 +7994,7 @@ const [lang, setLang] = useState<Lang>(() => {
                 </button>
               </div>
               <div style={{ marginTop:16, display:'flex', flexDirection:'column', gap:18 }}>
-                {DISCLAIMER_SECTIONS.map(section => (
+                {disclaimerContent.sections.map(section => (
                   <section key={section.title}>
                     <h3 style={{ margin:'0 0 8px', fontSize:16, fontWeight:700, color:'#1f2937' }}>{section.title}</h3>
                     {section.paragraphs.map((text, idx) => (
