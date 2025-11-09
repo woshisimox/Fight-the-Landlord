@@ -253,6 +253,7 @@ const DISCLAIMER_CONTENT: Record<Lang, { title: string; sections: DisclaimerSect
         paragraphs: [
           'The Platform respects user privacy and processes personal data in accordance with applicable data-protection laws. Basic browsing does not require registration. Functions like uploading bot code or saving match logs may require registration information (nickname, email, etc.), collected only to provide services and improve user experience.',
           'Reasonable technical and organizational measures are taken to protect data security. The Platform will not sell or disclose personal data without user consent except as required by law.',
+          'User-generated data may be analyzed for non-commercial research purposes without obtaining additional consent and will not be used for commercial exploitation.',
           'Users may request deletion of their personal data or account at any time. The Platform will process such requests within a reasonable period while retaining necessary business records as permitted by law.',
         ],
       },
@@ -338,6 +339,7 @@ const DISCLAIMER_CONTENT: Record<Lang, { title: string; sections: DisclaimerSect
         paragraphs: [
           '平台尊重用户隐私，并依据适用的数据保护法律处理个人数据。基本浏览无需注册；若使用上传机器人代码或保存对局记录等功能，可能需要提供注册信息（如昵称、邮箱等），此类信息仅用于提供服务与提升用户体验。',
           '平台采取合理的技术与组织措施保障数据安全。除法律要求外，平台不会在未经用户同意的情况下出售或披露个人数据。',
+          '用户产生的数据可用于非商业研究用途，无需事先征得用户同意，且不会用于商业化利用。',
           '用户可随时请求删除其个人数据或账户，平台将在合理期限内处理该请求，同时保留法律允许范围内的必要业务记录。',
         ],
       },
