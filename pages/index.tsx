@@ -7449,24 +7449,6 @@ const [lang, setLang] = useState<Lang>(() => {
       <SeatInfoContext.Provider value={seatInfoLabels}>
         <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
           <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 8px', textAlign:'center' }}>斗地主 · Fight the Landlord</h1>
-          <div style={{ display:'flex', justifyContent:'center', marginBottom:12 }}>
-            <button
-              type="button"
-              onClick={() => setDisclaimerOpen(true)}
-              style={{
-                padding:'6px 16px',
-                borderRadius:999,
-                border:'1px solid #dc2626',
-                background:'#fee2e2',
-                color:'#b91c1c',
-                fontWeight:600,
-                cursor:'pointer',
-                boxShadow:'0 1px 2px rgba(0,0,0,0.1)',
-              }}
-            >
-              {lang === 'en' ? I18N.en.DisclaimerButton : I18N.zh.DisclaimerButton}
-            </button>
-          </div>
           <div style={{ textAlign:'center', marginBottom:16 }}>
             <span
               style={{
@@ -7486,45 +7468,61 @@ const [lang, setLang] = useState<Lang>(() => {
             </span>
           </div>
           <div style={{ marginLeft:'auto', marginBottom:24, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:12 }} data-i18n-ignore>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
-          <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
-            <option value="zh">中文</option>
-            <option value="en">English</option>
-          </select>
-        </div>
-        <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'flex-end' }}>
-          <button
-            onClick={()=>setMatchMode('regular')}
-            aria-pressed={isRegularMode}
-            style={{
-              padding:'6px 12px',
-              borderRadius:8,
-              border:'1px solid #d1d5db',
-              background: isRegularMode ? '#2563eb' : '#fff',
-              color: isRegularMode ? '#fff' : '#1f2937',
-              cursor:'pointer',
-              fontWeight:600,
-            }}
-          >{regularLabel}</button>
-          <button
-            onClick={()=>setMatchMode('knockout')}
-            aria-pressed={!isRegularMode}
-            style={{
-              padding:'6px 12px',
-              borderRadius:8,
-              border:'1px solid #d1d5db',
-              background: !isRegularMode ? '#2563eb' : '#fff',
-              color: !isRegularMode ? '#fff' : '#1f2937',
-              cursor:'pointer',
-              fontWeight:600,
-            }}
-          >{knockoutLabel}</button>
-        </div>
-      </div>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
+              <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'flex-end', alignItems:'center' }}>
+              <button
+                type="button"
+                onClick={() => setDisclaimerOpen(true)}
+                style={{
+                  padding:'6px 16px',
+                  borderRadius:999,
+                  border:'1px solid #dc2626',
+                  background:'#fee2e2',
+                  color:'#b91c1c',
+                  fontWeight:600,
+                  cursor:'pointer',
+                  boxShadow:'0 1px 2px rgba(0,0,0,0.1)',
+                }}
+              >
+                {lang === 'en' ? I18N.en.DisclaimerButton : I18N.zh.DisclaimerButton}
+              </button>
+              <button
+                onClick={()=>setMatchMode('regular')}
+                aria-pressed={isRegularMode}
+                style={{
+                  padding:'6px 12px',
+                  borderRadius:8,
+                  border:'1px solid #d1d5db',
+                  background: isRegularMode ? '#2563eb' : '#fff',
+                  color: isRegularMode ? '#fff' : '#1f2937',
+                  cursor:'pointer',
+                  fontWeight:600,
+                }}
+              >{regularLabel}</button>
+              <button
+                onClick={()=>setMatchMode('knockout')}
+                aria-pressed={!isRegularMode}
+                style={{
+                  padding:'6px 12px',
+                  borderRadius:8,
+                  border:'1px solid #d1d5db',
+                  background: !isRegularMode ? '#2563eb' : '#fff',
+                  color: !isRegularMode ? '#fff' : '#1f2937',
+                  cursor:'pointer',
+                  fontWeight:600,
+                }}
+              >{knockoutLabel}</button>
+            </div>
+          </div>
 
 
-      {isRegularMode ? (
+          {isRegularMode ? (
         <>
         <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
           <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
