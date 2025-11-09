@@ -1,5 +1,6 @@
 // pages/index.tsx
 import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import DonationWidget from '../components/DonationWidget';
 import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
@@ -7568,24 +7569,27 @@ const [lang, setLang] = useState<Lang>(() => {
                 <option value="en">English</option>
               </select>
             </div>
-            <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
-              <button
-                type="button"
-                onClick={() => setDisclaimerOpen(true)}
-                style={{
-                  padding:'6px 16px',
-                  borderRadius:999,
-                  border:'1px solid #dc2626',
-                  background:'#fee2e2',
-                  color:'#b91c1c',
-                  fontWeight:600,
-                  cursor:'pointer',
-                  boxShadow:'0 1px 2px rgba(0,0,0,0.1)',
-                }}
-              >
-                {lang === 'en' ? I18N.en.DisclaimerButton : I18N.zh.DisclaimerButton}
-              </button>
-              <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center', marginLeft:'auto' }}>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center', justifyContent:'space-between' }}>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
+                <DonationWidget lang={lang} />
+                <button
+                  type="button"
+                  onClick={() => setDisclaimerOpen(true)}
+                  style={{
+                    padding:'6px 16px',
+                    borderRadius:999,
+                    border:'1px solid #dc2626',
+                    background:'#fee2e2',
+                    color:'#b91c1c',
+                    fontWeight:600,
+                    cursor:'pointer',
+                    boxShadow:'0 1px 2px rgba(0,0,0,0.1)',
+                  }}
+                >
+                  {lang === 'en' ? I18N.en.DisclaimerButton : I18N.zh.DisclaimerButton}
+                </button>
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
                 <button
                   onClick={()=>setMatchMode('regular')}
                   aria-pressed={isRegularMode}
