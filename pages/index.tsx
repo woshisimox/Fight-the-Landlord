@@ -190,7 +190,7 @@ type DisclaimerSection = { title: string; paragraphs: string[] };
 
 const DISCLAIMER_CONTENT: Record<Lang, { title: string; sections: DisclaimerSection[] }> = {
   en: {
-    title: 'AI Battle Platform (Fight the Landlord) – Compliance Statement & Terms of Use Template',
+    title: 'AI Battle Platform (Fight the Landlord)',
     sections: [
       {
         title: 'Scope',
@@ -273,7 +273,7 @@ const DISCLAIMER_CONTENT: Record<Lang, { title: string; sections: DisclaimerSect
     ],
   },
   zh: {
-    title: 'AI 对战平台（斗地主）——合规声明与使用条款模板',
+    title: 'AI 对战平台（斗地主）',
     sections: [
       {
         title: '一、适用范围',
