@@ -10,6 +10,8 @@ const I18N: Record<Lang, Record<string, string>> = {
   zh: {
     Title: '斗地主 · Fight the Landlord',
     TotalMatches: '所有参赛选手累计局数',
+    DisclaimerButton: '免责声明',
+    DisclaimerClose: '关闭免责声明',
     Settings: '对局设置',
     Enable: '启用对局',
     Reset: '清空',
@@ -28,6 +30,8 @@ const I18N: Record<Lang, Record<string, string>> = {
   en: {
     Title: 'Fight the Landlord',
     TotalMatches: 'Total games played by all participants',
+    DisclaimerButton: 'Disclaimer',
+    DisclaimerClose: 'Close disclaimer',
     Settings: 'Match settings',
     Enable: 'Enable match',
     Reset: 'Reset',
@@ -181,6 +185,91 @@ const TRANSLATIONS: TransRule[] = [
   { zh: '关闭后不可开始/继续对局；再次勾选即可恢复。', en: 'Disabled matches cannot start/continue; tick again to restore.' },
 ];
 function hasChinese(s: string) { return /[\u4e00-\u9fff]/.test(s); }
+
+type DisclaimerSection = { title: string; paragraphs: string[] };
+
+const DISCLAIMER_TITLE = 'AI Battle Platform (Fight the Landlord) – Compliance Statement & Terms of Use Template';
+
+const DISCLAIMER_SECTIONS: DisclaimerSection[] = [
+  {
+    title: 'Scope',
+    paragraphs: [
+      'This compliance statement and terms of use apply to an AI battle website or app (the “Platform”) built around the Fight the Landlord card game. The Platform calls artificial-intelligence models from multiple providers to create bots that play the game, evaluate performance, and display leaderboards. The service is for research, testing and entertainment only. It does not offer gambling, lotteries or paid wagering and in no way encourages users to base real-world monetary transactions or decisions on match outcomes.',
+    ],
+  },
+  {
+    title: 'AI models & providers',
+    paragraphs: [
+      'The Platform uses AI models from third-party providers, including but not limited to OpenAI (e.g. gpt-4o-mini), Google (Gemini series), Anthropic (Claude series), Alibaba (Qwen series), Kimi, DeepSeek, Grok, and Platform-developed or open-source strategies such as Greedy Max, Greedy Min, Random Legal, MiniNet, AllySupport and others.',
+      'Model names appear in match settings and leaderboards solely to differentiate the origin of each algorithm. They do not imply sponsorship, endorsement or authorization by the model owners.',
+      'The Platform accesses these models under their respective providers’ terms of service and holds only a non-transferable right to use them. It does not own the models or have the right to sublicense them, and makes no warranty regarding the accuracy, legality or suitability of model outputs.',
+      'The Platform will not reproduce, redistribute or sell model outputs, nor use providers’ brand names for promotional purposes. Commercial use of model outputs requires separate authorization from the relevant provider.',
+    ],
+  },
+  {
+    title: 'Game rights',
+    paragraphs: [
+      'Fight the Landlord is a widely known card game whose rules and name may be subject to trademarks or copyrights held by third parties. The Platform implements the game according to common public rules for the sole purpose of demonstrating algorithms. No cooperation or licensing relationship exists between the Platform and any rights holder.',
+      'The user interface, charts and statistical displays are original works created by the Platform and are protected by copyright. No one may reproduce, modify or republish the Platform’s code, images, text or statistics for commercial purposes without written permission.',
+    ],
+  },
+  {
+    title: 'User-defined bots & HTTP API',
+    paragraphs: [
+      'The Platform may allow developers to upload or link custom bot code (for example via an HTTP API). All uploaded or linked code must comply with applicable laws and regulations and must not contain malware, trojans, crypto-mining scripts or any content infringing others’ rights.',
+      'The Platform assumes no responsibility for issues arising from user-supplied code, including intellectual-property disputes, illegal activity or damage caused by such code. Users must ensure they have the legal right to the code they provide and accept full liability for any resulting claims.',
+      'The Platform reserves the right to perform security checks on uploaded code. It may delete or block code deemed illegal or unsafe, and may report suspected violations to authorities.',
+    ],
+  },
+  {
+    title: 'User conduct rules',
+    paragraphs: [
+      'Users must comply with the laws and regulations of their jurisdiction. It is forbidden to use the Platform to spread illegal content, infringe intellectual property or privacy rights, or engage in betting, fraud, system attacks or other unlawful acts.',
+      'Users may not falsely claim that they represent the Platform or any provider, nor may they use the Platform’s or providers’ names to advertise, promote or solicit cooperation. Any implication of endorsement is strictly prohibited.',
+      'Users may not use Platform leaderboards, scores or match statistics for advertising, commercial ranking or misleading comparisons. Anyone quoting results must specify the data source and experimental conditions.',
+      'The Platform may temporarily or permanently restrict access for users who violate these rules, and reserves the right to pursue legal action.',
+    ],
+  },
+  {
+    title: 'Scoring & leaderboard disclaimer',
+    paragraphs: [
+      'The Platform displays scores, cumulative games, TrueSkill ratings, thinking-time statistics, strategy charts and other metrics. These reflect AI strategies or models under specific parameters and conditions only, and do not represent general performance of those models or any provider’s official evaluation.',
+      'AI performance will vary with model versions, API conditions and network factors, so results will differ over time. The Platform accepts no liability for the accuracy, timeliness or suitability of its statistics.',
+      'Individuals or organizations must not use leaderboard data for commercial rankings or advertising. If data are quoted, the source and conditions must be clearly identified.',
+    ],
+  },
+  {
+    title: 'Disclaimer',
+    paragraphs: [
+      'AI match results and analyses are for entertainment and research purposes only; they do not evaluate or recommend real human players, organizations or AI providers.',
+      'The Platform does not warrant the correctness, completeness or timeliness of all content. Users assume all risk and responsibility for using Platform content.',
+      'The Platform may link to third-party websites or APIs. Such links are provided for convenience and do not constitute endorsement. Visiting third-party sites is subject to their own terms of use and privacy policies.',
+    ],
+  },
+  {
+    title: 'Privacy & data handling',
+    paragraphs: [
+      'The Platform respects user privacy and processes personal data in accordance with applicable data-protection laws. Basic browsing does not require registration. Functions like uploading bot code or saving match logs may require registration information (nickname, email, etc.), collected only to provide services and improve user experience.',
+      'Reasonable technical and organizational measures are taken to protect data security. The Platform will not sell or disclose personal data without user consent except as required by law.',
+      'Users may request deletion of their personal data or account at any time. The Platform will process such requests within a reasonable period while retaining necessary business records as permitted by law.',
+    ],
+  },
+  {
+    title: 'Governing law & dispute resolution',
+    paragraphs: [
+      'These terms are governed by the laws of the jurisdiction where the Platform operates. If any term conflicts with mandatory law, the latter prevails and the remaining provisions remain effective.',
+      'Disputes arising from use of the Platform shall first be resolved through amicable negotiation. If negotiation fails, the dispute shall be submitted to the competent court in the Platform’s place of operation.',
+    ],
+  },
+  {
+    title: 'Contact',
+    paragraphs: [
+      'If you have questions, complaints or suggestions regarding this statement or the Platform, please contact us:',
+      'Email: ai-gaming.online@outlook.com',
+      'We will respond and handle your request within a reasonable time.',
+    ],
+  },
+];
 
 let cachedCreatePortal: ((children: ReactNode, container: Element | DocumentFragment) => ReactNode) | null = null;
 const renderViaPortal = (children: ReactNode, container: HTMLElement | null): ReactNode => {
@@ -7243,6 +7332,8 @@ const [lang, setLang] = useState<Lang>(() => {
   const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
   const [totalMatches, setTotalMatches] = useState<number | null>(null);
+  const [disclaimerOpen, setDisclaimerOpen] = useState(false);
+  const disclaimerHostRef = useRef<HTMLElement | null>(null);
 
   const computeTotalMatches = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -7285,6 +7376,23 @@ const [lang, setLang] = useState<Lang>(() => {
       window.clearInterval(interval);
     };
   }, [computeTotalMatches]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let host = document.getElementById('ddz-disclaimer-root') as HTMLElement | null;
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'ddz-disclaimer-root';
+      document.body.appendChild(host);
+    }
+    disclaimerHostRef.current = host;
+    return () => {
+      if (!host) return;
+      if (host.childElementCount === 0) {
+        host.remove();
+      }
+    };
+  }, []);
 
   const seatInfoLabels = useMemo(() => {
     return [0,1,2].map(i => {
@@ -7341,6 +7449,24 @@ const [lang, setLang] = useState<Lang>(() => {
       <SeatInfoContext.Provider value={seatInfoLabels}>
         <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
           <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 8px', textAlign:'center' }}>斗地主 · Fight the Landlord</h1>
+          <div style={{ display:'flex', justifyContent:'center', marginBottom:12 }}>
+            <button
+              type="button"
+              onClick={() => setDisclaimerOpen(true)}
+              style={{
+                padding:'6px 16px',
+                borderRadius:999,
+                border:'1px solid #dc2626',
+                background:'#fee2e2',
+                color:'#b91c1c',
+                fontWeight:600,
+                cursor:'pointer',
+                boxShadow:'0 1px 2px rgba(0,0,0,0.1)',
+              }}
+            >
+              {lang === 'en' ? I18N.en.DisclaimerButton : I18N.zh.DisclaimerButton}
+            </button>
+          </div>
           <div style={{ textAlign:'center', marginBottom:16 }}>
             <span
               style={{
@@ -7725,6 +7851,70 @@ const [lang, setLang] = useState<Lang>(() => {
         <KnockoutPanel />
       )}
         </div>
+        {disclaimerOpen && renderViaPortal(
+          <div
+            role="presentation"
+            onClick={() => setDisclaimerOpen(false)}
+            style={{
+              position:'fixed',
+              inset:0,
+              background:'rgba(0,0,0,0.45)',
+              display:'flex',
+              alignItems:'center',
+              justifyContent:'center',
+              padding:'24px',
+              zIndex:2000,
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="ddz-disclaimer-title"
+              onClick={e => e.stopPropagation()}
+              style={{
+                background:'#fff',
+                maxWidth:720,
+                width:'100%',
+                maxHeight:'85vh',
+                overflowY:'auto',
+                borderRadius:12,
+                boxShadow:'0 20px 45px rgba(15,23,42,0.25)',
+                padding:'24px 28px',
+                lineHeight:1.6,
+              }}
+            >
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16 }}>
+                <h2 id="ddz-disclaimer-title" style={{ margin:0, fontSize:20, fontWeight:800, color:'#111827' }}>{DISCLAIMER_TITLE}</h2>
+                <button
+                  type="button"
+                  onClick={() => setDisclaimerOpen(false)}
+                  aria-label={lang === 'en' ? I18N.en.DisclaimerClose : I18N.zh.DisclaimerClose}
+                  style={{
+                    border:'none',
+                    background:'transparent',
+                    color:'#6b7280',
+                    fontSize:24,
+                    lineHeight:1,
+                    cursor:'pointer',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ marginTop:16, display:'flex', flexDirection:'column', gap:18 }}>
+                {DISCLAIMER_SECTIONS.map(section => (
+                  <section key={section.title}>
+                    <h3 style={{ margin:'0 0 8px', fontSize:16, fontWeight:700, color:'#1f2937' }}>{section.title}</h3>
+                    {section.paragraphs.map((text, idx) => (
+                      <p key={idx} style={{ margin:'0 0 10px', color:'#374151', fontSize:14 }}>{text}</p>
+                    ))}
+                  </section>
+                ))}
+              </div>
+            </div>
+          </div>,
+          disclaimerHostRef.current,
+        )}
       </SeatInfoContext.Provider>
     </LangContext.Provider>
   </>);
