@@ -8,7 +8,7 @@ type Props = {
 };
 
 const AFDIAN_URL = process.env.NEXT_PUBLIC_AFDIAN_URL ?? 'https://afdian.net/a/ai-battle';
-const BUYMEACOFFEE_URL = process.env.NEXT_PUBLIC_BMC_URL ?? 'https://www.buymeacoffee.com/ai-battle';
+const BUYMEACOFFEE_URL = process.env.NEXT_PUBLIC_BMC_URL ?? 'https://buymeacoffee.com';
 
 function resolveDefaultProvider(): DonationProvider {
   if (typeof window === 'undefined') {
@@ -45,17 +45,18 @@ function resolveDefaultProvider(): DonationProvider {
 }
 
 export default function DonationWidget({ lang, className }: Props) {
-  const [provider, setProvider] = useState<DonationProvider>(() => resolveDefaultProvider());
+  const [detectedProvider, setDetectedProvider] = useState<DonationProvider>(() => resolveDefaultProvider());
 
   useEffect(() => {
     // Re-evaluate provider when the component hydrates on the client.
     if (typeof window === 'undefined') {
       return;
     }
-    setProvider(resolveDefaultProvider());
+    setDetectedProvider(resolveDefaultProvider());
   }, []);
 
   const { href, label } = useMemo(() => {
+    const provider: DonationProvider = lang === 'en' ? 'buymeacoffee' : detectedProvider;
     if (provider === 'afdian') {
       return {
         href: AFDIAN_URL,
@@ -66,7 +67,7 @@ export default function DonationWidget({ lang, className }: Props) {
       href: BUYMEACOFFEE_URL,
       label: lang === 'zh' ? 'BuyMeACoffee 支持' : 'Buy Me a Coffee',
     };
-  }, [provider, lang]);
+  }, [detectedProvider, lang]);
 
   const message = lang === 'zh'
     ? '所有捐赠均为自愿支持行为，不构成任何付费服务或权益，不可退款。'
