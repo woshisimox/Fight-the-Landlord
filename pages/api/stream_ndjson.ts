@@ -665,9 +665,20 @@ function traceWrap(
         try {
           const humanOutcome = humanPromise
             .then((value) => ({ source: 'human' as const, value }))
-            .catch((error) => ({ source: 'human-error' as const, error }));
+            .catch((error) => {
+              const code = typeof (error as any)?.code === 'string' ? (error as any).code : '';
+              const message = typeof (error as any)?.message === 'string' ? (error as any).message : '';
+              if (code === 'timeout' || message === 'timeout' || message === 'error:timeout') {
+                return { source: 'human-timeout' as const, error };
+              }
+              return { source: 'human-error' as const, error };
+            });
           const timeoutOutcome = timeout.then((value) => ({ source: 'timeout' as const, value }));
           let outcome = await Promise.race([humanOutcome, timeoutOutcome]);
+          if (outcome.source === 'human-timeout') {
+            timedOut = true;
+            outcome = await timeoutOutcome;
+          }
           if (outcome.source === 'human') {
             result = outcome.value;
           } else if (outcome.source === 'human-error') {
@@ -694,7 +705,16 @@ function traceWrap(
             }
           }
         } catch (err:any) {
-          result = { move:'pass', reason:`error:${err?.message||String(err)}` };
+          if (timedOut) {
+            try {
+              const autoMove = await Promise.resolve(buildAutoTimeoutMove(ctxWithSeen));
+              result = autoMove || { move: 'pass', reason: 'auto:timeout-pass' };
+            } catch (autoErr: any) {
+              result = { move: 'pass', reason: `timeout-error:${autoErr?.message || String(autoErr)}` };
+            }
+          } else {
+            result = { move:'pass', reason:`error:${err?.message||String(err)}` };
+          }
         }
       } else {
         const timeout = makeTimeout(effectiveTimeoutMs);
