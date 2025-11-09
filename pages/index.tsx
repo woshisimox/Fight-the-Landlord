@@ -1546,6 +1546,7 @@ const deckKeyDisplay = (key: string): string => {
 
 function computeDeckAuditSnapshot(hands: string[][], bottom: BottomInfo | null): DeckAuditReport | null {
   if (!Array.isArray(hands) || hands.length !== 3) return null;
+  if (bottom && bottom.revealed === false) return null;
   const bottomCards = bottom?.cards?.map(c => c.label).filter((label): label is string => !!label) ?? [];
   const landlord = typeof bottom?.landlord === 'number' && bottom.landlord >= 0 && bottom.landlord < 3
     ? bottom.landlord
@@ -7062,20 +7063,16 @@ const handleAllSaveInner = () => {
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:8 }}>
           {[0,1,2].map(i=>{
-            const showAllBottom = !bottomInfo.revealed && bottomInfo.cards.length > 0;
+            const isRevealed = !!bottomInfo.revealed;
             const isLandlord = bottomInfo.landlord === i;
-            const showCards = showAllBottom
-              ? true
-              : bottomInfo.revealed
-                ? isLandlord
-                : (!hasHumanSeat);
+            const showCards = isRevealed && isLandlord;
             const cards = showCards ? bottomInfo.cards : [];
             const labelText = lang === 'en'
-              ? `Bottom${showAllBottom ? ' (pre-bid)' : ''}`
-              : `底牌${showAllBottom ? '（待抢地主）' : ''}`;
-            const background = showAllBottom
-              ? '#fef3c7'
-              : (isLandlord ? '#f0fdf4' : '#f9fafb');
+              ? (isRevealed ? 'Bottom' : 'Bottom (awaiting reveal)')
+              : (isRevealed ? '底牌' : '底牌（待明牌）');
+            const background = isRevealed
+              ? (isLandlord ? '#f0fdf4' : '#f9fafb')
+              : '#f9fafb';
             return (
               <div
                 key={`bottom-${i}`}
@@ -7104,8 +7101,12 @@ const handleAllSaveInner = () => {
                       {lang === 'en' ? '(awaiting reveal)' : '（待明牌）'}
                     </div>
                   )
-                ) : (
+                ) : isRevealed ? (
                   <div style={{ fontSize:12, color:'#d1d5db' }}>—</div>
+                ) : (
+                  <div style={{ fontSize:12, color:'#9ca3af' }}>
+                    {lang === 'en' ? '(awaiting reveal)' : '（待明牌）'}
+                  </div>
                 )}
               </div>
             );

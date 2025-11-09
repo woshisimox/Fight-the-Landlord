@@ -23,7 +23,7 @@ import { DeepseekBot } from '../../lib/bots/deepseek_bot';
 import {
   registerHumanRequest,
   fulfillHumanRequest,
-  expireHumanRequest,
+  releaseHumanRequest,
   resetSession as resetHumanSession,
 } from '../../lib/humanStore';
 import type { BotMove, Combo, Four2Policy } from '../../lib/doudizhu/engine';
@@ -90,6 +90,9 @@ const __keyRank = (mv:string[])=>{
   }
   return best || '3';
 };
+
+const HUMAN_TIMEOUT_GRACE_MS = 600;
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
 const __longestSingleChain=(cs:string[])=>{
   const cnt=__count(cs);
   const rs=Array.from(cnt.keys()).filter(r=>r!=='2'&&r!=='x'&&r!=='X').sort((a,b)=>(__POS[a]??-1)-(__POS[b]??-1));
@@ -651,15 +654,45 @@ function traceWrap(
             expiresAt,
           });
         } catch {}
+        let timedOut = false;
         const timeout = makeTimeout(
           effectiveTimeoutMs,
           () => {
-            expireHumanRequest(sessionKey, requestId, new Error('timeout'));
+            timedOut = true;
           },
           () => buildAutoTimeoutMove(ctxWithSeen),
         );
         try {
-          result = await Promise.race([humanPromise, timeout]);
+          const humanOutcome = humanPromise
+            .then((value) => ({ source: 'human' as const, value }))
+            .catch((error) => ({ source: 'human-error' as const, error }));
+          const timeoutOutcome = timeout.then((value) => ({ source: 'timeout' as const, value }));
+          let outcome = await Promise.race([humanOutcome, timeoutOutcome]);
+          if (outcome.source === 'human') {
+            result = outcome.value;
+          } else if (outcome.source === 'human-error') {
+            throw outcome.error;
+          } else {
+            if (timedOut && HUMAN_TIMEOUT_GRACE_MS > 0) {
+              const graceOutcome = await Promise.race([
+                humanOutcome,
+                sleep(HUMAN_TIMEOUT_GRACE_MS).then(() => ({ source: 'grace' as const })),
+              ]);
+              if (graceOutcome.source === 'human') {
+                timedOut = false;
+                result = graceOutcome.value;
+              } else if (graceOutcome.source === 'human-error') {
+                throw graceOutcome.error;
+              } else {
+                result = outcome.value;
+              }
+            } else {
+              result = outcome.value;
+            }
+            if (timedOut) {
+              releaseHumanRequest(sessionKey, requestId);
+            }
+          }
         } catch (err:any) {
           result = { move:'pass', reason:`error:${err?.message||String(err)}` };
         }

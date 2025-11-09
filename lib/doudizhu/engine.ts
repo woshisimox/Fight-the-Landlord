@@ -2890,7 +2890,7 @@ export async function* runOneGame(opts: {
       landlord: null,
       landlordIdx: null,
       hands: hands.map(h => [...h]),
-      bottom: bottom.slice(),
+      bottom: [],
     };
   } catch {}
 

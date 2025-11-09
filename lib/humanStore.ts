@@ -84,6 +84,16 @@ export function expireHumanRequest(sessionId: string, requestId: string, reason?
   try { entry.reject(reason); } catch {}
 }
 
+export function releaseHumanRequest(sessionId: string, requestId: string) {
+  const store = getStore();
+  const bucket = store.get(sessionId);
+  if (!bucket) return;
+  const entry = bucket.get(requestId);
+  if (!entry || entry.expired) return;
+  entry.expired = true;
+  bucket.delete(requestId);
+}
+
 export function hasPendingHumanRequest(sessionId: string, requestId: string): boolean {
   const store = getStore();
   const bucket = store.get(sessionId);
