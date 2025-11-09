@@ -3638,7 +3638,7 @@ function KnockoutPanel() {
           <div style={{ fontWeight:700, marginBottom:6 }}>
             {lang === 'en' ? 'Final standings' : '最终排名'}
           </div>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:16 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {podiumPlacements.map((placement, idx) => {
               const label = idx === 0
                 ? (lang === 'en' ? 'Champion' : '冠军')
