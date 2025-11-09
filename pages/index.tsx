@@ -9,12 +9,17 @@ const SeatInfoContext = createContext<string[] | null>(null);
 const I18N: Record<Lang, Record<string, string>> = {
   zh: {
     Title: '斗地主 · Fight the Landlord',
+    TotalMatches: '所有参赛选手累计局数',
+    DisclaimerButton: '免责声明',
+    DisclaimerClose: '关闭免责声明',
     Settings: '对局设置',
     Enable: '启用对局',
     Reset: '清空',
     EnableHint: '关闭后不可开始/继续对局；再次勾选即可恢复。',
-    LadderTitle: '天梯图（活动积分 ΔR）',
-    LadderRange: '范围 ±K（按局面权重加权，当前 K≈{K}；未参赛=历史或0）',
+    LadderTitle: '积分',
+    LadderSubtitle: '活动积分 ΔR',
+    LadderRange: '范围 ±K，按局面权重加权，当前 K≈{K}；未参赛=历史或0',
+    LadderPlaysTitle: '累计局数',
     Pass: '过',
     Play: '出牌',
     Empty: '（空）',
@@ -24,12 +29,17 @@ const I18N: Record<Lang, Record<string, string>> = {
   },
   en: {
     Title: 'Fight the Landlord',
+    TotalMatches: 'Total games played by all participants',
+    DisclaimerButton: 'Disclaimer',
+    DisclaimerClose: 'Close disclaimer',
     Settings: 'Match settings',
     Enable: 'Enable match',
     Reset: 'Reset',
     EnableHint: 'Disabled matches cannot start/continue; tick again to restore.',
-    LadderTitle: 'Ladder (ΔR)',
-    LadderRange: 'Range ±K (weighted by situation, current K≈{K}; no-participation = history or 0)',
+    LadderTitle: 'Points',
+    LadderSubtitle: 'Activity ΔR',
+    LadderRange: 'Range ±K, weighted by situation; current K≈{K}; no participation uses history or 0',
+    LadderPlaysTitle: 'Games played',
     Pass: 'Pass',
     Play: 'Play',
     Empty: '(empty)',
@@ -176,6 +186,113 @@ const TRANSLATIONS: TransRule[] = [
 ];
 function hasChinese(s: string) { return /[\u4e00-\u9fff]/.test(s); }
 
+type DisclaimerSection = { title: string; paragraphs: string[] };
+
+const DISCLAIMER_TITLE = 'AI Battle Platform (Fight the Landlord) – Compliance Statement & Terms of Use Template';
+
+const DISCLAIMER_SECTIONS: DisclaimerSection[] = [
+  {
+    title: 'Scope',
+    paragraphs: [
+      'This compliance statement and terms of use apply to an AI battle website or app (the “Platform”) built around the Fight the Landlord card game. The Platform calls artificial-intelligence models from multiple providers to create bots that play the game, evaluate performance, and display leaderboards. The service is for research, testing and entertainment only. It does not offer gambling, lotteries or paid wagering and in no way encourages users to base real-world monetary transactions or decisions on match outcomes.',
+    ],
+  },
+  {
+    title: 'AI models & providers',
+    paragraphs: [
+      'The Platform uses AI models from third-party providers, including but not limited to OpenAI (e.g. gpt-4o-mini), Google (Gemini series), Anthropic (Claude series), Alibaba (Qwen series), Kimi, DeepSeek, Grok, and Platform-developed or open-source strategies such as Greedy Max, Greedy Min, Random Legal, MiniNet, AllySupport and others.',
+      'Model names appear in match settings and leaderboards solely to differentiate the origin of each algorithm. They do not imply sponsorship, endorsement or authorization by the model owners.',
+      'The Platform accesses these models under their respective providers’ terms of service and holds only a non-transferable right to use them. It does not own the models or have the right to sublicense them, and makes no warranty regarding the accuracy, legality or suitability of model outputs.',
+      'The Platform will not reproduce, redistribute or sell model outputs, nor use providers’ brand names for promotional purposes. Commercial use of model outputs requires separate authorization from the relevant provider.',
+    ],
+  },
+  {
+    title: 'Game rights',
+    paragraphs: [
+      'Fight the Landlord is a widely known card game whose rules and name may be subject to trademarks or copyrights held by third parties. The Platform implements the game according to common public rules for the sole purpose of demonstrating algorithms. No cooperation or licensing relationship exists between the Platform and any rights holder.',
+      'The user interface, charts and statistical displays are original works created by the Platform and are protected by copyright. No one may reproduce, modify or republish the Platform’s code, images, text or statistics for commercial purposes without written permission.',
+    ],
+  },
+  {
+    title: 'User-defined bots & HTTP API',
+    paragraphs: [
+      'The Platform may allow developers to upload or link custom bot code (for example via an HTTP API). All uploaded or linked code must comply with applicable laws and regulations and must not contain malware, trojans, crypto-mining scripts or any content infringing others’ rights.',
+      'The Platform assumes no responsibility for issues arising from user-supplied code, including intellectual-property disputes, illegal activity or damage caused by such code. Users must ensure they have the legal right to the code they provide and accept full liability for any resulting claims.',
+      'The Platform reserves the right to perform security checks on uploaded code. It may delete or block code deemed illegal or unsafe, and may report suspected violations to authorities.',
+    ],
+  },
+  {
+    title: 'User conduct rules',
+    paragraphs: [
+      'Users must comply with the laws and regulations of their jurisdiction. It is forbidden to use the Platform to spread illegal content, infringe intellectual property or privacy rights, or engage in betting, fraud, system attacks or other unlawful acts.',
+      'Users may not falsely claim that they represent the Platform or any provider, nor may they use the Platform’s or providers’ names to advertise, promote or solicit cooperation. Any implication of endorsement is strictly prohibited.',
+      'Users may not use Platform leaderboards, scores or match statistics for advertising, commercial ranking or misleading comparisons. Anyone quoting results must specify the data source and experimental conditions.',
+      'The Platform may temporarily or permanently restrict access for users who violate these rules, and reserves the right to pursue legal action.',
+    ],
+  },
+  {
+    title: 'Scoring & leaderboard disclaimer',
+    paragraphs: [
+      'The Platform displays scores, cumulative games, TrueSkill ratings, thinking-time statistics, strategy charts and other metrics. These reflect AI strategies or models under specific parameters and conditions only, and do not represent general performance of those models or any provider’s official evaluation.',
+      'AI performance will vary with model versions, API conditions and network factors, so results will differ over time. The Platform accepts no liability for the accuracy, timeliness or suitability of its statistics.',
+      'Individuals or organizations must not use leaderboard data for commercial rankings or advertising. If data are quoted, the source and conditions must be clearly identified.',
+    ],
+  },
+  {
+    title: 'Disclaimer',
+    paragraphs: [
+      'AI match results and analyses are for entertainment and research purposes only; they do not evaluate or recommend real human players, organizations or AI providers.',
+      'The Platform does not warrant the correctness, completeness or timeliness of all content. Users assume all risk and responsibility for using Platform content.',
+      'The Platform may link to third-party websites or APIs. Such links are provided for convenience and do not constitute endorsement. Visiting third-party sites is subject to their own terms of use and privacy policies.',
+    ],
+  },
+  {
+    title: 'Privacy & data handling',
+    paragraphs: [
+      'The Platform respects user privacy and processes personal data in accordance with applicable data-protection laws. Basic browsing does not require registration. Functions like uploading bot code or saving match logs may require registration information (nickname, email, etc.), collected only to provide services and improve user experience.',
+      'Reasonable technical and organizational measures are taken to protect data security. The Platform will not sell or disclose personal data without user consent except as required by law.',
+      'Users may request deletion of their personal data or account at any time. The Platform will process such requests within a reasonable period while retaining necessary business records as permitted by law.',
+    ],
+  },
+  {
+    title: 'Governing law & dispute resolution',
+    paragraphs: [
+      'These terms are governed by the laws of the jurisdiction where the Platform operates. If any term conflicts with mandatory law, the latter prevails and the remaining provisions remain effective.',
+      'Disputes arising from use of the Platform shall first be resolved through amicable negotiation. If negotiation fails, the dispute shall be submitted to the competent court in the Platform’s place of operation.',
+    ],
+  },
+  {
+    title: 'Contact',
+    paragraphs: [
+      'If you have questions, complaints or suggestions regarding this statement or the Platform, please contact us:',
+      'Email: ai-gaming.online@outlook.com',
+      'We will respond and handle your request within a reasonable time.',
+    ],
+  },
+];
+
+let cachedCreatePortal: ((children: ReactNode, container: Element | DocumentFragment) => ReactNode) | null = null;
+const renderViaPortal = (children: ReactNode, container: HTMLElement | null): ReactNode => {
+  if (!container) return null;
+  if (typeof window === 'undefined') return children;
+  if (!cachedCreatePortal) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const mod = require('react-dom');
+      const fn = mod?.createPortal;
+      if (typeof fn === 'function') {
+        cachedCreatePortal = fn;
+      }
+    } catch {
+      cachedCreatePortal = null;
+    }
+  }
+  if (cachedCreatePortal) {
+    return cachedCreatePortal(children, container);
+  }
+  return children;
+};
+
 function translateTextLiteral(s: string): string {
   let out = s;
   for (const r of TRANSLATIONS) {
@@ -272,6 +389,7 @@ type BotChoice =
   | 'built-in:mininet'
   | 'built-in:ally-support'
   | 'built-in:endgame-rush'
+  | 'built-in:advanced-hybrid'
   | 'ai:openai' | 'ai:gemini' | 'ai:grok' | 'ai:kimi' | 'ai:qwen' | 'ai:deepseek'
   | 'http'
   | 'human';
@@ -361,6 +479,7 @@ const KO_DEFAULT_CHOICES: BotChoice[] = [
   'built-in:greedy-min',
   'built-in:random-legal',
   'built-in:mininet',
+  'built-in:advanced-hybrid',
 ];
 const KO_ALL_CHOICES: BotChoice[] = [
   'built-in:greedy-max',
@@ -369,6 +488,7 @@ const KO_ALL_CHOICES: BotChoice[] = [
   'built-in:mininet',
   'built-in:ally-support',
   'built-in:endgame-rush',
+  'built-in:advanced-hybrid',
   'ai:openai',
   'ai:gemini',
   'ai:grok',
@@ -621,6 +741,19 @@ function isFinalRoundMatch(rounds: KnockoutRound[], roundIdx: number, matchIdx: 
   return active.length === 3;
 }
 
+function isSingleTrioTournament(rounds: KnockoutRound[]): boolean {
+  if (!Array.isArray(rounds) || rounds.length !== 1) return false;
+  const first = rounds[0];
+  if (!isFinalRoundStructure(first)) return false;
+  const unique = new Set<string>();
+  for (const match of first.matches) {
+    for (const player of match.players) {
+      if (player && player !== KO_BYE) unique.add(player);
+    }
+  }
+  return unique.size > 0 && unique.size <= 3;
+}
+
 function shuffleArray<T>(input: T[]): T[] {
   const arr = [...input];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -652,6 +785,15 @@ function normalizeKnockoutRounds(base: KnockoutRound[]): KnockoutRound[] {
     roundIndex += 1;
   }
   return rounds;
+}
+
+function encodeRoundsSignature(rounds: KnockoutRound[]): string {
+  return JSON.stringify(rounds.map(round => ({
+    matches: round.matches.map(match => ({
+      players: match.players,
+      eliminated: match.eliminated ?? null,
+    })),
+  })));
 }
 
 function applyEliminationToDraft(
@@ -732,6 +874,7 @@ const writeStore = (s: TsStore) => { try { s.updatedAt=new Date().toISOString();
 type LiveProps = {
   rounds: number;
   startScore: number;
+  instanceId: number;
 
   seatDelayMs?: number[];
   enabled: boolean;
@@ -751,7 +894,9 @@ type LiveProps = {
   onFinished?: (result: LivePanelFinishPayload) => void;
   controlsHidden?: boolean;
   initialTotals?: [number, number, number] | null;
-  turnTimeoutSecs?: number[];};
+  turnTimeoutSecs?: number[];
+  controlsPortal?: HTMLElement | null;
+};
 
 type LivePanelHandle = {
   start: () => Promise<void>;
@@ -759,6 +904,7 @@ type LivePanelHandle = {
   togglePause: () => void;
   isRunning: () => boolean;
   isPaused: () => boolean;
+  getInstanceId: () => number;
 };
 
 type LivePanelFinishPayload = {
@@ -1599,7 +1745,7 @@ function writeThoughtStore(store: ThoughtStore): ThoughtStore {
 }
 
 const THOUGHT_CATALOG_CHOICES: BotChoice[] = [
-  'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush',
+  'built-in:greedy-max','built-in:greedy-min','built-in:random-legal','built-in:mininet','built-in:ally-support','built-in:endgame-rush','built-in:advanced-hybrid',
   'ai:openai','ai:gemini','ai:grok','ai:kimi','ai:qwen','ai:deepseek','http','human',
 ];
 const DEFAULT_THOUGHT_CATALOG_IDS = THOUGHT_CATALOG_CHOICES.map(choice => makeThoughtIdentity(choice));
@@ -1632,7 +1778,7 @@ function thoughtLabelForIdentity(id: string): string {
 
 /* ===== 天梯图组件（x=ΔR_event，y=各 AI/内置；含未参赛=历史或0） ===== */
 function LadderPanel() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [tick, setTick] = useState(0);
   useEffect(()=>{
     const onAny = () => setTick(k=>k+1);
@@ -1661,7 +1807,16 @@ function LadderPanel() {
     const val = ent?.current?.deltaR ?? 0;
     const n   = ent?.current?.n ?? 0;
     const label = ent?.label || catalogLabels(id) || id;
-    return { id, label, val, n };
+    const rawMatches = ent?.current?.matches;
+    const fallbackMatches = ent?.current?.n;
+    const matches = (() => {
+      const direct = Number(rawMatches);
+      if (Number.isFinite(direct)) return Math.max(0, direct);
+      const approx = Number(fallbackMatches);
+      if (Number.isFinite(approx)) return Math.max(0, Math.round(approx));
+      return 0;
+    })();
+    return { id, label, val, n, matches };
   });
 
   const valsForRange = (arr.some(x=> x.n>0) ? arr.filter(x=> x.n>0) : arr);
@@ -1670,18 +1825,23 @@ function LadderPanel() {
   const maxAbs = Math.max(Math.abs(minVal), Math.abs(maxVal));
   const K = Math.max(1, maxAbs * 1.1);
 
-  const items = arr.sort((a,b)=> b.val - a.val);
+  const itemsByScore = [...arr].sort((a,b)=> b.val - a.val);
+  const itemsByPlays = [...arr].sort((a,b)=> b.matches - a.matches);
+  const maxPlays = itemsByPlays.reduce((m, it) => Math.max(m, it.matches || 0), 0);
 
   const axisStyle:any = { position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'#e5e7eb' };
+  const playsUnit = lang === 'en' ? 'games' : '局';
 
   return (
     <div style={{ border:'1px dashed #e5e7eb', borderRadius:8, padding:10, marginTop:10 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
         <div style={{ fontWeight:700 }}>{t('LadderTitle')}</div>
-        <div style={{ fontSize:12, color:'#6b7280' }}>{t('LadderRange', { K })}</div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>
+          {`${t('LadderSubtitle')} · ${t('LadderRange', { K })}`}
+        </div>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 56px', gap:8 }}>
-        {items.map((it:any)=>{
+        {itemsByScore.map((it:any)=>{
           const pct = Math.min(1, Math.abs(it.val)/K);
           const pos = it.val >= 0;
           return (
@@ -1692,6 +1852,29 @@ function LadderPanel() {
                 <div style={{ position:'absolute', left: pos ? '50%' : `${50 - pct*50}%`, width: `${pct*50}%`, top:2, bottom:2, background: pos ? '#16a34a' : '#ef4444', borderRadius:6 }}/>
               </div>
               <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right' }}>{it.val.toFixed(2)}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontWeight:700, marginTop:16 }}>{t('LadderPlaysTitle')}</div>
+      <div style={{ display:'grid', gridTemplateColumns:'240px 1fr 96px', gap:8, marginTop:6 }}>
+        {itemsByPlays.map((it:any)=>{
+          const pct = maxPlays > 0 ? Math.min(1, (it.matches || 0) / maxPlays) : 0;
+          const countText = (() => {
+            const count = typeof it.matches === 'number' && isFinite(it.matches) ? it.matches : 0;
+            const rounded = Math.round(count);
+            const formatted = rounded > 0 ? rounded.toLocaleString() : '0';
+            return `${formatted} ${playsUnit}`;
+          })();
+          return (
+            <div key={`plays-${it.id}`} style={{ display:'contents' }}>
+              <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.label}</div>
+              <div style={{ position:'relative', height:16, background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:8 }}>
+                <div style={{ position:'absolute', left:0, top:2, bottom:2, width:`${pct*100}%`, background:'#2563eb', borderRadius:6 }} />
+              </div>
+              <div style={{ fontFamily:'ui-monospace,Menlo,Consolas,monospace', textAlign:'right', whiteSpace:'nowrap' }}>
+                {countText}
+              </div>
             </div>
           );
         })}
@@ -1827,31 +2010,55 @@ function KnockoutPanel() {
     return makeDefaultKnockoutEntries();
   });
   const [rounds, setRounds] = useState<KnockoutRound[]>([]);
+  const applyRoundsUpdate = useCallback((update: KnockoutRound[] | ((prev: KnockoutRound[]) => KnockoutRound[])) => {
+    if (typeof update === 'function') {
+      setRounds(prev => {
+        const next = (update as (prev: KnockoutRound[]) => KnockoutRound[])(prev);
+        roundsRef.current = next;
+        return next;
+      });
+    } else {
+      roundsRef.current = update;
+      setRounds(update);
+    }
+  }, [setRounds]);
   const [currentMatch, setCurrentMatch] = useState<KnockoutMatchContext | null>(null);
   const currentMatchRef = useRef<KnockoutMatchContext | null>(null);
   useEffect(() => { currentMatchRef.current = currentMatch; }, [currentMatch]);
   const [matchKey, setMatchKey] = useState(0);
+  const matchKeyRef = useRef(matchKey);
+  useEffect(() => { matchKeyRef.current = matchKey; }, [matchKey]);
   const [liveTotals, setLiveTotals] = useState<[number, number, number] | null>(null);
   const liveTotalsRef = useRef<[number, number, number] | null>(null);
   useEffect(() => { liveTotalsRef.current = liveTotals; }, [liveTotals]);
   const [seriesTotals, setSeriesTotals] = useState<[number, number, number] | null>(null);
   const seriesTotalsRef = useRef<[number, number, number] | null>(seriesTotals);
   useEffect(() => { seriesTotalsRef.current = seriesTotals; }, [seriesTotals]);
+  const [nextMatchInitialTotals, setNextMatchInitialTotals] = useState<[number, number, number] | null>(null);
   const [seriesRounds, setSeriesRounds] = useState<number>(() => settings.roundsPerGroup);
   const [overtimeCount, setOvertimeCount] = useState(0);
   const [overtimeReason, setOvertimeReason] = useState<'lowest' | 'final'>('lowest');
   const overtimeCountRef = useRef(overtimeCount);
   useEffect(() => { overtimeCountRef.current = overtimeCount; }, [overtimeCount]);
   const [liveRunning, setLiveRunning] = useState(false);
+  const liveRunningRef = useRef(liveRunning);
+  useEffect(() => { liveRunningRef.current = liveRunning; }, [liveRunning]);
   const [livePaused, setLivePaused] = useState(false);
   const [automationActive, setAutomationActive] = useState(false);
   const [finalStandings, setFinalStandings] = useState<KnockoutFinalStandings | null>(null);
+  const finalStandingsRef = useRef<KnockoutFinalStandings | null>(finalStandings);
+  useEffect(() => { finalStandingsRef.current = finalStandings; }, [finalStandings]);
   const livePanelRef = useRef<LivePanelHandle | null>(null);
   const roundsRef = useRef<KnockoutRound[]>(rounds);
-  useEffect(() => { roundsRef.current = rounds; }, [rounds]);
+  const finalTrioOnlyRef = useRef(false);
+  useEffect(() => {
+    roundsRef.current = rounds;
+    finalTrioOnlyRef.current = isSingleTrioTournament(rounds);
+  }, [rounds]);
   const entriesRef = useRef<KnockoutEntry[]>(entries);
   useEffect(() => { entriesRef.current = entries; }, [entries]);
   const autoRunRef = useRef(false);
+  const autoScheduleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const allFileRef = useRef<HTMLInputElement|null>(null);
@@ -1868,7 +2075,7 @@ function KnockoutPanel() {
       if (storedRounds) {
         const parsed = JSON.parse(storedRounds);
         if (Array.isArray(parsed)) {
-          setRounds(normalizeKnockoutRounds(parsed as KnockoutRound[]));
+          applyRoundsUpdate(normalizeKnockoutRounds(parsed as KnockoutRound[]));
         }
       }
       localStorage.removeItem('ddz_knockout_seed');
@@ -1902,16 +2109,45 @@ function KnockoutPanel() {
     setFinalStandings(null);
   }, [rounds.length]);
 
+  useEffect(() => () => {
+    if (autoScheduleTimer.current != null) {
+      clearTimeout(autoScheduleTimer.current);
+      autoScheduleTimer.current = null;
+    }
+  }, []);
+
   const participantLabel = (idx: number) => (lang === 'en' ? `Player ${idx + 1}` : `选手${idx + 1}`);
   const updateSettings = (patch: Partial<KnockoutSettings>) => {
     setSettings(prev => sanitizeKnockoutSettings({ ...prev, ...patch }));
   };
   const { enabled, roundsPerGroup, startScore, bid, four2, farmerCoop } = settings;
 
-  const setAutomation = (active: boolean) => {
+  const setAutomation = useCallback((active: boolean) => {
     autoRunRef.current = active;
+    if (!active && autoScheduleTimer.current != null) {
+      clearTimeout(autoScheduleTimer.current);
+      autoScheduleTimer.current = null;
+    }
     setAutomationActive(active);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!finalStandings?.placements?.length) return;
+    setAutomation(false);
+    setOvertimeCount(0);
+    setOvertimeReason('lowest');
+    setNextMatchInitialTotals(null);
+    const panel = livePanelRef.current;
+    if (panel?.isRunning()) {
+      try {
+        panel.stop();
+      } catch (err) {
+        console.error('[knockout] stop after finals failed', err);
+      }
+    }
+    setLiveRunning(false);
+    setLivePaused(false);
+  }, [finalStandings, setAutomation]);
 
   const handleAllFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1982,7 +2218,7 @@ function KnockoutPanel() {
     if (roster.length < 3) {
       setError(lang === 'en' ? 'Add at least three participants.' : '请至少添加三名参赛选手。');
       setNotice(null);
-      setRounds([]);
+      applyRoundsUpdate([]);
       if (typeof window !== 'undefined') {
         try { localStorage.removeItem('ddz_knockout_rounds'); } catch {}
       }
@@ -1998,11 +2234,11 @@ function KnockoutPanel() {
     const firstRoundMatches = buildMatchesFromPool(shuffled, 0);
     if (!firstRoundMatches.length) {
       setError(lang === 'en' ? 'Unable to build initial groups.' : '无法生成首轮对阵，请重试。');
-      setRounds([]);
+      applyRoundsUpdate([]);
       return;
     }
     const firstRound: KnockoutRound = { matches: firstRoundMatches };
-    setRounds([firstRound]);
+    applyRoundsUpdate([firstRound]);
     setError(null);
     setNotice(lang === 'en'
       ? `Participants shuffled into groups of three where possible. Each trio plays ${roundsPerGroup} game(s).`
@@ -2020,7 +2256,7 @@ function KnockoutPanel() {
     setSeriesRounds(settings.roundsPerGroup);
     setOvertimeCount(0);
     setFinalStandings(null);
-    setRounds([]);
+    applyRoundsUpdate([]);
     setError(null);
     setNotice(null);
     if (typeof window !== 'undefined') {
@@ -2042,7 +2278,7 @@ function KnockoutPanel() {
     setSettings(defaultKnockoutSettings());
     setEntries(makeDefaultKnockoutEntries());
     setFinalStandings(null);
-    setRounds([]);
+    applyRoundsUpdate([]);
     setError(null);
     setNotice(null);
     if (typeof window !== 'undefined') {
@@ -2059,7 +2295,7 @@ function KnockoutPanel() {
       return;
     }
     setFinalStandings(null);
-    setRounds(prev => {
+    applyRoundsUpdate(prev => {
       const draft = cloneKnockoutRounds(prev);
       const match = draft[roundIdx]?.matches?.[matchIdx];
       if (!match) return prev;
@@ -2069,6 +2305,18 @@ function KnockoutPanel() {
     });
   };
 
+  const mergeAliasAndProvider = (alias: string, providerLabel: string) => {
+    const trimmedAlias = alias.trim();
+    const trimmedProvider = providerLabel.trim();
+    if (trimmedAlias && trimmedProvider) {
+      if (trimmedAlias.toLowerCase() === trimmedProvider.toLowerCase()) {
+        return trimmedAlias;
+      }
+      return `${trimmedAlias} · ${trimmedProvider}`;
+    }
+    return trimmedAlias || trimmedProvider;
+  };
+
   const displayName = (value: KnockoutPlayer | null) => {
     if (value === KO_BYE) return lang === 'en' ? 'BYE' : '轮空';
     if (!value) return lang === 'en' ? 'TBD' : '待定';
@@ -2076,35 +2324,77 @@ function KnockoutPanel() {
       try {
         const parsed = JSON.parse(value);
         if (parsed && typeof parsed === 'object') {
+          const entryId = typeof (parsed as any).id === 'string' ? (parsed as any).id : '';
+          const entry = entryId ? entries.find(item => item.id === entryId) : null;
+          const aliasFromEntry = (entry?.name || '').trim();
+          const aliasFromToken = typeof (parsed as any).name === 'string' ? ((parsed as any).name as string).trim() : '';
+          const alias = aliasFromEntry || aliasFromToken;
+          const rawChoice = entry?.choice || (typeof (parsed as any).choice === 'string' ? (parsed as any).choice as string : '');
+          const normalizedChoice = KO_ALL_CHOICES.includes(rawChoice as BotChoice)
+            ? (rawChoice as BotChoice)
+            : null;
+          let providerLabel = '';
+          if (normalizedChoice) {
+            if (normalizedChoice === 'human') {
+              providerLabel = humanProviderLabel;
+            } else {
+              const model = (entry?.model || (typeof (parsed as any).model === 'string' ? (parsed as any).model as string : ''))
+                .trim();
+              const httpBase = (entry?.keys?.httpBase || (typeof (parsed as any).httpBase === 'string'
+                ? (parsed as any).httpBase as string
+                : ''))
+                .trim();
+              providerLabel = providerSummary(normalizedChoice, model, httpBase, lang);
+            }
+          }
+          const merged = mergeAliasAndProvider(alias, providerLabel);
+          if (merged) return merged;
           const slotNumber = Number((parsed as any).slot);
           if (Number.isFinite(slotNumber) && slotNumber >= 1) {
             return participantLabel(slotNumber - 1);
           }
-          if (typeof (parsed as any).id === 'string') {
-            const idx = entries.findIndex(entry => entry.id === (parsed as any).id);
+          if (entry) {
+            const idx = entries.findIndex(item => item.id === entry.id);
             if (idx >= 0) return participantLabel(idx);
           }
-          const alias = typeof parsed.name === 'string' ? parsed.name.trim() : '';
-          const rawChoice = typeof parsed.choice === 'string' ? parsed.choice : '';
-          const provider = KO_ALL_CHOICES.includes(rawChoice as BotChoice) ? choiceLabel(rawChoice as BotChoice) : '';
-          let providerLabel = provider;
-          if (KO_ALL_CHOICES.includes(rawChoice as BotChoice)) {
-            const normalized = rawChoice as BotChoice;
-            if (normalized === 'human') {
-              providerLabel = humanProviderLabel;
-            } else {
-              const model = typeof parsed.model === 'string' ? parsed.model : '';
-              const base = typeof parsed.httpBase === 'string' ? parsed.httpBase : '';
-              providerLabel = providerSummary(normalized, model, base, lang);
-            }
-          }
-          if (alias && providerLabel) return `${alias} · ${providerLabel}`;
-          if (alias) return alias;
-          if (providerLabel) return providerLabel;
         }
       } catch {}
     }
-    return value;
+    return String(value);
+  };
+
+  const podiumDisplayName = (value: KnockoutPlayer | null) => {
+    if (!value || value === KO_BYE) return displayName(value);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        const entryId = typeof (parsed as any)?.id === 'string' ? (parsed as any).id : '';
+        const entry = entryId ? entries.find(item => item.id === entryId) : null;
+        const aliasFromEntry = (entry?.name || '').trim();
+        const aliasFromToken = typeof (parsed as any)?.name === 'string' ? ((parsed as any).name as string).trim() : '';
+        const alias = aliasFromEntry || aliasFromToken;
+        const choiceFromEntry = entry?.choice;
+        const choiceFromToken = typeof (parsed as any)?.choice === 'string' ? (parsed as any).choice as string : '';
+        const normalizedChoice = KO_ALL_CHOICES.includes((choiceFromEntry || choiceFromToken) as BotChoice)
+          ? (choiceFromEntry || choiceFromToken) as BotChoice
+          : null;
+        const modelFromEntry = entry?.model || '';
+        const modelFromToken = typeof (parsed as any)?.model === 'string' ? (parsed as any).model as string : '';
+        const httpFromEntry = entry?.keys?.httpBase || '';
+        const httpFromToken = typeof (parsed as any)?.httpBase === 'string' ? (parsed as any).httpBase as string : '';
+        const providerLabel = normalizedChoice
+          ? providerSummary(
+              normalizedChoice,
+              (normalizedChoice.startsWith('ai:') ? (modelFromEntry || modelFromToken) : modelFromEntry) || '',
+              normalizedChoice === 'http' ? (httpFromEntry || httpFromToken) : httpFromEntry,
+              lang,
+            )
+          : '';
+        const merged = mergeAliasAndProvider(alias, providerLabel);
+        if (merged) return merged;
+      } catch {}
+    }
+    return displayName(value);
   };
 
   const playerMeta = (value: KnockoutPlayer | null): { label: string; provider: string } => {
@@ -2191,6 +2481,46 @@ function KnockoutPanel() {
     };
   };
 
+  const queueReplayStart = useCallback((targetKey: number) => {
+    if (finalStandingsRef.current?.placements?.length) return;
+    const attemptStart = (tries: number) => {
+      if (finalStandingsRef.current?.placements?.length) return;
+      const panel = livePanelRef.current;
+      if (!panel) {
+        if (tries < 40) {
+          setTimeout(() => attemptStart(tries + 1), 50);
+        }
+        return;
+      }
+      if (!currentMatchRef.current) {
+        if (tries < 40) {
+          setTimeout(() => attemptStart(tries + 1), 50);
+        }
+        return;
+      }
+      if (typeof panel.getInstanceId === 'function') {
+        const instance = panel.getInstanceId();
+        if (instance !== targetKey) {
+          if (tries < 40) {
+            setTimeout(() => attemptStart(tries + 1), 50);
+          }
+          return;
+        }
+      }
+      if (panel.isRunning()) return;
+      panel.start()
+        .then(() => {
+          setTimeout(() => {
+            if (!panel.isRunning() && tries < 40) {
+              attemptStart(tries + 1);
+            }
+          }, 120);
+        })
+        .catch(err => console.error('[knockout] auto replay start failed', err));
+    };
+    setTimeout(() => attemptStart(0), 0);
+  }, []);
+
   const launchMatch = (roundIdx: number, matchIdx: number) => {
     const context = buildMatchContext(roundIdx, matchIdx);
     if (!context) {
@@ -2200,20 +2530,32 @@ function KnockoutPanel() {
         : '无法启动下一组三人对局，请检查参赛设置。');
       return false;
     }
+    currentMatchRef.current = context;
     setCurrentMatch(context);
     const baseScore = Number.isFinite(startScore) ? startScore : 0;
     const baseTotals = [baseScore, baseScore, baseScore] as [number, number, number];
     setSeriesRounds(roundsPerGroup);
     setSeriesTotals(baseTotals);
+    setNextMatchInitialTotals(null);
     setOvertimeCount(0);
     setOvertimeReason('lowest');
     setLiveTotals(baseTotals);
-    setMatchKey(key => key + 1);
-    setTimeout(() => { livePanelRef.current?.start(); }, 0);
+    const nextKey = matchKeyRef.current + 1;
+    setMatchKey(nextKey);
+    queueReplayStart(nextKey);
     return true;
   };
 
-  const scheduleNextMatch = () => {
+  const scheduleNextMatch = useCallback(() => {
+    if (finalStandingsRef.current?.placements?.length) {
+      if (autoRunRef.current) {
+        setAutomation(false);
+        setNotice(lang === 'en'
+          ? 'Final standings are locked in. No further knockout trios will run.'
+          : '最终排名已生成，将不再继续淘汰赛对局。');
+      }
+      return;
+    }
     if (!autoRunRef.current) return;
     if (livePanelRef.current?.isRunning()) return;
     const pendingContext = currentMatchRef.current;
@@ -2224,15 +2566,30 @@ function KnockoutPanel() {
         const active = match.players.filter(p => p && p !== KO_BYE);
         if (active.length >= 3) {
           if (seriesTotalsRef.current) setLiveTotals(seriesTotalsRef.current);
+          const baseScore = Number.isFinite(startScore) ? startScore : 0;
+          const baseTotals = [baseScore, baseScore, baseScore] as [number, number, number];
+          setNextMatchInitialTotals(prev => prev ?? baseTotals);
           setSeriesRounds(3);
-          setMatchKey(key => key + 1);
-          setTimeout(() => { livePanelRef.current?.start(); }, 0);
+          const nextKey = matchKeyRef.current + 1;
+          setMatchKey(nextKey);
+          queueReplayStart(nextKey);
           return;
         }
       }
     }
-    const next = findNextPlayableMatch(roundsRef.current || []);
+    const currentRounds = roundsRef.current || [];
+    const next = findNextPlayableMatch(currentRounds);
     if (!next) {
+      const normalized = normalizeKnockoutRounds(currentRounds);
+      if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(currentRounds)) {
+        applyRoundsUpdate(normalized);
+        if (autoRunRef.current) {
+          setTimeout(() => {
+            if (autoRunRef.current) scheduleNextMatch();
+          }, 0);
+        }
+        return;
+      }
       setAutomation(false);
       setNotice(lang === 'en' ? 'All scheduled rounds are complete.' : '当前所有轮次的对局均已完成。');
       return;
@@ -2251,7 +2608,7 @@ function KnockoutPanel() {
       setSeriesRounds(roundsPerGroup);
       setOvertimeCount(0);
       setOvertimeReason('lowest');
-      setRounds(prev => {
+      applyRoundsUpdate(prev => {
         const draft = cloneKnockoutRounds(prev);
         applyEliminationToDraft(draft, next.roundIdx, next.matchIdx, byeToken);
         return draft;
@@ -2263,20 +2620,75 @@ function KnockoutPanel() {
     if (!launched) {
       setAutomation(false);
     }
-  };
+  }, [applyRoundsUpdate, lang, launchMatch, roundsPerGroup, setAutomation, setNotice]);
+
+  useEffect(() => {
+    if (!automationActive) return;
+    if (!autoRunRef.current) return;
+    if (!roundsRef.current?.length) return;
+    if (finalStandingsRef.current?.placements?.length) {
+      setAutomation(false);
+      return;
+    }
+    if (livePanelRef.current?.isRunning()) return;
+    if (liveRunningRef.current) return;
+    const currentRounds = roundsRef.current || [];
+    const pending = findNextPlayableMatch(currentRounds);
+    if (!pending) {
+      const normalized = normalizeKnockoutRounds(currentRounds);
+      if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(currentRounds)) {
+        applyRoundsUpdate(normalized);
+        if (autoRunRef.current) {
+          setTimeout(() => {
+            if (autoRunRef.current) scheduleNextMatch();
+          }, 0);
+        }
+        return;
+      }
+      setAutomation(false);
+      return;
+    }
+    const ctx = currentMatchRef.current;
+    if (ctx && ctx.roundIdx === pending.roundIdx && ctx.matchIdx === pending.matchIdx && overtimeCountRef.current === 0) {
+      return;
+    }
+    if (autoScheduleTimer.current != null) return;
+    autoScheduleTimer.current = setTimeout(() => {
+      autoScheduleTimer.current = null;
+      if (!autoRunRef.current) return;
+      if (livePanelRef.current?.isRunning()) return;
+      if (liveRunningRef.current) return;
+      const snapshot = roundsRef.current || [];
+      const next = findNextPlayableMatch(snapshot);
+      if (!next) {
+        const normalized = normalizeKnockoutRounds(snapshot);
+        if (encodeRoundsSignature(normalized) !== encodeRoundsSignature(snapshot)) {
+          applyRoundsUpdate(normalized);
+          return;
+        }
+        setAutomation(false);
+        return;
+      }
+      scheduleNextMatch();
+    }, 0);
+  }, [applyRoundsUpdate, automationActive, rounds, scheduleNextMatch, setAutomation]);
 
   const handleLiveFinished = (result: LivePanelFinishPayload) => {
+    setLiveRunning(false);
+    setLivePaused(false);
+    if (finalStandingsRef.current?.placements?.length) {
+      setAutomation(false);
+      return;
+    }
     if (result.aborted) {
       setAutomation(false);
       return;
     }
     const endedEarly = !!result.endedEarlyForNegative;
     if (!result.completedAll && !endedEarly) {
-      setAutomation(false);
       setNotice(lang === 'en'
-        ? 'The trio stopped before finishing all games; automation has been paused.'
-        : '该组三人未跑完全部局数，已暂停自动流程。');
-      return;
+        ? 'The trio stopped before finishing all games; continuing with recorded scores.'
+        : '该组三人未跑完全部局数，自动流程将继续使用已有积分。');
     }
     const ctx = currentMatchRef.current;
     if (!ctx) return;
@@ -2284,13 +2696,34 @@ function KnockoutPanel() {
     const totals = result.totals || liveTotalsRef.current;
     if (!totals) return;
     const baseScore = Number.isFinite(startScore) ? startScore : 0;
+    const baseTotals = [baseScore, baseScore, baseScore] as [number, number, number];
     const totalsTuple = [0, 0, 0] as [number, number, number];
     for (let i = 0; i < 3; i++) {
       const raw = Number((totals as number[])[i]);
       totalsTuple[i] = Number.isFinite(raw) ? raw : baseScore;
     }
+    const epsilon = 1e-6;
+    const finishedCount = Number(result.finishedCount) || 0;
+    const totalsUnchanged = totalsTuple.every((total, idx) => Math.abs(total - baseTotals[idx]) <= epsilon);
+    const shouldRetry = finishedCount <= 0 || (totalsUnchanged && !result.completedAll && !endedEarly);
+    if (shouldRetry) {
+      setLiveTotals(baseTotals);
+      setSeriesTotals(baseTotals);
+      setNextMatchInitialTotals(baseTotals);
+      setOvertimeCount(0);
+      setOvertimeReason('lowest');
+      const message = lang === 'en'
+        ? 'No completed games were recorded. Restarting this trio automatically.'
+        : '未记录有效局数，正在自动重新启动该组三人对局。';
+      setNotice(message);
+      const nextKey = matchKeyRef.current + 1;
+      setMatchKey(nextKey);
+      queueReplayStart(nextKey);
+      return;
+    }
     setLiveTotals(totalsTuple);
     setSeriesTotals(totalsTuple);
+    setNextMatchInitialTotals(null);
     const scored = ctx.tokens.map((token, idx) => {
       const val = Number(totals[idx]);
       return {
@@ -2301,42 +2734,43 @@ function KnockoutPanel() {
     const ranked = scored
       .filter(entry => !!entry.token)
       .sort((a, b) => a.total - b.total);
+    const finalTrioOnly = finalTrioOnlyRef.current;
     const placementsDesc = wasFinalMatch
       ? ctx.tokens
           .map((token, idx) => ({ token, total: totalsTuple[idx] }))
           .filter(entry => !!entry.token && entry.token !== KO_BYE)
           .sort((a, b) => b.total - a.total)
       : null;
-    const epsilon = 1e-6;
     if (wasFinalMatch) {
       const trioTotals = ctx.tokens.map((token, idx) => ({ token, total: totalsTuple[idx] }))
         .filter(entry => !!entry.token && entry.token !== KO_BYE);
-      const tiedFinalTokens = new Set<string>();
-      for (let i = 0; i < trioTotals.length; i++) {
-        for (let j = i + 1; j < trioTotals.length; j++) {
-          const a = trioTotals[i];
-          const b = trioTotals[j];
-          if (Math.abs(a.total - b.total) <= epsilon) {
-            tiedFinalTokens.add(String(a.token));
-            tiedFinalTokens.add(String(b.token));
-          }
+      const sortedTotals = trioTotals.slice().sort((a, b) => b.total - a.total);
+      const championTie = sortedTotals.length >= 2
+        ? Math.abs(sortedTotals[0].total - sortedTotals[1].total) <= epsilon
+        : false;
+      if (championTie) {
+        if (finalStandingsRef.current?.placements?.length) {
+          setAutomation(false);
+          return;
         }
-      }
-      if (tiedFinalTokens.size > 0) {
-        const tiedLabels = ctx.tokens
-          .filter(token => tiedFinalTokens.has(String(token)))
-          .map(token => displayName(token))
+        const tiedChampions = sortedTotals
+          .filter(entry => Math.abs(entry.total - sortedTotals[0].total) <= epsilon)
+          .map(entry => entry.token);
+        const tiedLabels = tiedChampions
+          .map(token => podiumDisplayName(token))
           .join(lang === 'en' ? ', ' : '、');
         const nextAttempt = overtimeCountRef.current + 1;
         setOvertimeCount(nextAttempt);
         setOvertimeReason('final');
+        setNextMatchInitialTotals(baseTotals);
         setSeriesRounds(3);
         setFinalStandings(null);
         setNotice(lang === 'en'
-          ? `Final round tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
-          : `决赛积分出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
-        setMatchKey(key => key + 1);
-        setTimeout(() => { livePanelRef.current?.start(); }, 0);
+          ? `Final round tie for champion between ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
+          : `决赛冠军积分出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
+        const nextKey = matchKeyRef.current + 1;
+        setMatchKey(nextKey);
+        queueReplayStart(nextKey);
         return;
       }
     }
@@ -2353,19 +2787,22 @@ function KnockoutPanel() {
       return;
     }
     const tiedLowest = ranked.filter(entry => Math.abs(entry.total - lowest.total) <= epsilon);
-    if (tiedLowest.length !== 1) {
+    const lowestTieForcesReplay = tiedLowest.length !== 1 && (!wasFinalMatch || !finalTrioOnly);
+    if (lowestTieForcesReplay) {
       const tiedLabels = tiedLowest
         .map(entry => displayName(entry.token))
         .join(lang === 'en' ? ', ' : '、');
       const nextAttempt = overtimeCountRef.current + 1;
       setOvertimeCount(nextAttempt);
       setOvertimeReason('lowest');
+      setNextMatchInitialTotals(baseTotals);
       setSeriesRounds(3);
       setNotice(lang === 'en'
         ? `Round ${ctx.roundIdx + 1}${endedEarly ? ' ended early after a negative score;' : ''} lowest score tie among ${tiedLabels}. Starting 3-game playoff #${nextAttempt}.`
         : `第 ${ctx.roundIdx + 1} 轮${endedEarly ? '出现负分提前结束，' : ''}积分最低出现平局（${tiedLabels}），开始第 ${nextAttempt} 次加时赛（3 局）。`);
-      setMatchKey(key => key + 1);
-      setTimeout(() => { livePanelRef.current?.start(); }, 0);
+      const nextKey = matchKeyRef.current + 1;
+      setMatchKey(nextKey);
+      queueReplayStart(nextKey);
       return;
     }
     const eliminatedToken = tiedLowest[0]?.token;
@@ -2374,7 +2811,7 @@ function KnockoutPanel() {
       return;
     }
     const label = displayName(eliminatedToken);
-    setRounds(prev => {
+    applyRoundsUpdate(prev => {
       const draft = cloneKnockoutRounds(prev);
       applyEliminationToDraft(draft, ctx.roundIdx, ctx.matchIdx, eliminatedToken);
       return draft;
@@ -2393,9 +2830,9 @@ function KnockoutPanel() {
         setFinalStandings(null);
       }
       if (ordered.length >= 3) {
-        const championLabel = displayName(ordered[0].token);
-        const runnerUpLabel = displayName(ordered[1].token);
-        const thirdLabel = displayName(ordered[2].token);
+        const championLabel = podiumDisplayName(ordered[0].token);
+        const runnerUpLabel = podiumDisplayName(ordered[1].token);
+        const thirdLabel = podiumDisplayName(ordered[2].token);
         setNotice(lang === 'en'
           ? `Final standings — Champion: ${championLabel}, Runner-up: ${runnerUpLabel}, Third: ${thirdLabel}.`
           : `最终排名：冠军 ${championLabel}，亚军 ${runnerUpLabel}，季军 ${thirdLabel}。`);
@@ -2419,6 +2856,12 @@ function KnockoutPanel() {
     if (!enabled) {
       setError(lang === 'en' ? 'Enable the tournament before starting.' : '请先启用淘汰赛再开始运行。');
       setNotice(null);
+      return;
+    }
+    if (finalStandingsRef.current?.placements?.length) {
+      setNotice(lang === 'en'
+        ? 'Final standings are already available. Reset the bracket to run a new tournament.'
+        : '最终排名已生成。如需重新比赛，请先重置对阵。');
       return;
     }
     if (!rounds.length) {
@@ -2506,6 +2949,7 @@ function KnockoutPanel() {
     return [base, base, base] as [number, number, number];
   }, [liveTotals, seriesTotals, currentMatch, startScore]);
 
+  const initialTotalsForLive = nextMatchInitialTotals ?? seriesTotals;
   const seatsForLive = currentMatch ? currentMatch.seats : fallbackLive.seats;
   const modelsForLive = currentMatch ? currentMatch.seatModels : fallbackLive.seatModels;
   const keysForLive = currentMatch ? currentMatch.seatKeys : fallbackLive.seatKeys;
@@ -2751,6 +3195,7 @@ function KnockoutPanel() {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:advanced-hybrid">Advanced Hybrid</option>
                     </optgroup>
                     <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
@@ -3089,8 +3534,8 @@ function KnockoutPanel() {
                                   ? (lang === 'en' ? 'Runner-up' : '亚军')
                                   : (lang === 'en' ? 'Third place' : '季军');
                               const baseText = lang === 'en'
-                                ? `${labelText}: ${displayName(playerToken)}`
-                                : `${labelText}：${displayName(playerToken)}`;
+                                ? `${labelText}: ${podiumDisplayName(playerToken)}`
+                                : `${labelText}：${podiumDisplayName(playerToken)}`;
                               const scoreText = placement.total != null
                                 ? (lang === 'en'
                                   ? ` (Points: ${placement.total})`
@@ -3123,18 +3568,12 @@ function KnockoutPanel() {
                                 const meta = playerMeta(playerToken);
                                 const eliminated = match.eliminated === playerToken || playerToken === KO_BYE;
                                 const labelColor = eliminated ? '#9ca3af' : '#1f2937';
-                                const detailColor = eliminated ? '#9ca3af' : '#6b7280';
                                 return (
                                   <div key={`${match.id || `match-${midx}`}-player-${pidx}`} style={{ display:'flex', alignItems:'center', gap:6 }}>
                                     <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-start', gap:2 }}>
                                       <span style={{ fontWeight:700, fontSize:16, color: labelColor, opacity: eliminated ? 0.7 : 1 }}>
                                         {meta.label}
                                       </span>
-                                      {meta.provider && (
-                                        <span style={{ fontSize:12, color: detailColor, opacity: eliminated ? 0.65 : 1 }}>
-                                          {meta.provider}
-                                        </span>
-                                      )}
                                     </div>
                                     {pidx < match.players.length - 1 && <span style={{ color:'#6b7280', fontSize:14 }}>vs</span>}
                                   </div>
@@ -3252,6 +3691,7 @@ function KnockoutPanel() {
               <LivePanel
                 key={matchKey}
                 ref={livePanelRef}
+                instanceId={matchKey}
                 rounds={seriesRounds}
                 startScore={startScore}
                 seatDelayMs={delaysForLive}
@@ -3267,7 +3707,7 @@ function KnockoutPanel() {
                 onPauseChange={setLivePaused}
                 onFinished={handleLiveFinished}
                 controlsHidden
-                initialTotals={seriesTotals}
+                initialTotals={initialTotalsForLive}
                 turnTimeoutSecs={timeoutsForLive}
               />
             </div>
@@ -3287,7 +3727,7 @@ function KnockoutPanel() {
           <div style={{ fontWeight:700, marginBottom:6 }}>
             {lang === 'en' ? 'Final standings' : '最终排名'}
           </div>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:16 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {podiumPlacements.map((placement, idx) => {
               const label = idx === 0
                 ? (lang === 'en' ? 'Champion' : '冠军')
@@ -3365,6 +3805,7 @@ function choiceLabel(choice: BotChoice): string {
     case 'built-in:mininet':      return 'MiniNet';
     case 'built-in:ally-support': return 'AllySupport';
     case 'built-in:endgame-rush': return 'EndgameRush';
+    case 'built-in:advanced-hybrid': return 'Advanced Hybrid';
     case 'ai:openai':             return 'OpenAI';
     case 'ai:gemini':             return 'Gemini';
     case 'ai:grok':               return 'Grok';
@@ -3570,6 +4011,9 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   const pauseRef = useRef(false);
   const pauseResolversRef = useRef<Array<() => void>>([]);
   const runningRef = useRef(running);
+  const instanceIdRef = useRef<number>(props.instanceId);
+
+  useEffect(() => { instanceIdRef.current = props.instanceId; }, [props.instanceId]);
 
   useEffect(() => { runningRef.current = running; }, [running]);
   useEffect(() => { props.onRunningChange?.(running); }, [running, props.onRunningChange]);
@@ -4014,6 +4458,48 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
     : humanPhase === 'double'
       ? (lang === 'en' ? 'Double' : '加倍')
       : (lang === 'en' ? 'Play cards' : '出牌');
+
+  useEffect(() => {
+    const request = humanRequest;
+    if (!request) return;
+    if (!['bid', 'double', 'play'].includes(request.phase)) return;
+    const seat = request.seat;
+    if (typeof seat !== 'number' || seat < 0 || seat > 2) return;
+    if (!isHumanSeat(seat)) return;
+    const ctxObj: any = request.ctx || {};
+    const rawHand = Array.isArray(ctxObj.hands)
+      ? ctxObj.hands.map((card: any) => String(card))
+      : Array.isArray(ctxObj.hand)
+        ? ctxObj.hand.map((card: any) => String(card))
+        : null;
+    if (!rawHand || rawHand.length === 0) return;
+
+    const usage = suitUsageRef.current;
+    const ownerKey = ownerKeyForSeat(seat);
+    const prevHand = Array.isArray(handsRef.current?.[seat])
+      ? (handsRef.current[seat] as string[])
+      : [];
+
+    unregisterSuitUsage(usage, ownerKey, prevHand);
+    const reservedBase = snapshotSuitUsage(usage, ownerKey);
+    const seatPrefsSingle: SeatSuitPrefs = [];
+    const preferred = extractSeatSuitPrefs(rawHand);
+    seatPrefsSingle[seat] = preferred;
+    const reserved = mergeReservedWithForeign(reservedBase, seat, seatPrefsSingle);
+    const decorated = reconcileHandFromRaw(rawHand, prevHand, reserved, preferred);
+    registerSuitUsage(usage, ownerKey, decorated);
+    suitUsageRef.current = usage;
+
+    const unchanged = decorated.length === prevHand.length
+      && decorated.every((label, idx) => label === prevHand[idx]);
+    if (unchanged) return;
+
+    setHands(prev => {
+      const base = Array.isArray(prev) ? [...prev] : [[], [], []];
+      base[seat] = decorated;
+      return base as string[][];
+    });
+  }, [humanRequest, isHumanSeat]);
   const humanRequireText = (() => {
     if (humanPhase !== 'play') return '';
     const req = humanRequest?.ctx?.require;
@@ -4451,12 +4937,12 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   /** 根据当前地主身份（已知/未知）把存档套到 UI 的 aggStats/aggCount */
   
   /* ===== 天梯（活动积分 ΔR_event）本地存档（localStorage 直接读写） ===== */
-  type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number };
+  type LadderAgg = { n:number; sum:number; delta:number; deltaR:number; K:number; N0:number; matches:number };
   type LadderEntry = { id:string; label:string; current:LadderAgg; history?: { when:string; n:number; delta:number; deltaR:number }[] };
   type LadderStore = { schema:'ddz-ladder@1'; updatedAt:string; players: Record<string, LadderEntry> };
   const LADDER_KEY = 'ddz_ladder_store_v1';
   const LADDER_EMPTY: LadderStore = { schema:'ddz-ladder@1', updatedAt:new Date().toISOString(), players:{} };
-  const LADDER_DEFAULT: LadderAgg = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20 };
+  const LADDER_DEFAULT: LadderAgg = { n:0, sum:0, delta:0, deltaR:0, K:20, N0:20, matches:0 };
 
   function readLadder(): LadderStore {
     try { const raw = localStorage.getItem(LADDER_KEY); if (raw) { const j = JSON.parse(raw); if (j?.schema==='ddz-ladder@1') return j as LadderStore; } } catch {}
@@ -4465,16 +4951,22 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
   function writeLadder(s: LadderStore) {
     try { s.updatedAt = new Date().toISOString(); localStorage.setItem(LADDER_KEY, JSON.stringify(s)); } catch {}
   }
-  function ladderUpdateLocal(id:string, label:string, sWin:number, pExp:number, weight:number=1) {
+  function ladderUpdateLocal(id:string, label:string, sWin:number, pExp:number, weight:number=1, matchIncrement:number=1) {
     const st = readLadder();
     const ent = st.players[id] || { id, label, current: { ...LADDER_DEFAULT }, history: [] };
     if (!ent.current) ent.current = { ...LADDER_DEFAULT };
     if (!ent.label) ent.label = label;
     const w = Math.max(0, Number(weight) || 0);
+    const matchInc = Math.max(0, Number(matchIncrement) || 0);
     ent.current.n += w;
     ent.current.sum += w * (sWin - pExp);
     const N0 = ent.current.N0 ?? 20;
     const K  = ent.current.K  ?? 20;
+    if (typeof ent.current.matches !== 'number' || !Number.isFinite(ent.current.matches)) {
+      const fallback = Number(ent.current.n) || 0;
+      ent.current.matches = Math.max(0, Math.round(fallback));
+    }
+    ent.current.matches += matchInc;
     ent.current.delta = ent.current.n > 0 ? (ent.current.sum / ent.current.n) : 0;
     const shrink = Math.sqrt(ent.current.n / (ent.current.n + Math.max(1, N0)));
     ent.current.deltaR = K * ent.current.delta * shrink;
@@ -5168,6 +5660,24 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     const byHint = typeof rawHint.by === 'string' ? rawHint.by : undefined;
                     hint = { move, cards, score, reason, label, by: byHint };
                   }
+                  const ctxHandsRaw = Array.isArray((m as any)?.ctx?.hands)
+                    ? ((m as any).ctx.hands as any[]).map(card => String(card))
+                    : null;
+                  if (ctxHandsRaw && ctxHandsRaw.length > 0) {
+                    const prevHand = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : [];
+                    const usage = suitUsageRef.current;
+                    const ownerKey = ownerKeyForSeat(seat);
+                    unregisterSuitUsage(usage, ownerKey, prevHand);
+                    const reservedBase = snapshotSuitUsage(usage, ownerKey);
+                    const seatPrefsSingle: SeatSuitPrefs = [];
+                    const preferred = extractSeatSuitPrefs(ctxHandsRaw);
+                    seatPrefsSingle[seat] = preferred;
+                    const reserved = mergeReservedWithForeign(reservedBase, seat, seatPrefsSingle);
+                    const decorated = reconcileHandFromRaw(ctxHandsRaw, prevHand, reserved, preferred);
+                    nextHands = Object.assign([], nextHands, { [seat]: decorated });
+                    registerSuitUsage(usage, ownerKey, decorated);
+                    suitUsageRef.current = usage;
+                  }
                   if (hint && hint.move === 'play' && Array.isArray(hint.cards)) {
                     const seatHandSnapshot = Array.isArray(nextHands?.[seat]) ? (nextHands[seat] as string[]) : [];
                     if (seatHandSnapshot.length > 0) {
@@ -5199,20 +5709,41 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     : rawPhase === 'double'
                       ? 'double'
                       : rawPhase;
-                  const effectiveTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
-                    ? timeoutParsed
-                    : 30_000;
                   const issuedAtRaw = (m as any).issuedAt ?? (m as any).issued_at;
                   const expiresAtRaw = (m as any).expiresAt ?? (m as any).expires_at;
                   const issuedAtParsed = typeof issuedAtRaw === 'number' ? issuedAtRaw : Number(issuedAtRaw);
                   const expiresAtParsed = typeof expiresAtRaw === 'number' ? expiresAtRaw : Number(expiresAtRaw);
+                  const serverIssuedAt = Number.isFinite(issuedAtParsed) ? issuedAtParsed : undefined;
+                  const serverExpiresAt = Number.isFinite(expiresAtParsed) ? expiresAtParsed : undefined;
+                  const serverWindowMs = (typeof serverExpiresAt === 'number' && typeof serverIssuedAt === 'number')
+                    ? Math.max(0, Math.floor(serverExpiresAt - serverIssuedAt))
+                    : undefined;
+                  const fallbackTimeoutMs = (typeof timeoutParsed === 'number' && timeoutParsed > 0)
+                    ? timeoutParsed
+                    : 30_000;
                   const clientIssuedAt = Date.now();
                   const upstreamLagMs = Number.isFinite(issuedAtParsed)
                     ? Math.max(0, clientIssuedAt - issuedAtParsed)
                     : 0;
-                  let resolvedWindowMs = Math.max(0, effectiveTimeoutMs);
+                  let totalWindowMs = Math.max(0, fallbackTimeoutMs);
+                  if (typeof serverWindowMs === 'number' && serverWindowMs > 0) {
+                    totalWindowMs = serverWindowMs;
+                  }
                   if (normalizedPhase === 'bid' || normalizedPhase === 'double') {
-                    resolvedWindowMs = 30_000;
+                    totalWindowMs = 30_000;
+                  }
+                  let elapsedSinceIssued = typeof serverIssuedAt === 'number'
+                    ? Math.max(0, clientIssuedAt - serverIssuedAt)
+                    : upstreamLagMs;
+                  if (typeof serverIssuedAt === 'number' && elapsedSinceIssued > totalWindowMs * 2) {
+                    elapsedSinceIssued = upstreamLagMs;
+                  }
+                  let resolvedWindowMs = Math.max(0, totalWindowMs - elapsedSinceIssued);
+                  if (typeof serverExpiresAt === 'number') {
+                    const serverRemaining = Math.max(0, Math.floor(serverExpiresAt - clientIssuedAt));
+                    if (serverRemaining > 0 || resolvedWindowMs === 0) {
+                      resolvedWindowMs = Math.min(resolvedWindowMs, serverRemaining);
+                    }
                   }
                   const clientExpiresAt = clientIssuedAt + resolvedWindowMs;
                   humanCallIssuedAtRef.current[seat] = clientIssuedAt;
@@ -5223,7 +5754,7 @@ useEffect(() => { allLogsRef.current = allLogs; }, [allLogs]);
                     phase: normalizedPhase,
                     ctx: m.ctx ?? {},
                     timeoutMs: resolvedWindowMs,
-                    totalTimeoutMs: resolvedWindowMs,
+                    totalTimeoutMs: totalWindowMs,
                     latencyMs: upstreamLagMs,
                     remainingMs: resolvedWindowMs,
                     delayMs: typeof m.delayMs === 'number' ? m.delayMs : undefined,
@@ -5793,10 +6324,9 @@ if (m.type === 'event' && m.kind === 'play') {
                   for (let i=0;i<3;i++) {
                     const sWinTeam = teamWin(i) ? 1 : 0;
                     const pExpTeam = teamP(i);
-                    const scale    = (i === L) ? 1 : 0.5;  // 地主记一份，两个农民各记半份
                     const id = seatIdentity(i);
                     const label = agentIdForIndex(i);
-                    ladderUpdateLocal(id, label, sWinTeam * scale, pExpTeam * scale, weight);
+                    ladderUpdateLocal(id, label, sWinTeam, pExpTeam, weight, 1);
                   }
                 } catch {}
 // ✅ TrueSkill：局后更新 + 写入“角色分档”存档
@@ -5998,9 +6528,66 @@ if (m.type === 'event' && m.kind === 'play') {
     togglePause,
     isRunning: () => runningRef.current,
     isPaused: () => pauseRef.current,
+    getInstanceId: () => instanceIdRef.current,
   }));
 
   const remainingGames = Math.max(0, (props.rounds || 1) - finishedCount);
+
+  const controlsContent = (
+    <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
+      <button
+        onClick={start}
+        disabled={running}
+        style={{
+          padding:'8px 12px',
+          borderRadius:8,
+          border:'1px solid #d1d5db',
+          background: running ? '#f3f4f6' : '#2563eb',
+          color: running ? '#9ca3af' : '#fff',
+          cursor: running ? 'not-allowed' : 'pointer',
+          fontWeight:600,
+        }}
+      >开始</button>
+      <button
+        onClick={togglePause}
+        disabled={!running}
+        style={{
+          padding:'8px 12px',
+          borderRadius:8,
+          border:'1px solid #d1d5db',
+          background: !running ? '#f3f4f6' : (paused ? '#bfdbfe' : '#fde68a'),
+          color: !running ? '#9ca3af' : (paused ? '#1e3a8a' : '#92400e'),
+          cursor: !running ? 'not-allowed' : 'pointer',
+          fontWeight:600,
+        }}
+      >{paused ? '继续' : '暂停'}</button>
+      <button
+        onClick={stop}
+        disabled={!running}
+        style={{
+          padding:'8px 12px',
+          borderRadius:8,
+          border:'1px solid #d1d5db',
+          background: running ? '#fee2e2' : '#f3f4f6',
+          color: running ? '#b91c1c' : '#9ca3af',
+          cursor: running ? 'pointer' : 'not-allowed',
+          fontWeight:600,
+        }}
+      >停止</button>
+      <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
+        剩余局数：{remainingGames}
+      </span>
+    </div>
+  );
+
+  let controlsNode: ReactNode = null;
+  if (!props.controlsHidden) {
+    if (props.controlsPortal) {
+      controlsNode = renderViaPortal(controlsContent, props.controlsPortal);
+    } else if (typeof props.controlsPortal === 'undefined') {
+      controlsNode = controlsContent;
+    }
+  }
 
   // ===== 统一统计打包（All-in-One） =====
 type AllBundle = {
@@ -6100,52 +6687,7 @@ const handleAllSaveInner = () => {
   return (
     <SeatInfoContext.Provider value={seatDisplayNames}>
       <div>
-      {!props.controlsHidden && (
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-        <button
-          onClick={start}
-          disabled={running}
-          style={{
-            padding:'8px 12px',
-            borderRadius:8,
-            border:'1px solid #d1d5db',
-            background: running ? '#f3f4f6' : '#2563eb',
-            color: running ? '#9ca3af' : '#fff',
-            cursor: running ? 'not-allowed' : 'pointer',
-            fontWeight:600,
-          }}
-        >开始</button>
-        <button
-          onClick={togglePause}
-          disabled={!running}
-          style={{
-            padding:'8px 12px',
-            borderRadius:8,
-            border:'1px solid #d1d5db',
-            background: !running ? '#f3f4f6' : (paused ? '#bfdbfe' : '#fde68a'),
-            color: !running ? '#9ca3af' : (paused ? '#1e3a8a' : '#92400e'),
-            cursor: !running ? 'not-allowed' : 'pointer',
-            fontWeight:600,
-          }}
-        >{paused ? '继续' : '暂停'}</button>
-        <button
-          onClick={stop}
-          disabled={!running}
-          style={{
-            padding:'8px 12px',
-            borderRadius:8,
-            border:'1px solid #d1d5db',
-            background: running ? '#fee2e2' : '#f3f4f6',
-            color: running ? '#b91c1c' : '#9ca3af',
-            cursor: running ? 'pointer' : 'not-allowed',
-            fontWeight:600,
-          }}
-        >停止</button>
-        <span style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, fontSize:12, background:'#fff' }}>
-          剩余局数：{remainingGames}
-        </span>
-      </div>
-      )}
+      {controlsNode}
 
       <ThoughtSummaryPanel stats={thoughtStore} lastMs={lastThoughtMs} identities={seatIdentitiesMemo} lang={lang} />
 
@@ -6789,6 +7331,68 @@ const [lang, setLang] = useState<Lang>(() => {
   const [seats, setSeats] = useState<BotChoice[]>(DEFAULTS.seats);
   const [seatModels, setSeatModels] = useState<string[]>(DEFAULTS.seatModels);
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
+  const [totalMatches, setTotalMatches] = useState<number | null>(null);
+  const [disclaimerOpen, setDisclaimerOpen] = useState(false);
+  const disclaimerHostRef = useRef<HTMLElement | null>(null);
+
+  const computeTotalMatches = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('ddz_ladder_store_v1');
+      if (!raw) {
+        setTotalMatches(0);
+        return;
+      }
+      const store = JSON.parse(raw) || {};
+      const players = (store?.players && typeof store.players === 'object') ? store.players as Record<string, any> : {};
+      let total = 0;
+      for (const key of Object.keys(players)) {
+        const entry = players[key];
+        if (!entry) continue;
+        const matches = entry?.current?.matches;
+        if (typeof matches === 'number' && Number.isFinite(matches)) {
+          total += Math.max(0, Math.round(matches));
+          continue;
+        }
+        const fallback = entry?.current?.n;
+        if (typeof fallback === 'number' && Number.isFinite(fallback)) {
+          total += Math.max(0, Math.round(fallback));
+        }
+      }
+      setTotalMatches(total);
+    } catch {
+      setTotalMatches(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => { computeTotalMatches(); };
+    handler();
+    window.addEventListener('ddz-all-refresh', handler as any);
+    const interval = window.setInterval(handler, 2000);
+    return () => {
+      window.removeEventListener('ddz-all-refresh', handler as any);
+      window.clearInterval(interval);
+    };
+  }, [computeTotalMatches]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let host = document.getElementById('ddz-disclaimer-root') as HTMLElement | null;
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'ddz-disclaimer-root';
+      document.body.appendChild(host);
+    }
+    disclaimerHostRef.current = host;
+    return () => {
+      if (!host) return;
+      if (host.childElementCount === 0) {
+        host.remove();
+      }
+    };
+  }, []);
 
   const seatInfoLabels = useMemo(() => {
     return [0,1,2].map(i => {
@@ -6805,6 +7409,10 @@ const [lang, setLang] = useState<Lang>(() => {
   }, [seats, seatModels, seatKeys]);
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
+  const [ladderControlsHost, setLadderControlsHost] = useState<HTMLDivElement | null>(null);
+  const ladderControlsHostRef = useCallback((el: HTMLDivElement | null) => {
+    setLadderControlsHost(el);
+  }, []);
 
   const doResetAll = () => {
     setEnabled(DEFAULTS.enabled); setRounds(DEFAULTS.rounds); setStartScore(DEFAULTS.startScore);
@@ -6840,47 +7448,83 @@ const [lang, setLang] = useState<Lang>(() => {
     <LangContext.Provider value={lang}>
       <SeatInfoContext.Provider value={seatInfoLabels}>
         <div style={{ maxWidth: 1080, margin:'24px auto', padding:'0 16px' }} ref={mainRef} key={lang}>
-          <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 16px' }}>斗地主 · Fight the Landlord</h1>
-          <div style={{ marginLeft:'auto', marginBottom:24, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:12 }} data-i18n-ignore>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
-          <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
-            <option value="zh">中文</option>
-            <option value="en">English</option>
-          </select>
-        </div>
-        <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'flex-end' }}>
-          <button
-            onClick={()=>setMatchMode('regular')}
-            aria-pressed={isRegularMode}
-            style={{
-              padding:'6px 12px',
-              borderRadius:8,
-              border:'1px solid #d1d5db',
-              background: isRegularMode ? '#2563eb' : '#fff',
-              color: isRegularMode ? '#fff' : '#1f2937',
-              cursor:'pointer',
-              fontWeight:600,
-            }}
-          >{regularLabel}</button>
-          <button
-            onClick={()=>setMatchMode('knockout')}
-            aria-pressed={!isRegularMode}
-            style={{
-              padding:'6px 12px',
-              borderRadius:8,
-              border:'1px solid #d1d5db',
-              background: !isRegularMode ? '#2563eb' : '#fff',
-              color: !isRegularMode ? '#fff' : '#1f2937',
-              cursor:'pointer',
-              fontWeight:600,
-            }}
-          >{knockoutLabel}</button>
-        </div>
-      </div>
+          <h1 style={{ fontSize:28, fontWeight:900, margin:'6px 0 8px', textAlign:'center' }}>斗地主 · Fight the Landlord</h1>
+          <div style={{ textAlign:'center', marginBottom:16 }}>
+            <span
+              style={{
+                display:'inline-block',
+                padding:'4px 12px',
+                borderBottom:'2px solid #ef4444',
+                fontSize:16,
+                fontWeight:700,
+              }}
+            >
+              {(() => {
+                const formatted = totalMatches != null ? totalMatches.toLocaleString() : '—';
+                return lang === 'en'
+                  ? `${I18N.en.TotalMatches}: ${formatted}`
+                  : `${I18N.zh.TotalMatches}：${formatted}`;
+              })()}
+            </span>
+          </div>
+          <div style={{ marginLeft:'auto', marginBottom:24, display:'flex', flexDirection:'column', alignItems:'stretch', gap:12 }} data-i18n-ignore>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span aria-hidden="true" title={lang==='en'?'Language':'语言'} style={{ fontSize:14, opacity:0.75, display:'inline-flex', alignItems:'center' }}>🌐</span>
+              <select aria-label={lang==='en'?'Language':'语言'} value={lang} onChange={e=>setLang((e.target.value as Lang))} style={{ padding:'4px 8px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff' }}>
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
+              <button
+                type="button"
+                onClick={() => setDisclaimerOpen(true)}
+                style={{
+                  padding:'6px 16px',
+                  borderRadius:999,
+                  border:'1px solid #dc2626',
+                  background:'#fee2e2',
+                  color:'#b91c1c',
+                  fontWeight:600,
+                  cursor:'pointer',
+                  boxShadow:'0 1px 2px rgba(0,0,0,0.1)',
+                }}
+              >
+                {lang === 'en' ? I18N.en.DisclaimerButton : I18N.zh.DisclaimerButton}
+              </button>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center', marginLeft:'auto' }}>
+                <button
+                  onClick={()=>setMatchMode('regular')}
+                  aria-pressed={isRegularMode}
+                  style={{
+                    padding:'6px 12px',
+                    borderRadius:8,
+                    border:'1px solid #d1d5db',
+                    background: isRegularMode ? '#2563eb' : '#fff',
+                    color: isRegularMode ? '#fff' : '#1f2937',
+                    cursor:'pointer',
+                    fontWeight:600,
+                  }}
+                >{regularLabel}</button>
+                <button
+                  onClick={()=>setMatchMode('knockout')}
+                  aria-pressed={!isRegularMode}
+                  style={{
+                    padding:'6px 12px',
+                    borderRadius:8,
+                    border:'1px solid #d1d5db',
+                    background: !isRegularMode ? '#2563eb' : '#fff',
+                    color: !isRegularMode ? '#fff' : '#1f2937',
+                    cursor:'pointer',
+                    fontWeight:600,
+                  }}
+                >{knockoutLabel}</button>
+              </div>
+            </div>
+          </div>
 
 
-      {isRegularMode ? (
+          {isRegularMode ? (
         <>
         <div style={{ border:'1px solid #eee', borderRadius:12, padding:14, marginBottom:16 }}>
           <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局设置</div>
@@ -6998,6 +7642,7 @@ const [lang, setLang] = useState<Lang>(() => {
                       <option value="built-in:mininet">MiniNet</option>
                       <option value="built-in:ally-support">AllySupport</option>
                       <option value="built-in:endgame-rush">EndgameRush</option>
+                      <option value="built-in:advanced-hybrid">Advanced Hybrid</option>
                     </optgroup>
                     <optgroup label={lang === 'en' ? 'AI / External' : 'AI / 外置'}>
                       <option value="ai:openai">OpenAI</option>
@@ -7176,12 +7821,15 @@ const [lang, setLang] = useState<Lang>(() => {
           </div>
         </div>
 
+        <div ref={ladderControlsHostRef} style={{ margin:'16px 0' }} />
+
         <div style={{ border:'1px solid #eee', borderRadius:12, padding:14 }}>
           {/* —— 天梯图 —— */}
           <LadderPanel />
           <div style={{ fontSize:18, fontWeight:800, marginBottom:6 }}>对局</div>
           <LivePanel
             key={resetKey}
+            instanceId={resetKey}
             rounds={rounds}
             startScore={startScore}
             seatDelayMs={seatDelayMs}
@@ -7195,6 +7843,7 @@ const [lang, setLang] = useState<Lang>(() => {
             onLog={setLiveLog}
 
             turnTimeoutSecs={turnTimeoutSecs}
+            controlsPortal={ladderControlsHost}
           />
         </div>
         </>
@@ -7202,6 +7851,70 @@ const [lang, setLang] = useState<Lang>(() => {
         <KnockoutPanel />
       )}
         </div>
+        {disclaimerOpen && renderViaPortal(
+          <div
+            role="presentation"
+            onClick={() => setDisclaimerOpen(false)}
+            style={{
+              position:'fixed',
+              inset:0,
+              background:'rgba(0,0,0,0.45)',
+              display:'flex',
+              alignItems:'center',
+              justifyContent:'center',
+              padding:'24px',
+              zIndex:2000,
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="ddz-disclaimer-title"
+              onClick={e => e.stopPropagation()}
+              style={{
+                background:'#fff',
+                maxWidth:720,
+                width:'100%',
+                maxHeight:'85vh',
+                overflowY:'auto',
+                borderRadius:12,
+                boxShadow:'0 20px 45px rgba(15,23,42,0.25)',
+                padding:'24px 28px',
+                lineHeight:1.6,
+              }}
+            >
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16 }}>
+                <h2 id="ddz-disclaimer-title" style={{ margin:0, fontSize:20, fontWeight:800, color:'#111827' }}>{DISCLAIMER_TITLE}</h2>
+                <button
+                  type="button"
+                  onClick={() => setDisclaimerOpen(false)}
+                  aria-label={lang === 'en' ? I18N.en.DisclaimerClose : I18N.zh.DisclaimerClose}
+                  style={{
+                    border:'none',
+                    background:'transparent',
+                    color:'#6b7280',
+                    fontSize:24,
+                    lineHeight:1,
+                    cursor:'pointer',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ marginTop:16, display:'flex', flexDirection:'column', gap:18 }}>
+                {DISCLAIMER_SECTIONS.map(section => (
+                  <section key={section.title}>
+                    <h3 style={{ margin:'0 0 8px', fontSize:16, fontWeight:700, color:'#1f2937' }}>{section.title}</h3>
+                    {section.paragraphs.map((text, idx) => (
+                      <p key={idx} style={{ margin:'0 0 10px', color:'#374151', fontSize:14 }}>{text}</p>
+                    ))}
+                  </section>
+                ))}
+              </div>
+            </div>
+          </div>,
+          disclaimerHostRef.current,
+        )}
       </SeatInfoContext.Provider>
     </LangContext.Provider>
   </>);
