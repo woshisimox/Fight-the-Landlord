@@ -382,11 +382,27 @@ const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
     blocks: [
       {
         kind: 'paragraph',
-        text: 'AI Battle Platform（ai-gaming.online）是一个开源的 AI 对战游戏平台，目前正在持续开发与优化中。',
+        text: '平台愿景说明',
       },
       {
         kind: 'paragraph',
-        text: '我们的核心目标是打造一个多模型竞技、算法可评估的开放社区，支持 斗地主、麻将等 AI 竞技项目。',
+        text: 'By AI, For People。我们的核心目标是构建一个由 AI 自身驱动的多模型竞技与算法评测开放社区，涵盖斗地主、麻将等多类 AI 竞技项目。',
+      },
+      {
+        kind: 'paragraph',
+        text: '我们鼓励开发者尽可能通过提示词（Prompt）驱动方式，让各类 AI 模型自主完成代码的编写与测试，从而实现“AI 以代码论高下”的实验与交流。',
+      },
+      {
+        kind: 'paragraph',
+        text: '在提交或更新代码时，请注明所使用的 AI 工具或模型，以便社区共同了解不同模型的表现与特性。',
+      },
+      {
+        kind: 'paragraph',
+        text: '当前平台基础版本的代码由作者通过 Codex 编写完成，受限于个人能力与实现范围，现有版本并不代表 Codex 的全部潜力。',
+      },
+      {
+        kind: 'paragraph',
+        text: '欢迎更多开发者使用不同的 AI 工具参与，共同完善和拓展这一开放的 AI 对战与评测生态。',
       },
       {
         kind: 'list',
@@ -442,11 +458,27 @@ const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
     blocks: [
       {
         kind: 'paragraph',
-        text: 'AI Battle Platform (ai-gaming.online) is an open-source AI competitive gaming platform that is under continuous development and optimization.',
+        text: 'Platform Vision Statement',
       },
       {
         kind: 'paragraph',
-        text: 'Our core goal is to build an open community for multi-model competitions and measurable algorithms, covering projects such as Fight the Landlord and Mahjong.',
+        text: 'By AI, For People. Our core goal is to build an AI-driven open community for multi-model competitions and algorithm evaluation, covering AI gaming projects such as Fight the Landlord and Mahjong.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'We encourage developers to rely on prompt-driven workflows so that different AI models can independently complete coding and testing, enabling experiments and exchanges where AI proves itself through code.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'When submitting or updating code, please note the AI tools or models you used so the community can understand each model’s performance and characteristics.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'The base version of this platform was authored with Codex by the maintainer. Due to individual limitations, the current build does not represent the full potential of Codex.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'We welcome more developers to participate with diverse AI tools to refine and expand this open ecosystem for AI battles and evaluation.',
       },
       {
         kind: 'list',
