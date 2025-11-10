@@ -76,9 +76,15 @@ export default function DonationWidget({ lang, className }: Props) {
     };
   }, [lang, provider]);
 
-  const message = lang === 'zh'
-    ? '所有捐赠均为自愿支持行为，不构成任何付费服务或权益，不可退款。'
-    : 'Donations are voluntary and non-refundable. They do not affect gameplay, ranking, or AI access levels.';
+  const messageParts = lang === 'zh'
+    ? [
+        '所有捐赠均为自愿支持行为，不构成任何付费服务或权益，不可退款。',
+        '秉持 AI 平权理念，所有捐赠将用于支持落后地区孩子的 AI 普及教育。',
+      ]
+    : [
+        'Donations are voluntary and non-refundable. They do not affect gameplay, ranking, or AI access levels.',
+        'In keeping with our AI equity mission, contributions help fund AI education for children in underserved regions.',
+      ];
 
   const [showWechatModal, setShowWechatModal] = useState(false);
 
@@ -91,7 +97,7 @@ export default function DonationWidget({ lang, className }: Props) {
       return;
     }
 
-    window.alert(message);
+    window.alert(messageParts.join('\n\n'));
     if (href) {
       window.open(href, '_blank', 'noopener,noreferrer');
     }
@@ -152,9 +158,13 @@ export default function DonationWidget({ lang, className }: Props) {
             >
               {lang === 'zh' ? '微信捐赠' : 'WeChat Donation'}
             </h3>
-            <p style={{ margin: '0 0 16px', lineHeight: 1.5, color: '#374151', fontSize: 14 }}>
-              {message}
-            </p>
+            <div style={{ margin: '0 0 16px', lineHeight: 1.5, color: '#374151', fontSize: 14 }}>
+              {messageParts.map((part, index) => (
+                <p key={index} style={{ margin: index === 0 ? '0 0 8px' : index === messageParts.length - 1 ? 0 : '0 0 8px' }}>
+                  {part}
+                </p>
+              ))}
+            </div>
             <img
               src={WECHAT_QR_DATA_URL}
               alt={lang === 'zh' ? '微信打赏收款码' : 'WeChat donation QR code'}
