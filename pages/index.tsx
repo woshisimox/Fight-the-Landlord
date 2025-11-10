@@ -13,6 +13,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     TotalMatches: '所有参赛选手累计局数',
     DisclaimerButton: '免责声明',
     DisclaimerClose: '关闭免责声明',
+    DeveloperJoinButton: '开发者加入',
+    DeveloperJoinClose: '关闭开发者加入窗口',
     Settings: '对局设置',
     Enable: '启用对局',
     Reset: '清空',
@@ -33,6 +35,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     TotalMatches: 'Total games played by all participants',
     DisclaimerButton: 'Disclaimer',
     DisclaimerClose: 'Close disclaimer',
+    DeveloperJoinButton: 'Join as Developer',
+    DeveloperJoinClose: 'Close developer join dialog',
     Settings: 'Match settings',
     Enable: 'Enable match',
     Reset: 'Reset',
@@ -359,6 +363,45 @@ const DISCLAIMER_CONTENT: Record<Lang, { title: string; sections: DisclaimerSect
         ],
       },
     ],
+  },
+};
+
+type DeveloperJoinContent = {
+  title: string;
+  intro: string;
+  bullets: string[];
+  contactLabel: string;
+  contactEmail: string;
+  ctaLabel: string;
+  ctaHref: string;
+};
+
+const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
+  zh: {
+    title: '开发者加入',
+    intro: '欢迎研究者、工程师和玩家共同推进 AI 对战平台。我们提供专属沙盘、对局指标打通与调参与持续更新的攻关环境。',
+    bullets: [
+      '请简要介绍团队背景，以及希望接入的 AI 模型或自研策略。',
+      '说明预期的实验规模与需要的沙盘 / 接口支持，我们会协助安排资源。',
+      '提交申请后，我们将在 3 个工作日内回复，规划沙盘接入与迭代跟踪。',
+    ],
+    contactLabel: '邮件加入或咨询：',
+    contactEmail: 'ai-gaming.online@outlook.com',
+    ctaLabel: '查看加入说明',
+    ctaHref: 'mailto:ai-gaming.online@outlook.com?subject=AI%20%E5%AF%B9%E6%88%98%E5%B9%B3%E5%8F%B0%E5%BC%80%E5%8F%91%E8%80%85%E5%8A%A0%E5%85%A5%E7%94%B3%E8%AF%B7',
+  },
+  en: {
+    title: 'Join as a Developer',
+    intro: 'Researchers, engineers, and competitive players are welcome to co-develop the AI battle platform. We provide dedicated sandboxes, shared metrics, and ongoing tuning support.',
+    bullets: [
+      'Share a brief background of your team and the AI models or custom bots you plan to integrate.',
+      'Describe the scale of matches you want to run and any sandbox or API support you need.',
+      'After receiving your request we will reply within three business days to schedule sandbox access and follow-up reviews.',
+    ],
+    contactLabel: 'Email for access or questions:',
+    contactEmail: 'ai-gaming.online@outlook.com',
+    ctaLabel: 'View onboarding guide',
+    ctaHref: 'mailto:ai-gaming.online@outlook.com?subject=AI%20Battle%20Platform%20Developer%20Join',
   },
 };
 
@@ -7425,6 +7468,7 @@ const [lang, setLang] = useState<Lang>(() => {
   const [seatKeys, setSeatKeys] = useState(DEFAULTS.seatKeys);
   const [totalMatches, setTotalMatches] = useState<number | null>(null);
   const [disclaimerOpen, setDisclaimerOpen] = useState(false);
+  const [developerJoinOpen, setDeveloperJoinOpen] = useState(false);
   const disclaimerHostRef = useRef<HTMLElement | null>(null);
 
   const computeTotalMatches = useCallback(() => {
@@ -7488,6 +7532,9 @@ const [lang, setLang] = useState<Lang>(() => {
 
   const disclaimerContent = useMemo(() => {
     return DISCLAIMER_CONTENT[lang] ?? DISCLAIMER_CONTENT.zh;
+  }, [lang]);
+  const developerJoinContent = useMemo(() => {
+    return DEVELOPER_JOIN_CONTENT[lang] ?? DEVELOPER_JOIN_CONTENT.zh;
   }, [lang]);
 
   const seatInfoLabels = useMemo(() => {
@@ -7576,7 +7623,7 @@ const [lang, setLang] = useState<Lang>(() => {
                 <DonationWidget lang={lang} />
                 <button
                   type="button"
-                  onClick={() => setDisclaimerOpen(true)}
+                  onClick={() => { setDisclaimerOpen(true); setDeveloperJoinOpen(false); }}
                   style={{
                     padding:'6px 16px',
                     borderRadius:999,
@@ -7589,6 +7636,22 @@ const [lang, setLang] = useState<Lang>(() => {
                   }}
                 >
                   {lang === 'en' ? I18N.en.DisclaimerButton : I18N.zh.DisclaimerButton}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setDeveloperJoinOpen(true); setDisclaimerOpen(false); }}
+                  style={{
+                    padding:'6px 16px',
+                    borderRadius:999,
+                    border:'1px solid #2563eb',
+                    background:'#eff6ff',
+                    color:'#1d4ed8',
+                    fontWeight:600,
+                    cursor:'pointer',
+                    boxShadow:'0 1px 2px rgba(0,0,0,0.08)',
+                  }}
+                >
+                  {lang === 'en' ? I18N.en.DeveloperJoinButton : I18N.zh.DeveloperJoinButton}
                 </button>
               </div>
               <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
@@ -7950,6 +8013,96 @@ const [lang, setLang] = useState<Lang>(() => {
         <KnockoutPanel />
       )}
         </div>
+        {developerJoinOpen && renderViaPortal(
+          <div
+            role="presentation"
+            onClick={() => setDeveloperJoinOpen(false)}
+            style={{
+              position:'fixed',
+              inset:0,
+              background:'rgba(0,0,0,0.45)',
+              display:'flex',
+              alignItems:'center',
+              justifyContent:'center',
+              padding:'24px',
+              zIndex:2000,
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="ddz-developer-join-title"
+              onClick={e => e.stopPropagation()}
+              style={{
+                background:'#fff',
+                maxWidth:520,
+                width:'100%',
+                maxHeight:'80vh',
+                overflowY:'auto',
+                borderRadius:12,
+                boxShadow:'0 20px 45px rgba(15,23,42,0.25)',
+                padding:'24px 28px',
+                lineHeight:1.6,
+              }}
+            >
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16 }}>
+                <h2 id="ddz-developer-join-title" style={{ margin:0, fontSize:20, fontWeight:800, color:'#1f2937' }}>{developerJoinContent.title}</h2>
+                <button
+                  type="button"
+                  onClick={() => setDeveloperJoinOpen(false)}
+                  aria-label={lang === 'en' ? I18N.en.DeveloperJoinClose : I18N.zh.DeveloperJoinClose}
+                  style={{
+                    border:'none',
+                    background:'transparent',
+                    color:'#6b7280',
+                    fontSize:24,
+                    lineHeight:1,
+                    cursor:'pointer',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+              <p style={{ margin:'16px 0', color:'#374151', fontSize:14 }}>{developerJoinContent.intro}</p>
+              <ul style={{ margin:'0 0 16px 18px', padding:0, color:'#374151', fontSize:14, display:'flex', flexDirection:'column', gap:8 }}>
+                {developerJoinContent.bullets.map((text, idx) => (
+                  <li key={idx} style={{ margin:0 }}>{text}</li>
+                ))}
+              </ul>
+              <div style={{ marginTop:12, color:'#1f2937', fontSize:14 }}>
+                <span>{developerJoinContent.contactLabel}</span>
+                <a
+                  href={`mailto:${developerJoinContent.contactEmail}`}
+                  style={{ color:'#2563eb', marginLeft:4, textDecoration:'underline', wordBreak:'break-all' }}
+                >
+                  {developerJoinContent.contactEmail}
+                </a>
+              </div>
+              <div style={{ marginTop:20 }}>
+                <a
+                  href={developerJoinContent.ctaHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    display:'inline-flex',
+                    alignItems:'center',
+                    justifyContent:'center',
+                    padding:'8px 18px',
+                    borderRadius:999,
+                    background:'#2563eb',
+                    color:'#fff',
+                    fontWeight:600,
+                    textDecoration:'none',
+                    boxShadow:'0 6px 18px rgba(37,99,235,0.35)',
+                  }}
+                >
+                  {developerJoinContent.ctaLabel}
+                </a>
+              </div>
+            </div>
+          </div>,
+          disclaimerHostRef.current,
+        )}
         {disclaimerOpen && renderViaPortal(
           <div
             role="presentation"
