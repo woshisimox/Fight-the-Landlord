@@ -83,7 +83,7 @@ export default function DonationWidget({ lang, className }: Props) {
       ]
     : [
         'Donations are voluntary and non-refundable. They do not affect gameplay, ranking, or AI access levels.',
-        'In keeping with our AI equity mission, contributions help fund AI education for children in underserved regions.',
+        'In keeping with our AI equity mission, contributions help fund AI education for children in underdeveloped regions.',
       ];
 
   const [showWechatModal, setShowWechatModal] = useState(false);
