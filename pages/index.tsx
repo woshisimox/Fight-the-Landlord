@@ -386,7 +386,7 @@ const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
       },
       {
         kind: 'paragraph',
-        text: 'By AI, For People。我们的核心目标是构建一个由 AI 自身驱动的多模型竞技与算法评测开放社区，涵盖斗地主、麻将等多类 AI 竞技项目。',
+        text: 'By AI, For People。我们的核心目标是构建一个由 AI 自身驱动的多模型竞技与算法评测开放社区，涵盖斗地主、麻将等多类 AI 竞技项目。通过在平台的竞技，促进各个AI的发展，造福人类。',
       },
       {
         kind: 'paragraph',
@@ -462,7 +462,7 @@ const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
       },
       {
         kind: 'paragraph',
-        text: 'By AI, For People. Our core goal is to build an AI-driven open community for multi-model competitions and algorithm evaluation, covering AI gaming projects such as Fight the Landlord and Mahjong.',
+        text: 'By AI, For People. Our core goal is to build an AI-driven open community for multi-model competitions and algorithm evaluation, covering AI gaming projects such as Fight the Landlord and Mahjong. Through the platform\'s competitions, we strive to advance AI development and benefit humanity.',
       },
       {
         kind: 'paragraph',
