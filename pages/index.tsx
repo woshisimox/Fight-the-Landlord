@@ -366,42 +366,136 @@ const DISCLAIMER_CONTENT: Record<Lang, { title: string; sections: DisclaimerSect
   },
 };
 
+type DeveloperJoinListItem = string | { prefix?: string; text: string };
+type DeveloperJoinBlock =
+  | { kind: 'paragraph'; text: string }
+  | { kind: 'list'; title: string; items: DeveloperJoinListItem[] };
+
 type DeveloperJoinContent = {
   title: string;
-  intro: string;
-  bullets: string[];
-  contactLabel: string;
-  contactEmail: string;
-  ctaLabel: string;
-  ctaHref: string;
+  blocks: DeveloperJoinBlock[];
 };
 
 const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
   zh: {
     title: '开发者加入',
-    intro: '欢迎研究者、工程师和玩家共同推进 AI 对战平台。我们提供专属沙盘、对局指标打通与调参与持续更新的攻关环境。',
-    bullets: [
-      '请简要介绍团队背景，以及希望接入的 AI 模型或自研策略。',
-      '说明预期的实验规模与需要的沙盘 / 接口支持，我们会协助安排资源。',
-      '提交申请后，我们将在 3 个工作日内回复，规划沙盘接入与迭代跟踪。',
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: 'AI Battle Platform（ai-gaming.online）是一个开源的 AI 对战游戏平台，目前正在持续开发与优化中。',
+      },
+      {
+        kind: 'paragraph',
+        text: '我们的核心目标是打造一个多模型竞技、算法可评估的开放社区，支持 斗地主、麻将等 AI 竞技项目。',
+      },
+      {
+        kind: 'list',
+        title: '🔗 项目托管',
+        items: [
+          { prefix: 'GitHub 仓库：', text: 'https://github.com/woshisimox/Fight-the-Landlord' },
+          '部署平台： Vercel',
+        ],
+      },
+      {
+        kind: 'list',
+        title: '👩‍💻 如何参与',
+        items: [
+          'Fork 仓库，创建分支后提交 Pull Request',
+          '参与前可查看 README.md、CONTRIBUTING.md 与 issues',
+          '欢迎提交：',
+          '· 新算法 / AI 接口适配',
+          '· UI/UX 优化',
+          '· TrueSkill / Ladder 评分改进',
+          '· 调试、日志与对战回放模块',
+        ],
+      },
+      {
+        kind: 'list',
+        title: '💬 交流与支持',
+        items: [
+          '提交 Issue 或 Discussion',
+          '可通过 GitHub 联系维护者：@woshisimox',
+          { prefix: '或通过邮件联系：', text: 'ai-gaming.online@outlook.com' },
+        ],
+      },
+      {
+        kind: 'list',
+        title: '🧠 当前技术栈',
+        items: [
+          '前端：Next.js + TypeScript + TailwindCSS',
+          '后端：Node.js（Vercel Serverless）',
+          '数据存储：本地 JSON / GitHub Pages 同步（后续支持 Cloud DB）',
+        ],
+      },
+      {
+        kind: 'list',
+        title: '📜 许可协议',
+        items: [
+          '代码采用 MIT License 开源',
+          '欢迎任何形式的学习、改进与二次开发，但请保留署名',
+        ],
+      },
     ],
-    contactLabel: '邮件加入或咨询：',
-    contactEmail: 'ai-gaming.online@outlook.com',
-    ctaLabel: '查看加入说明',
-    ctaHref: 'mailto:ai-gaming.online@outlook.com?subject=AI%20%E5%AF%B9%E6%88%98%E5%B9%B3%E5%8F%B0%E5%BC%80%E5%8F%91%E8%80%85%E5%8A%A0%E5%85%A5%E7%94%B3%E8%AF%B7',
   },
   en: {
     title: 'Join as a Developer',
-    intro: 'Researchers, engineers, and competitive players are welcome to co-develop the AI battle platform. We provide dedicated sandboxes, shared metrics, and ongoing tuning support.',
-    bullets: [
-      'Share a brief background of your team and the AI models or custom bots you plan to integrate.',
-      'Describe the scale of matches you want to run and any sandbox or API support you need.',
-      'After receiving your request we will reply within three business days to schedule sandbox access and follow-up reviews.',
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: 'AI Battle Platform (ai-gaming.online) is an open-source AI competitive gaming platform that is under continuous development and optimization.',
+      },
+      {
+        kind: 'paragraph',
+        text: 'Our core goal is to build an open community for multi-model competitions and measurable algorithms, covering projects such as Fight the Landlord and Mahjong.',
+      },
+      {
+        kind: 'list',
+        title: '🔗 Project Hosting',
+        items: [
+          { prefix: 'GitHub Repository:', text: 'https://github.com/woshisimox/Fight-the-Landlord' },
+          'Deployment Platform: Vercel',
+        ],
+      },
+      {
+        kind: 'list',
+        title: '👩‍💻 How to Participate',
+        items: [
+          'Fork the repository, create a branch, and submit a Pull Request.',
+          'Review README.md, CONTRIBUTING.md, and issues before contributing.',
+          'We welcome submissions including:',
+          '· New algorithms / AI interface integrations',
+          '· UI/UX improvements',
+          '· TrueSkill / ladder scoring enhancements',
+          '· Debugging, logging, and match replay modules',
+        ],
+      },
+      {
+        kind: 'list',
+        title: '💬 Communication & Support',
+        items: [
+          'Open an Issue or Discussion',
+          'Reach the maintainer on GitHub: @woshisimox',
+          { prefix: 'Contact via email:', text: 'ai-gaming.online@outlook.com' },
+        ],
+      },
+      {
+        kind: 'list',
+        title: '🧠 Current Tech Stack',
+        items: [
+          'Frontend: Next.js + TypeScript + TailwindCSS',
+          'Backend: Node.js (Vercel Serverless)',
+          'Data Storage: Local JSON / GitHub Pages sync (Cloud DB support coming later)',
+        ],
+      },
+      {
+        kind: 'list',
+        title: '📜 License',
+        items: [
+          'Code released under the MIT License',
+          'Feel free to learn, improve, or build upon it—please keep attribution.',
+        ],
+      },
     ],
-    contactLabel: 'Email for access or questions:',
-    contactEmail: 'ai-gaming.online@outlook.com',
-    ctaLabel: 'View onboarding guide',
-    ctaHref: 'mailto:ai-gaming.online@outlook.com?subject=AI%20Battle%20Platform%20Developer%20Join',
   },
 };
 
@@ -437,6 +531,40 @@ function translateTextLiteral(s: string): string {
     }
   }
   return out;
+}
+
+const developerLinkStyle: CSSProperties = { color:'#2563eb', textDecoration:'underline', wordBreak:'break-all' };
+
+function renderRichText(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const linkRegex = /(https?:\/\/[^\s]+|[\w.+-]+@[\w.-]+\.[\w.-]+)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = linkRegex.exec(text)) !== null) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      nodes.push(text.slice(lastIndex, index));
+    }
+    const value = match[0];
+    if (value.includes('@') && !value.startsWith('http')) {
+      nodes.push(
+        <a key={`mail-${value}-${index}`} href={`mailto:${value}`} style={developerLinkStyle}>
+          {value}
+        </a>,
+      );
+    } else {
+      nodes.push(
+        <a key={`link-${value}-${index}`} href={value} target="_blank" rel="noreferrer" style={developerLinkStyle}>
+          {value}
+        </a>,
+      );
+    }
+    lastIndex = linkRegex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes;
 }
 
 function autoTranslateContainer(root: HTMLElement | null, lang: Lang) {
@@ -8063,41 +8191,39 @@ const [lang, setLang] = useState<Lang>(() => {
                   ×
                 </button>
               </div>
-              <p style={{ margin:'16px 0', color:'#374151', fontSize:14 }}>{developerJoinContent.intro}</p>
-              <ul style={{ margin:'0 0 16px 18px', padding:0, color:'#374151', fontSize:14, display:'flex', flexDirection:'column', gap:8 }}>
-                {developerJoinContent.bullets.map((text, idx) => (
-                  <li key={idx} style={{ margin:0 }}>{text}</li>
-                ))}
-              </ul>
-              <div style={{ marginTop:12, color:'#1f2937', fontSize:14 }}>
-                <span>{developerJoinContent.contactLabel}</span>
-                <a
-                  href={`mailto:${developerJoinContent.contactEmail}`}
-                  style={{ color:'#2563eb', marginLeft:4, textDecoration:'underline', wordBreak:'break-all' }}
-                >
-                  {developerJoinContent.contactEmail}
-                </a>
-              </div>
-              <div style={{ marginTop:20 }}>
-                <a
-                  href={developerJoinContent.ctaHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{
-                    display:'inline-flex',
-                    alignItems:'center',
-                    justifyContent:'center',
-                    padding:'8px 18px',
-                    borderRadius:999,
-                    background:'#2563eb',
-                    color:'#fff',
-                    fontWeight:600,
-                    textDecoration:'none',
-                    boxShadow:'0 6px 18px rgba(37,99,235,0.35)',
-                  }}
-                >
-                  {developerJoinContent.ctaLabel}
-                </a>
+              <div style={{ marginTop:12, display:'flex', flexDirection:'column', gap:16, color:'#374151' }}>
+                {developerJoinContent.blocks.map((block, blockIndex) => {
+                  if (block.kind === 'paragraph') {
+                    return (
+                      <p key={`dev-join-paragraph-${blockIndex}`} style={{ margin:0, fontSize:14, lineHeight:1.7 }}>
+                        {renderRichText(block.text)}
+                      </p>
+                    );
+                  }
+                  return (
+                    <div key={`dev-join-list-${blockIndex}`} style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                      <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:'#1f2937' }}>{block.title}</h3>
+                      <ul style={{ margin:0, paddingLeft:20, fontSize:14, display:'flex', flexDirection:'column', gap:6 }}>
+                        {block.items.map((item, itemIndex) => {
+                          if (typeof item === 'string') {
+                            return (
+                              <li key={`dev-join-item-${blockIndex}-${itemIndex}`} style={{ margin:0 }}>
+                                {renderRichText(item)}
+                              </li>
+                            );
+                          }
+                          return (
+                            <li key={`dev-join-item-${blockIndex}-${itemIndex}`} style={{ margin:0 }}>
+                              {item.prefix ? <span>{item.prefix}</span> : null}
+                              {item.prefix ? ' ' : null}
+                              {renderRichText(item.text)}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>,
