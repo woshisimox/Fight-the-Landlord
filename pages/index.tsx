@@ -1221,6 +1221,32 @@ type LivePanelFinishPayload = {
   endedEarlyForNegative?: boolean;
 };
 
+type RunLogDeliveryPayload = {
+  runId: string;
+  mode: 'regular' | 'knockout';
+  logLines: string[];
+  metadata: Record<string, any>;
+};
+
+const LOG_DELIVERY_ENDPOINT = '/api/deliver_logs';
+
+async function postRunLogDelivery(payload: RunLogDeliveryPayload) {
+  if (typeof window === 'undefined' || typeof fetch !== 'function') return;
+  try {
+    const res = await fetch(LOG_DELIVERY_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.error('[log-delivery] HTTP error', res.status, text);
+    }
+  } catch (err) {
+    console.error('[log-delivery] request failed', err);
+  }
+}
+
 type HumanHint = {
   move: 'play' | 'pass';
   cards?: string[];
@@ -2369,6 +2395,9 @@ function KnockoutPanel() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const allFileRef = useRef<HTMLInputElement|null>(null);
+  const [matchLog, setMatchLog] = useState<string[]>([]);
+  const matchLogRef = useRef<string[]>(matchLog);
+  useEffect(() => { matchLogRef.current = matchLog; }, [matchLog]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -3048,6 +3077,47 @@ function KnockoutPanel() {
           .filter(entry => !!entry.token && entry.token !== KO_BYE)
           .sort((a, b) => b.total - a.total)
       : null;
+    const seatMeta = ctx.tokens.map((token, idx) => ({
+      seatIndex: idx,
+      token,
+      label: ctx.labels[idx] || displayName(token),
+      choice: ctx.seats[idx],
+      model: ctx.seatModels[idx] || '',
+      httpBase: ctx.seatKeys[idx]?.httpBase || '',
+    }));
+    const rankedSummary = ranked.map(entry => {
+      const pos = ctx.tokens.indexOf(entry.token);
+      const labelText = pos >= 0 ? (ctx.labels[pos] || displayName(entry.token)) : displayName(entry.token);
+      return { token: entry.token, label: labelText, total: entry.total };
+    });
+    const baseMetadata = {
+      summary: `Round ${ctx.roundIdx + 1} · Match ${ctx.matchIdx + 1}`,
+      timestamp: new Date().toISOString(),
+      roundIndex: ctx.roundIdx,
+      matchIndex: ctx.matchIdx,
+      finishedCount,
+      requestedRounds: seriesRounds,
+      endedEarly,
+      totals: totalsTuple,
+      ranked: rankedSummary,
+      seatMeta,
+      farmerCoop,
+      bid,
+      four2,
+      startScore,
+      overtimeCount: overtimeCountRef.current,
+      placementsDesc,
+    };
+    const pushKnockoutLog = (extra?: Record<string, any>) => {
+      const lines = (matchLogRef.current || []).map(line => String(line));
+      const runId = `knockout-${ctx.roundIdx + 1}-${ctx.matchIdx + 1}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      void postRunLogDelivery({
+        runId,
+        mode: 'knockout',
+        logLines: lines,
+        metadata: { ...baseMetadata, ...(extra || {}) },
+      });
+    };
     if (wasFinalMatch) {
       const trioTotals = ctx.tokens.map((token, idx) => ({ token, total: totalsTuple[idx] }))
         .filter(entry => !!entry.token && entry.token !== KO_BYE);
@@ -3148,6 +3218,10 @@ function KnockoutPanel() {
           ? `Final round complete. Eliminated ${label}${endedEarly ? ' after an early finish caused by a negative score.' : '.'}`
           : `决赛结束：淘汰 ${label}${endedEarly ? '（因出现负分提前结束）' : ''}`);
       }
+      pushKnockoutLog({
+        eliminated: { token: eliminatedToken, label },
+        finalPlacements: ordered,
+      });
       setAutomation(false);
       return;
     }
@@ -3155,6 +3229,9 @@ function KnockoutPanel() {
     setNotice(lang === 'en'
       ? `Round ${ctx.roundIdx + 1}: eliminated ${label}${endedEarly ? ' after an early finish caused by a negative score.' : '.'}`
       : `第 ${ctx.roundIdx + 1} 轮淘汰：${label}${endedEarly ? '（因出现负分提前结束）' : ''}`);
+    pushKnockoutLog({
+      eliminated: { token: eliminatedToken, label },
+    });
     setTimeout(() => { if (autoRunRef.current) scheduleNextMatch(); else setAutomation(false); }, 0);
   };
 
@@ -4009,6 +4086,7 @@ function KnockoutPanel() {
                 seatModels={modelsForLive}
                 seatKeys={keysForLive}
                 farmerCoop={farmerCoop}
+                onLog={setMatchLog}
                 onTotals={setLiveTotals}
                 onRunningChange={setLiveRunning}
                 onPauseChange={setLivePaused}
@@ -7705,6 +7783,8 @@ const [lang, setLang] = useState<Lang>(() => {
   }, [seats, seatModels, seatKeys]);
 
   const [liveLog, setLiveLog] = useState<string[]>([]);
+  const liveLogRef = useRef<string[]>(liveLog);
+  useEffect(() => { liveLogRef.current = liveLog; }, [liveLog]);
   const [ladderControlsHost, setLadderControlsHost] = useState<HTMLDivElement | null>(null);
   const ladderControlsHostRef = useCallback((el: HTMLDivElement | null) => {
     setLadderControlsHost(el);
@@ -7720,6 +7800,45 @@ const [lang, setLang] = useState<Lang>(() => {
     try { localStorage.removeItem('ddz_latency_store_v1'); } catch {}
     try { window.dispatchEvent(new Event('ddz-all-refresh')); } catch {}
   };
+
+  const handleRegularFinished = useCallback((result: LivePanelFinishPayload) => {
+    if (!result || result.aborted) return;
+    if (!(result.completedAll || result.endedEarlyForNegative)) return;
+    const lines = (liveLogRef.current || []).map(line => String(line));
+    const seatMeta = seats.slice(0, 3).map((choice, idx) => ({
+      seatIndex: idx,
+      label: seatInfoLabels[idx] || seatLabel(idx, lang),
+      choice,
+      model: seatModels[idx] || '',
+      httpBase: seatKeys[idx]?.httpBase || '',
+      human: choice === 'human',
+    }));
+    const summary = lang === 'en'
+      ? `Regular · ${rounds} round(s)`
+      : `常规赛 · ${rounds} 局`;
+    const metadata = {
+      summary,
+      timestamp: new Date().toISOString(),
+      roundsRequested: rounds,
+      finishedCount: result.finishedCount,
+      totals: result.totals,
+      endedEarly: !!result.endedEarlyForNegative,
+      startScore,
+      farmerCoop,
+      bid,
+      four2,
+      seatDelaysMs: seatDelayMs,
+      turnTimeoutSecs,
+      seatMeta,
+    };
+    const runId = `regular-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    void postRunLogDelivery({
+      runId,
+      mode: 'regular',
+      logLines: lines,
+      metadata,
+    });
+  }, [bid, farmerCoop, four2, lang, rounds, seatDelayMs, seatKeys, seatModels, seats, seatInfoLabels, startScore, turnTimeoutSecs]);
   // —— 统一统计（TS + Radar + 出牌评分 + 评分统计）外层上传入口 ——
   const allFileRef = useRef<HTMLInputElement|null>(null);
   const handleAllFileUploadHome = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -8156,6 +8275,7 @@ const [lang, setLang] = useState<Lang>(() => {
             seatKeys={seatKeys}
             farmerCoop={farmerCoop}
             onLog={setLiveLog}
+            onFinished={handleRegularFinished}
 
             turnTimeoutSecs={turnTimeoutSecs}
             controlsPortal={ladderControlsHost}
