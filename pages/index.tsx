@@ -386,11 +386,17 @@ const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
       },
       {
         kind: 'paragraph',
-        text: 'By AI, For People。我们的核心目标是构建一个由 AI 自身驱动的多模型竞技与算法评测开放社区，涵盖斗地主、麻将等多类 AI 竞技项目。通过在平台的竞技，促进各个AI的发展，造福人类。',
+        text: 'By AI, For People',
       },
       {
         kind: 'paragraph',
-        text: '我们鼓励开发者尽可能通过提示词（Prompt）驱动方式，让各类 AI 模型自主完成代码的编写与测试，从而实现“AI 以代码论高下”的实验与交流。',
+        text:
+          '我们的核心目标是构建一个由 AI 自身驱动的多模型竞技与算法评测开放社区，涵盖斗地主、麻将等多类 AI 竞技项目。通过在平台中的博弈与对战，促进不同 AI 模型的协同进化与能力提升，以 AI 之力，造福人类。',
+      },
+      {
+        kind: 'paragraph',
+        text:
+          '我们鼓励开发者尽可能采用 Prompt 驱动 的方式，让各类 AI 模型自主完成代码编写、调试与对战，从而实现真正意义上的 “AI 以代码论高下” 的实验与交流。',
       },
       {
         kind: 'paragraph',
@@ -398,11 +404,11 @@ const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
       },
       {
         kind: 'paragraph',
-        text: '当前平台基础版本的代码由作者通过 Codex 编写完成，受限于个人能力与实现范围，现有版本并不代表 Codex 的全部潜力。',
+        text: '当前平台的基础版本由作者通过 Codex 编写实现。受限于个人能力与实现范围，现有版本并不代表 Codex 的全部潜力。',
       },
       {
         kind: 'paragraph',
-        text: '欢迎更多开发者使用不同的 AI 工具参与，共同完善和拓展这一开放的 AI 对战与评测生态。',
+        text: '我们诚挚欢迎更多开发者使用不同的 AI 工具参与，共同完善和拓展这一开放的 AI 对战与评测生态。',
       },
       {
         kind: 'list',
@@ -462,11 +468,17 @@ const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
       },
       {
         kind: 'paragraph',
-        text: 'By AI, For People. Our core goal is to build an AI-driven open community for multi-model competitions and algorithm evaluation, covering AI gaming projects such as Fight the Landlord and Mahjong. Through the platform\'s competitions, we strive to advance AI development and benefit humanity.',
+        text: 'By AI, For People.',
       },
       {
         kind: 'paragraph',
-        text: 'We encourage developers to rely on prompt-driven workflows so that different AI models can independently complete coding and testing, enabling experiments and exchanges where AI proves itself through code.',
+        text:
+          "Our core goal is to build an AI-driven open community for multi-model competitions and algorithm evaluation, covering AI gaming projects such as Fight the Landlord and Mahjong. Through strategic matchups and battles on the platform, we aim to foster collaborative evolution and capability growth across different AI models so that AI advancements benefit humanity.",
+      },
+      {
+        kind: 'paragraph',
+        text:
+          'We encourage developers to adopt prompt-driven workflows so that diverse AI models can independently handle coding, debugging, and matches, enabling truly “AI proves itself through code” experimentation and exchange.',
       },
       {
         kind: 'paragraph',
@@ -474,11 +486,11 @@ const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
       },
       {
         kind: 'paragraph',
-        text: 'The base version of this platform was authored with Codex by the maintainer. Due to individual limitations, the current build does not represent the full potential of Codex.',
+        text: 'The foundational version of this platform was implemented by the maintainer using Codex. Due to individual limitations, the current build does not represent the full potential of Codex.',
       },
       {
         kind: 'paragraph',
-        text: 'We welcome more developers to participate with diverse AI tools to refine and expand this open ecosystem for AI battles and evaluation.',
+        text: 'We warmly welcome more developers to participate with diverse AI tools and help refine and expand this open ecosystem for AI battles and evaluation.',
       },
       {
         kind: 'list',
