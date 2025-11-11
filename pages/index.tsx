@@ -4920,13 +4920,11 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
       const bands = (cuts && cuts.length ? [...cuts] : [0]).sort((a,b)=>a-b);
       if (bands[0] !== 0) bands.unshift(0);
       if (bands[bands.length-1] !== n) bands.push(n);
-      let totalRounds = 0;
       const perSeatRounds:number[][] = [[],[],[]];
       for (let b=0;b<bands.length-1;b++){
         const st = bands[b], ed = bands[b+1];
         const len = Math.max(0, ed - st);
         if (len <= 0) continue;
-        totalRounds++;
         for (let s=0;s<3;s++){
           const arr = series[s]||[];
           let sum = 0, cnt = 0;
@@ -4935,43 +4933,26 @@ const LivePanel = forwardRef<LivePanelHandle, LiveProps>(function LivePanel(prop
             if (typeof v === 'number' && Number.isFinite(v)) { sum += v; cnt++; }
           }
           if (cnt>0) perSeatRounds[s].push(sum/cnt);
-          else perSeatRounds[s].push(Number.NaN);
         }
       }
       const stats = [0,1,2].map(s=>{
         const rs = perSeatRounds[s];
-        const rounds = totalRounds;
+        const rounds = rs.length;
         if (rounds===0) return { rounds:0, overallAvg:0, lastAvg:0, best:0, worst:0, mean:0, sigma:0 };
-        const valid = rs.filter(v => Number.isFinite(v));
-        const overall = valid.length ? (valid.reduce((a,b)=>a+b,0) / valid.length) : 0;
-        const last = (() => {
-          for (let idx = rs.length - 1; idx >= 0; idx--) {
-            const v = rs[idx];
-            if (Number.isFinite(v)) return v as number;
-          }
-          return 0;
-        })();
-        const best = valid.length ? Math.max(...valid) : 0;
-        const worst = valid.length ? Math.min(...valid) : 0;
+        const overall = rs.reduce((a,b)=>a+b,0) / rounds;
+        const last = rs[rounds - 1];
+        const best = Math.max(...rs);
+        const worst = Math.min(...rs);
         const mu = overall;
-        const sigma = valid.length
-          ? Math.sqrt(Math.max(0, valid.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / valid.length))
-          : 0;
+        const sigma = Math.sqrt(Math.max(0, rs.reduce((a,b)=>a + (b-mu)*(b-mu), 0) / rounds));
         return { rounds, overallAvg: overall, lastAvg: last, best, worst, mean: mu, sigma };
       });
       setScoreStats(stats);
-      setScoreDists(perSeatRounds.map(rs => rs.filter(v => Number.isFinite(v))));
+      setScoreDists(perSeatRounds.map(rs => rs.slice()));
     } catch (e) { console.error('[stats] recompute error', e); }
   }
   // 每局结束或数据变化时刷新统计
   useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
-
-  // 每局结束或数据变化时刷新统计
-  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
-
-  // 每局结束或数据变化时刷新统计
-  useEffect(()=>{ recomputeScoreStats(); }, [roundCuts, scoreSeries]);
-;
 
   const recordThought = useCallback((seat:number, ms:number, appendLog?: (line:string) => void) => {
     if (!Number.isFinite(ms) || ms < 0) return;
