@@ -19,20 +19,45 @@ function resolveBooleanFlag(value: string | undefined, fallback: boolean): boole
   return fallback;
 }
 
+function resolveConnectionUrl(): string | null {
+  const candidates = [
+    process.env.LOG_EMAIL_TRANSPORT,
+    process.env.SMTP_URL,
+    process.env.SMTP_CONNECTION_URL,
+    process.env.EMAIL_SERVER,
+  ];
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
+}
+
 function createTransporter(): Transporter | null {
+  const url = resolveConnectionUrl();
+  if (url) {
+    try {
+      return nodemailer.createTransport(url);
+    } catch (err) {
+      console.error('[email] failed to create transporter from url', err);
+    }
+  }
+
   const host = process.env.SMTP_HOST?.trim();
   if (!host) return null;
 
   const portRaw = process.env.SMTP_PORT?.trim();
-  const port = portRaw ? Number(portRaw) : 465;
+  const parsedPort = portRaw ? Number(portRaw) : Number.NaN;
+  const port = Number.isFinite(parsedPort) ? parsedPort : undefined;
   const secure = resolveBooleanFlag(process.env.SMTP_SECURE, port === 465);
+  const finalPort = port ?? (secure ? 465 : 587);
   const user = process.env.SMTP_USER?.trim();
   const pass = process.env.SMTP_PASS ?? '';
 
   try {
     return nodemailer.createTransport({
       host,
-      port: Number.isFinite(port) ? port : 465,
+      port: finalPort,
       secure,
       auth: user ? { user, pass } : undefined,
     });

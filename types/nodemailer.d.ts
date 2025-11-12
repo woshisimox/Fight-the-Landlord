@@ -23,10 +23,12 @@ declare module 'nodemailer' {
     sendMail(mailOptions: SendMailOptions): Promise<unknown>;
   }
 
-  export function createTransport(options: TransportOptions): Transporter;
+  export type TransportConfig = TransportOptions | string;
+
+  export function createTransport(options: TransportConfig): Transporter;
 
   const nodemailer: {
-    createTransport(options: TransportOptions): Transporter;
+    createTransport(options: TransportConfig): Transporter;
   };
 
   export default nodemailer;
