@@ -13,9 +13,20 @@ declare module 'nodemailer' {
     host?: string;
     port?: number;
     secure?: boolean;
+    service?: string;
+    pool?: boolean;
+    requireTLS?: boolean;
+    ignoreTLS?: boolean;
+    secureConnection?: boolean;
+    name?: string;
+    authMethod?: string;
     auth?: {
       user?: string;
       pass?: string;
+    };
+    tls?: {
+      rejectUnauthorized?: boolean;
+      ciphers?: string;
     };
   }
 

@@ -116,3 +116,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     res.status(400).json({ ok: false, error: err?.message || 'Invalid payload' });
   }
 }
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '4mb',
+    },
+  },
+};
