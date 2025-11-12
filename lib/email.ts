@@ -1,4 +1,4 @@
-import nodemailer, { Transporter } from 'nodemailer';
+import nodemailer, { Transporter, TransportOptions } from 'nodemailer';
 
 type SendMailOptions = {
   subject: string;
@@ -19,27 +19,51 @@ function resolveBooleanFlag(value: string | undefined, fallback: boolean): boole
   return fallback;
 }
 
-function resolveConnectionUrl(): string | null {
+type TransportConfig = string | TransportOptions;
+
+function parseTransportCandidate(raw: string | undefined | null): TransportConfig | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object') {
+        return parsed as TransportOptions;
+      }
+    } catch (err) {
+      console.error('[email] failed to parse transport JSON', err);
+    }
+  }
+  return trimmed;
+}
+
+function resolveConnectionConfigs(): TransportConfig[] {
+  const configs: TransportConfig[] = [];
   const candidates = [
     process.env.LOG_EMAIL_TRANSPORT,
+    process.env.LOG_EMAIL_TRANSPORT_JSON,
+    process.env.EMAIL_TRANSPORT,
     process.env.SMTP_URL,
     process.env.SMTP_CONNECTION_URL,
     process.env.EMAIL_SERVER,
   ];
   for (const candidate of candidates) {
-    const trimmed = candidate?.trim();
-    if (trimmed) return trimmed;
+    const parsed = parseTransportCandidate(candidate);
+    if (parsed) configs.push(parsed);
   }
-  return null;
+  return configs;
 }
 
 function createTransporter(): Transporter | null {
-  const url = resolveConnectionUrl();
-  if (url) {
+  const configs = resolveConnectionConfigs();
+  for (const config of configs) {
     try {
-      return nodemailer.createTransport(url);
+      const transporter = nodemailer.createTransport(config);
+      console.info('[email] transporter configured from connection config');
+      return transporter;
     } catch (err) {
-      console.error('[email] failed to create transporter from url', err);
+      console.error('[email] failed to create transporter from config', err);
     }
   }
 
@@ -51,8 +75,19 @@ function createTransporter(): Transporter | null {
   const port = Number.isFinite(parsedPort) ? parsedPort : undefined;
   const secure = resolveBooleanFlag(process.env.SMTP_SECURE, port === 465);
   const finalPort = port ?? (secure ? 465 : 587);
-  const user = process.env.SMTP_USER?.trim();
-  const pass = process.env.SMTP_PASS ?? '';
+  const user = (
+    process.env.SMTP_USER
+    || process.env.SMTP_USERNAME
+    || process.env.EMAIL_USER
+    || process.env.EMAIL_USERNAME
+  )?.trim();
+  const passRaw = (
+    process.env.SMTP_PASS
+    ?? process.env.SMTP_PASSWORD
+    ?? process.env.EMAIL_PASS
+    ?? process.env.EMAIL_PASSWORD
+  );
+  const pass = typeof passRaw === 'string' ? passRaw : '';
 
   try {
     return nodemailer.createTransport({
@@ -68,11 +103,12 @@ function createTransporter(): Transporter | null {
 }
 
 function getTransporter(): Transporter | null {
-  if ((globalThis as any).__DDZ_MAIL_TRANSPORT__) {
-    return (globalThis as any).__DDZ_MAIL_TRANSPORT__ as Transporter;
-  }
+  const cached = (globalThis as any).__DDZ_MAIL_TRANSPORT__ as Transporter | null | undefined;
+  if (cached) return cached;
   const transporter = createTransporter();
-  (globalThis as any).__DDZ_MAIL_TRANSPORT__ = transporter;
+  if (transporter) {
+    (globalThis as any).__DDZ_MAIL_TRANSPORT__ = transporter;
+  }
   return transporter;
 }
 
@@ -87,6 +123,14 @@ export async function sendRunLogEmail(options: SendMailOptions): Promise<{ ok: b
   const from = (process.env.LOG_EMAIL_FROM || '').trim() || to;
 
   try {
+    const maybeVerify = (transporter as any).verify;
+    if (typeof maybeVerify === 'function') {
+      try {
+        await maybeVerify.call(transporter);
+      } catch (verifyErr) {
+        console.warn('[email] transporter verify failed', verifyErr);
+      }
+    }
     await transporter.sendMail({
       from,
       to,

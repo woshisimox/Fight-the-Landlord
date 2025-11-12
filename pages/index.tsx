@@ -1228,22 +1228,48 @@ type RunLogDeliveryPayload = {
   metadata: Record<string, any>;
 };
 
-const LOG_DELIVERY_ENDPOINT = '/api/deliver_logs';
+type RunLogDeliveryResponse = {
+  ok: boolean;
+  runId?: string;
+  delivered?: boolean;
+  message?: string;
+  error?: string;
+};
 
-async function postRunLogDelivery(payload: RunLogDeliveryPayload) {
+const LOG_DELIVERY_ENDPOINT = ((process.env.NEXT_PUBLIC_LOG_DELIVERY_ENDPOINT ?? '') as string).trim()
+  || '/api/deliver_logs';
+const LOG_DELIVERY_MAX_ATTEMPTS = 3;
+const LOG_DELIVERY_RETRY_DELAY_MS = 2000;
+
+async function postRunLogDelivery(payload: RunLogDeliveryPayload, attempt = 1): Promise<void> {
   if (typeof window === 'undefined' || typeof fetch !== 'function') return;
   try {
     const res = await fetch(LOG_DELIVERY_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
+      keepalive: true,
     });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      console.error('[log-delivery] HTTP error', res.status, text);
+    const text = await res.text().catch(() => '');
+    let data: RunLogDeliveryResponse | null = null;
+    if (text) {
+      try { data = JSON.parse(text) as RunLogDeliveryResponse; } catch {}
     }
+    const delivered = data?.delivered ?? data?.ok;
+    if (!res.ok || !delivered) {
+      const message = data?.message || data?.error || (text || `HTTP ${res.status}`);
+      console.error(`[log-delivery] send failed (attempt ${attempt})`, message);
+      if (attempt < LOG_DELIVERY_MAX_ATTEMPTS) {
+        setTimeout(() => { void postRunLogDelivery(payload, attempt + 1); }, LOG_DELIVERY_RETRY_DELAY_MS * attempt);
+      }
+      return;
+    }
+    console.info('[log-delivery] sent run log', data?.runId || payload.runId);
   } catch (err) {
-    console.error('[log-delivery] request failed', err);
+    console.error(`[log-delivery] request failed (attempt ${attempt})`, err);
+    if (attempt < LOG_DELIVERY_MAX_ATTEMPTS) {
+      setTimeout(() => { void postRunLogDelivery(payload, attempt + 1); }, LOG_DELIVERY_RETRY_DELAY_MS * attempt);
+    }
   }
 }
 

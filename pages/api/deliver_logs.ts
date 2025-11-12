@@ -93,13 +93,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
     const sendResult = await sendRunLogEmail({ subject, text });
 
+    if (!sendResult.ok) {
+      console.error('[deliver_logs] send failed', runId, sendResult.message);
+      res.status(502).json({
+        ok: false,
+        runId,
+        delivered: false,
+        message: sendResult.message || 'Email send failed',
+      });
+      return;
+    }
+
     clearRunLog(runId);
 
     res.status(200).json({
       ok: true,
       runId,
-      delivered: sendResult.ok,
-      message: sendResult.message,
+      delivered: true,
     });
   } catch (err: any) {
     console.error('[deliver_logs] error', err);

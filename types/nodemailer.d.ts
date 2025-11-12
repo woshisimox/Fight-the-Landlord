@@ -21,6 +21,7 @@ declare module 'nodemailer' {
 
   export interface Transporter {
     sendMail(mailOptions: SendMailOptions): Promise<unknown>;
+    verify?(callback?: (err: Error | null, success: boolean) => void): Promise<unknown> | void;
   }
 
   export type TransportConfig = TransportOptions | string;
