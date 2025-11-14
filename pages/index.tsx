@@ -2,6 +2,7 @@
 import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import DonationWidget from '../components/DonationWidget';
 import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
+import type { PageSeoMeta } from '../lib/seoConfig';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
 type Lang = 'zh' | 'en';
 const LangContext = createContext<Lang>('zh');
@@ -8468,6 +8469,18 @@ const [lang, setLang] = useState<Lang>(() => {
     </LangContext.Provider>
   </>);
 }
+
+(Home as PageSeoMeta).seoTitle = 'Fight the Landlord · AI Battle Platform';
+(Home as PageSeoMeta).seoDescription =
+  'AI Battle Platform（ai-gaming.online）是一个面向斗地主、麻将等竞技项目的开源 AI 对战平台，鼓励使用提示词驱动完成算法研发、对战与评测。';
+(Home as PageSeoMeta).seoKeywords = [
+  'AI Battle Platform',
+  'Fight the Landlord',
+  '斗地主 AI',
+  'Mahjong AI',
+  'Prompt Engineering',
+  'AI 对战平台',
+];
 
 export default Home;
 
