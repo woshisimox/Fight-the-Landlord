@@ -572,7 +572,7 @@ const BLOG_CONTENT: Record<Lang, BlogContent> = {
       {
         id: 'vision-and-roadmap',
         title: 'AI Battle Platform 愿景与路线图快照',
-        date: '2024-05-12',
+        date: '2025-10-01',
         paragraphs: [
           'AI Battle Platform（ai-gaming.online）正在持续扩展斗地主、麻将等博弈项目的 AI 竞技能力。我们致力于打造一个“By AI, For People”的开放实验场，支持开发者使用提示词驱动的方式，让各类模型在真实牌局中持续迭代。',
           '近期我们重点完成了对赛后日志的邮件分发能力、基础 SEO 与 sitemap 构建，并持续优化 TrueSkill / Ladder 指标的可视化体验。接下来我们会逐步引入更多 AI 适配接口与回放工具，欢迎关注 GitHub 仓库 https://github.com/woshisimox/Fight-the-Landlord 并参与讨论。',
@@ -582,7 +582,7 @@ const BLOG_CONTENT: Record<Lang, BlogContent> = {
       {
         id: 'community-call',
         title: '社区征集：共建 AI 对战生态',
-        date: '2024-05-02',
+        date: '2025-10-07',
         paragraphs: [
           '我们正在招募更多开发者与研究者，一起完善斗地主、麻将等项目的 AI 对战体验。无论你专注于提示词工程、算法策略，还是 UI/UX、日志回放模块，都可以通过 Pull Request 与 Issue 分享你的想法。',
           '平台欢迎所有遵循 MIT License 的贡献者加入。提交代码时记得注明所使用的 AI 工具或模型，如果需要帮助，可通过 GitHub Issue 或邮箱 ai-gaming.online@outlook.com 联系维护者。',
@@ -600,7 +600,7 @@ const BLOG_CONTENT: Record<Lang, BlogContent> = {
       {
         id: 'vision-and-roadmap',
         title: 'Vision & Roadmap Highlights',
-        date: '2024-05-12',
+        date: '2025-10-01',
         paragraphs: [
           'AI Battle Platform (ai-gaming.online) keeps expanding support for Fight the Landlord, Mahjong, and other competitive AI scenes. Our “By AI, For People” mission invites developers to drive code with prompts so models can iteratively improve through real matches.',
           'Recently we launched automated log delivery via email, baseline SEO metadata, and a sitemap endpoint while polishing TrueSkill / ladder visualizations. Next up we are investing in broader AI integrations and replay tooling—follow the GitHub repo https://github.com/woshisimox/Fight-the-Landlord and join the conversation.',
@@ -610,7 +610,7 @@ const BLOG_CONTENT: Record<Lang, BlogContent> = {
       {
         id: 'community-call',
         title: 'Community Call for Contributors',
-        date: '2024-05-02',
+        date: '2025-10-07',
         paragraphs: [
           'We are onboarding more developers and researchers to elevate the AI match experience across Fight the Landlord, Mahjong, and future titles. Whether you focus on prompt engineering, algorithm design, UI/UX, or replay and logging modules, we would love to review your Pull Requests and ideas.',
           'Contributions are welcome under the MIT License. Please credit the AI tools or models used in your submissions, and reach out via GitHub issues or email ai-gaming.online@outlook.com if you need support.',
