@@ -183,7 +183,7 @@ function createTransporter(): Transporter | null {
     secure,
     auth: user ? { user, pass } : undefined,
     requireTLS: requireTls,
-    ignoreTLS,
+    ignoreTLS: ignoreTls,
     tls: rejectUnauthorized ? undefined : { rejectUnauthorized },
     service: service || undefined,
   };
