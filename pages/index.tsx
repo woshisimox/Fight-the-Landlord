@@ -7873,7 +7873,18 @@ const [lang, setLang] = useState<Lang>(() => {
     return DEVELOPER_JOIN_CONTENT[lang] ?? DEVELOPER_JOIN_CONTENT.zh;
   }, [lang]);
   const blogContent = useMemo(() => {
-    return BLOG_CONTENT[lang] ?? BLOG_CONTENT.zh;
+    const content = BLOG_CONTENT[lang] ?? BLOG_CONTENT.zh;
+    const sortedPosts = Array.isArray(content.posts)
+      ? [...content.posts].sort((a, b) => {
+          const timeA = new Date(a.date).getTime();
+          const timeB = new Date(b.date).getTime();
+          if (!Number.isFinite(timeA) && !Number.isFinite(timeB)) return 0;
+          if (!Number.isFinite(timeA)) return 1;
+          if (!Number.isFinite(timeB)) return -1;
+          return timeB - timeA;
+        })
+      : [];
+    return { ...content, posts: sortedPosts };
   }, [lang]);
 
   const seatInfoLabels = useMemo(() => {
