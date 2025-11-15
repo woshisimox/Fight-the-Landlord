@@ -41,6 +41,10 @@ const PLAYERS: PlayerPresentation[] = [
 ];
 
 const BOARD_CANVAS_SIZE = BOARD_SIZE - 1;
+const INTERSECTION_HIT_SIZE = `calc((100% / ${BOARD_SIZE}) * 1.15)`;
+const STONE_SIZE = `calc((100% / ${BOARD_SIZE}) * 0.7)`;
+const GUIDE_DOT_SIZE = `calc((100% / ${BOARD_SIZE}) * 0.22)`;
+const LAST_MOVE_RING_SIZE = `calc((100% / ${BOARD_SIZE}) * 0.92)`;
 
 function createPendingInitialState(): GobangState {
   const initial = gobangEngine.initialState();
@@ -381,52 +385,70 @@ export default function GobangRenderer() {
                     />
                   ))}
                 </svg>
-                <div
-                  className="absolute inset-[44px] grid"
-                  style={{
-                    gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
-                    gridTemplateRows: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
-                  }}
-                >
-                  {board.map((row, rowIndex) =>
-                    row.map((cell, colIndex) => {
-                      const isLastMove = !!lastMove && lastMove.row === rowIndex && lastMove.col === colIndex;
-                      const isHumanTurn = state.status === 'running' && playerModes[state.currentPlayer as 0 | 1] === 'human';
-                      const disabled = cell !== null || !isHumanTurn;
+                <div className="absolute inset-[44px]">
+                  <div className="relative h-full w-full">
+                    {board.map((row, rowIndex) =>
+                      row.map((cell, colIndex) => {
+                        const isLastMove = !!lastMove && lastMove.row === rowIndex && lastMove.col === colIndex;
+                        const isHumanTurn = state.status === 'running' && playerModes[state.currentPlayer as 0 | 1] === 'human';
+                        const disabled = cell !== null || !isHumanTurn;
+                        const left = ((colIndex + 0.5) / BOARD_SIZE) * 100;
+                        const top = ((rowIndex + 0.5) / BOARD_SIZE) * 100;
 
-                      return (
-                        <button
-                          key={`${rowIndex}-${colIndex}`}
-                          type="button"
-                          aria-label={`Place stone at ${formatCoordinate(rowIndex, colIndex)}`}
-                          onClick={() => handleCellClick(rowIndex, colIndex)}
-                          disabled={disabled}
-                          className={`group relative flex items-center justify-center transition-colors duration-150 ${
-                            !disabled ? 'cursor-pointer hover:bg-white/10' : 'cursor-default'
-                          }`}
-                        >
-                          {cell !== null ? (
+                        return (
+                          <button
+                            key={`${rowIndex}-${colIndex}`}
+                            type="button"
+                            aria-label={`Place stone at ${formatCoordinate(rowIndex, colIndex)}`}
+                            onClick={() => handleCellClick(rowIndex, colIndex)}
+                            disabled={disabled}
+                            style={{
+                              left: `${left}%`,
+                              top: `${top}%`,
+                              width: INTERSECTION_HIT_SIZE,
+                              height: INTERSECTION_HIT_SIZE,
+                            }}
+                            className={`group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full transition-colors duration-150 ${
+                              !disabled ? 'cursor-pointer hover:bg-white/10' : 'cursor-default'
+                            }`}
+                          >
                             <span
-                              className="pointer-events-none block h-6 w-6 rounded-full shadow-[0_12px_22px_rgba(4,0,10,0.55)] md:h-7 md:w-7"
+                              className="pointer-events-none relative flex items-center justify-center"
                               style={{
-                                background: PLAYERS[cell].stoneFill,
-                                boxShadow: `${PLAYERS[cell].shadow}${
-                                  isLastMove ? ', 0 0 0 4px rgba(255,255,255,0.2)' : ''
-                                }`,
+                                width: LAST_MOVE_RING_SIZE,
+                                height: LAST_MOVE_RING_SIZE,
                               }}
-                            />
-                          ) : (
-                            <span
-                              className={`pointer-events-none h-2 w-2 rounded-full transition duration-200 ${
-                                !disabled ? 'bg-white/0 group-hover:bg-white/25' : 'bg-transparent'
-                              }`}
-                            />
-                          )}
-                          {isLastMove ? <span className="pointer-events-none absolute inset-[2px] rounded-full border border-white/20" /> : null}
-                        </button>
-                      );
-                    })
-                  )}
+                            >
+                              {cell !== null ? (
+                                <span
+                                  className="pointer-events-none block rounded-full shadow-[0_12px_22px_rgba(4,0,10,0.55)]"
+                                  style={{
+                                    width: STONE_SIZE,
+                                    height: STONE_SIZE,
+                                    background: PLAYERS[cell].stoneFill,
+                                    boxShadow: `${PLAYERS[cell].shadow}${
+                                      isLastMove ? ', 0 0 0 4px rgba(255,255,255,0.2)' : ''
+                                    }`,
+                                  }}
+                                />
+                              ) : (
+                                <span
+                                  className={`pointer-events-none rounded-full transition duration-200 ${
+                                    !disabled ? 'bg-white/0 group-hover:bg-white/25' : 'bg-transparent'
+                                  }`}
+                                  style={{
+                                    width: GUIDE_DOT_SIZE,
+                                    height: GUIDE_DOT_SIZE,
+                                  }}
+                                />
+                              )}
+                              {isLastMove ? <span className="pointer-events-none absolute inset-0 rounded-full border border-white/20" /> : null}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
                 {state.status === 'pending' ? (
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
