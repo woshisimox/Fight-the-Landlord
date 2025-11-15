@@ -4,6 +4,10 @@ import { ddzEngine } from './ddz/game';
 import type { DdzAction, DdzState } from './ddz/game';
 import ddzConfig from './ddz/config.json';
 import DdzRenderer from './ddz/renderer';
+import { gobangEngine } from './gobang/game';
+import type { GobangAction, GobangState } from './gobang/game';
+import gobangConfig from './gobang/config.json';
+import GobangRenderer from './gobang/renderer';
 
 export interface GameDefinition<State extends GameState = GameState, Action = unknown> {
   id: string;
@@ -25,8 +29,19 @@ const ddzDefinition: GameDefinition<DdzState, DdzAction> = {
   renderer: DdzRenderer,
 };
 
+const gobangDefinition: GameDefinition<GobangState, GobangAction> = {
+  id: gobangConfig.id,
+  name: gobangConfig.name,
+  displayName: gobangConfig.displayName,
+  maxPlayers: gobangConfig.maxPlayers,
+  description: gobangConfig.description,
+  engine: gobangEngine,
+  renderer: GobangRenderer,
+};
+
 export const GAME_REGISTRY = {
   [ddzConfig.id]: ddzDefinition,
+  [gobangConfig.id]: gobangDefinition,
 } as const;
 
 export type GameId = keyof typeof GAME_REGISTRY;

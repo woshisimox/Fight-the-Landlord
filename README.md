@@ -12,10 +12,13 @@ npm run build && npm run start
 
 ## 结构
 - pages/index.tsx — 平台入口（选择游戏、加载对应渲染器）
-- games/ — 游戏插件目录（`ddz` 为示例实现）
+- games/ — 游戏插件目录（`ddz`、`gobang` 为示例实现）
   - games/ddz/game.ts — 斗地主 GameEngine 适配（含统一状态/动作接口）
   - games/ddz/renderer.tsx — 斗地主前端渲染器
   - games/ddz/config.json — 斗地主元数据
+  - games/gobang/game.ts — 五子棋 GameEngine 适配（15×15 棋盘、五连胜判定）
+  - games/gobang/renderer.tsx — 五子棋前端渲染器（人类对战演示）
+  - games/gobang/config.json — 五子棋元数据
 - core/ — 通用 GameEngine 接口与 `runMatch` 调度器
 - lib/engine.ts — 新的统一导出入口（暴露核心类型 + 兼容旧引擎导出）
 - pages/api/stream_ndjson.ts — 流式 NDJSON API（仍使用 legacy 斗地主引擎）
