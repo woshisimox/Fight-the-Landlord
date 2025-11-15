@@ -1,10 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { GobangAction, GobangState } from './game';
 import { gobangEngine } from './game';
 
-const BOARD_SIZE = (gobangEngine.initialState().data.board.length ?? 15) as number;
+const BOARD_SIZE = gobangEngine.initialState().data.board.length;
 
 interface PlayerPresentation {
   id: 0 | 1;
@@ -13,9 +13,8 @@ interface PlayerPresentation {
   flag: string;
   rating: number;
   delta: number;
-  clock: string;
-  accentSoft: string;
-  stoneGradient: string;
+  stoneFill: string;
+  shadow: string;
 }
 
 const PLAYERS: PlayerPresentation[] = [
@@ -26,9 +25,8 @@ const PLAYERS: PlayerPresentation[] = [
     flag: '🇯🇵',
     rating: 1012,
     delta: 12,
-    clock: '04:42',
-    accentSoft: 'rgba(251, 113, 133, 0.5)',
-    stoneGradient: 'linear-gradient(135deg, #fb7185, #f43f5e)',
+    stoneFill: 'radial-gradient(circle at 30% 25%, rgba(255,255,255,0.95), #f43f5e)',
+    shadow: '0 10px 25px rgba(248, 113, 113, 0.35)',
   },
   {
     id: 1,
@@ -37,11 +35,24 @@ const PLAYERS: PlayerPresentation[] = [
     flag: '🇨🇳',
     rating: 998,
     delta: -12,
-    clock: '04:54',
-    accentSoft: 'rgba(52, 211, 153, 0.45)',
-    stoneGradient: 'linear-gradient(135deg, #34d399, #059669)',
+    stoneFill: 'radial-gradient(circle at 30% 25%, rgba(255,255,255,0.95), #34d399)',
+    shadow: '0 10px 25px rgba(52, 211, 153, 0.35)',
   },
 ];
+
+type PlayerMode = 'human' | 'ai_random';
+
+const MODE_LABEL: Record<PlayerMode, string> = {
+  human: '人类',
+  ai_random: 'AI (随机)',
+};
+
+const MODE_OPTIONS: Array<{ value: PlayerMode; label: string }> = [
+  { value: 'human', label: '人类' },
+  { value: 'ai_random', label: 'AI (随机)' },
+];
+
+type MoveOrigin = 'human' | 'ai' | 'resign';
 
 interface MoveLogEntry {
   turn: number;
@@ -49,8 +60,16 @@ interface MoveLogEntry {
   row: number | null;
   col: number | null;
   coordinate: string;
-  type: 'move' | 'resign';
+  origin: MoveOrigin;
 }
+
+const STAR_POINTS: Array<{ row: number; col: number }> = [
+  { row: 3, col: 3 },
+  { row: 3, col: 11 },
+  { row: 7, col: 7 },
+  { row: 11, col: 3 },
+  { row: 11, col: 11 },
+];
 
 function formatCoordinate(row: number, col: number): string {
   const letter = String.fromCharCode('A'.charCodeAt(0) + col);
@@ -62,184 +81,295 @@ function formatDelta(delta: number): string {
   return delta > 0 ? `+${delta}` : `${delta}`;
 }
 
+function pickAiMove(state: GobangState, legal: GobangAction[]): GobangAction {
+  const { lastMove } = state.data;
+  if (legal.length === 0) {
+    throw new Error('No legal moves available.');
+  }
+
+  if (lastMove) {
+    const nearby = legal.filter((move) => Math.abs(move.row - lastMove.row) <= 1 && Math.abs(move.col - lastMove.col) <= 1);
+    if (nearby.length > 0) {
+      return nearby[Math.floor(Math.random() * nearby.length)];
+    }
+  }
+
+  const center = (BOARD_SIZE - 1) / 2;
+  let best = legal[0];
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  legal.forEach((move) => {
+    const score = Math.abs(move.row - center) + Math.abs(move.col - center);
+    if (score < bestScore) {
+      best = move;
+      bestScore = score;
+    }
+  });
+
+  return best;
+}
+
+function getMatchStatus(state: GobangState): string {
+  const { winner } = state.data;
+  if (winner !== null) {
+    return `${PLAYERS[winner].name} 获胜`;
+  }
+  if (state.status === 'finished') {
+    return '对局结束';
+  }
+  return `${PLAYERS[state.currentPlayer as 0 | 1].name} 落子`;
+}
+
 export default function GobangRenderer() {
   const [state, setState] = useState<GobangState>(() => gobangEngine.initialState());
   const [moveLog, setMoveLog] = useState<MoveLogEntry[]>([]);
-  const { board, lastMove, winner } = state.data;
+  const [playerModes, setPlayerModes] = useState<PlayerMode[]>(['human', 'ai_random']);
 
   const legalMoves = useMemo(() => gobangEngine.legalActions(state), [state]);
+  const matchStatus = getMatchStatus(state);
+  const { board, lastMove } = state.data;
 
-  const matchStatus = winner !== null
-    ? `${PLAYERS[winner].name} takes the win`
-    : state.status === 'finished'
-    ? 'Draw — no more moves available'
-    : `${PLAYERS[state.currentPlayer].name} to move`;
+  const applyAction = useCallback((action: GobangAction, origin: MoveOrigin) => {
+    setState((previous) => {
+      if (previous.status === 'finished') {
+        return previous;
+      }
 
-  const seriesScore: [number, number] = winner !== null
-    ? winner === 0
-      ? [1, 0]
-      : [0, 1]
-    : [0, 0];
+      const nextState = gobangEngine.nextState(previous, action);
+      const player = previous.currentPlayer as 0 | 1;
 
-  const handleCellClick = (row: number, col: number) => {
-    if (state.status === 'finished') return;
-    if (board[row][col] !== null) return;
+      setMoveLog((history) => [
+        ...history,
+        {
+          turn: previous.turn + 1,
+          player,
+          row: action.row,
+          col: action.col,
+          coordinate: formatCoordinate(action.row, action.col),
+          origin,
+        },
+      ]);
 
-    const action: GobangAction = { row, col };
-    const next = gobangEngine.nextState(state, action);
-    setState(next);
+      return nextState;
+    });
+  }, []);
 
-    setMoveLog((previous) => [
-      ...previous,
-      {
-        turn: state.turn + 1,
-        player: state.currentPlayer as 0 | 1,
-        row,
-        col,
-        coordinate: formatCoordinate(row, col),
-        type: 'move',
-      },
-    ]);
-  };
+  const handleCellClick = useCallback(
+    (row: number, col: number) => {
+      if (state.status !== 'running') return;
+      if (board[row][col] !== null) return;
 
-  const handleReset = () => {
+      const current = state.currentPlayer as 0 | 1;
+      if (playerModes[current] !== 'human') return;
+
+      applyAction({ row, col }, 'human');
+    },
+    [applyAction, board, playerModes, state]
+  );
+
+  const handleReset = useCallback(() => {
     setState(gobangEngine.initialState());
     setMoveLog([]);
-  };
+  }, []);
 
-  const handleResign = () => {
-    if (state.status === 'finished') return;
+  const handleResign = useCallback(() => {
+    if (state.status !== 'running') return;
 
     const resigning = state.currentPlayer as 0 | 1;
-    const victorious = (resigning + 1) % gobangEngine.maxPlayers as 0 | 1;
+    const winner = ((resigning + 1) % gobangEngine.maxPlayers) as 0 | 1;
 
-    setState({
-      ...state,
+    setState((previous) => ({
+      ...previous,
       status: 'finished',
       data: {
-        ...state.data,
-        winner: victorious,
+        ...previous.data,
+        winner,
       },
-    });
+    }));
 
-    setMoveLog((previous) => [
-      ...previous,
+    setMoveLog((history) => [
+      ...history,
       {
         turn: state.turn + 1,
         player: resigning,
         row: null,
         col: null,
         coordinate: 'Resign',
-        type: 'resign',
+        origin: 'resign',
       },
     ]);
-  };
+  }, [state]);
+
+  useEffect(() => {
+    if (state.status !== 'running') return;
+
+    const currentPlayer = state.currentPlayer as 0 | 1;
+    const mode = playerModes[currentPlayer];
+    if (mode === 'human') return;
+
+    const legal = gobangEngine.legalActions(state);
+    if (legal.length === 0) return;
+
+    const timer = window.setTimeout(() => {
+      const action = pickAiMove(state, legal);
+      applyAction(action, 'ai');
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [applyAction, playerModes, state]);
 
   return (
     <div className="flex flex-col gap-8 text-slate-100">
-      <section className="rounded-3xl bg-[#0b1220] p-6 shadow-2xl ring-1 ring-white/5">
-        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-          {PLAYERS.map((player) => {
-            const isActive = winner !== null ? winner === player.id : state.currentPlayer === player.id;
-            const deltaColor = player.delta >= 0 ? 'text-emerald-400' : 'text-rose-400';
-
-            return (
-              <div
-                key={player.id}
-                className={`flex flex-1 items-center gap-4 rounded-2xl border border-white/10 px-4 py-3 transition-all duration-200 ${
-                  isActive ? 'bg-white/10 shadow-[0_0_30px_rgba(255,255,255,0.08)]' : 'bg-white/[0.03]'
-                }`}
-                style={{ boxShadow: isActive ? `0 0 25px ${player.accentSoft}` : undefined }}
-              >
-                <div
-                  className="flex h-12 w-12 items-center justify-center rounded-full text-xl"
-                  style={{ background: player.stoneGradient }}
-                >
-                  <span>{player.avatar}</span>
+      <section className="rounded-3xl bg-[#071020] px-6 py-5 shadow-2xl ring-1 ring-white/5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-1 flex-col gap-3">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3 rounded-2xl bg-[#0d1628] px-4 py-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-rose-400 to-rose-600 text-2xl">
+                  {PLAYERS[0].avatar}
                 </div>
-                <div className="flex flex-col">
+                <div>
                   <div className="flex items-center gap-2 text-base font-semibold">
-                    <span>{player.name}</span>
-                    <span className="text-lg">{player.flag}</span>
+                    <span>{PLAYERS[0].name}</span>
+                    <span>{PLAYERS[0].flag}</span>
                   </div>
-                  <div className="mt-1 flex items-center gap-3 text-sm text-slate-300">
-                    <span className="font-medium">TrueSkill {player.rating}</span>
-                    <span className={deltaColor}>{formatDelta(player.delta)}</span>
-                    <span className="text-xs uppercase tracking-wide text-slate-400">{player.clock}</span>
+                  <div className="mt-1 flex items-center gap-3 text-xs text-slate-300">
+                    <span>TrueSkill {PLAYERS[0].rating}</span>
+                    <span className={PLAYERS[0].delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{formatDelta(PLAYERS[0].delta)}</span>
+                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] uppercase tracking-wider text-slate-400">先手</span>
                   </div>
+                  <select
+                    aria-label="Player 1 mode"
+                    value={playerModes[0]}
+                    onChange={(event) => {
+                      const mode = event.target.value as PlayerMode;
+                      setPlayerModes((previous) => {
+                        const next = [...previous] as PlayerMode[];
+                        next[0] = mode;
+                        return next;
+                      });
+                    }}
+                    className="mt-2 w-full rounded-xl bg-[#111d35] px-3 py-2 text-xs font-medium text-slate-200 ring-1 ring-slate-700/60 focus:outline-none focus:ring-emerald-400/60"
+                  >
+                    {MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            );
-          })}
 
-          <div className="flex w-full max-w-[12rem] flex-col items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-center">
-            <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Score</div>
-            <div className="flex items-center gap-3 text-4xl font-bold">
-              <span className="text-rose-400">{seriesScore[0]}</span>
-              <span className="text-slate-500">•</span>
-              <span className="text-emerald-400">{seriesScore[1]}</span>
+              <div className="flex items-center gap-3 rounded-2xl bg-[#0d1628] px-4 py-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 text-2xl">
+                  {PLAYERS[1].avatar}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 text-base font-semibold">
+                    <span>{PLAYERS[1].name}</span>
+                    <span>{PLAYERS[1].flag}</span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-3 text-xs text-slate-300">
+                    <span>TrueSkill {PLAYERS[1].rating}</span>
+                    <span className={PLAYERS[1].delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{formatDelta(PLAYERS[1].delta)}</span>
+                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] uppercase tracking-wider text-slate-400">后手</span>
+                  </div>
+                  <select
+                    aria-label="Player 2 mode"
+                    value={playerModes[1]}
+                    onChange={(event) => {
+                      const mode = event.target.value as PlayerMode;
+                      setPlayerModes((previous) => {
+                        const next = [...previous] as PlayerMode[];
+                        next[1] = mode;
+                        return next;
+                      });
+                    }}
+                    className="mt-2 w-full rounded-xl bg-[#111d35] px-3 py-2 text-xs font-medium text-slate-200 ring-1 ring-slate-700/60 focus:outline-none focus:ring-emerald-400/60"
+                  >
+                    {MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
-            <p className="text-xs text-slate-400">Bo1 • Ranked Ladder</p>
           </div>
-        </div>
 
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-300">
-          <div className="flex items-center gap-2">
-            <span className="text-xs uppercase tracking-wider text-slate-500">Match</span>
-            <span className="rounded-full bg-white/10 px-2 py-1 font-mono text-xs">GOB-2024-001</span>
-          </div>
-          <div className="text-slate-200">{matchStatus}</div>
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <span>Moves played</span>
-            <span className="font-semibold text-slate-200">{state.turn}</span>
+          <div className="flex h-full w-full max-w-[220px] flex-col items-center justify-center gap-2 rounded-2xl bg-[#0d1628] px-6 py-4 text-center">
+            <div className="text-[11px] uppercase tracking-[0.35em] text-slate-400">Match</div>
+            <div className="text-4xl font-bold text-white">Gobang</div>
+            <p className="text-xs text-slate-400">{matchStatus}</p>
           </div>
         </div>
       </section>
 
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <div className="flex w-full flex-col gap-4 lg:flex-1">
-          <div className="rounded-[32px] bg-[#0b1220] p-6 shadow-2xl ring-1 ring-white/5">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex flex-col gap-5">
+          <div className="rounded-[36px] bg-[#071020] p-6 shadow-[0_30px_80px_rgba(2,6,23,0.6)] ring-1 ring-white/5">
             <div className="mx-auto w-full max-w-[560px]">
               <div className="relative aspect-square w-full">
-                <div
-                  className="absolute inset-0 rounded-[28px] border border-white/10 bg-[#111b2e]"
-                  style={{ boxShadow: 'inset 0 40px 80px rgba(15, 23, 42, 0.6)' }}
-                >
-                  <div className="absolute inset-[6%] rounded-3xl border border-white/10 bg-transparent">
+                <div className="absolute inset-0 rounded-[30px] bg-[#050b17] shadow-[0_25px_60px_rgba(0,0,0,0.55)]" />
+                <div className="absolute inset-5 rounded-[26px] border border-slate-700/50 bg-[#0b1526]">
+                  <div className="absolute inset-6">
                     <div
-                      className="grid h-full w-full"
-                      style={{ gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${BOARD_SIZE}, minmax(0, 1fr))` }}
+                      className="pointer-events-none absolute inset-0 rounded-[22px]"
+                      style={{
+                        backgroundImage: `linear-gradient(to right, rgba(148, 163, 184, 0.2) 1px, transparent 1px), linear-gradient(to bottom, rgba(148, 163, 184, 0.2) 1px, transparent 1px)`,
+                        backgroundSize: `${100 / (BOARD_SIZE - 1)}% ${100 / (BOARD_SIZE - 1)}%`,
+                        backgroundPosition: 'center',
+                      }}
+                    />
+                    {STAR_POINTS.map((point) => (
+                      <span
+                        key={`${point.row}-${point.col}`}
+                        className="pointer-events-none absolute h-2 w-2 rounded-full bg-slate-200/70"
+                        style={{
+                          left: `${(point.col / (BOARD_SIZE - 1)) * 100}%`,
+                          top: `${(point.row / (BOARD_SIZE - 1)) * 100}%`,
+                          transform: 'translate(-50%, -50%)',
+                          boxShadow: '0 0 15px rgba(255,255,255,0.12)',
+                        }}
+                      />
+                    ))}
+                    <div
+                      className="absolute inset-0 grid"
+                      style={{
+                        gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
+                        gridTemplateRows: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
+                      }}
                     >
                       {board.map((row, rowIndex) =>
                         row.map((cell, colIndex) => {
                           const isLastMove = !!lastMove && lastMove.row === rowIndex && lastMove.col === colIndex;
-                          const isDisabled = state.status === 'finished' || cell !== null;
+                          const isHumanTurn =
+                            state.status === 'running' && playerModes[state.currentPlayer as 0 | 1] === 'human';
+                          const disabled = cell !== null || !isHumanTurn;
 
                           return (
                             <button
                               key={`${rowIndex}-${colIndex}`}
                               type="button"
                               aria-label={`Place stone at ${formatCoordinate(rowIndex, colIndex)}`}
-                              className={`group relative flex items-center justify-center border border-white/5 transition-colors duration-150 ${
-                                isDisabled ? 'cursor-not-allowed bg-white/[0.02]' : 'hover:bg-white/5'
-                              }`}
                               onClick={() => handleCellClick(rowIndex, colIndex)}
-                              disabled={isDisabled}
+                              disabled={disabled}
+                              className={`relative flex items-center justify-center bg-transparent transition-colors duration-150 ${
+                                !disabled ? 'cursor-pointer hover:bg-white/10' : 'cursor-default'
+                              }`}
                             >
                               {cell !== null ? (
                                 <span
-                                  className="pointer-events-none block h-6 w-6 rounded-full shadow-lg transition-all duration-200 md:h-7 md:w-7"
+                                  className="pointer-events-none block h-5 w-5 rounded-full md:h-6 md:w-6"
                                   style={{
-                                    background: PLAYERS[cell].stoneGradient,
-                                    boxShadow: isLastMove
-                                      ? `0 0 0 5px ${PLAYERS[cell].accentSoft}`
-                                      : `0 12px 28px ${PLAYERS[cell].accentSoft}`,
+                                    background: PLAYERS[cell].stoneFill,
+                                    boxShadow: `${PLAYERS[cell].shadow}${isLastMove ? ', 0 0 0 4px rgba(255,255,255,0.25)' : ''}`,
                                   }}
                                 />
                               ) : null}
-
                               {isLastMove ? (
-                                <span className="pointer-events-none absolute inset-1 rounded-full border border-white/40" />
+                                <span className="pointer-events-none absolute inset-2 rounded-full border border-white/40" />
                               ) : null}
                             </button>
                           );
@@ -252,80 +382,82 @@ export default function GobangRenderer() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#0b1220] px-5 py-4 text-sm text-slate-200 shadow-xl ring-1 ring-white/5">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#071020] px-5 py-4 text-sm text-slate-200 shadow-xl ring-1 ring-white/5">
             <div className="flex items-center gap-2">
-              <span className="text-xs uppercase tracking-widest text-slate-500">Legal moves</span>
+              <span className="text-xs uppercase tracking-widest text-slate-400">合法落点</span>
               <span className="rounded-full bg-white/10 px-2 py-1 font-mono text-sm text-white">{legalMoves.length}</span>
             </div>
             <div className="flex items-center gap-3">
               <button
                 type="button"
                 onClick={handleReset}
-                className="rounded-full bg-white/10 px-4 py-2 font-medium text-white transition hover:bg-white/20"
+                className="rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/20"
               >
-                Reset match
+                重新开始
               </button>
               <button
                 type="button"
                 onClick={handleResign}
-                disabled={state.status === 'finished'}
-                className="rounded-full border border-rose-400/50 px-4 py-2 font-medium text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={state.status !== 'running'}
+                className="rounded-full border border-rose-500/60 px-4 py-2 text-sm font-medium text-rose-200 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                认输 (Resign)
+                认输
               </button>
             </div>
           </div>
         </div>
 
-        <aside className="flex w-full flex-col gap-4 lg:max-w-xs">
-          <div className="rounded-3xl bg-[#0b1220] p-6 shadow-2xl ring-1 ring-white/5">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">Match Insights</h3>
+        <aside className="flex flex-col gap-4">
+          <div className="rounded-3xl bg-[#071020] p-6 shadow-2xl ring-1 ring-white/5">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">对局信息</h3>
             <dl className="mt-4 space-y-3 text-sm text-slate-300">
               <div className="flex items-center justify-between">
-                <dt className="text-slate-400">Current turn</dt>
-                <dd className="font-medium text-white">{state.status === 'finished' ? '—' : PLAYERS[state.currentPlayer].name}</dd>
+                <dt className="text-slate-400">当前回合</dt>
+                <dd className="font-medium text-white">{state.turn}</dd>
               </div>
               <div className="flex items-center justify-between">
-                <dt className="text-slate-400">Last move</dt>
-                <dd className="font-mono text-white">
-                  {lastMove ? `${PLAYERS[lastMove.player].name} → ${formatCoordinate(lastMove.row, lastMove.col)}` : 'None'}
+                <dt className="text-slate-400">轮到</dt>
+                <dd className="font-medium text-white">
+                  {state.status === 'running' ? PLAYERS[state.currentPlayer as 0 | 1].name : '—'}
                 </dd>
               </div>
               <div className="flex items-center justify-between">
-                <dt className="text-slate-400">Game state</dt>
-                <dd className="font-medium text-white">{state.status === 'finished' ? (winner !== null ? 'Victory' : 'Draw') : 'In progress'}</dd>
+                <dt className="text-slate-400">状态</dt>
+                <dd className="font-medium text-white">{matchStatus}</dd>
               </div>
               <div className="flex items-center justify-between">
-                <dt className="text-slate-400">Legal moves</dt>
-                <dd className="font-mono text-white">{legalMoves.length}</dd>
+                <dt className="text-slate-400">AI 模式</dt>
+                <dd className="font-medium text-white">
+                  {playerModes.map((mode, index) => `${PLAYERS[index].name}: ${MODE_LABEL[mode]}`).join(' | ')}
+                </dd>
               </div>
             </dl>
           </div>
 
-          <div className="flex-1 rounded-3xl bg-[#0b1220] p-6 shadow-2xl ring-1 ring-white/5">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">Moves Timeline</h3>
+          <div className="flex-1 rounded-3xl bg-[#071020] p-6 shadow-2xl ring-1 ring-white/5">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">落子记录</h3>
             <div className="mt-4 max-h-80 overflow-auto pr-2">
               {moveLog.length === 0 ? (
-                <p className="text-sm text-slate-400">No moves recorded yet. Click the board to start the duel.</p>
+                <p className="text-sm text-slate-400">尚未开始，请点击棋盘或等待 AI 落子。</p>
               ) : (
                 <ol className="space-y-2 text-sm">
                   {moveLog.map((entry, index) => {
                     const player = PLAYERS[entry.player];
-                    const badgeColor = entry.player === 0 ? 'bg-rose-500/20 text-rose-200' : 'bg-emerald-500/20 text-emerald-200';
-                    const label = entry.type === 'resign' ? 'Resigned' : entry.coordinate;
+                    const badgeColor =
+                      entry.player === 0 ? 'bg-rose-500/20 text-rose-200' : 'bg-emerald-500/20 text-emerald-200';
+                    const label = entry.origin === 'resign' ? '认输' : entry.coordinate;
+                    const originLabel = entry.origin === 'ai' ? 'AI' : entry.origin === 'human' ? '人类' : '系统';
 
                     return (
-                      <li
-                        key={`${entry.turn}-${index}`}
-                        className="flex items-center justify-between rounded-2xl bg-white/[0.04] px-3 py-2"
-                      >
+                      <li key={`${entry.turn}-${index}`} className="flex items-center justify-between rounded-2xl bg-white/5 px-3 py-2">
                         <div className="flex items-center gap-3">
-                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeColor}`}>
-                            {player.name}
-                          </span>
-                          <span className="text-xs uppercase tracking-wide text-slate-400">Turn {entry.turn.toString().padStart(2, '0')}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeColor}`}>{player.name}</span>
+                          <span className="text-xs uppercase tracking-wide text-slate-400">T{String(entry.turn).padStart(2, '0')}</span>
                         </div>
-                        <span className="font-mono text-sm text-white">{label}</span>
+                        <div className="flex items-center gap-3 text-xs text-slate-300">
+                          <span className="font-mono text-sm text-white">{label}</span>
+                          <span className="rounded-full bg-white/10 px-2 py-0.5">{originLabel}</span>
+                        </div>
                       </li>
                     );
                   })}
