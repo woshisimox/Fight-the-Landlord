@@ -42,6 +42,14 @@ const PLAYERS: PlayerPresentation[] = [
 
 const BOARD_CANVAS_SIZE = BOARD_SIZE - 1;
 
+function createPendingInitialState(): GobangState {
+  const initial = gobangEngine.initialState();
+  return {
+    ...initial,
+    status: 'pending',
+  };
+}
+
 type PlayerMode = 'human' | 'ai_random';
 
 const MODE_LABEL: Record<PlayerMode, string> = {
@@ -116,6 +124,10 @@ function pickAiMove(state: GobangState, legal: GobangAction[]): GobangAction {
 }
 
 function getMatchStatus(state: GobangState): string {
+  if (state.status === 'pending') {
+    return '准备开始对局';
+  }
+
   const { winner } = state.data;
   if (winner !== null) {
     return `${PLAYERS[winner].name} 获胜`;
@@ -127,17 +139,23 @@ function getMatchStatus(state: GobangState): string {
 }
 
 export default function GobangRenderer() {
-  const [state, setState] = useState<GobangState>(() => gobangEngine.initialState());
+  const [state, setState] = useState<GobangState>(createPendingInitialState);
   const [moveLog, setMoveLog] = useState<MoveLogEntry[]>([]);
   const [playerModes, setPlayerModes] = useState<PlayerMode[]>(['human', 'ai_random']);
 
-  const legalMoves = useMemo(() => gobangEngine.legalActions(state), [state]);
+  const legalMoves = useMemo(() => {
+    if (state.status !== 'running') {
+      return [] as GobangAction[];
+    }
+    return gobangEngine.legalActions(state);
+  }, [state]);
   const matchStatus = getMatchStatus(state);
   const { board, lastMove } = state.data;
+  const hasStarted = state.status !== 'pending';
 
   const applyAction = useCallback((action: GobangAction, origin: MoveOrigin) => {
     setState((previous) => {
-      if (previous.status === 'finished') {
+      if (previous.status !== 'running') {
         return previous;
       }
 
@@ -172,6 +190,11 @@ export default function GobangRenderer() {
     },
     [applyAction, board, playerModes, state]
   );
+
+  const handleStart = useCallback(() => {
+    setState(gobangEngine.initialState());
+    setMoveLog([]);
+  }, []);
 
   const handleReset = useCallback(() => {
     setState(gobangEngine.initialState());
@@ -315,12 +338,12 @@ export default function GobangRenderer() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex flex-col gap-5">
           <div className="rounded-[36px] bg-[#050b17] p-6 shadow-[0_30px_80px_rgba(2,6,23,0.65)] ring-1 ring-white/5">
-            <div className="mx-auto w-full max-w-[540px]">
+            <div className="mx-auto w-full max-w-[420px]">
               <div className="relative aspect-square w-full overflow-hidden rounded-[32px] bg-[#041021] shadow-[0_40px_60px_rgba(4,10,25,0.55)]">
                 <div className="absolute inset-0 bg-gradient-to-br from-[#07162b] via-[#041021] to-[#020912]" />
                 <div className="absolute inset-[18px] rounded-[24px] border border-white/10 bg-[#030b1a] shadow-[inset_0_0_20px_rgba(8,20,45,0.6)]" />
                 <svg
-                  className="pointer-events-none absolute inset-[58px] h-auto w-auto"
+                  className="pointer-events-none absolute inset-[44px] h-auto w-auto"
                   viewBox={`-0.5 -0.5 ${BOARD_CANVAS_SIZE + 1} ${BOARD_CANVAS_SIZE + 1}`}
                   preserveAspectRatio="none"
                 >
@@ -359,7 +382,7 @@ export default function GobangRenderer() {
                   ))}
                 </svg>
                 <div
-                  className="absolute inset-[58px] grid"
+                  className="absolute inset-[44px] grid"
                   style={{
                     gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
                     gridTemplateRows: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
@@ -405,6 +428,11 @@ export default function GobangRenderer() {
                     })
                   )}
                 </div>
+                {state.status === 'pending' ? (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <div className="rounded-full bg-black/40 px-6 py-2 text-sm font-medium text-slate-200">点击“开始对局”以启动比赛</div>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -415,21 +443,33 @@ export default function GobangRenderer() {
               <span className="rounded-full bg-white/10 px-2 py-1 font-mono text-sm text-white">{legalMoves.length}</span>
             </div>
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleReset}
-                className="rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/20"
-              >
-                重新开始
-              </button>
-              <button
-                type="button"
-                onClick={handleResign}
-                disabled={state.status !== 'running'}
-                className="rounded-full border border-rose-500/60 px-4 py-2 text-sm font-medium text-rose-200 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                认输
-              </button>
+              {hasStarted ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/20"
+                  >
+                    重新开始
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResign}
+                    disabled={state.status !== 'running'}
+                    className="rounded-full border border-rose-500/60 px-4 py-2 text-sm font-medium text-rose-200 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    认输
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  className="rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-emerald-950 shadow-lg transition hover:bg-emerald-400"
+                >
+                  开始对局
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -465,7 +505,7 @@ export default function GobangRenderer() {
             <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">落子记录</h3>
             <div className="mt-4 max-h-80 overflow-auto pr-2">
               {moveLog.length === 0 ? (
-                <p className="text-sm text-slate-400">尚未开始，请点击棋盘或等待 AI 落子。</p>
+                <p className="text-sm text-slate-400">尚未开始，请点击上方的“开始对局”按钮。</p>
               ) : (
                 <ol className="space-y-2 text-sm">
                   {moveLog.map((entry, index) => {
