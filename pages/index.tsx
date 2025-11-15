@@ -1,6 +1,7 @@
 // pages/index.tsx
 import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import DonationWidget from '../components/DonationWidget';
+import DeveloperJoinModule from '../components/DeveloperJoinModule';
 import type { ChangeEvent, CSSProperties, ReactNode } from 'react';
 import type { PageSeoMeta } from '../lib/seoConfig';
 /* ======= Minimal i18n (zh/en) injection: BEGIN ======= */
@@ -8311,6 +8312,7 @@ const [lang, setLang] = useState<Lang>(() => {
             </div>
           </div>
 
+          <DeveloperJoinModule lang={lang} />
 
           {isRegularMode ? (
         <>
