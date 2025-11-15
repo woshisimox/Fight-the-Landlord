@@ -11,10 +11,15 @@ npm run build && npm run start
 前端默认 POST NDJSON 到 `/api/stream_ndjson`。
 
 ## 结构
-- pages/index.tsx — 前端页面（花色图标/红黑着色、本轮出牌顺序、实时日志等）
-- pages/api/stream_ndjson.ts — 流式 NDJSON API（调用引擎）
+- pages/index.tsx — 平台入口（选择游戏、加载对应渲染器）
+- games/ — 游戏插件目录（`ddz` 为示例实现）
+  - games/ddz/game.ts — 斗地主 GameEngine 适配（含统一状态/动作接口）
+  - games/ddz/renderer.tsx — 斗地主前端渲染器
+  - games/ddz/config.json — 斗地主元数据
+- core/ — 通用 GameEngine 接口与 `runMatch` 调度器
+- lib/engine.ts — 新的统一导出入口（暴露核心类型 + 兼容旧引擎导出）
+- pages/api/stream_ndjson.ts — 流式 NDJSON API（仍使用 legacy 斗地主引擎）
 - lib/doudizhu/engine.ts — 完整斗地主引擎（含正式记分：炸弹/火箭×2，春天/反春天×2）
-- lib/engine.ts — 旧代码兼容适配层（导出 Engine / IBot 等别名）
 - lib/arenaStream.ts — 旧流程的组装/驱动
 
 ## Bot 接口（抢地主 / 翻倍支持）
