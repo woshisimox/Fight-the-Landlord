@@ -16,6 +16,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     DisclaimerClose: '关闭免责声明',
     BlogButton: '平台博客',
     BlogClose: '关闭博客窗口',
+    DiscordButton: 'Discord 社区',
+    DiscordClose: '关闭 Discord 窗口',
     DeveloperJoinButton: '开发者加入',
     DeveloperJoinClose: '关闭开发者加入窗口',
     Settings: '对局设置',
@@ -40,6 +42,8 @@ const I18N: Record<Lang, Record<string, string>> = {
     DisclaimerClose: 'Close disclaimer',
     BlogButton: 'Blog',
     BlogClose: 'Close blog dialog',
+    DiscordButton: 'Discord',
+    DiscordClose: 'Close Discord dialog',
     DeveloperJoinButton: 'Join as Developer',
     DeveloperJoinClose: 'Close developer join dialog',
     Settings: 'Match settings',
@@ -395,6 +399,29 @@ type BlogContent = {
   posts: BlogPost[];
 };
 
+type DiscordChannel = {
+  id: string;
+  name: string;
+  description: string;
+  link?: string;
+};
+
+type DiscordSection = {
+  heading: string;
+  items: DiscordChannel[];
+};
+
+type DiscordContent = {
+  title: string;
+  intro?: string[];
+  serverName: string;
+  inviteText: string;
+  inviteUrl: string;
+  inviteNote?: string;
+  sections: DiscordSection[];
+  footer?: string[];
+};
+
 const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
   zh: {
     title: '开发者加入',
@@ -617,6 +644,153 @@ const BLOG_CONTENT: Record<Lang, BlogContent> = {
         ],
         tags: ['community', 'contribution'],
       },
+    ],
+  },
+};
+
+const DISCORD_CONTENT: Record<Lang, DiscordContent> = {
+  zh: {
+    title: 'Discord 实时社区',
+    intro: [
+      'ai-gaming.online 的 Discord 服务器汇集了开发者、AI 选手与平台维护者，是托管赛程规划、训练日志与实时公告的核心阵地。',
+      '加入后即可第一时间获得平台更新、玩法讨论以及 Prompt 协作案例，参与社区驱动的 AI 竞技生态建设。',
+    ],
+    serverName: 'ai-gaming.online Discord Server',
+    inviteText: '立即加入服务器： https://discord.gg/ai-gaming-online',
+    inviteUrl: 'https://discord.gg/ai-gaming-online',
+    inviteNote: '提示：如遇到链接失效，可通过邮箱 ai-gaming.online@outlook.com 获取最新邀请。',
+    sections: [
+      {
+        heading: '📣 核心频道',
+        items: [
+          {
+            id: 'announcements',
+            name: '#announcements',
+            description: '发布平台公告、版本更新、维护安排与赛事日程。',
+          },
+          {
+            id: 'release-feed',
+            name: '#release-feed',
+            description: '自动同步 GitHub Release、部署进展及关键里程碑。',
+          },
+          {
+            id: 'match-log',
+            name: '#match-log',
+            description: '备份重点赛事的运行日志与赛果，便于回溯与分析。',
+          },
+        ],
+      },
+      {
+        heading: '🤝 协作专区',
+        items: [
+          {
+            id: 'prompt-lab',
+            name: '#prompt-lab',
+            description: '分享提示词工程经验与模型调试案例，协同打磨 AI 策略。',
+          },
+          {
+            id: 'bot-integration',
+            name: '#bot-integration',
+            description: '讨论 API 对接、SDK 使用以及多语言客户端适配方案。',
+          },
+          {
+            id: 'matchmaking',
+            name: '#matchmaking',
+            description: '预约训练赛 / 表演赛，协调不同模型的对战排期。',
+          },
+        ],
+      },
+      {
+        heading: '📚 资料与回放',
+        items: [
+          {
+            id: 'resource-library',
+            name: '#resource-library',
+            description: '集中整理平台文档、API 参考与 TrueSkill 评分相关资料。',
+          },
+          {
+            id: 'replay-studio',
+            name: '#replay-studio',
+            description: '上传或查阅经典对局的回放，分析模型策略优劣。',
+          },
+        ],
+      },
+    ],
+    footer: [
+      '社区遵循 MIT License 精神，欢迎在频道内分享 AI 相关研究、插件与可复现案例。',
+      '请遵守服务器规则，尊重每位参与者，并保持技术讨论的专业与友好。',
+    ],
+  },
+  en: {
+    title: 'Discord Community Hub',
+    intro: [
+      'The ai-gaming.online Discord server brings together developers, AI competitors, and maintainers. It hosts our schedules, training logs, and real-time announcements.',
+      'Join to receive instant platform updates, dive into gameplay discussions, and collaborate on prompt-driven experiments that power the AI battle ecosystem.',
+    ],
+    serverName: 'ai-gaming.online Discord Server',
+    inviteText: 'Join the server now: https://discord.gg/ai-gaming-online',
+    inviteUrl: 'https://discord.gg/ai-gaming-online',
+    inviteNote: 'Tip: If the invite expires, reach out via ai-gaming.online@outlook.com for the latest link.',
+    sections: [
+      {
+        heading: '📣 Key Channels',
+        items: [
+          {
+            id: 'announcements',
+            name: '#announcements',
+            description: 'Official announcements, release notes, maintenance windows, and event schedules.',
+          },
+          {
+            id: 'release-feed',
+            name: '#release-feed',
+            description: 'Automated feed that mirrors GitHub releases, deployment progress, and milestone callouts.',
+          },
+          {
+            id: 'match-log',
+            name: '#match-log',
+            description: 'Mirror of highlighted match logs and results for quick review and auditing.',
+          },
+        ],
+      },
+      {
+        heading: '🤝 Collaboration Zones',
+        items: [
+          {
+            id: 'prompt-lab',
+            name: '#prompt-lab',
+            description: 'Share prompt engineering techniques and debugging cases to refine AI strategies together.',
+          },
+          {
+            id: 'bot-integration',
+            name: '#bot-integration',
+            description: 'Discuss API integrations, SDK usage, and adapting clients across languages.',
+          },
+          {
+            id: 'matchmaking',
+            name: '#matchmaking',
+            description: 'Arrange scrimmages or showcase matches and coordinate cross-model battles.',
+          },
+        ],
+      },
+      {
+        heading: '📚 Knowledge & Replays',
+        items: [
+          {
+            id: 'resource-library',
+            name: '#resource-library',
+            description: 'Centralized references for docs, API guides, and TrueSkill / ladder methodology.',
+          },
+          {
+            id: 'replay-studio',
+            name: '#replay-studio',
+            description: 'Upload or review standout match replays to analyze model strengths and weaknesses.',
+          },
+        ],
+      },
+    ],
+    footer: [
+      'The community embraces the MIT License spirit—share AI research, plugins, and reproducible case studies freely.',
+      'Please follow the server rules, respect fellow contributors, and keep discussions constructive and technical.',
     ],
   },
 };
@@ -7805,6 +7979,7 @@ const [lang, setLang] = useState<Lang>(() => {
   const [disclaimerOpen, setDisclaimerOpen] = useState(false);
   const [developerJoinOpen, setDeveloperJoinOpen] = useState(false);
   const [blogOpen, setBlogOpen] = useState(false);
+  const [discordOpen, setDiscordOpen] = useState(false);
   const disclaimerHostRef = useRef<HTMLElement | null>(null);
 
   const computeTotalMatches = useCallback(() => {
@@ -7885,6 +8060,9 @@ const [lang, setLang] = useState<Lang>(() => {
         })
       : [];
     return { ...content, posts: sortedPosts };
+  }, [lang]);
+  const discordContent = useMemo(() => {
+    return DISCORD_CONTENT[lang] ?? DISCORD_CONTENT.zh;
   }, [lang]);
 
   const seatInfoLabels = useMemo(() => {
@@ -8014,7 +8192,7 @@ const [lang, setLang] = useState<Lang>(() => {
                 <DonationWidget lang={lang} />
                 <button
                   type="button"
-                  onClick={() => { setDisclaimerOpen(true); setDeveloperJoinOpen(false); setBlogOpen(false); }}
+                  onClick={() => { setDisclaimerOpen(true); setDeveloperJoinOpen(false); setBlogOpen(false); setDiscordOpen(false); }}
                   style={{
                     padding:'6px 16px',
                     borderRadius:999,
@@ -8030,7 +8208,7 @@ const [lang, setLang] = useState<Lang>(() => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setDeveloperJoinOpen(true); setDisclaimerOpen(false); setBlogOpen(false); }}
+                  onClick={() => { setDeveloperJoinOpen(true); setDisclaimerOpen(false); setBlogOpen(false); setDiscordOpen(false); }}
                   style={{
                     padding:'6px 16px',
                     borderRadius:999,
@@ -8046,7 +8224,28 @@ const [lang, setLang] = useState<Lang>(() => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setBlogOpen(true); setDisclaimerOpen(false); setDeveloperJoinOpen(false); }}
+                  onClick={() => {
+                    setDiscordOpen(true);
+                    setDisclaimerOpen(false);
+                    setDeveloperJoinOpen(false);
+                    setBlogOpen(false);
+                  }}
+                  style={{
+                    padding:'6px 16px',
+                    borderRadius:999,
+                    border:'1px solid #6366f1',
+                    background:'#eef2ff',
+                    color:'#4338ca',
+                    fontWeight:600,
+                    cursor:'pointer',
+                    boxShadow:'0 1px 2px rgba(0,0,0,0.08)',
+                  }}
+                >
+                  {lang === 'en' ? I18N.en.DiscordButton : I18N.zh.DiscordButton}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setBlogOpen(true); setDisclaimerOpen(false); setDeveloperJoinOpen(false); setDiscordOpen(false); }}
                   style={{
                     padding:'6px 16px',
                     borderRadius:999,
@@ -8421,6 +8620,145 @@ const [lang, setLang] = useState<Lang>(() => {
         <KnockoutPanel />
       )}
         </div>
+        {discordOpen && renderViaPortal(
+          <div
+            role="presentation"
+            onClick={() => setDiscordOpen(false)}
+            style={{
+              position:'fixed',
+              inset:0,
+              background:'rgba(0,0,0,0.45)',
+              display:'flex',
+              alignItems:'center',
+              justifyContent:'center',
+              padding:'24px',
+              zIndex:2000,
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="ddz-discord-title"
+              onClick={e => e.stopPropagation()}
+              data-i18n-ignore
+              style={{
+                background:'#fff',
+                maxWidth:560,
+                width:'100%',
+                maxHeight:'80vh',
+                overflowY:'auto',
+                borderRadius:12,
+                boxShadow:'0 20px 45px rgba(15,23,42,0.25)',
+                padding:'24px 28px',
+                lineHeight:1.65,
+              }}
+            >
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16 }}>
+                <h2 id="ddz-discord-title" style={{ margin:0, fontSize:20, fontWeight:800, color:'#1f2937' }}>{discordContent.title}</h2>
+                <button
+                  type="button"
+                  onClick={() => setDiscordOpen(false)}
+                  aria-label={lang === 'en' ? I18N.en.DiscordClose : I18N.zh.DiscordClose}
+                  style={{
+                    border:'none',
+                    background:'transparent',
+                    color:'#6b7280',
+                    fontSize:24,
+                    lineHeight:1,
+                    cursor:'pointer',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ marginTop:12, display:'flex', flexDirection:'column', gap:18, color:'#374151', fontSize:14 }}>
+                {discordContent.intro?.map((text, idx) => (
+                  <p key={`discord-intro-${idx}`} style={{ margin:0 }}>{renderRichText(text)}</p>
+                ))}
+                <div
+                  style={{
+                    border:'1px solid #c7d2fe',
+                    background:'#eef2ff',
+                    borderRadius:12,
+                    padding:'16px 18px',
+                    display:'flex',
+                    flexDirection:'column',
+                    gap:8,
+                  }}
+                >
+                  <strong style={{ fontSize:15, color:'#312e81' }}>{discordContent.serverName}</strong>
+                  <p style={{ margin:0, color:'#4338ca' }}>{renderRichText(discordContent.inviteText)}</p>
+                  {discordContent.inviteNote ? (
+                    <p style={{ margin:0, color:'#4c1d95' }}>{renderRichText(discordContent.inviteNote)}</p>
+                  ) : null}
+                  <a
+                    href={discordContent.inviteUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      alignSelf:'flex-start',
+                      padding:'6px 14px',
+                      borderRadius:999,
+                      background:'#6366f1',
+                      color:'#fff',
+                      fontWeight:600,
+                      textDecoration:'none',
+                      boxShadow:'0 5px 12px rgba(79,70,229,0.35)',
+                    }}
+                  >
+                    {lang === 'en' ? 'Open Discord' : '打开 Discord'}
+                  </a>
+                </div>
+                {discordContent.sections.map(section => (
+                  <section
+                    key={`discord-section-${section.heading}`}
+                    style={{
+                      display:'flex',
+                      flexDirection:'column',
+                      gap:12,
+                      border:'1px solid #e5e7eb',
+                      borderRadius:12,
+                      padding:'16px 18px',
+                      background:'#f9fafb',
+                    }}
+                  >
+                    <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:'#1f2937' }}>{section.heading}</h3>
+                    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                      {section.items.map(item => (
+                        <div
+                          key={`discord-item-${section.heading}-${item.id}`}
+                          style={{ display:'flex', flexDirection:'column', gap:4 }}
+                        >
+                          <div style={{ fontWeight:700, color:'#1d4ed8' }}>
+                            {item.link ? (
+                              <a
+                                href={item.link}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ color:'#1d4ed8', textDecoration:'underline' }}
+                              >
+                                {item.name}
+                              </a>
+                            ) : (
+                              item.name
+                            )}
+                          </div>
+                          <div style={{ color:'#4b5563' }}>{renderRichText(item.description)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+                {discordContent.footer?.map((text, idx) => (
+                  <p key={`discord-footer-${idx}`} style={{ margin:0, fontSize:13, color:'#6b7280' }}>
+                    {renderRichText(text)}
+                  </p>
+                ))}
+              </div>
+            </div>
+          </div>,
+          disclaimerHostRef.current,
+        )}
         {blogOpen && renderViaPortal(
           <div
             role="presentation"
