@@ -648,6 +648,15 @@ const BLOG_CONTENT: Record<Lang, BlogContent> = {
   },
 };
 
+const DISCORD_INVITE_EMAIL = 'ai-gaming.online@outlook.com';
+const DISCORD_FALLBACK_MAIL_SUBJECT = encodeURIComponent('Discord Invite Request');
+const DISCORD_FALLBACK_MAIL_URL = `mailto:${DISCORD_INVITE_EMAIL}?subject=${DISCORD_FALLBACK_MAIL_SUBJECT}`;
+const DISCORD_DIRECT_INVITE_URL = (process.env.NEXT_PUBLIC_DISCORD_INVITE_URL || '').trim();
+const HAS_DIRECT_DISCORD_INVITE = DISCORD_DIRECT_INVITE_URL.length > 0;
+const RESOLVED_DISCORD_INVITE_URL = HAS_DIRECT_DISCORD_INVITE
+  ? DISCORD_DIRECT_INVITE_URL
+  : DISCORD_FALLBACK_MAIL_URL;
+
 const DISCORD_CONTENT: Record<Lang, DiscordContent> = {
   zh: {
     title: 'Discord 实时社区',
@@ -656,9 +665,13 @@ const DISCORD_CONTENT: Record<Lang, DiscordContent> = {
       '加入后即可第一时间获得平台更新、玩法讨论以及 Prompt 协作案例，参与社区驱动的 AI 竞技生态建设。',
     ],
     serverName: 'ai-gaming.online Discord Server',
-    inviteText: '立即加入服务器： https://discord.gg/ai-gaming-online',
-    inviteUrl: 'https://discord.gg/ai-gaming-online',
-    inviteNote: '提示：如遇到链接失效，可通过邮箱 ai-gaming.online@outlook.com 获取最新邀请。',
+    inviteText: HAS_DIRECT_DISCORD_INVITE
+      ? `立即加入服务器： ${RESOLVED_DISCORD_INVITE_URL}`
+      : `点击下方按钮邮件联系 ${DISCORD_INVITE_EMAIL} 获取最新的 Discord 邀请链接。`,
+    inviteUrl: RESOLVED_DISCORD_INVITE_URL,
+    inviteNote: HAS_DIRECT_DISCORD_INVITE
+      ? `提示：如遇到链接失效，可通过邮箱 ${DISCORD_INVITE_EMAIL} 获取最新邀请。`
+      : '提示：当前公开邀请链接暂不可用，我们会尽快更新。发送邮件后即可收到最新加入方式。',
     sections: [
       {
         heading: '📣 核心频道',
@@ -728,9 +741,13 @@ const DISCORD_CONTENT: Record<Lang, DiscordContent> = {
       'Join to receive instant platform updates, dive into gameplay discussions, and collaborate on prompt-driven experiments that power the AI battle ecosystem.',
     ],
     serverName: 'ai-gaming.online Discord Server',
-    inviteText: 'Join the server now: https://discord.gg/ai-gaming-online',
-    inviteUrl: 'https://discord.gg/ai-gaming-online',
-    inviteNote: 'Tip: If the invite expires, reach out via ai-gaming.online@outlook.com for the latest link.',
+    inviteText: HAS_DIRECT_DISCORD_INVITE
+      ? `Join the server now: ${RESOLVED_DISCORD_INVITE_URL}`
+      : `Tap the button below to email ${DISCORD_INVITE_EMAIL} for the latest Discord invite link.`,
+    inviteUrl: RESOLVED_DISCORD_INVITE_URL,
+    inviteNote: HAS_DIRECT_DISCORD_INVITE
+      ? `Tip: If the invite expires, reach out via ${DISCORD_INVITE_EMAIL} for the latest link.`
+      : `Tip: The public invite is currently offline. Email ${DISCORD_INVITE_EMAIL} and we will share the most recent access link shortly.`,
     sections: [
       {
         heading: '📣 Key Channels',
