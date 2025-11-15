@@ -1,0 +1,8 @@
+{
+  "id": "ddz",
+  "name": "Fight the Landlord",
+  "displayName": "斗地主",
+  "maxPlayers": 3,
+  "description": "Classic three-player landlord card game.",
+  "defaultRenderer": "ddz"
+}

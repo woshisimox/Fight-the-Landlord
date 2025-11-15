@@ -1,0 +1,8 @@
+{
+  "id": "gobang",
+  "name": "gobang",
+  "displayName": "Gomoku (五子棋)",
+  "maxPlayers": 2,
+  "description": "Place five stones in a row on a 15x15 board.",
+  "boardSize": 15
+}
