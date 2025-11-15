@@ -42,9 +42,9 @@ const PLAYERS: PlayerPresentation[] = [
 ];
 
 const INTERSECTION_HIT_SIZE = `calc((100% / ${BOARD_SIZE}) * 1.15)`;
-const STONE_SIZE = `calc((100% / ${BOARD_SIZE}) * 0.7)`;
-const GUIDE_DOT_SIZE = `calc((100% / ${BOARD_SIZE}) * 0.22)`;
-const LAST_MOVE_RING_SIZE = `calc((100% / ${BOARD_SIZE}) * 0.92)`;
+const STONE_SIZE = `calc((100% / ${BOARD_SIZE}) * 0.92)`;
+const GUIDE_DOT_SIZE = `calc((100% / ${BOARD_SIZE}) * 0.24)`;
+const LAST_MOVE_RING_SIZE = `calc((100% / ${BOARD_SIZE}) * 1.08)`;
 
 function createPendingInitialState(): GobangState {
   const initial = gobangEngine.initialState();
