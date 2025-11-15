@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { GobangAction, GobangState } from './game';
 import { gobangEngine } from './game';
+import styles from './renderer.module.css';
 
 const BOARD_SIZE = gobangEngine.initialState().data.board.length;
 
@@ -40,7 +41,6 @@ const PLAYERS: PlayerPresentation[] = [
   },
 ];
 
-const BOARD_CANVAS_SIZE = BOARD_SIZE - 1;
 const INTERSECTION_HIT_SIZE = `calc((100% / ${BOARD_SIZE}) * 1.15)`;
 const STONE_SIZE = `calc((100% / ${BOARD_SIZE}) * 0.7)`;
 const GUIDE_DOT_SIZE = `calc((100% / ${BOARD_SIZE}) * 0.22)`;
@@ -252,105 +252,94 @@ export default function GobangRenderer() {
   }, [applyAction, playerModes, state]);
 
   return (
-    <div className="flex flex-col gap-8 text-slate-100">
-      <section className="rounded-3xl bg-[#071020] px-6 py-5 shadow-2xl ring-1 ring-white/5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-1 flex-col gap-3">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-3 rounded-2xl bg-[#0d1628] px-4 py-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-rose-400 to-rose-600 text-2xl">
-                  {PLAYERS[0].avatar}
+    <div className={styles.root}>
+      <section className={styles.headerCard}>
+        <div className={styles.playerRow}>
+          <div className={styles.playerCards}>
+            <div className={styles.playerCard}>
+              <div className={`${styles.avatar} ${styles.avatarRed}`}>{PLAYERS[0].avatar}</div>
+              <div className={styles.playerMeta}>
+                <div className={styles.playerHeader}>
+                  <span>{PLAYERS[0].name}</span>
+                  <span>{PLAYERS[0].flag}</span>
                 </div>
-                <div>
-                  <div className="flex items-center gap-2 text-base font-semibold">
-                    <span>{PLAYERS[0].name}</span>
-                    <span>{PLAYERS[0].flag}</span>
-                  </div>
-                  <div className="mt-1 flex items-center gap-3 text-xs text-slate-300">
-                    <span>TrueSkill {PLAYERS[0].rating}</span>
-                    <span className={PLAYERS[0].delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{formatDelta(PLAYERS[0].delta)}</span>
-                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] uppercase tracking-wider text-slate-400">先手</span>
-                  </div>
-                  <select
-                    aria-label="Player 1 mode"
-                    value={playerModes[0]}
-                    onChange={(event) => {
-                      const mode = event.target.value as PlayerMode;
-                      setPlayerModes((previous) => {
-                        const next = [...previous] as PlayerMode[];
-                        next[0] = mode;
-                        return next;
-                      });
-                    }}
-                    className="mt-2 w-full rounded-xl bg-[#111d35] px-3 py-2 text-xs font-medium text-slate-200 ring-1 ring-slate-700/60 focus:outline-none focus:ring-emerald-400/60"
-                  >
-                    {MODE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                <div className={styles.playerStats}>
+                  <span>TrueSkill {PLAYERS[0].rating}</span>
+                  <span style={{ color: PLAYERS[0].delta >= 0 ? '#34d399' : '#fb7185' }}>{formatDelta(PLAYERS[0].delta)}</span>
+                  <span className={styles.badge}>先手</span>
                 </div>
+                <select
+                  aria-label="Player 1 mode"
+                  value={playerModes[0]}
+                  onChange={(event) => {
+                    const mode = event.target.value as PlayerMode;
+                    setPlayerModes((previous) => {
+                      const next = [...previous] as PlayerMode[];
+                      next[0] = mode;
+                      return next;
+                    });
+                  }}
+                  className={styles.modeSelect}
+                >
+                  {MODE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
+            </div>
 
-              <div className="flex items-center gap-3 rounded-2xl bg-[#0d1628] px-4 py-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 text-2xl">
-                  {PLAYERS[1].avatar}
+            <div className={styles.playerCard}>
+              <div className={`${styles.avatar} ${styles.avatarGreen}`}>{PLAYERS[1].avatar}</div>
+              <div className={styles.playerMeta}>
+                <div className={styles.playerHeader}>
+                  <span>{PLAYERS[1].name}</span>
+                  <span>{PLAYERS[1].flag}</span>
                 </div>
-                <div>
-                  <div className="flex items-center gap-2 text-base font-semibold">
-                    <span>{PLAYERS[1].name}</span>
-                    <span>{PLAYERS[1].flag}</span>
-                  </div>
-                  <div className="mt-1 flex items-center gap-3 text-xs text-slate-300">
-                    <span>TrueSkill {PLAYERS[1].rating}</span>
-                    <span className={PLAYERS[1].delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{formatDelta(PLAYERS[1].delta)}</span>
-                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] uppercase tracking-wider text-slate-400">后手</span>
-                  </div>
-                  <select
-                    aria-label="Player 2 mode"
-                    value={playerModes[1]}
-                    onChange={(event) => {
-                      const mode = event.target.value as PlayerMode;
-                      setPlayerModes((previous) => {
-                        const next = [...previous] as PlayerMode[];
-                        next[1] = mode;
-                        return next;
-                      });
-                    }}
-                    className="mt-2 w-full rounded-xl bg-[#111d35] px-3 py-2 text-xs font-medium text-slate-200 ring-1 ring-slate-700/60 focus:outline-none focus:ring-emerald-400/60"
-                  >
-                    {MODE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                <div className={styles.playerStats}>
+                  <span>TrueSkill {PLAYERS[1].rating}</span>
+                  <span style={{ color: PLAYERS[1].delta >= 0 ? '#34d399' : '#fb7185' }}>{formatDelta(PLAYERS[1].delta)}</span>
+                  <span className={styles.badge}>后手</span>
                 </div>
+                <select
+                  aria-label="Player 2 mode"
+                  value={playerModes[1]}
+                  onChange={(event) => {
+                    const mode = event.target.value as PlayerMode;
+                    setPlayerModes((previous) => {
+                      const next = [...previous] as PlayerMode[];
+                      next[1] = mode;
+                      return next;
+                    });
+                  }}
+                  className={styles.modeSelect}
+                >
+                  {MODE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
 
-          <div className="flex h-full w-full max-w-[220px] flex-col items-center justify-center gap-2 rounded-2xl bg-[#0d1628] px-6 py-4 text-center">
-            <div className="text-[11px] uppercase tracking-[0.35em] text-slate-400">Match</div>
-            <div className="text-4xl font-bold text-white">Gobang</div>
-            <p className="text-xs text-slate-400">{matchStatus}</p>
+          <div className={styles.matchBadge}>
+            <div className={styles.badge}>Match</div>
+            <div className={styles.matchTitle}>Gobang</div>
+            <p className={styles.matchStatus}>{matchStatus}</p>
           </div>
         </div>
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="flex flex-col gap-5">
-          <div className="rounded-[36px] bg-[#050b17] p-6 shadow-[0_30px_80px_rgba(2,6,23,0.65)] ring-1 ring-white/5">
-            <div className="mx-auto w-full max-w-[420px]">
-              <div className="relative aspect-square w-full overflow-hidden rounded-[32px] bg-[#041021] shadow-[0_40px_60px_rgba(4,10,25,0.55)]">
-                <div className="absolute inset-0 bg-gradient-to-br from-[#07162b] via-[#041021] to-[#020912]" />
-                <div className="absolute inset-[18px] rounded-[24px] border border-white/10 bg-[#030b1a] shadow-[inset_0_0_20px_rgba(8,20,45,0.6)]" />
-                <svg
-                  className="pointer-events-none absolute inset-[44px] h-auto w-auto"
-                  viewBox={`-0.5 -0.5 ${BOARD_CANVAS_SIZE + 1} ${BOARD_CANVAS_SIZE + 1}`}
-                  preserveAspectRatio="none"
-                >
+      <div className={styles.main}>
+        <div className={styles.boardColumn}>
+          <div className={styles.boardWrapper}>
+            <div className={styles.boardContainer}>
+              <div className={styles.boardSurface}>
+                <div className={styles.boardFrame} />
+                <svg className={styles.boardGrid} viewBox={`-0.5 -0.5 ${BOARD_SIZE} ${BOARD_SIZE}`} preserveAspectRatio="none">
                   <defs>
                     <radialGradient id={BOARD_GRADIENT_ID} cx="50%" cy="50%" r="75%">
                       <stop offset="0%" stopColor="rgba(30, 41, 59, 0.65)" />
@@ -358,19 +347,13 @@ export default function GobangRenderer() {
                       <stop offset="100%" stopColor="rgba(2, 6, 23, 0.1)" />
                     </radialGradient>
                   </defs>
-                  <rect
-                    x={-0.5}
-                    y={-0.5}
-                    width={BOARD_CANVAS_SIZE + 1}
-                    height={BOARD_CANVAS_SIZE + 1}
-                    fill={`url(#${BOARD_GRADIENT_ID})`}
-                  />
+                  <rect x={-0.5} y={-0.5} width={BOARD_SIZE} height={BOARD_SIZE} fill={`url(#${BOARD_GRADIENT_ID})`} />
                   {Array.from({ length: BOARD_SIZE }).map((_, index) => {
                     const offset = index;
                     return (
                       <g key={index}>
-                        <line x1={offset} y1={0} x2={offset} y2={BOARD_CANVAS_SIZE} stroke={BOARD_LINE_COLOR} strokeWidth={0.04} />
-                        <line x1={0} y1={offset} x2={BOARD_CANVAS_SIZE} y2={offset} stroke={BOARD_LINE_COLOR} strokeWidth={0.04} />
+                        <line x1={offset} y1={0} x2={offset} y2={BOARD_SIZE - 1} stroke={BOARD_LINE_COLOR} strokeWidth={0.04} />
+                        <line x1={0} y1={offset} x2={BOARD_SIZE - 1} y2={offset} stroke={BOARD_LINE_COLOR} strokeWidth={0.04} />
                       </g>
                     );
                   })}
@@ -385,8 +368,8 @@ export default function GobangRenderer() {
                     />
                   ))}
                 </svg>
-                <div className="absolute inset-[44px]">
-                  <div className="relative h-full w-full">
+                <div className={styles.boardIntersections}>
+                  <div className={styles.boardIntersectionsInner}>
                     {board.map((row, rowIndex) =>
                       row.map((cell, colIndex) => {
                         const isLastMove = !!lastMove && lastMove.row === rowIndex && lastMove.col === colIndex;
@@ -394,6 +377,7 @@ export default function GobangRenderer() {
                         const disabled = cell !== null || !isHumanTurn;
                         const left = ((colIndex + 0.5) / BOARD_SIZE) * 100;
                         const top = ((rowIndex + 0.5) / BOARD_SIZE) * 100;
+                        const buttonClass = disabled ? styles.boardCell : `${styles.boardCell} ${styles.boardCellEnabled}`;
 
                         return (
                           <button
@@ -402,47 +386,45 @@ export default function GobangRenderer() {
                             aria-label={`Place stone at ${formatCoordinate(rowIndex, colIndex)}`}
                             onClick={() => handleCellClick(rowIndex, colIndex)}
                             disabled={disabled}
+                            className={buttonClass}
                             style={{
                               left: `${left}%`,
                               top: `${top}%`,
                               width: INTERSECTION_HIT_SIZE,
                               height: INTERSECTION_HIT_SIZE,
                             }}
-                            className={`group absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full transition-colors duration-150 ${
-                              !disabled ? 'cursor-pointer hover:bg-white/10' : 'cursor-default'
-                            }`}
                           >
                             <span
-                              className="pointer-events-none relative flex items-center justify-center"
                               style={{
+                                position: 'relative',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                                 width: LAST_MOVE_RING_SIZE,
                                 height: LAST_MOVE_RING_SIZE,
                               }}
                             >
                               {cell !== null ? (
                                 <span
-                                  className="pointer-events-none block rounded-full shadow-[0_12px_22px_rgba(4,0,10,0.55)]"
+                                  className={styles.stone}
                                   style={{
                                     width: STONE_SIZE,
                                     height: STONE_SIZE,
                                     background: PLAYERS[cell].stoneFill,
-                                    boxShadow: `${PLAYERS[cell].shadow}${
-                                      isLastMove ? ', 0 0 0 4px rgba(255,255,255,0.2)' : ''
-                                    }`,
+                                    boxShadow: `${PLAYERS[cell].shadow}${isLastMove ? ', 0 0 0 4px rgba(255,255,255,0.2)' : ''}`,
                                   }}
                                 />
                               ) : (
                                 <span
-                                  className={`pointer-events-none rounded-full transition duration-200 ${
-                                    !disabled ? 'bg-white/0 group-hover:bg-white/25' : 'bg-transparent'
-                                  }`}
+                                  className={styles.guideDot}
                                   style={{
                                     width: GUIDE_DOT_SIZE,
                                     height: GUIDE_DOT_SIZE,
+                                    background: disabled ? 'transparent' : 'rgba(255,255,255,0.08)',
                                   }}
                                 />
                               )}
-                              {isLastMove ? <span className="pointer-events-none absolute inset-0 rounded-full border border-white/20" /> : null}
+                              {isLastMove ? <span className={styles.lastMoveRing} /> : null}
                             </span>
                           </button>
                         );
@@ -451,44 +433,36 @@ export default function GobangRenderer() {
                   </div>
                 </div>
                 {state.status === 'pending' ? (
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                    <div className="rounded-full bg-black/40 px-6 py-2 text-sm font-medium text-slate-200">点击“开始对局”以启动比赛</div>
+                  <div className={styles.pendingOverlay}>
+                    <div className={styles.pendingOverlayContent}>点击“开始对局”以启动比赛</div>
                   </div>
                 ) : null}
               </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#071020] px-5 py-4 text-sm text-slate-200 shadow-xl ring-1 ring-white/5">
-            <div className="flex items-center gap-2">
-              <span className="text-xs uppercase tracking-widest text-slate-400">合法落点</span>
-              <span className="rounded-full bg-white/10 px-2 py-1 font-mono text-sm text-white">{legalMoves.length}</span>
+          <div className={styles.controls}>
+            <div className={styles.controlStat}>
+              <span className={styles.badge}>合法落点</span>
+              <span className={styles.statBadge}>{legalMoves.length}</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className={styles.controlStat}>
               {hasStarted ? (
                 <>
-                  <button
-                    type="button"
-                    onClick={handleReset}
-                    className="rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/20"
-                  >
+                  <button type="button" onClick={handleReset} className={styles.buttonSecondary}>
                     重新开始
                   </button>
                   <button
                     type="button"
                     onClick={handleResign}
                     disabled={state.status !== 'running'}
-                    className="rounded-full border border-rose-500/60 px-4 py-2 text-sm font-medium text-rose-200 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    className={styles.buttonDanger}
                   >
                     认输
                   </button>
                 </>
               ) : (
-                <button
-                  type="button"
-                  onClick={handleStart}
-                  className="rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-emerald-950 shadow-lg transition hover:bg-emerald-400"
-                >
+                <button type="button" onClick={handleStart} className={styles.buttonPrimary}>
                   开始对局
                 </button>
               )}
@@ -496,63 +470,56 @@ export default function GobangRenderer() {
           </div>
         </div>
 
-        <aside className="flex flex-col gap-4">
-          <div className="rounded-3xl bg-[#071020] p-6 shadow-2xl ring-1 ring-white/5">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">对局信息</h3>
-            <dl className="mt-4 space-y-3 text-sm text-slate-300">
-              <div className="flex items-center justify-between">
-                <dt className="text-slate-400">当前回合</dt>
-                <dd className="font-medium text-white">{state.turn}</dd>
+        <aside className={styles.sidebar}>
+          <div className={styles.infoCard}>
+            <h3 className={styles.infoTitle}>对局信息</h3>
+            <dl className={styles.infoList}>
+              <div className={styles.infoRow}>
+                <dt className={styles.infoLabel}>当前回合</dt>
+                <dd>{state.turn}</dd>
               </div>
-              <div className="flex items-center justify-between">
-                <dt className="text-slate-400">轮到</dt>
-                <dd className="font-medium text-white">
-                  {state.status === 'running' ? PLAYERS[state.currentPlayer as 0 | 1].name : '—'}
-                </dd>
+              <div className={styles.infoRow}>
+                <dt className={styles.infoLabel}>轮到</dt>
+                <dd>{state.status === 'running' ? PLAYERS[state.currentPlayer as 0 | 1].name : '—'}</dd>
               </div>
-              <div className="flex items-center justify-between">
-                <dt className="text-slate-400">状态</dt>
-                <dd className="font-medium text-white">{matchStatus}</dd>
+              <div className={styles.infoRow}>
+                <dt className={styles.infoLabel}>状态</dt>
+                <dd>{matchStatus}</dd>
               </div>
-              <div className="flex items-center justify-between">
-                <dt className="text-slate-400">AI 模式</dt>
-                <dd className="font-medium text-white">
-                  {playerModes.map((mode, index) => `${PLAYERS[index].name}: ${MODE_LABEL[mode]}`).join(' | ')}
-                </dd>
+              <div className={styles.infoRow}>
+                <dt className={styles.infoLabel}>AI 模式</dt>
+                <dd>{playerModes.map((mode, index) => `${PLAYERS[index].name}: ${MODE_LABEL[mode]}`).join(' | ')}</dd>
               </div>
             </dl>
           </div>
 
-          <div className="flex-1 rounded-3xl bg-[#071020] p-6 shadow-2xl ring-1 ring-white/5">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">落子记录</h3>
-            <div className="mt-4 max-h-80 overflow-auto pr-2">
-              {moveLog.length === 0 ? (
-                <p className="text-sm text-slate-400">尚未开始，请点击上方的“开始对局”按钮。</p>
-              ) : (
-                <ol className="space-y-2 text-sm">
-                  {moveLog.map((entry, index) => {
-                    const player = PLAYERS[entry.player];
-                    const badgeColor =
-                      entry.player === 0 ? 'bg-rose-500/20 text-rose-200' : 'bg-emerald-500/20 text-emerald-200';
-                    const label = entry.origin === 'resign' ? '认输' : entry.coordinate;
-                    const originLabel = entry.origin === 'ai' ? 'AI' : entry.origin === 'human' ? '人类' : '系统';
+          <div className={styles.logCard}>
+            <h3 className={styles.logTitle}>落子记录</h3>
+            {moveLog.length === 0 ? (
+              <p className={styles.logEmpty}>尚未开始，请点击上方的“开始对局”按钮。</p>
+            ) : (
+              <ol className={styles.logList}>
+                {moveLog.map((entry, index) => {
+                  const player = PLAYERS[entry.player];
+                  const badgeClass = entry.player === 0 ? styles.logBadgeRed : styles.logBadgeGreen;
+                  const label = entry.origin === 'resign' ? '认输' : entry.coordinate;
+                  const originLabel = entry.origin === 'ai' ? 'AI' : entry.origin === 'human' ? '人类' : '系统';
 
-                    return (
-                      <li key={`${entry.turn}-${index}`} className="flex items-center justify-between rounded-2xl bg-white/5 px-3 py-2">
-                        <div className="flex items-center gap-3">
-                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeColor}`}>{player.name}</span>
-                          <span className="text-xs uppercase tracking-wide text-slate-400">T{String(entry.turn).padStart(2, '0')}</span>
-                        </div>
-                        <div className="flex items-center gap-3 text-xs text-slate-300">
-                          <span className="font-mono text-sm text-white">{label}</span>
-                          <span className="rounded-full bg-white/10 px-2 py-0.5">{originLabel}</span>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-            </div>
+                  return (
+                    <li key={`${entry.turn}-${index}`} className={styles.logItem}>
+                      <div className={styles.controlStat}>
+                        <span className={`${styles.logItemBadge} ${badgeClass}`}>{player.name}</span>
+                        <span className={styles.badge}>T{String(entry.turn).padStart(2, '0')}</span>
+                      </div>
+                      <div className={styles.logMeta}>
+                        <span className={styles.logCoordinate}>{label}</span>
+                        <span className={styles.logOrigin}>{originLabel}</span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
           </div>
         </aside>
       </div>
