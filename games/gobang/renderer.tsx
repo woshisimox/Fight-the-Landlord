@@ -374,47 +374,45 @@ export default function GobangRenderer() {
                       row.map((cell, colIndex) => {
                         const isLastMove = !!lastMove && lastMove.row === rowIndex && lastMove.col === colIndex;
                         const isHumanTurn = state.status === 'running' && playerModes[state.currentPlayer as 0 | 1] === 'human';
-                        const disabled = cell !== null || !isHumanTurn;
+                        const disabled = !isHumanTurn;
                         const left = ((colIndex + 0.5) / BOARD_SIZE) * 100;
                         const top = ((rowIndex + 0.5) / BOARD_SIZE) * 100;
-                        const buttonClass = disabled ? styles.boardCell : `${styles.boardCell} ${styles.boardCellEnabled}`;
+                        const intersectionStyle = {
+                          left: `${left}%`,
+                          top: `${top}%`,
+                          width: INTERSECTION_HIT_SIZE,
+                          height: INTERSECTION_HIT_SIZE,
+                        } as const;
 
                         return (
-                          <button
-                            key={`${rowIndex}-${colIndex}`}
-                            type="button"
-                            aria-label={`Place stone at ${formatCoordinate(rowIndex, colIndex)}`}
-                            onClick={() => handleCellClick(rowIndex, colIndex)}
-                            disabled={disabled}
-                            className={buttonClass}
-                            style={{
-                              left: `${left}%`,
-                              top: `${top}%`,
-                              width: INTERSECTION_HIT_SIZE,
-                              height: INTERSECTION_HIT_SIZE,
-                            }}
-                          >
-                            <span
-                              style={{
-                                position: 'relative',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                width: LAST_MOVE_RING_SIZE,
-                                height: LAST_MOVE_RING_SIZE,
-                              }}
-                            >
-                              {cell !== null ? (
+                          <div key={`${rowIndex}-${colIndex}`} className={styles.intersection} style={intersectionStyle}>
+                            {cell !== null ? (
+                              <>
                                 <span
                                   className={styles.stone}
                                   style={{
                                     width: STONE_SIZE,
                                     height: STONE_SIZE,
                                     background: PLAYERS[cell].stoneFill,
-                                    boxShadow: `${PLAYERS[cell].shadow}${isLastMove ? ', 0 0 0 4px rgba(255,255,255,0.2)' : ''}`,
+                                    boxShadow: PLAYERS[cell].shadow,
                                   }}
                                 />
-                              ) : (
+                                {isLastMove ? (
+                                  <span
+                                    className={styles.lastMoveRing}
+                                    style={{ width: LAST_MOVE_RING_SIZE, height: LAST_MOVE_RING_SIZE }}
+                                  />
+                                ) : null}
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                aria-label={`Place stone at ${formatCoordinate(rowIndex, colIndex)}`}
+                                onClick={() => handleCellClick(rowIndex, colIndex)}
+                                disabled={disabled}
+                                className={disabled ? styles.boardCell : `${styles.boardCell} ${styles.boardCellEnabled}`}
+                                style={{ width: '100%', height: '100%' }}
+                              >
                                 <span
                                   className={styles.guideDot}
                                   style={{
@@ -423,10 +421,9 @@ export default function GobangRenderer() {
                                     background: disabled ? 'transparent' : 'rgba(255,255,255,0.08)',
                                   }}
                                 />
-                              )}
-                              {isLastMove ? <span className={styles.lastMoveRing} /> : null}
-                            </span>
-                          </button>
+                              </button>
+                            )}
+                          </div>
                         );
                       })
                     )}
