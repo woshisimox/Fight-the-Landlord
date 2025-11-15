@@ -234,11 +234,13 @@
 }
 
 .guideDot {
+  display: block;
   border-radius: 50%;
   transition: background 0.2s ease;
 }
 
 .stone {
+  display: block;
   border-radius: 50%;
   box-shadow: 0 12px 22px rgba(4, 0, 10, 0.55);
 }
