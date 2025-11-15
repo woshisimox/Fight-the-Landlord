@@ -25,8 +25,8 @@ const PLAYERS: PlayerPresentation[] = [
     flag: '🇯🇵',
     rating: 1012,
     delta: 12,
-    stoneFill: 'radial-gradient(circle at 30% 25%, rgba(255,255,255,0.95), #f43f5e)',
-    shadow: '0 10px 25px rgba(248, 113, 113, 0.35)',
+    stoneFill: 'radial-gradient(circle at 30% 25%, rgba(255,255,255,0.95), #fb7185)',
+    shadow: '0 12px 30px rgba(248, 113, 113, 0.45)',
   },
   {
     id: 1,
@@ -36,7 +36,7 @@ const PLAYERS: PlayerPresentation[] = [
     rating: 998,
     delta: -12,
     stoneFill: 'radial-gradient(circle at 30% 25%, rgba(255,255,255,0.95), #34d399)',
-    shadow: '0 10px 25px rgba(52, 211, 153, 0.35)',
+    shadow: '0 12px 30px rgba(16, 185, 129, 0.45)',
   },
 ];
 
@@ -70,6 +70,9 @@ const STAR_POINTS: Array<{ row: number; col: number }> = [
   { row: 11, col: 3 },
   { row: 11, col: 11 },
 ];
+
+const BOARD_BACKGROUND =
+  'radial-gradient(circle at 20% 20%, rgba(15, 23, 42, 0.45), transparent 55%), radial-gradient(circle at 80% 30%, rgba(15, 23, 42, 0.35), transparent 50%), #020817';
 
 function formatCoordinate(row: number, col: number): string {
   const letter = String.fromCharCode('A'.charCodeAt(0) + col);
@@ -308,74 +311,80 @@ export default function GobangRenderer() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex flex-col gap-5">
-          <div className="rounded-[36px] bg-[#071020] p-6 shadow-[0_30px_80px_rgba(2,6,23,0.6)] ring-1 ring-white/5">
-            <div className="mx-auto w-full max-w-[560px]">
-              <div className="relative aspect-square w-full">
-                <div className="absolute inset-0 rounded-[30px] bg-[#050b17] shadow-[0_25px_60px_rgba(0,0,0,0.55)]" />
-                <div className="absolute inset-5 rounded-[26px] border border-slate-700/50 bg-[#0b1526]">
-                  <div className="absolute inset-6">
-                    <div
-                      className="pointer-events-none absolute inset-0 rounded-[22px]"
+          <div className="rounded-[36px] bg-[#050b17] p-6 shadow-[0_30px_80px_rgba(2,6,23,0.65)] ring-1 ring-white/5">
+            <div className="mx-auto w-full max-w-[520px]">
+              <div className="relative aspect-square w-full overflow-hidden rounded-[32px] border border-slate-800/60 bg-[#020817]">
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: BOARD_BACKGROUND,
+                  }}
+                />
+                <div className="absolute inset-6 rounded-[26px] border border-slate-700/60 bg-black/10 shadow-[inset_0_0_40px_rgba(15,23,42,0.55)]" />
+                <div className="absolute inset-[2.75rem]">
+                  <div
+                    className="pointer-events-none absolute inset-0"
+                    style={{
+                      backgroundImage: `linear-gradient(to right, rgba(100,116,139,0.35) 1px, transparent 1px), linear-gradient(to bottom, rgba(100,116,139,0.35) 1px, transparent 1px)`,
+                      backgroundSize: `${100 / (BOARD_SIZE - 1)}% ${100 / (BOARD_SIZE - 1)}%`,
+                      backgroundPosition: 'center',
+                    }}
+                  />
+                  {STAR_POINTS.map((point) => (
+                    <span
+                      key={`${point.row}-${point.col}`}
+                      className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-200/80"
                       style={{
-                        backgroundImage: `linear-gradient(to right, rgba(148, 163, 184, 0.2) 1px, transparent 1px), linear-gradient(to bottom, rgba(148, 163, 184, 0.2) 1px, transparent 1px)`,
-                        backgroundSize: `${100 / (BOARD_SIZE - 1)}% ${100 / (BOARD_SIZE - 1)}%`,
-                        backgroundPosition: 'center',
+                        left: `${(point.col / (BOARD_SIZE - 1)) * 100}%`,
+                        top: `${(point.row / (BOARD_SIZE - 1)) * 100}%`,
+                        boxShadow: '0 0 20px rgba(148, 163, 184, 0.35)',
                       }}
                     />
-                    {STAR_POINTS.map((point) => (
-                      <span
-                        key={`${point.row}-${point.col}`}
-                        className="pointer-events-none absolute h-2 w-2 rounded-full bg-slate-200/70"
-                        style={{
-                          left: `${(point.col / (BOARD_SIZE - 1)) * 100}%`,
-                          top: `${(point.row / (BOARD_SIZE - 1)) * 100}%`,
-                          transform: 'translate(-50%, -50%)',
-                          boxShadow: '0 0 15px rgba(255,255,255,0.12)',
-                        }}
-                      />
-                    ))}
-                    <div
-                      className="absolute inset-0 grid"
-                      style={{
-                        gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
-                        gridTemplateRows: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
-                      }}
-                    >
-                      {board.map((row, rowIndex) =>
-                        row.map((cell, colIndex) => {
-                          const isLastMove = !!lastMove && lastMove.row === rowIndex && lastMove.col === colIndex;
-                          const isHumanTurn =
-                            state.status === 'running' && playerModes[state.currentPlayer as 0 | 1] === 'human';
-                          const disabled = cell !== null || !isHumanTurn;
+                  ))}
+                  <div
+                    className="absolute inset-0 grid"
+                    style={{
+                      gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
+                      gridTemplateRows: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
+                    }}
+                  >
+                    {board.map((row, rowIndex) =>
+                      row.map((cell, colIndex) => {
+                        const isLastMove = !!lastMove && lastMove.row === rowIndex && lastMove.col === colIndex;
+                        const isHumanTurn = state.status === 'running' && playerModes[state.currentPlayer as 0 | 1] === 'human';
+                        const disabled = cell !== null || !isHumanTurn;
 
-                          return (
-                            <button
-                              key={`${rowIndex}-${colIndex}`}
-                              type="button"
-                              aria-label={`Place stone at ${formatCoordinate(rowIndex, colIndex)}`}
-                              onClick={() => handleCellClick(rowIndex, colIndex)}
-                              disabled={disabled}
-                              className={`relative flex items-center justify-center bg-transparent transition-colors duration-150 ${
-                                !disabled ? 'cursor-pointer hover:bg-white/10' : 'cursor-default'
-                              }`}
-                            >
-                              {cell !== null ? (
-                                <span
-                                  className="pointer-events-none block h-5 w-5 rounded-full md:h-6 md:w-6"
-                                  style={{
-                                    background: PLAYERS[cell].stoneFill,
-                                    boxShadow: `${PLAYERS[cell].shadow}${isLastMove ? ', 0 0 0 4px rgba(255,255,255,0.25)' : ''}`,
-                                  }}
-                                />
-                              ) : null}
-                              {isLastMove ? (
-                                <span className="pointer-events-none absolute inset-2 rounded-full border border-white/40" />
-                              ) : null}
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
+                        return (
+                          <button
+                            key={`${rowIndex}-${colIndex}`}
+                            type="button"
+                            aria-label={`Place stone at ${formatCoordinate(rowIndex, colIndex)}`}
+                            onClick={() => handleCellClick(rowIndex, colIndex)}
+                            disabled={disabled}
+                            className={`relative flex items-center justify-center transition-colors duration-150 ${
+                              !disabled ? 'cursor-pointer hover:bg-white/5' : 'cursor-default'
+                            }`}
+                          >
+                            {cell !== null ? (
+                              <span
+                                className="pointer-events-none block h-6 w-6 rounded-full shadow-[0_10px_18px_rgba(0,0,0,0.45)] md:h-7 md:w-7"
+                                style={{
+                                  background: PLAYERS[cell].stoneFill,
+                                  boxShadow: `${PLAYERS[cell].shadow}${
+                                    isLastMove ? ', 0 0 0 4px rgba(255,255,255,0.25)' : ''
+                                  }`,
+                                }}
+                              />
+                            ) : (
+                              <span className="pointer-events-none h-3 w-3 rounded-full bg-transparent" />
+                            )}
+                            {isLastMove ? (
+                              <span className="pointer-events-none absolute inset-1 rounded-full border border-white/30" />
+                            ) : null}
+                          </button>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               </div>
