@@ -9095,9 +9095,26 @@ function ScoreTimeline(
   const colorBandFallback = ['#fef2f2', '#eff6ff', '#f0fdf4'];
   const colors = colorLine;
 
-  const cuts = Array.isArray(bands) && bands.length ? [...bands] : [0];
+  const parseBandValue = (v: any): number => {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') {
+      const parsed = Number(v.trim());
+      return Number.isFinite(parsed) ? parsed : NaN;
+    }
+    return NaN;
+  };
+
+  const rawCuts = Array.isArray(bands) ? bands : [];
+  const sanitizedCuts = rawCuts
+    .map(parseBandValue)
+    .filter(v => Number.isFinite(v))
+    .map(v => {
+      const rounded = Math.round(v);
+      return Math.max(0, Math.min(n, rounded));
+    });
+  const cuts = Array.from(new Set(sanitizedCuts));
   cuts.sort((a,b)=>a-b);
-  if (cuts[0] !== 0) cuts.unshift(0);
+  if (cuts.length === 0 || cuts[0] !== 0) cuts.unshift(0);
   if (cuts[cuts.length-1] !== n) cuts.push(n);
   const cutSet = new Set(cuts);
 
@@ -9124,7 +9141,12 @@ function ScoreTimeline(
     }
   }
 
-  const landlordsArr = Array.isArray(landlords) ? landlords.slice(0) : [];
+  const landlordsArr = Array.isArray(landlords)
+    ? landlords.map(v => {
+        const parsed = parseBandValue(v);
+        return parsed === 0 || parsed === 1 || parsed === 2 ? parsed : -1;
+      })
+    : [];
   while (landlordsArr.length < Math.max(0, cuts.length-1)) landlordsArr.push(-1);
 
   // —— 底色兜底：把未知地主段回填为最近一次已知的地主（前向填充 + 首段回填） ——
