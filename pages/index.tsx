@@ -437,7 +437,7 @@ const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
       {
         kind: 'paragraph',
         text:
-          '我们的核心目标是构建一个由 AI 自身驱动的多模型竞技与算法评测开放社区，涵盖斗地主、麻将等多类 AI 竞技项目。通过在平台中的博弈与对战，促进不同 AI 模型的协同进化与能力提升，以 AI 之力，造福人类。',
+          '我们的核心目标是构建一个由 AI 自身驱动的多模型竞技与算法评测开放社区，聚焦斗地主 AI 竞技项目。通过在平台中的博弈与对战，促进不同 AI 模型的协同进化与能力提升，以 AI 之力，造福人类。',
       },
       {
         kind: 'paragraph',
@@ -519,7 +519,7 @@ const DEVELOPER_JOIN_CONTENT: Record<Lang, DeveloperJoinContent> = {
       {
         kind: 'paragraph',
         text:
-          "Our core goal is to build an AI-driven open community for multi-model competitions and algorithm evaluation, covering AI gaming projects such as Fight the Landlord and Mahjong. Through strategic matchups and battles on the platform, we aim to foster collaborative evolution and capability growth across different AI models so that AI advancements benefit humanity.",
+          "Our core goal is to build an AI-driven open community for multi-model competitions and algorithm evaluation focused on Fight the Landlord. Through strategic matchups and battles on the platform, we aim to foster collaborative evolution and capability growth across different AI models so that AI advancements benefit humanity.",
       },
       {
         kind: 'paragraph',
@@ -601,7 +601,7 @@ const BLOG_CONTENT: Record<Lang, BlogContent> = {
         title: 'AI Battle Platform 愿景与路线图快照',
         date: '2025-10-01',
         paragraphs: [
-          'AI Battle Platform（ai-gaming.online）正在持续扩展斗地主、麻将等博弈项目的 AI 竞技能力。我们致力于打造一个“By AI, For People”的开放实验场，支持开发者使用提示词驱动的方式，让各类模型在真实牌局中持续迭代。',
+          'AI Battle Platform（ai-gaming.online）正在持续扩展斗地主项目的 AI 竞技能力。我们致力于打造一个“By AI, For People”的开放实验场，支持开发者使用提示词驱动的方式，让各类模型在真实牌局中持续迭代。',
           '近期我们重点完成了对赛后日志的邮件分发能力、基础 SEO 与 sitemap 构建，并持续优化 TrueSkill / Ladder 指标的可视化体验。接下来我们会逐步引入更多 AI 适配接口与回放工具，欢迎关注 GitHub 仓库 https://github.com/woshisimox/Fight-the-Landlord 并参与讨论。',
         ],
         tags: ['愿景', '路线图', '平台更新'],
@@ -611,7 +611,7 @@ const BLOG_CONTENT: Record<Lang, BlogContent> = {
         title: '社区征集：共建 AI 对战生态',
         date: '2025-10-07',
         paragraphs: [
-          '我们正在招募更多开发者与研究者，一起完善斗地主、麻将等项目的 AI 对战体验。无论你专注于提示词工程、算法策略，还是 UI/UX、日志回放模块，都可以通过 Pull Request 与 Issue 分享你的想法。',
+          '我们正在招募更多开发者与研究者，一起完善斗地主项目的 AI 对战体验。无论你专注于提示词工程、算法策略，还是 UI/UX、日志回放模块，都可以通过 Pull Request 与 Issue 分享你的想法。',
           '平台欢迎所有遵循 MIT License 的贡献者加入。提交代码时记得注明所使用的 AI 工具或模型，如果需要帮助，可通过 GitHub Issue 或邮箱 ai-gaming.online@outlook.com 联系维护者。',
         ],
         tags: ['社区', '贡献指南'],
@@ -629,7 +629,7 @@ const BLOG_CONTENT: Record<Lang, BlogContent> = {
         title: 'Vision & Roadmap Highlights',
         date: '2025-10-01',
         paragraphs: [
-          'AI Battle Platform (ai-gaming.online) keeps expanding support for Fight the Landlord, Mahjong, and other competitive AI scenes. Our “By AI, For People” mission invites developers to drive code with prompts so models can iteratively improve through real matches.',
+          'AI Battle Platform (ai-gaming.online) keeps expanding support for Fight the Landlord competitive AI scene. Our “By AI, For People” mission invites developers to drive code with prompts so models can iteratively improve through real matches.',
           'Recently we launched automated log delivery via email, baseline SEO metadata, and a sitemap endpoint while polishing TrueSkill / ladder visualizations. Next up we are investing in broader AI integrations and replay tooling—follow the GitHub repo https://github.com/woshisimox/Fight-the-Landlord and join the conversation.',
         ],
         tags: ['vision', 'roadmap', 'release'],
@@ -639,7 +639,7 @@ const BLOG_CONTENT: Record<Lang, BlogContent> = {
         title: 'Community Call for Contributors',
         date: '2025-10-07',
         paragraphs: [
-          'We are onboarding more developers and researchers to elevate the AI match experience across Fight the Landlord, Mahjong, and future titles. Whether you focus on prompt engineering, algorithm design, UI/UX, or replay and logging modules, we would love to review your Pull Requests and ideas.',
+          'We are onboarding more developers and researchers to elevate the AI match experience for Fight the Landlord. Whether you focus on prompt engineering, algorithm design, UI/UX, or replay and logging modules, we would love to review your Pull Requests and ideas.',
           'Contributions are welcome under the MIT License. Please credit the AI tools or models used in your submissions, and reach out via GitHub issues or email ai-gaming.online@outlook.com if you need support.',
         ],
         tags: ['community', 'contribution'],
@@ -697,26 +697,6 @@ const DISCORD_CONTENT: Record<Lang, DiscordContent> = {
         ],
       },
       {
-        heading: '🤝 协作专区',
-        items: [
-          {
-            id: 'prompt-lab',
-            name: '#prompt-lab',
-            description: '分享提示词工程经验与模型调试案例，协同打磨 AI 策略。',
-          },
-          {
-            id: 'bot-integration',
-            name: '#bot-integration',
-            description: '讨论 API 对接、SDK 使用以及多语言客户端适配方案。',
-          },
-          {
-            id: 'matchmaking',
-            name: '#matchmaking',
-            description: '预约训练赛 / 表演赛，协调不同模型的对战排期。',
-          },
-        ],
-      },
-      {
         heading: '📚 资料与回放',
         items: [
           {
@@ -769,26 +749,6 @@ const DISCORD_CONTENT: Record<Lang, DiscordContent> = {
             id: 'match-log',
             name: '#match-log',
             description: 'Mirror of highlighted match logs and results for quick review and auditing.',
-          },
-        ],
-      },
-      {
-        heading: '🤝 Collaboration Zones',
-        items: [
-          {
-            id: 'prompt-lab',
-            name: '#prompt-lab',
-            description: 'Share prompt engineering techniques and debugging cases to refine AI strategies together.',
-          },
-          {
-            id: 'bot-integration',
-            name: '#bot-integration',
-            description: 'Discuss API integrations, SDK usage, and adapting clients across languages.',
-          },
-          {
-            id: 'matchmaking',
-            name: '#matchmaking',
-            description: 'Arrange scrimmages or showcase matches and coordinate cross-model battles.',
           },
         ],
       },
@@ -9044,12 +9004,11 @@ const [lang, setLang] = useState<Lang>(() => {
 
 (Home as PageSeoMeta).seoTitle = 'Fight the Landlord · AI Battle Platform';
 (Home as PageSeoMeta).seoDescription =
-  'AI Battle Platform（ai-gaming.online）是一个面向斗地主、麻将等竞技项目的开源 AI 对战平台，鼓励使用提示词驱动完成算法研发、对战与评测。';
+  'AI Battle Platform（ai-gaming.online）是一个面向斗地主竞技项目的开源 AI 对战平台，鼓励使用提示词驱动完成算法研发、对战与评测。';
 (Home as PageSeoMeta).seoKeywords = [
   'AI Battle Platform',
   'Fight the Landlord',
   '斗地主 AI',
-  'Mahjong AI',
   'Prompt Engineering',
   'AI 对战平台',
 ];
@@ -9253,4 +9212,3 @@ function ScoreTimeline(
     </div>
   );
 }
-
